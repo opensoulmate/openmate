@@ -55,6 +55,7 @@ from agent.loop_guard import LoopGuard
 from agent.code_mode import CodeModeExecutor
 from agent.sandbox_policy import SandboxPolicy  # kilocode supplement3 #15 网络受限工具面收缩
 from agent.output_guard import SecretStreamRedactor, redact_secrets  # P0 输出侧护栏：流式密钥脱敏（Warp secret_redaction）
+from agent.infection_guard import InfectionGate  # P0 输出侧护栏：注入审计门（agent-zero _infection_check三态verdict）
 from agent.read_turn import DIFF_MAX_BYTES, TurnReadView, render_trace, result_ok
 from agent.mcp_resources import (
     MCP_RESOURCE_TOOL_NAMES,
@@ -789,6 +790,14 @@ class SoulMateAgent:
             guards[session_id] = guard
         guard.reset()
         return guard
+
+    async def _infection_llm_call(self, messages: list[dict]) -> str:
+        """注入审计门的判词LLM调用（agent-zero utility model同位）。
+
+        走llm_engine.chat非流式单发；provider故障（如402余额不足）由
+        LLMEngine.chat吞异常返回"[LLM错误: …]"，InfectionGate按失败fail-safe放行。
+        """
+        return await self.llm_engine.chat(messages)
 
     # ── Code Mode内层工具执行（goose code_execution+kilocode code-mode两方定案）──
     # builtin子集实现与_run_llm_with_tools内联分支同款语义（遗留：后续可重构共享）；
@@ -1527,6 +1536,10 @@ You can send files to the user natively: to deliver a file, write a brief confir
         # feed()按空白边界hold住未完结token——秘密被streaming chunk从词中间劈开也
         # 绝不完整外泄（"redact secrets WHILE streaming"）──
         redactor = SecretStreamRedactor()
+        # ── P0输出侧注入审计门（agent-zero _infection_check）：工具执行前gate，
+        # 启发式劫持签名（离线兜底）+LLM语义审计三态verdict。每真实turn一个实例
+        # （clarify计数/LLM熔断不跨turn串扰）。──
+        infection_gate = InfectionGate(llm_call=self._infection_llm_call)
         # ── P0-4: 活动观测开始（goose peek：status=running，durable turns开始计数）──
         activity = self._activity(session_id)
         activity.mark_running()
@@ -1699,6 +1712,75 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             "role": "user",
                             "content": f"[LoopGuard警告] {loop_result.message}",
                         })
+
+                    # ── P0输出侧注入审计门（agent-zero _infection_check三态verdict）：
+                    # gate卡在**工具执行前**（tool_execute_before同位）。terminate=不执行
+                    # 任何工具+终止本轮（FORCE_STOP同构）；clarify=不执行+合成拦截工具结果
+                    # （open-webui三态"拒绝=合成错误工具结果，loop不断"）让模型说明后重试，
+                    # 超限由gate升级terminate。审计故障fail-safe放行，不因审计挂死会话。──
+                    infection_verdict = await infection_gate.check(
+                        output_text=full_response,
+                        tool_calls=[
+                            {
+                                "name": (tc.get("function") or {}).get("name", ""),
+                                "arguments": (tc.get("function") or {}).get("arguments"),
+                            }
+                            for tc in tool_calls
+                        ],
+                        user_text=user_text,
+                    )
+                    if infection_verdict.action != "ok":
+                        ig_action = infection_verdict.action
+                        logger.warning(
+                            f"[infection-guard] session={session_id} verdict={ig_action} "
+                            f"source={infection_verdict.source} detail={infection_verdict.detail[:200]}")
+                        # 可观测：拦截事件进all_tool_calls轨迹账本（"为什么没执行"可查）
+                        for tc in tool_calls:
+                            all_tool_calls.append({
+                                "name": (tc.get("function") or {}).get("name", ""),
+                                "arguments": (tc.get("function") or {}).get("arguments"),
+                                "result_preview": infection_verdict.message[:200],
+                                "permission": f"infection:{ig_action}",
+                            })
+                        if ig_action == "terminate":
+                            # TERMINATE（含clarify超限升级）：工具一个都不执行，终止本轮
+                            _ig_tail = redactor.flush()
+                            if _ig_tail:
+                                full_response += _ig_tail
+                                if self._client is not None:
+                                    await self._client.session_update(
+                                        session_id=session_id,
+                                        update=acp.update_agent_message_text(_ig_tail),
+                                    )
+                                    self._streamed_flags[session_id] = True
+                            block_note = f"\n\n🛡️ [注入审计终止] {infection_verdict.message}"
+                            full_response += block_note
+                            if self._client is not None:
+                                await self._client.session_update(
+                                    session_id=session_id,
+                                    update=acp.update_agent_message_text(block_note),
+                                )
+                                self._streamed_flags[session_id] = True
+                            activity.mark_idle()
+                            self._activity_store.upsert(activity)
+                            logger.warning(
+                                f"[infection-guard] session={session_id} TERMINATE，工具调用未执行")
+                            return full_response, all_tool_calls
+                        # CLARIFY：工具未执行，合成拦截结果（协议完整、loop不断）
+                        synthetic_ig = (
+                            f"🛡️ [注入审计拦截] {infection_verdict.message} "
+                            "本轮工具调用未执行。请先说明这些工具调用与用户请求的关系；"
+                            "如确有必要，请重新发起调用。")
+                        tool_results = []
+                        for tc in tool_calls:
+                            tool_results.append({
+                                "tool_call_id": tc.get("id", ""),
+                                "role": "tool",
+                                "content": synthetic_ig,
+                            })
+                        messages.append({"role": "assistant", "content": None, "tool_calls": tool_calls})
+                        messages.extend(tool_results)
+                        break
 
                     # 推送工具调用状态给前端
                     for tc in tool_calls:

@@ -256,7 +256,7 @@ class TestWiring:
     def test_stream_feed_flush_callsites(self):
         src = inspect.getsource(SoulMateAgent._run_llm_with_tools)
         assert src.count("redactor.feed(") == 1  # 纯文本chunk路径
-        assert src.count("redactor.flush()") == 2  # 终局return + FORCE_STOP早退
+        assert src.count("redactor.flush()") == 3  # 终局return + FORCE_STOP早退 + 注入审计TERMINATE早退
         assert "SecretStreamRedactor()" in src
         # full_response只累加脱敏后文本（落库/记忆/缓存一并干净）
         assert "full_response += safe_text" in src
