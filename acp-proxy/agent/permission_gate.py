@@ -91,15 +91,67 @@ def _call_signature(tool_name: str, tool_args: dict) -> str:
     return hashlib.sha256(f"{tool_name}:{payload}".encode()).hexdigest()[:24]
 
 
+# ── P0-3 本地降级数据外泄检测（fail-safe镜像） ────────────────────
+# opensoul permission_engine.detect_exfiltration 是权威实现；本镜像仅在
+# opensoul不可达时兜底（defense-in-depth），保持与引擎同语义：机密文件当网络
+# 载荷=凭据外泄→本地硬否决。覆盖最清晰的三类：@上传 / 管道·重定向 / 反弹shell。
+_EXFIL_SINK_RE = re.compile(
+    r"(?:^|[|;&\s])(?:curl|wget|nc|ncat|netcat|ftp|sftp|scp|ssh|telnet|socat)\b|/dev/(?:tcp|udp)/",
+    re.IGNORECASE,
+)
+_EXFIL_REVERSE_RE = re.compile(
+    r"/dev/(?:tcp|udp)/|\bbash\s+-i\b|\bsh\s+-i\b|\bnc\s+(?:-\w*\s+)*-e\b|>&\s*/dev/tcp",
+    re.IGNORECASE,
+)
+_EXFIL_SENSITIVE_RE = re.compile(
+    r"\.ssh/|id_rsa|id_ed25519|id_ecdsa|id_dsa|\.pem\b|\.key\b|\.env\b|/etc/passwd|/etc/shadow"
+    r"|\.aws/credentials|\.gnupg|\.netrc|\.git-credentials|api[_-]?key|access[_-]?token"
+    r"|secret|password|passwd|credential|private[_-]?key|token",
+    re.IGNORECASE,
+)
+_EXFIL_AT_RE = re.compile(r"@(?:'[^']*'|\"[^\"]*\"|[^\s'\"]+)")
+
+
+def _degraded_exfil(cmd: str) -> Optional[str]:
+    if not cmd:
+        return None
+    if _EXFIL_REVERSE_RE.search(cmd):
+        return "reverse_shell"
+    if not _EXFIL_SINK_RE.search(cmd):
+        return None
+    for m in _EXFIL_AT_RE.finditer(cmd):
+        if _EXFIL_SENSITIVE_RE.search(m.group(0)[1:]):
+            return "upload"
+    for m in re.finditer(r"(?:cat|head|tail|less|more|grep)\s+([^\s|;]+)\s*\|", cmd, re.IGNORECASE):
+        if _EXFIL_SENSITIVE_RE.search(m.group(1)):
+            return "pipe"
+    for m in re.finditer(r"<\s*([^\s;]+)", cmd):
+        if _EXFIL_SENSITIVE_RE.search(m.group(1)):
+            return "redirect"
+    return None
+
+
 def degraded_decision(tool_name: str, tool_args: dict) -> GateResult:
     """opensoul不可达时的本地降级策略（可独立测试的纯函数）
 
+    - 数据外泄（凭据外泄/反弹shell）→ 本地硬否决（fail-safe镜像，见上）
     - 只读工具 → 放行
     - 灾难性命令 → 硬否决（与引擎builtin hard deny同源）
     - 其余 → 放行 + 标记degraded（fail-open：不因权限服务掉线锁死用户工作流，
       但决策带degraded标记，审计可追）
     """
     cmd = str(tool_args.get("command") or tool_args.get("cmd") or "")
+    exfil = _degraded_exfil(cmd)
+    if exfil:
+        return GateResult(
+            allowed=False, behavior="deny",
+            blocked_reason=(
+                f"[PERMISSION DENIED - DEGRADED LOCAL RULE] {tool_name} blocked: "
+                f"credential exfiltration detected ({exfil}) — opensoul权限引擎不可达，"
+                f"本地降级硬否决兜底。参数: {json.dumps(tool_args, ensure_ascii=False)[:300]}"),
+            rule_source="degraded-local", rule_content=exfil,
+            denial_class="exfiltration:degraded-local",
+        )
     for pat in _DEGRADED_HARD_PATTERNS:
         if cmd and pat.search(cmd):
             return GateResult(
