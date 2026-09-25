@@ -2471,3 +2471,37 @@
 4. `plan()`每条消息都发起一次LLM规划调用（judge/planning）——token成本项，与"上下文压缩引擎"cortex差距同族，列P2观察
 5. kilocode supplement3剩余缺口顺延：#16 GoalPolicy工具门（goal循环Registry按session过滤工具——本系统goal loop尚不存在，直接做=死代码，需先建goal循环或挂在task-plan环上）、#18 reminders合成提醒part（plan→执行切换显式事件）——均为下轮P1候选
 6. cron环境约束持续有效：管道`cmd | tail`吞退出码（tail退出码掩盖pytest失败）再次踩坑用不带管道重跑纠正；全量pytest输出243KB超窗落盘out-*.log用--tb=line压输出
+
+## [2026-09-25 22:45 CST] P0 输出侧护栏——流式密钥脱敏（Warp secret_redaction 20正则移植+流式holdback）+工具预览/缓存重放展示边界收口
+**目标**：销账SUMMARY.md P0差距「immune | 输出侧护栏（流式脱敏20正则+输出侧注入审计门）」的**脱敏半边**——模型流式输出/工具结果preview/语义缓存重放此前**直达用户界面**：agent cat到.env、LLM复述凭据、缓存重放旧泄露，全部原文展示+落库，无任何输出侧防护。本轮建立流式增量脱敏（完整秘密绝不进入用户可见流），接线到acp-proxy真实消息路径全部4个展示边界。
+**调研来源**：①64-warp-source-supplement2.md #1-#4（secret_redaction.rs 613行消费端：\"redact secrets WHILE streaming to avoid any full secrets ever being shown\"+last_word_to_rescan三缓冲+SecretLevel分级）；②本地源码~/agent-research-src/warp-master/crates/secret_redaction/src/lib.rs **DEFAULT_REGEXES_WITH_NAMES 20正则逐字移植**（不凭报告转述）；③75-agent-zero-source.md #2 _infection_check（输出侧注入审计门——**本轮未做**，列遗留#1）；④autonomous-dev-verification skill「测试首跑暴露真bug」方法论——本轮两次实锤（off级别bug+假\b提前匹配）均由测试当场抓住。
+**改动文件**（openmate 3文件+636/-10，全部增量hunk）：
+- acp-proxy/agent/output_guard.py（新255行：20正则移植表+`_find_matches`合并去重+`redact_secrets`全量入口+`SecretStreamRedactor`流式增量脱敏器（feed/flush/findings/summary））
+- acp-proxy/agent/soulmate_agent.py（+48/-10：import+_run_llm_with_tools内redactor构造/纯文本chunk路径feed/终局+FORCE_STOP两处flush/result_preview两处先脱敏后截断/语义缓存重放脱敏）
+- acp-proxy/tests/test_output_guard.py（新333行26用例）
+**改动内容**：
+1. **20正则逐字移植**（Warp lib.rs DEFAULT_REGEXES_WITH_NAMES原序）：IPv4/IPv6/Phone/MAC/Google/AWS/Slack/GitHub×5/Stripe/Firebase/JWT/OpenAI/Anthropic/GenericSK/Fireworks/Warp——Rust regex→Python re等价改写，specific先于generic、左most长者优先合并、重叠区防重复条目（Warp retain防抖）。**适配披露**：SecretLevel分级credential/identifier，**默认只遮credential**——开发场景输出大量合法IP/端口（127.0.0.1:8090），Warp全遮罩语义毁可用性；identifier级经`OUTPUT_REDACT_LEVEL=identifier`显式开启，off=关闭。findings只记种类/级别/长度，**秘密本体绝不进日志/审计**；每次脱敏WARNING可见（mem0禁止静默）。
+2. **流式增量脱敏**（Warp last_word_to_rescan同构）：feed()按**空白符边界**切emit/holdback——20正则凭据类全部是无空白单token，"最后一个空白符之后整体hold"即保证秘密被chunk从词中间劈开也绝不外发（下chunk到达与holdback一起重扫）；flush()流结束冲出尾部。**超长单token（>1024）强制切分+定点回撤**：emit区不以空白结尾时假\b是最大危险——凡end==emit区末尾的命中一律可疑，切分点回撤到其起点反复迭代（测试首跑实锤：13字符前缀被当完整秘密脱敏、后半段38字符碎片外发，此bug被逐切点穷举测试当场抓住后修复）。
+3. **4个展示边界接线**：①纯文本chunk流式路径（feed→session_update外发+full_response只累加脱敏后文本=落库/记忆/缓存一并干净）②③两处result_preview（工具结果UI预览先脱敏后截断——先截断会拦腰泄漏秘密前缀）④语义缓存重放（历史缓存条目可能存有修复前原文，重放前防御纵深脱敏）。FORCE_STOP早退路径flush先于停止提示（已生成内容先于提示呈现）。
+**接线位置**（grep证据，文件:行号）：
+- 定义：agent/output_guard.py:64 `_SECRET_PATTERNS`/:111 `_find_matches`/:134 `redact_secrets`/:157 `SecretStreamRedactor`
+- 运行时消费（真实消息路径）：soulmate_agent.py:1529（`redactor = SecretStreamRedactor()`，_run_llm_with_tools内）+:2299（`safe_text = redactor.feed(chunk_text)`纯文本chunk→session_update）+:2341/:1660（终局/FORCE_STOP两处`redactor.flush()`）+:1815/:2238（result_preview两处`redact_secrets(str(result))[0][:200]`）+:2991（缓存重放`redact_secrets(cached)[0]`）
+- 调用链到真实入口：`_run_llm_with_tools`被soulmate_agent.py:3367（`_prompt_inner`主消息路径，ws /ws/acp真实turn）+:3254/:3291（task plan步骤/retry路径）调用；`_prompt_inner`被:2619（`prompt()`）调用
+- 防死接线测试：test_output_guard.py TestWiring 3项（import同一性+feed==1/flush==2调用点计数+`full_response += safe_text`存在且`+= chunk_text`已移除）
+**验证结果**：
+- **完整性✅**：git show --stat 25045304（3文件+636/-10，soulmate_agent +48/-10全增量hunk零全量重写）；ast.parse 3文件全过；staged diff密钥扫描（sk-长串/ghp_/Bearer长token模式）0命中
+- **集成✅**：grep证据链如上（每个新符号=定义行+真实消息路径消费行，调用链prompt→_prompt_inner→_run_llm_with_tools三级落到底）；**live运行时证据（决定性，证据阶梯第4级）**：真实ws /ws/acp turn（JWT+session/new agent_id=soulmate+session/prompt全链）——语义缓存命中重放路径实录：客户端收到`api_key=[REDACTED:OpenAI API Key]`（完整伪造密钥零泄漏、≥6字符碎片全无）+journal实录`[output_guard] WARNING: [output-guard] 输出脱敏: kind=OpenAI API Key level=credential len=51`（acp-proxy-a真实服务进程）+cache.db原行仍明文（证明脱敏发生在重放展示边界而非种子侧）
+- **测试✅**：新增tests/test_output_guard.py **26 passed**——TestPatternCoverage 5（15凭据样例全命中+Anthropic压Generic归因+identifier默认不遮IP+identifier开启可遮+off透传）；TestFullTextRedaction 5（findings无秘密本体/多秘密全遮/普通文本零改写/None/重叠防重复）；TestStreamRedactor 7（**逐切点穷举：秘密被chunk在任意字节劈开→无完整秘密+无≥6字符碎片+输出与全量脱敏逐字一致**+正常文本恒等+flush尾部+runaway token+**假\b回归用例**+\\b语义忠实性显式记录+summary无秘密）；TestWiring 3；TestRunLlmStreamRedaction 4（**真实_run_llm_with_tools路径**：脚本化流劈开秘密→fake client捕获外发文本零泄漏+marker可见+full_response干净/尾部token不丢/普通回答零变化对照/preview接线）
+- **负控制（决定性对照）**：①普通中文回答输出逐字不变（test_clean_text_passes_unchanged）②identifier级默认关闭=健康检查127.0.0.1照常显示③cache原行明文不被改动（脱敏只在展示边界）④off级别透传
+- **测试首跑抓到2个真bug（已修，铁证测试有效性）**：①`off`级别rank语义错误→off会全量脱敏（修复：off早退空表）②强制切分区假\b提前匹配→13字符前缀误判完整秘密、后半段碎片外发（修复：定点回撤迭代），各自有回归用例锁死
+- **全量tests/ 795 passed 0 failed**（273s，=769基线+26新，test_steering/test_sandbox_policy/test_plan_execution等全绿无破坏）；**systemic_test.py 29/29 passed**（S1消息流/S2权限×工具/S3作业队列/S4并发/S5降级/S6混合负载全绿，EXIT=0）
+**服务重启**：systemctl --user restart acp-proxy-a.service + acp-proxy-b.service（soulmate_agent双实例改动）→ 双active → :8092/health+:8095/health双200 → 重启后全量795 passed+systemic 29/29+live探针（probe2）均在重启后服务上通过；opensoul零改动不重启；openmate前端零改动不build
+**commit**：openmate `25045304`（3文件+636/-10）；本轮docs commit随后单独入库
+**遗留问题**：
+1. **输出侧注入审计门未做（P0缺口剩余半边）**：agent-zero _infection_check三态verdict（`<ok/>`/`<terminate/>`/`<clarify>`）+工具执行前gate阻塞——本轮只做了脱敏半边，注入检测（\"ignore previous instructions\"类LLM输出+工具结果注入）仍无防护。**下轮P0第一优先**
+2. **⚠️环境问题：acp-proxy的LLM provider余额不足（402 Insufficient account balance）**——live探针#1（要求模型复述伪造密钥）实测`[LLM错误: LLM API error 402]`，流式路径无法借真模型产秘密文本（本轮live证据改走缓存重放展示边界，同为真实ws传输+真实服务代码路径）。provider=`api.xiaomimimo.com` model=mimo-v2.5-pro（systemic_test S-LLM配置实录）。**agent当前完全无法正常回答用户消息，请用户充值/换key**；流式feed路径的live实锤待provider恢复后补（探针脚本/tmp/og_live_probe.py已备好）
+3. live流式feed路径实锤缺位（见#2）：feed/flush的接线真实性由真实_run_llm_with_tools单测（脚本化LLM）+inspect调用点锁死，但"真实provider流式chunk劈开秘密"的live实录待provider恢复后补跑
+4. \\b语义忠实性自述：秘密与词字符直接粘连（如`ZZZsk-…`）不命中——Warp上游15个模式全部带\\b，属忠实移植（真实场景秘密前是=/空格/:等非词字符）；如需更激进可加无\\b变体pattern，但会引入过度匹配（`task-`类前缀误伤），**需先讨论再动**
+5. identifier级（IP/电话/MAC/Firebase域名）默认关闭是适配而非Warp原语义——如用户希望对齐Warp全遮罩，一行env `OUTPUT_REDACT_LEVEL=identifier`可开（或改默认值）
+6. 异常路径不flush：_run_llm_with_tools抛异常时holdback尾部（≤1个token）不外发——宁可丢尾不泄漏，可接受；如需严格完整可在try/finally加flush，列P3
+7. cron环境约束持续有效：管道`cmd | tail`吞退出码继续用重定向+独立grep规避；sibling subagent并行编辑settings-client.tsx/locales未staged
