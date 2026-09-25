@@ -2583,3 +2583,41 @@
 2. scp位置操作数仅用「强凭据文件路径」判定（降低误伤的显式取舍）：`scp token.txt user@host:`这类弱词命名的文件经scp外发暂不命中（@/管道语境下的弱词仍命中）。如需更激进需先讨论误伤容忍度。
 3. 降级镜像_degraded_exfil与引擎detect_exfiltration为跨进程复制（无法import），已加注释互为镜像；若未来检测规则扩展需双侧同步——可在opensoul侧单测中加「双侧规则一致性」断言固化（列为P3增强）。
 4. live探针的正常curl返回ask（builtin curl需确认）而非allow——是既有builtin ask规则的预期行为，非本轮问题；如要放开常规curl需在session/user层加allow规则（kilocode findLast可覆盖builtin ask），不在本轮范围。
+
+## [2026-09-26 改进轮] P0-3 参数粒度数据外泄检测补完——Python载荷库级外泄（AST污点分析）+ 降级镜像code/script键盲区修复 + 双侧规则一致性断言
+**目标**：销账上轮遗留#1「execute_code的Python载荷内的库级外发（requests.post把secret发出去）不在shell正则检测面」——shell正则只认curl/wget等命令字面量，Python以库调用出网（requests/httpx/urllib/socket/smtp/ftp）此前完全绕过外泄检测；顺手销账上轮遗留#3「双侧规则一致性断言」（P3增强）并修复降级路径cmd提取缺code/script键的镜像盲区（batch_execute脚本与execute_code载荷在opensoul不可达时完全不可见）。
+**调研来源**：上轮dev报告遗留#1/#3原文 + SUMMARY.md P0-3「路径/参数粒度」（10+方互证）+ Warp secret_redaction（凭据识别）+ agent-zero _infection_check（外发通道）。取舍沿用上轮先例：污点源只收**强凭据文件路径**（弱词命名文件外发与scp弱词同列遗留，需先讨论误伤容忍度）；os.environ类环境变量密钥不做污点源（OAuth令牌交换类合法流会把client_secret发进body，误伤面大，同列遗留）。
+**改动文件**：
+- opensoul/src/immune/permission_engine.py（+292/-4）——新增detect_python_exfiltration（AST污点分析）+ _shell_command_of补"script"键
+- opensoul/tests/test_python_exfil_guard.py（+232，新增）
+- openmate/acp-proxy/agent/permission_gate.py（+213/-1）——新增_degraded_py_exfil镜像 + degraded_decision补code/script键提取
+- openmate/acp-proxy/tests/test_permission_gate.py（+68）——新增TestDegradedPyExfil
+- openmate/acp-proxy/tests/test_exfil_parity.py（+169，新增）——双侧一致性断言（遗留#3销账）
+**改动内容**：
+1. `detect_python_exfiltration(code)`：轻量ast污点分析四类命中——①py_upload：**强凭据文件读取**（open('/etc/passwd')/Path.read_text()/expanduser包装/敏感路径字面量变量p='~/.ssh/id_rsa'再open(p)/污点句柄fh.read()多步传播）流入网络出口调用（requests/httpx/urllib/socket.send/smtp/ftp，含requests.Session()句柄工厂跟踪）；②py_shellout：subprocess/os.system外带shell命令时字面量重组回既有shell检测面（subprocess.run(['curl','-d','@/etc/passwd',…])）+ f-string变量路径（os.system(f'curl -d @{p} …')，shell正则看不见@p，靠敏感路径污点）；③reverse_shell：os.dup2/pty.spawn+socket.connect反弹shell签名；④py_unparsed：载荷语法不可解析时的保守兜底（敏感读取+网络出口签名同现才命中）。terminal内`python3 -c`/heredoc子载荷自动提取进同一检测面。
+2. `_shell_command_of`补"script"键：batch_execute（code-mode）脚本载荷进检测面（此前shell+Python两类检测都看不见script键）。
+3. acp-proxy `_degraded_py_exfil`：opensoul不可达时的同算法镜像（跨进程复制，与既有_degraded_exfil同模式注释互为镜像）；**修复degraded_decision的cmd提取缺code/script键盲区**——此前降级路径对execute_code/batch_execute载荷零检测。
+4. **双侧规则一致性断言（遗留#3销账）**：tests/test_exfil_parity.py两层固化——①规则集结构一致（强凭据路径正则逐字相等+Python网络模块/出口方法/句柄工厂/shell-out/read尾集逐元素相等+python -c/heredoc/兜底正则逐字相等，引擎侧改规则镜像侧漏改=测试红）；②行为一致（9正例+6负控制fixture矩阵跑过双侧实现，共享子集判定必须相同）+scp transfer类为引擎侧文档化超集的防收缩断言。
+**接线位置**（grep证据，文件:行号）：
+- opensoul：`permission_engine.py:674` 定义detect_python_exfiltration；`:357`+`:413` 在detect_exfiltration内被调用（Shell检测面之后的Python分析尾部）；`:924` detect_exfiltration在`PermissionEngine.check()`内被调用（=HTTP /api/immune/permission/check评估内核，acp-proxy每个tool_call执行前经permission_gate调此端点，真实工具执行路径）。
+- openmate：`permission_gate.py:314` 定义_degraded_py_exfil；`:356` 在`degraded_decision()`内被调用（opensoul不可达时的真实降级路径）；`soulmate_agent.py:127/264` PermissionGate构造=每tool_call消费方。
+- 运行时调用证据：live探针经真实HTTP端点命中guard-exfiltration（见验证结果）；systemic_test.py S6「混合负载（health+job+perm+ACP）」ok=4/4命中perm路径=活体。
+**验证结果**：
+- 完整性✅：git show --stat——opensoul 3b3a9d7b（2文件+561/-4，纯增量hunk零全量重写）；openmate 27d650aa（3文件+450/-1）。sibling未提交改动（settings-client.tsx/locales/systemic_test_results.json/opensoul config/rbac_policy.csv）显式排除未入库。
+- 集成✅：grep证据链如上（每个新符号=定义行+真实消息/降级路径消费行），非死代码。
+- 测试✅：
+  - opensoul `tests/test_python_exfil_guard.py` **37 passed**（TestPyUpload 8正例=变量传播/内联/with句柄/expanduser/敏感路径变量/urllib/put/多步read_bytes、TestPyShellOut 3=argv字面量重组/f-string变量路径/污点管道、TestPyReverseShell 2、TestSubPayloadAndFallback 4=python -c/heredoc提取+兜底命中/不误命中、TestPyNegative 12负控制零误伤、TestEngineWiring 4=全模式hard deny×5+BYPASS普通py不误判）。
+  - opensoul 全量 `tests/` **2165 passed 0 failed**（167.47s，EXIT=0，=上轮2128+37新，无回归）。
+  - openmate `tests/test_permission_gate.py` + `test_exfil_parity.py` **60 passed**（TestDegradedPyExfil 11 + TestRuleSetParity 4 + TestBehaviorParity 15 + 既有30无回归）。
+  - openmate 全量 `tests/` **870 passed 0 failed**（301.25s，EXIT=0，=上轮839+31新）。
+  - `systemic_test.py` **29/29 passed**（EXIT=0，S1-S6全绿）。
+  - **live行为实锤**：重启后经`POST /api/immune/permission/check`真实HTTP探针7/7——EXFIL-py-upload→`deny guard-exfiltration (py_upload)`、EXFIL-py-shellout→`deny (py_shellout)`、EXFIL-py-revshell→`deny (reverse_shell)`、EXFIL-script-key(batch_execute)→`deny (py_upload)`；负控制NORMAL-py-request→allow、NORMAL-py-local-read（本地读/etc/passwd不出网）→allow、NORMAL-curl→ask（builtin curl规则非guard-exfiltration，零误伤）。
+  - 负控制（决定性对照）：普通API请求/本地敏感读/非敏感文件外发/敏感路径字符串（非内容）外发/普通socket业务连接/普通os.system/download类urlretrieve/dup2单独出现共12例零误伤。
+**服务重启**：`systemctl --user restart opensoul.service acp-proxy-a.service acp-proxy-b.service`→三服务active；健康检查 /api/health=200、:8092/health=200、:8095/health=200；live探针在重启后服务上命中guard-exfiltration=进程已加载新代码。
+**commit**：opensoul `3b3a9d7b`；openmate `27d650aa`。
+**遗留问题**：
+1. 环境变量密钥外发（os.environ['CLIENT_SECRET']→requests.post body）显式不判——OAuth令牌交换类合法流误伤面大，如需覆盖需先讨论误伤容忍度（与scp弱词、上轮遗留#2同族）。
+2. 污点分析是名称级直传近似（无作用域/重赋值失效处理）：`x=open('/etc/passwd').read(); x='clean'`后x仍带污点（保守方向，可能过度命中而非漏命）；闭包/类属性/跨函数返回值传播不追（漏检方向，真隔离沙箱仍是根本解——mirror差距P1）。
+3. aiohttp类`session = aiohttp.ClientSession(); session.post(...)`已由句柄工厂覆盖，但第三方库封装的网络出口（如自定义http工具函数内部出网）不在检测面——归运行时网络沙箱。
+4. 双侧镜像为跨进程复制（无法import），test_exfil_parity.py已固化同步约束防漂移，但新规则扩展时仍需人工双侧同改（测试红=提醒器不是自动化修复）。
+5. cron环境约束持续有效：管道`cmd | tail`吞退出码继续用重定向+独立tail规避；sibling subagent并行改动settings-client.tsx/locales/systemic_test_results.json未staged（非本轮范围）。
