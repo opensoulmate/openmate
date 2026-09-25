@@ -54,6 +54,7 @@ from agent.context_compression import ContextCompressor
 from agent.loop_guard import LoopGuard
 from agent.code_mode import CodeModeExecutor
 from agent.sandbox_policy import SandboxPolicy  # kilocode supplement3 #15 网络受限工具面收缩
+from agent.output_guard import SecretStreamRedactor, redact_secrets  # P0 输出侧护栏：流式密钥脱敏（Warp secret_redaction）
 from agent.read_turn import DIFF_MAX_BYTES, TurnReadView, render_trace, result_ok
 from agent.mcp_resources import (
     MCP_RESOURCE_TOOL_NAMES,
@@ -1522,6 +1523,10 @@ You can send files to the user natively: to deliver a file, write a brief confir
         attr_items += items_from_openai_tools([clarify_tool], source="builtin")
 
         self._streamed_flags[session_id] = False
+        # ── P0输出侧护栏（Warp secret_redaction流式脱敏）：每次LLM流一个redactor，
+        # feed()按空白边界hold住未完结token——秘密被streaming chunk从词中间劈开也
+        # 绝不完整外泄（"redact secrets WHILE streaming"）──
+        redactor = SecretStreamRedactor()
         # ── P0-4: 活动观测开始（goose peek：status=running，durable turns开始计数）──
         activity = self._activity(session_id)
         activity.mark_running()
@@ -1651,6 +1656,16 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             lg_severity == "intervene" and loop_intervene_count >= 1)
                         if _lg_force_stop:
                             # FORCE_STOP（或wiring级升级）：断循环+用户可见（mem0：失败必须可见）
+                            # P0输出侧护栏：先冲出holdback尾部（已生成内容先于停止提示呈现）
+                            _og_tail = redactor.flush()
+                            if _og_tail:
+                                full_response += _og_tail
+                                if self._client is not None:
+                                    await self._client.session_update(
+                                        session_id=session_id,
+                                        update=acp.update_agent_message_text(_og_tail),
+                                    )
+                                    self._streamed_flags[session_id] = True
                             stop_note = f"\n\n🛑 [循环检测强制停止] {loop_result.message}"
                             full_response += stop_note
                             if self._client is not None:
@@ -1797,7 +1812,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
                                 all_tool_calls.append({
                                     "name": func_name,
                                     "arguments": func_args,
-                                    "result_preview": str(result)[:200],
+                                    "result_preview": redact_secrets(str(result))[0][:200],
                                     "cached": True,
                                     "permission": gate_result.behavior,
                                     "permission_provenance": gate_provenance,
@@ -2220,7 +2235,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
                         all_tool_calls.append({
                             "name": func_name,
                             "arguments": func_args,
-                            "result_preview": result[:200] if result else "",
+                            "result_preview": (redact_secrets(str(result))[0][:200] if result else ""),
                             "permission": gate_result.behavior,
                             "permission_provenance": gate_provenance,
                         })
@@ -2277,13 +2292,19 @@ You can send files to the user natively: to deliver a file, write a brief confir
                     chunk_text = str(chunk) if not isinstance(chunk, str) else chunk
                     if chunk_text:
                         round_had_text = True
-                        full_response += chunk_text
-                        if self._client is not None:
-                            await self._client.session_update(
-                                session_id=session_id,
-                                update=acp.update_agent_message_text(chunk_text),
-                            )
-                            self._streamed_flags[session_id] = True
+                        # ── P0输出侧护栏：流式增量脱敏（Warp"边流边脱敏，完整秘密
+                        # 绝不显示"）——feed()只返回可安全外发部分，未完结token压在
+                        # holdback里等下个chunk补全后整体替换；full_response同样只
+                        # 累加脱敏后文本（落库/记忆/缓存一并干净）──
+                        safe_text = redactor.feed(chunk_text)
+                        if safe_text:
+                            full_response += safe_text
+                            if self._client is not None:
+                                await self._client.session_update(
+                                    session_id=session_id,
+                                    update=acp.update_agent_message_text(safe_text),
+                                )
+                                self._streamed_flags[session_id] = True
 
             # ── P0-4: 活动记账（goose durable turns + claude-code noop自报streak）──
             if got_tool_call:
@@ -2314,6 +2335,21 @@ You can send files to the user natively: to deliver a file, write a brief confir
                 )
                 self._streamed_flags[session_id] = True
             logger.warning(f"[loop-guard] session={session_id} MAX_ROUNDS={MAX_ROUNDS} 耗尽")
+
+        # ── P0输出侧护栏：冲出holdback尾部（流结束必须flush，否则尾部token永远压着
+        # 不外发/不落库）──
+        _og_tail = redactor.flush()
+        if _og_tail:
+            full_response += _og_tail
+            if self._client is not None:
+                await self._client.session_update(
+                    session_id=session_id,
+                    update=acp.update_agent_message_text(_og_tail),
+                )
+                self._streamed_flags[session_id] = True
+        if redactor.findings:
+            logger.warning(
+                f"[output-guard] session={session_id} 输出脱敏摘要: {redactor.summary()}")
 
         # ── P0-4: 活动观测结束（idle+持久化，/api/agent/peek跨进程可读）──
         activity.mark_idle()
@@ -2950,7 +2986,9 @@ You can send files to the user natively: to deliver a file, write a brief confir
                 if self._client:
                     await self._client.session_update(
                         session_id=session_id,
-                        update=acp.update_agent_message_text(cached),
+                        # P0输出侧护栏：缓存重放也是模型输出展示边界——历史缓存条目
+                        # 可能存有修复前原文，重放前同样脱敏（防御纵深）
+                        update=acp.update_agent_message_text(redact_secrets(cached)[0]),
                     )
                 # 记录成本为0（缓存命中）
                 self._cost_tracker.record_usage(
