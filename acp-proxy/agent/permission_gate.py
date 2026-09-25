@@ -19,6 +19,7 @@
 4. 同一session内完全相同的调用被人工批准后缓存，不再重复弹窗
 """
 
+import ast
 import asyncio
 import hashlib
 import json
@@ -131,6 +132,207 @@ def _degraded_exfil(cmd: str) -> Optional[str]:
     return None
 
 
+# ── P0-3 本地降级Python载荷库级外泄镜像（fail-safe镜像） ──────────
+# opensoul permission_engine.detect_python_exfiltration 是权威实现（AST污点分析）；
+# 本镜像保持同一算法：强凭据文件读取流入网络出口调用=外泄。取舍与引擎一致——
+# 污点源只收强凭据文件路径（与引擎 _SENSITIVE_FILE_RE 同一真源，见 _EXFIL_STRONG_RE）；
+# os.environ类不做污点源。若引擎侧规则扩展需双侧同步
+# （tests/test_exfil_parity.py 的跨侧一致性断言固化此约束）。
+_EXFIL_STRONG_RE = re.compile(
+    r"\.ssh/|id_rsa|id_ed25519|id_ecdsa|id_dsa|\.pem\b|\.key\b|\.env\b|/etc/passwd|/etc/shadow"
+    r"|\.aws/credentials|\.aws/config|\.gnupg|\.netrc|\.git-credentials|\.npmrc|\.pypirc"
+    r"|\.kube/config|\.docker/config|\.bash_history|\.zsh_history",
+    re.IGNORECASE,
+)
+_PY_NET_MODULES = {
+    "requests", "httpx", "urllib", "urllib3", "aiohttp", "socket",
+    "smtplib", "ftplib", "telnetlib", "http", "httplib",
+}
+_PY_SINK_METHODS = {
+    "get", "post", "put", "patch", "delete", "head", "options", "request",
+    "urlopen", "send", "sendall", "sendto", "sendmail", "send_message",
+    "storbinary", "storlines", "putfile", "upload",
+}
+_PY_HANDLE_FACTORIES = _PY_SINK_METHODS | {
+    "socket", "create_connection", "Session", "Client", "SMTP", "SMTP_SSL",
+    "FTP", "FTP_TLS", "HTTPConnection", "HTTPSConnection", "urlopen",
+}
+_PY_SHELL_OUT_TAILS = {
+    "system", "popen", "run", "call", "check_call", "check_output", "Popen",
+    "getoutput", "getstatusoutput",
+}
+_PY_READ_TAILS = {"read", "readline", "readlines", "read_text", "read_bytes"}
+_PY_C_RE = re.compile(
+    r"python[23]?(?:\.\d+)?\s+(?:-[a-zA-Z]\S*\s+)*-c\s+([\"'])(.+?)\1", re.DOTALL
+)
+_PY_HEREDOC_RE = re.compile(
+    r"python[23]?(?:\.\d+)?\s*<<[\"']?(\w+)[\"']?\s*\n(.*?)\n\s*\1", re.DOTALL
+)
+_PY_SINK_HINT_RE = re.compile(
+    r"requests\s*\.|httpx\s*\.|urllib|urlopen|socket\s*\.\s*(?:socket|create_connection)"
+    r"|smtplib|ftplib|aiohttp|\w+\s*\.\s*(?:post|put|sendall|sendto|storbinary)\s*\(",
+    re.IGNORECASE,
+)
+_PY_OPEN_HINT_RE = re.compile(r"\bopen\s*\(|read_text\s*\(|read_bytes\s*\(")
+
+
+def _py_qualname(node) -> str:
+    parts = []
+    cur = node
+    while isinstance(cur, ast.Attribute):
+        parts.append(cur.attr)
+        cur = cur.value
+    if isinstance(cur, ast.Name):
+        parts.append(cur.id)
+        return ".".join(reversed(parts))
+    if isinstance(cur, ast.Call):
+        inner = _py_qualname(cur.func)
+        if inner:
+            parts.append(inner)
+        return ".".join(reversed(parts))
+    return ".".join(reversed(parts))
+
+
+def _py_str_constants(node) -> list:
+    return [
+        n.value for n in ast.walk(node)
+        if isinstance(n, ast.Constant) and isinstance(n.value, str)
+    ]
+
+
+def _py_names_used(node) -> set:
+    return {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
+
+
+def _py_secret_read(node, tainted: set, sensitive_paths: set) -> Optional[str]:
+    for sub in ast.walk(node):
+        if not isinstance(sub, ast.Call):
+            continue
+        tail = _py_qualname(sub.func).rsplit(".", 1)[-1]
+        if tail == "open" or tail in _PY_READ_TAILS:
+            for s in _py_str_constants(sub):
+                if _EXFIL_STRONG_RE.search(s):
+                    return s
+            if _py_names_used(sub) & sensitive_paths:
+                return sorted(_py_names_used(sub) & sensitive_paths)[0]
+            if tail in _PY_READ_TAILS and isinstance(sub.func, ast.Attribute):
+                base = sub.func.value
+                if isinstance(base, ast.Name) and base.id in tainted:
+                    return base.id
+    return None
+
+
+def _analyze_python_ast(code: str) -> Optional[str]:
+    try:
+        tree = ast.parse(code)
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        return None
+
+    tainted: set = set()
+    sensitive_paths: set = set()
+    net_handles: set = set()
+    dup2 = connect = pty_spawn = False
+
+    def _taint_targets(target, value):
+        names = [target.id] if isinstance(target, ast.Name) else [
+            t.id for t in ast.walk(target) if isinstance(t, ast.Name)
+        ]
+        for s in _py_str_constants(value):
+            if _EXFIL_STRONG_RE.search(s):
+                sensitive_paths.update(names)
+                break
+        if _py_names_used(value) & sensitive_paths:
+            sensitive_paths.update(names)
+        secret = _py_secret_read(value, tainted, sensitive_paths)
+        if secret is not None or bool(_py_names_used(value) & tainted):
+            tainted.update(names)
+        for t in names:
+            for sub in ast.walk(value):
+                if isinstance(sub, ast.Call):
+                    q = _py_qualname(sub.func)
+                    if (q.split(".", 1)[0] in _PY_NET_MODULES
+                            and q.rsplit(".", 1)[-1] in _PY_HANDLE_FACTORIES):
+                        net_handles.add(t)
+                        break
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for tgt in node.targets:
+                _taint_targets(tgt, node.value)
+        elif isinstance(node, ast.AnnAssign) and node.value is not None and node.target is not None:
+            _taint_targets(node.target, node.value)
+        elif isinstance(node, ast.AugAssign):
+            _taint_targets(node.target, node.value)
+        elif isinstance(node, ast.withitem):
+            if node.optional_vars is not None:
+                _taint_targets(node.optional_vars, node.context_expr)
+
+    def _sink_call(call) -> bool:
+        q = _py_qualname(call.func)
+        tail = q.rsplit(".", 1)[-1]
+        if tail not in _PY_SINK_METHODS:
+            return False
+        if q.split(".", 1)[0] in _PY_NET_MODULES:
+            return True
+        base = call.func.value if isinstance(call.func, ast.Attribute) else None
+        return isinstance(base, ast.Name) and base.id in net_handles
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        q = _py_qualname(node.func)
+        tail = q.rsplit(".", 1)[-1]
+        if tail == "dup2":
+            dup2 = True
+        if tail == "spawn" and "pty" in q:
+            pty_spawn = True
+        if tail == "connect":
+            connect = True
+
+        if _sink_call(node):
+            args = list(node.args) + [kw.value for kw in node.keywords]
+            for arg in args:
+                if _py_secret_read(arg, tainted, sensitive_paths) is not None:
+                    return "py_upload"
+                if _py_names_used(arg) & tainted:
+                    return "py_upload"
+
+        if tail in _PY_SHELL_OUT_TAILS and q.split(".", 1)[0] in ("os", "subprocess", "commands"):
+            pseudo = " ".join(_py_str_constants(node))
+            if pseudo:
+                shell_hit = _degraded_exfil(pseudo)
+                if shell_hit is not None:
+                    return "py_shellout"
+            if _py_names_used(node) & (tainted | sensitive_paths) and _EXFIL_SINK_RE.search(pseudo):
+                return "py_shellout"
+
+    if (dup2 or pty_spawn) and connect:
+        return "reverse_shell"
+    return None
+
+
+def _degraded_py_exfil(code: str) -> Optional[str]:
+    """Python载荷库级外泄降级镜像。返回kind或None（引擎detect_python_exfiltration镜像）。"""
+    if not code or not code.strip():
+        return None
+    candidates = [code]
+    m = _PY_C_RE.search(code)
+    if m:
+        candidates.append(m.group(2))
+    m2 = _PY_HEREDOC_RE.search(code)
+    if m2:
+        candidates.append(m2.group(2))
+    for cand in candidates:
+        hit = _analyze_python_ast(cand)
+        if hit is not None:
+            return hit
+    # 不可解析保守兜底：敏感文件读取+网络出口签名同现
+    if (_PY_SINK_HINT_RE.search(code) and _EXFIL_STRONG_RE.search(code)
+            and _PY_OPEN_HINT_RE.search(code)):
+        return "py_unparsed"
+    return None
+
+
 def degraded_decision(tool_name: str, tool_args: dict) -> GateResult:
     """opensoul不可达时的本地降级策略（可独立测试的纯函数）
 
@@ -140,8 +342,18 @@ def degraded_decision(tool_name: str, tool_args: dict) -> GateResult:
     - 其余 → 放行 + 标记degraded（fail-open：不因权限服务掉线锁死用户工作流，
       但决策带degraded标记，审计可追）
     """
-    cmd = str(tool_args.get("command") or tool_args.get("cmd") or "")
+    cmd = str(
+        tool_args.get("command")
+        or tool_args.get("cmd")
+        or tool_args.get("code")
+        or tool_args.get("script")
+        or ""
+    )
     exfil = _degraded_exfil(cmd)
+    if exfil is None:
+        # Python载荷库级外泄镜像（execute_code的code / batch_execute的script；
+        # shell命令文本对AST解析天然无效，交由上面的shell检测面）
+        exfil = _degraded_py_exfil(cmd)
     if exfil:
         return GateResult(
             allowed=False, behavior="deny",
