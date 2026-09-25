@@ -2505,3 +2505,39 @@
 5. identifier级（IP/电话/MAC/Firebase域名）默认关闭是适配而非Warp原语义——如用户希望对齐Warp全遮罩，一行env `OUTPUT_REDACT_LEVEL=identifier`可开（或改默认值）
 6. 异常路径不flush：_run_llm_with_tools抛异常时holdback尾部（≤1个token）不外发——宁可丢尾不泄漏，可接受；如需严格完整可在try/finally加flush，列P3
 7. cron环境约束持续有效：管道`cmd | tail`吞退出码继续用重定向+独立grep规避；sibling subagent并行编辑settings-client.tsx/locales未staged
+
+## [2026-09-26 01:10] P0输出侧护栏补完——注入审计门（agent-zero _infection_check三态verdict移植）
+**目标**：补齐SUMMARY.md「immune | 输出侧护栏（流式脱敏20正则+输出侧注入审计门）| P0」的注入审计门半边——上轮25045304做完流式脱敏半边，本轮dev-report遗留#1（工具执行前无任何注入劫持检测，模型被上下文夹带内容劫持后工具照常执行）销账
+**调研来源**：agent-zero `plugins/_infection_check/helpers/checker.py`（395行，~/agent-research-src/agent-zero）——三态verdict `<ok/>`/`<terminate/>`/`<clarify>…</clarify>`（parse_result最后一个标签获胜）、gate卡在tool_execute_before（工具执行前阻塞）、max_clarifications超限升级terminate、检查异常non-fatal放行；clarify循环语义对齐open-webui tool_approval三态「拒绝=合成错误工具结果，loop不断」（SUMMARY.md P0-9）
+**改动文件**：
+- `acp-proxy/agent/infection_guard.py`（新建255行）：Verdict/parse_verdict/heuristic_scan/InfectionGate/JUDGE_PROMPT
+- `acp-proxy/agent/soulmate_agent.py`（+82增量）：import（:58）+ `_infection_llm_call`判词LLM封装（:794）+ gate实例化（:1542）+ 工具执行前gate检查块（:1721）
+- `acp-proxy/tests/test_infection_guard.py`（新建33测）
+- `acp-proxy/tests/test_output_guard.py`（1行：redactor.flush()调用点计数2→3，新增TERMINATE早退路径）
+**改动内容**：
+1. 三态verdict解析（agent-zero parse_result逐字语义：最后一个标签获胜）
+2. 确定性启发式劫持签名（本系统新加的离线兜底层，agent-zero没有）：中英双语四类——指令覆盖/身份改写/对用户隐瞒/套取系统提示词（10个窄正则；不做role-marker宽匹配防误伤日常提示词开发）。命中→clarify软拦截（合法转述注入样例可说明后继续）
+3. LLM语义审计（JUDGE_PROMPT要求三态标签输出）：llm_call注入走llm_engine.chat；判词故障/超时/`[LLM错误:`前缀（LLMEngine.chat吞异常语义）→ fail-safe放行+WARNING（agent-zero non-fatal同语义）+ 连续2次失败熔断（本轮不再发起审计，防每轮挂timeout拖死会话）
+4. 真实循环接线（_run_llm_with_tools，loop_guard之后、工具执行之前）：terminate=工具一个不执行+redactor flush+用户可见`🛡️ [注入审计终止]`+本轮终止（FORCE_STOP同构）；clarify=合成拦截工具结果`🛡️ [注入审计拦截]`（协议完整loop不断）让模型说明后重试，超2次由gate升级terminate；拦截事件进all_tool_calls轨迹账本（permission=`infection:clarify|terminate`，"为什么没执行"可查）；每真实turn一个InfectionGate实例（clarify计数/熔断不跨turn串扰）
+**接线位置**（grep证据，`grep -rn "InfectionGate\|infection_gate" --include="*.py"`）：
+- 定义：`acp-proxy/agent/infection_guard.py:174`（class InfectionGate）
+- import：`acp-proxy/agent/soulmate_agent.py:58`（from agent.infection_guard import InfectionGate）
+- 实例化：`soulmate_agent.py:1542`（`infection_gate = InfectionGate(llm_call=self._infection_llm_call)`，_run_llm_with_tools内、redactor旁）
+- **运行时调用点**：`soulmate_agent.py:1721`（`infection_verdict = await infection_gate.check(...)`）——位于`if isinstance(chunk, dict) and "tool_calls" in chunk`分支内、`# 执行所有工具调用并收集结果`（:1790）之前=真实工具执行路径的必经点（inspect断言`pos_check < pos_exec`锁死）
+- 判词LLM调用链：`infection_gate` → `soulmate_agent.py:794 _infection_llm_call` → `llm_engine.chat`（真实provider路径）
+- 调用链到底：`_run_llm_with_tools`被`_prompt_inner`（ws /ws/acp真实turn入口，:3445等）调用
+**验证结果**：
+- **完整性✅**：git show --stat aee6c164（5文件+747/-28；soulmate_agent +82全增量hunk零全量重写）；ast.parse 3文件全过
+- **集成✅**：grep证据链如上（新符号=定义行+import+实例化+运行时调用点，且inspect断言gate在工具执行语句之前）；**进程级证据**：acp-proxy-a MainPID=575993启动时间01:03:30晚于代码写入00:48/00:49与commit——重启后的服务进程加载的就是新代码
+- **测试✅**：新增tests/test_infection_guard.py **33 passed**——TestParseVerdict 5（三态+last-wins+无标签默认ok）；TestHeuristicScan 8（中英四类签名命中+工具参数扫描+**负控制5条正常技术文本零误伤**：提及system prompt/override/指令/规则等词不判劫持）；TestGate 11（启发式→clarify/超2次升级terminate/LLM三态判词/**LLM故障fail-safe放行**/LLMEngine"[LLM错误:"语义/熔断只call 2次/timeout/enable=False不调LLM/message可见性/JUDGE_PROMPT契约）；TestWiring 4（import同源+唯一调用点+**gate在工具执行之前**inspect断言+三态路径marker+判词helper接线）；TestRunLlmInfectionGate 5（**真实_run_llm_with_tools路径副作用证据**：①clarify拦截→counter文件不产生+trajectory带infection:clarify+合成拦截结果进第2轮上下文②terminate→counter不产生+响应含`[注入审计终止]`+无第2轮LLM调用③真实循环clarify超限升级terminate（2 clarify+1 terminate计数）④**负控制**：干净工具照常执行（counter产生）+审计故障fail-safe不挡正常工作⑤纯文本轮零变化）
+- **负控制（决定性对照）**：干净终端命令真实执行产生副作用文件；正常技术文本启发式零命中；纯文本回答逐字不变
+- **全量tests/ 828 passed 0 failed**（299s，=795基线+33新，test_output_guard/test_loop_guard_wiring/test_steering等全绿；test_output_guard的flush计数断言随新早退路径同步2→3）；**systemic_test.py 29/29 passed**（S1消息流/S2权限×工具/S3作业队列/S4并发/S5降级/S6混合负载，EXIT=0）
+**服务重启**：systemctl --user restart acp-proxy-a.service + acp-proxy-b.service（soulmate_agent改动双实例）→ 双active → :8092/health+:8095/health双200 → 进程启动时间01:03:30晚于代码mtime（新代码已加载）；opensoul零改动不重启；openmate前端零改动不build
+**commit**：openmate `aee6c164`（5文件+747/-28）；本轮docs commit随后单独入库
+**遗留问题**：
+1. **⚠️环境问题持续：LLM provider余额不足（402 Insufficient account balance）**——live探针(/tmp/ig_live_probe.py，真实ws /ws/acp两回合：劫持命令正测试+干净命令负控制)实测两回合均`[LLM错误: LLM API error 402]`，模型无法产出任何工具调用→gate无法被真实触发，探针如实判定INCONCLUSIVE（不据未触发声称live实锤）。provider=`api.xiaomimimo.com` model=mimo-v2.5-pro。**请用户充值/换key**；恢复后补跑`python3 /tmp/ig_live_probe.py`即得live实锤（脚本已备好，PASS判定含负控制零误伤双断言）
+2. live gate触发实锤缺位（见#1）：接线真实性由inspect调用点断言+真实_run_llm_with_tools E2E（counter副作用证据）+进程加载新代码三重锁死，但"真实provider产出劫持工具调用被拦"的journal实录待provider恢复后补
+3. clarify循环为合成工具结果单跳（模型说明后重试）——agent-zero _clarify_loop的"克隆会话让助手本人作答再复审"CoT双向对话未移植（少一次模型调用+不打断流式UI，列为P3增强）
+4. 工具参数级命令注入（curl外发/凭据窃取类终端命令）不归本门——归sandbox_policy/permission_gate（既有P0-3工具权限引擎缺口仍开放）
+5. 启发式签名窄化取舍显式记录：只收指令劫持语义10正则，role-marker类（</system>/<|im_start|>）不做宽匹配（本系统助手大量输出提示词模板代码会误伤）；如需更激进需先讨论
+6. cron环境约束持续有效：管道`cmd | tail`吞退出码继续用重定向+独立grep规避；sibling subagent并行改动settings-client.tsx/locales仍未staged（非本轮范围）
