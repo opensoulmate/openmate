@@ -2541,3 +2541,45 @@
 4. 工具参数级命令注入（curl外发/凭据窃取类终端命令）不归本门——归sandbox_policy/permission_gate（既有P0-3工具权限引擎缺口仍开放）
 5. 启发式签名窄化取舍显式记录：只收指令劫持语义10正则，role-marker类（</system>/<|im_start|>）不做宽匹配（本系统助手大量输出提示词模板代码会误伤）；如需更激进需先讨论
 6. cron环境约束持续有效：管道`cmd | tail`吞退出码继续用重定向+独立grep规避；sibling subagent并行改动settings-client.tsx/locales仍未staged（非本轮范围）
+
+## [2026-09-26 改进轮] P0-3 参数粒度数据外泄检测——凭据外泄hard deny + 降级fail-safe镜像
+**目标**：补上SUMMARY.md P0-3「路径/参数粒度」缺口与上轮遗留「工具参数级命令注入（curl外发/凭据窃取类终端命令）不归任何门禁」——网络出口工具把机密文件当载荷上传/管道喂入/重定向此前可绕过所有权限规则，本轮改为硬否决（任何模式/规则不可覆盖）。
+**调研来源**：SUMMARY.md P0-3（10+方互证，AgentScope PermissionEngine 5模式4行为+路径/参数粒度）+ Warp secret_redaction（凭据识别）+ agent-zero _infection_check（外发通道）。上轮明确把此缺口列为遗留#4「P0-3工具权限引擎缺口仍开放」，本轮销账。
+**改动文件**：
+- opensoul/src/immune/permission_engine.py（+138）——新增detect_exfiltration检测器 + 接线check()
+- opensoul/tests/test_exfiltration_guard.py（+114，新增）
+- openmate/acp-proxy/agent/permission_gate.py（+52）——新增_degraded_exfil降级镜像 + 接线degraded_decision()
+- openmate/acp-proxy/tests/test_permission_gate.py（+36）——新增TestDegradedExfil
+
+**改动内容**：
+1. `detect_exfiltration(tool_input)`: 网络出口工具（curl/wget/nc/ncat/ftp/sftp/scp/ssh/telnet/socat + /dev/tcp|udp）把**机密文件**当载荷时判定外泄，返回finding(kind/risk/hard/reason/matched)。四类命中：①@上传位置（`curl -d @/etc/passwd`、`--data-binary @file`、`-F name=@file`、`--post-file=`、`--upload-file=`）②管道/重定向喂入网络出口（`cat /etc/shadow | nc`、`nc < ~/.ssh/id_rsa`）③scp/sftp/ftp本地源操作数（强凭据文件路径，含@的远端目标跳过避免误伤）④反弹shell（`/dev/tcp`、`bash -i`、`nc -e`——本身即外泄通道）。
+2. `PermissionEngine.check()` Step 0a：命中→返回DENY，rule_id=guard-exfiltration，risk=high，requires_human=False，mode透传——语义=hard deny，BYPASS也不可覆盖。
+3. acp-proxy `_degraded_exfil(cmd)`：opensoul不可达时的本地fail-safe镜像（defense-in-depth），同语义覆盖@上传/管道·重定向/反弹shell三类，接入degraded_decision() Step 0，denial_class=exfiltration:degraded-local。
+4. **负控制设计（决定性对照）**：机密判定分「强凭据文件路径」（.ssh/、id_rsa、.pem、.key、.env、/etc/passwd、/etc/shadow、.aws/credentials…）与「弱机密命名词」（token/secret/password/credential…）；@/管道语境明确才用宽词，scp位置操作数只用强路径——`scp /var/secret/backup.tar`不误伤、`scp ~/.ssh/id_rsa`命中。普通`curl https://api…`、`curl -d '{"json":"data"}'`、`wget https://x/pkg.tar.gz`、`scp backup.tar user@host:`、本地`cat /etc/passwd`（无网络出口）全部零误伤。
+
+**接线位置**（grep证据，文件:行号）：
+- opensoul：`permission_engine.py:326` 定义detect_exfiltration；`permission_engine.py:624` 在`PermissionEngine.check()`内被调用（=HTTP /api/immune/permission/check的评估内核，acp-proxy每个tool_call执行前经permission_gate调此端点，属真实工具执行路径）。
+- openmate：`permission_gate.py:115` 定义_degraded_exfil；`permission_gate.py:144` 在`degraded_decision()`内被调用（opensoul不可达时的真实降级路径）。
+- 运行时调用证据：systemic_test.py S6「混合负载（health+job+perm+ACP）」ok=4/4命中perm路径=活体。
+
+**验证结果**：
+- 完整性✅：`git diff --stat`——opensoul permission_engine.py +138 / test_exfiltration_guard.py +114（commit f7af860b合计+252）；openmate permission_gate.py +52 / test_permission_gate.py +36（commit 953abab4合计+88）。改动真实落盘，未触碰sibling subagent的settings-client.tsx/locales与systemic_test_results.json（显式排除未提交）。
+- 集成✅：grep命中调用点如上（detect_exfiltration→check:624，_degraded_exfil→degraded_decision:144），改的是真实工具执行/降级路径非死代码。
+- 测试✅：
+  - opensoul `tests/test_exfiltration_guard.py` 33 passed（TestDetectPositive 14正例=11外泄+3反弹shell、TestDetectNegative 11负控制零误伤、TestEngineWiring 8=每模式deny×5+BYPASS普通curl不误判+反弹shell deny）。
+  - opensoul 全量 `tests/` **2128 passed 0 failed**（173.55s，EXIT=0，无回归）。
+  - openmate `tests/test_permission_gate.py` 29 passed（含新TestDegradedExfil 5正例+6负控制）。
+  - openmate 全量 `tests/` **839 passed 0 failed**（285.50s，EXIT=0）。
+  - `systemic_test.py` **29/29 passed**（EXIT=0，S1消息流/S2权限×工具/S3作业队列/S4并发/S5降级/S6混合负载全绿）。
+  - **live行为实锤**：重启后经`POST /api/immune/permission/check`真实HTTP探针——EXFIL-upload→`deny rule_id=guard-exfiltration`、EXFIL-revshell→`deny guard-exfiltration`、EXFIL-pipe→`deny guard-exfiltration`、NORMAL-curl→`ask`(builtin curl规则，非guard-exfiltration，证明零误伤)。
+  - 旁证：Hermes平台层Tirith策略独立判词「[HIGH] Data exfiltration via curl upload: curl command uploads sensitive data to a remote server」，与本检测语义一致，交叉验证判定标准对齐真实安全工具。
+
+**服务重启**：`systemctl --user restart opensoul.service acp-proxy-a.service acp-proxy-b.service`→三服务active；健康检查 `/api/health`(opensoul:8090)=200、acp-proxy-a:8092/health=200、acp-proxy-b:8095/health=200；重启后进程加载新代码（live探针命中guard-exfiltration即为证）。
+
+**commit**：opensoul `f7af860b`（feat(immune): P0-3 参数粒度数据外泄检测）；openmate `953abab4`（feat(acp-proxy): P0-3 降级数据外泄fail-safe镜像）。
+
+**遗留问题**：
+1. execute_code的Python载荷内的库级外发（requests.post把secret发出去）不在shell正则检测面——归运行时import/网络沙箱（mirror沙箱仍为目录级假沙箱，SUMMARY P1真隔离沙箱缺口），下轮或后续评估。
+2. scp位置操作数仅用「强凭据文件路径」判定（降低误伤的显式取舍）：`scp token.txt user@host:`这类弱词命名的文件经scp外发暂不命中（@/管道语境下的弱词仍命中）。如需更激进需先讨论误伤容忍度。
+3. 降级镜像_degraded_exfil与引擎detect_exfiltration为跨进程复制（无法import），已加注释互为镜像；若未来检测规则扩展需双侧同步——可在opensoul侧单测中加「双侧规则一致性」断言固化（列为P3增强）。
+4. live探针的正常curl返回ask（builtin curl需确认）而非allow——是既有builtin ask规则的预期行为，非本轮问题；如要放开常规curl需在session/user层加allow规则（kilocode findLast可覆盖builtin ask），不在本轮范围。
