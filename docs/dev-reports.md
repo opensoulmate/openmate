@@ -2791,3 +2791,42 @@
 4. overview()逐键调status()（N+1查询，N=键数）——单机量级无碍；键数上千时改聚合SQL（与due_wakeups窗口化同款优化）。
 5. 上轮遗留#2（唤醒回合无实时流式推送，跨proxy实例可见性不保证）仍有效——本轮是10s轮询级"运行中可见"，流式级归后续；08:31遗留#2折叠UI本轮已销账✅。环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步仍有效非本轮范围。
 6. cron环境约束实录：`curl | python3`管道继续"curl -o落盘+python3读文件"；`tail -3`在该shell报option context错误→改`tail -n N`。
+
+## [2026-09-26 21:40 CST] 唤醒回合实时可见跨进程relay——turn_origin标记+WS补推（11:11遗留#3销账，连续4轮挂账项）
+**目标**：销账11:11起连续挂账的"唤醒回合无实时流式推送，跨proxy实例可见性不保证"——唤醒回合在无客户端headless实例/赢得claim的proxy实例执行（可能是会话WS所在实例的**对端**），`_notify_client`在client=None时no-op，消息落opensoul.db前端只能下次加载历史才可见；用户"说了60秒后再醒"，醒完屏幕毫无动静，正是"我都不知道他们在干嘛"痛点的最后一块。
+**调研来源**：claude-code ScheduleWakeup runtime语义（唤醒回合=真实回合输出，其输出必须抵达观察者）；mem0 §1.1（输出可见性不得静默丢失）；kilocode #9消息级metadata留痕（turn_origin出身标记走同一metadata列）；AIHawk显式标记纪律（消息级实时≠token级流式，粒度诚实声明）；前端chat-client.tsx既有`sessionUpdate=agent_message`处理面（复用不新造协议）。
+**改动文件**：
+- openmate `acp-proxy/agent/soulmate_agent.py`（+40/-0增量）：`__init__`加`_turn_origin`字典 + `set_turn_origin`/`clear_turn_origin`/`_merge_turn_origin`三方法 + `_save_message`落库前合并metadata
+- openmate `acp-proxy/agent/wakeup_executor.py`（+20/-5增量）：`WAKEUP_PROMPT_MARKER`/`WAKEUP_TURN_ORIGIN`常量单一真源 + `default_headless_fire._run`的prompt()窗口打/清标记（finally）
+- openmate `acp-proxy/agent/wakeup_relay.py`（新216行）：`WakeupRelay`轮询推送任务 + `fetch_rows`/`is_wakeup_meta`/`max_row_id`/`update_payload`/`relay_stats`
+- openmate `acp-proxy/ws_acp.py`（+21）：soulmate WS连接起relay任务 + 最终清理cancel
+- openmate `acp-proxy/ws_chat.py`（+7）：/health加`wakeup_relay`观测键
+- openmate `acp-proxy/tests/test_wakeup_relay.py`（新430行，25测）
+- openmate `acp-proxy/tests/test_wakeup_executor.py`/`test_wakeup_fire_llm_error.py`（各+7：测试替身镜像set/clear_turn_origin契约）
+**改动内容**：
+1. **turn_origin出身标记（识别面）**：`default_headless_fire`在`agent.prompt()`窗口内`set_turn_origin(sid,"wakeup")`（finally清除，异常不残留）→ `_save_message`把`turn_origin`并入metadata JSON（kilocode #9同一metadata列；已有记忆marker/cache_replay键全保留；不可解析metadata原文保全在`raw_metadata`下不丢数据；**无标记窗口metadata零变化**=普通回合回归面）。唤醒prompt的固定开头提为`WAKEUP_PROMPT_MARKER`常量（识别/展示单一真源）。
+2. **WakeupRelay补推面（推送）**：每个soulmate WS连接一个轮询任务（默认2s，env `WAKEUP_RELAY_INTERVAL_S`），只推`turn_origin=wakeup`的落库行，形状=`{"method":"session/update","params":{"sessionId":…,"update":{"sessionUpdate":"agent_message","content":{"type":"text","text":…}}}}`——**前端chat-client.tsx既有处理面，零前端改动**。双实例对称：各推各自的本地WS，唤醒回合在哪个实例执行都可见，无实例间路由表/HTTP扇出。防重复：普通回合行不标记（子进程自己流式），relay绝不推；游标跨未标记行推进防重扫；启动基线=MAX(id)（启动前旧行不补推，前端历史加载覆盖）；WS发送失败→停止relay+push_errors可见计数，不打爆死连接；DB读故障fail-safe空结果不炸循环。
+3. **可观测**：`relay_stats()`（relays_started/active/sid_timeout/rows_pushed/push_errors/poll_errors）挂/ws_chat /health的`wakeup_relay`键（既有观测聚合面，非新建页面）。
+4. **粒度诚实声明**：消息级实时（2s轮询），非token级流式——token chunk跨进程不落库不可复原，消息落库即推是可达上限；毫秒级"历史加载与relay基线之间"竞态窗口有意接受。
+**接线位置**（grep证据，文件:行号）：
+- 标记面：`agent/wakeup_executor.py:227 agent.set_turn_origin(sid, WAKEUP_TURN_ORIGIN)`→`:235 finally agent.clear_turn_origin(sid)`（真实fire路径：app.py lifespan `wakeup_executor.start()`→`poll_once`→`_fire_one`→`default_headless_fire._run`）→ `agent/soulmate_agent.py:321 set_turn_origin` / `:334 _merge_turn_origin` / `:385 metadata = self._merge_turn_origin(...)`（`_save_message`唯一落库点，3个调用方全部受益）。
+- 推送面：`ws_acp.py:268 WakeupRelay(...)`（`/ws/acp`真实聊天连接，agent_id=="soulmate"分支）→ `agent/wakeup_relay.py:51 relay_stats` / `:120 poll_once` → `ws_acp.py:479 relay_task.cancel()`（连接清理）。
+- 观测消费点：`ws_chat.py:455 payload["wakeup_relay"] = relay_stats()`（/health真实应答方）。
+**验证结果**：
+- 完整性✅：`git show --numstat` 61a309c9（9文件+768/-25：soulmate_agent +40纯增量、wakeup_relay.py 216行新文件、ws_acp/ws_chat均增量hunk，零全量重写）；sibling并行改动（settings-client.tsx/locales/*.json/.mmb-render）显式排除未入库。
+- 集成✅：上述grep调用链 + live实锤（见下）。
+- 测试✅：`tests/test_wakeup_relay.py` **25 passed**（①标记7例：窗口标记/既有metadata合并保留/无窗口零变化（None与字节级）/不可解析原文保全/clear结束窗口/裸实例不炸；②判定4例：is_wakeup_meta/**interleaving交错只标wakeup行**（普通行子进程流式推，误推=重复）/after_id边界/缺表fail-safe；③推送6例：payload形状=前端契约/只推标记行且有序/游标跨未标记行推进不重推/**基线跳过启动前旧行**/发送失败停止+可见计数/取消清理计数/sid超时可见退出；④窗口2例：set-prompt-clear顺序/异常finally清除；⑤接线护栏4例）；既有wakeup家族+缓存+输出护栏合计**112 passed**无回归；acp-proxy全量`tests/` **956 passed 0 failed**（323.53s，=上轮931+25新，无回归）；`systemic_test.py` **29/29 passed**（EXIT=0，S1-S6全绿）。本轮纯后端无前端改动（复用既有agent_message处理面），npm build不适用。
+- **live E2E跨实例实锤**（重启后真服务，正是遗留#3描述的最坏场景）：
+  ① WS `/ws/acp` 连 **:8092**（A实例）保持正连（模拟前端聊天页），session `om-f02a82cd8331`；
+  ② POST /wakeup/schedule（event 15，delay=60）→到点由 **:8095（B实例）CAS赢claim执行唤醒回合**（:8095 `claimed=1, fire_ok=1`；:8092 `claim_lost=1`）——回合发生在WS所在实例的**对端**，正是此前"实时可见性不保证"的场景；
+  ③ **:8092的WakeupRelay把唤醒回合2条落库行实时推给了正连WS**：`session/update agent_message`第1条=唤醒触发行（"⏰ [ScheduleWakeup 到点唤醒｜系统自动回合，非用户消息]…"）、第2条=回合输出（语义缓存命中回复"LIVE-RELAY-PROBE 唤醒回合缓存命中回复落库验证文本…"）——`rows_pushed=2, push_errors=0, poll_errors=0, relays_active=1`（/health wakeup_relay键）；
+  ④ 唤醒回合本身健康：语义缓存（build_wakeup_prompt原文精确键）命中→`_cache_replay`落库→fire_ok=1单次成功（LLM余额402环境问题被绕开，推送面验证不受影响）。
+**服务重启**：`systemctl --user restart acp-proxy-a.service acp-proxy-b.service`→两服务active；:8092/health=200（wakeup_relay键可见）、:8095/health=200；executor双实例running=true（opensoul本轮零改动未重启）。
+**commit**：openmate `61a309c9`（本轮仅openmate改动，无opensoul侧commit）。
+**遗留问题**：
+1. **⚠️环境问题仍在（非代码，需用户处理）**：soulmate LLM供应商**余额不足**（402）依旧——本轮live用语义缓存命中分支绕开LLM验证推送链路，正常聊天/非缓存唤醒回合在充值或换key前拿不到真实模型回复。
+2. 粒度边界（有意取舍，非缺陷）：relay是**消息级**实时（2s轮询），非token级流式——token chunk不落库跨进程不可复原；如需token级需把唤醒回合路由到会话WS所在实例的stdio子进程执行（改动面大，归后续"唤醒回合路由执行"轮）。会话正连期间relay启动前的毫秒级窗口内落库的行不补推（历史加载覆盖）。
+3. relay按WS连接轮询共享SQLite（每连接2s一次轻查询）——连接数上百时改事件通知/合批（当前单机量级无碍，与overview N+1同级观察项）。
+4. 唤醒触发行以`agent_message`（agent角色）透出而非user角色——前端session/update无user_message处理面；行文本自带"系统自动回合，非用户消息"声明，语义自洽；如后续前端加user_message处理面可改推该形状。
+5. 上轮遗留（前端视觉走查登录墙、overview() N+1、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步）仍有效非本轮范围。
+6. cron环境约束实录：`curl | python3`管道继续规避（live探针=独立脚本python3直跑）；`tail -N`管道复现"exit_code被tail掩盖"提示——长测试命令不接管道直跑。
