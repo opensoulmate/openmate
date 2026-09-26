@@ -233,6 +233,13 @@ class FakeAgent:
     def __init__(self, stop_reason):
         self._stop_reason = stop_reason
         self.calls = []
+        self.origin_log = []
+
+    def set_turn_origin(self, session_id, origin):
+        self.origin_log.append(("set", session_id, origin))
+
+    def clear_turn_origin(self, session_id):
+        self.origin_log.append(("clear", session_id))
 
     async def prompt(self, prompt, session_id, **kw):
         self.calls.append((prompt, session_id))

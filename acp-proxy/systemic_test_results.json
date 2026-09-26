@@ -17,13 +17,13 @@
       "name": "chat流式SSE",
       "passed": true,
       "detail": "chunks=3",
-      "latency_s": 8.37
+      "latency_s": 8.57
     },
     {
       "suite": "S1",
       "name": "hippo记忆系统",
       "passed": true,
-      "detail": "ltm=504 memories, avg_importance=0.357",
+      "detail": "ltm=506 memories, avg_importance=0.358",
       "latency_s": 0.01
     },
     {
@@ -31,7 +31,7 @@
       "name": "trajectory可观测性",
       "passed": true,
       "detail": "status=200",
-      "latency_s": 0.0
+      "latency_s": 0.01
     },
     {
       "suite": "S2",
@@ -45,14 +45,14 @@
       "name": "权限检查: write_file",
       "passed": true,
       "detail": "behavior=allow, reason=Bypass mode allows all operations not covered by deny/hard r",
-      "latency_s": 0.03
+      "latency_s": 0.04
     },
     {
       "suite": "S2",
       "name": "权限检查: execute_code",
       "passed": true,
       "detail": "behavior=allow, reason=Rule[user]: (tool-level)",
-      "latency_s": 0.03
+      "latency_s": 0.04
     },
     {
       "suite": "S2",
@@ -66,28 +66,28 @@
       "name": "权限检查: unknown_tool_xyz",
       "passed": true,
       "detail": "behavior=allow, reason=Bypass mode allows all operations not covered by deny/hard r",
-      "latency_s": 0.03
+      "latency_s": 0.04
     },
     {
       "suite": "S2",
       "name": "ACP工具执行链路",
       "passed": true,
-      "detail": "content_len=1041, source=acp",
-      "latency_s": 24.98
+      "detail": "content_len=938, source=acp",
+      "latency_s": 30.07
     },
     {
       "suite": "S2",
       "name": "权限规则CRUD→引擎生效",
       "passed": true,
       "detail": "rule_added=True, behavior_after_add=deny",
-      "latency_s": 0.09
+      "latency_s": 0.08
     },
     {
       "suite": "S3",
       "name": "并发提交10个作业",
       "passed": true,
       "detail": "submitted=10/10",
-      "latency_s": 0.56
+      "latency_s": 0.58
     },
     {
       "suite": "S3",
@@ -107,14 +107,14 @@
       "suite": "S3",
       "name": "队列健康统计",
       "passed": true,
-      "detail": "total=705, workers=3, handlers=['heredity.evaluate_triggers', 'hippo.dream', 'hippo.memory_pipeline', 'learn.collect_experiences']",
+      "detail": "total=730, workers=3, handlers=['heredity.evaluate_triggers', 'hippo.dream', 'hippo.memory_pipeline', 'learn.collect_experiences']",
       "latency_s": 0.0
     },
     {
       "suite": "S3",
       "name": "取消pending作业",
       "passed": true,
-      "detail": "job=job_8971b4e0b1f1, cancelled=False",
+      "detail": "job=job_474d65de2564, cancelled=False",
       "latency_s": 0.07
     },
     {
@@ -128,15 +128,15 @@
       "suite": "S4",
       "name": "同session并发3条消息",
       "passed": true,
-      "detail": "session=808a8008-f602-4c50-9, success=3/3, total_latency=9.2s",
-      "latency_s": 9.16
+      "detail": "session=4b508f23-59c8-49ec-8, success=3/3, total_latency=14.5s",
+      "latency_s": 14.5
     },
     {
       "suite": "S4",
       "name": "不同session并发",
       "passed": true,
-      "detail": "success=3/3, latency=5.2s",
-      "latency_s": 5.22
+      "detail": "success=3/3, latency=19.1s",
+      "latency_s": 19.12
     },
     {
       "suite": "S4",
@@ -198,15 +198,15 @@
       "suite": "S6",
       "name": "混合负载（health+job+perm+ACP）",
       "passed": true,
-      "detail": "ok=4/4, latency=2.7s",
-      "latency_s": 2.66
+      "detail": "ok=4/4, latency=3.8s",
+      "latency_s": 3.81
     },
     {
       "suite": "S6",
       "name": "系统资源使用",
       "passed": true,
-      "detail": "python服务总内存=1065MB",
-      "latency_s": 0.01
+      "detail": "python服务总内存=1043MB",
+      "latency_s": 0.02
     }
   ]
 }

@@ -155,6 +155,11 @@ class SoulMateAgent:
         self.llm_engine = llm_engine
         self.sessions: dict[str, dict] = {}  # session_id -> session state
         self._client = None  # AgentSideConnection，由 on_connect 设置
+        # 回合出身标记（wakeup_relay实时推送面）：session_id→origin，set/clear窗口内
+        # 落库的行在metadata里带turn_origin——唤醒回合行据此被识别并实时推给正连着的
+        # 前端（跨proxy实例可见性，dev-reports 11:11遗留#3），普通回合行不标记
+        # （子进程自己流式推送，relay不推防重复）
+        self._turn_origin: dict[str, str] = {}
         # 自动检测项目根目录：agent/ 在 acp-proxy/ 下，acp-proxy/ 在项目根目录下
         self._project_root = str(Path(__file__).resolve().parent.parent.parent)
         self._opensoul_root = Path(os.environ.get("OPENSOUL_ROOT", "/home/climbing/opensoul"))
@@ -313,6 +318,38 @@ class SoulMateAgent:
         db.row_factory = sqlite3.Row
         return db
 
+    def set_turn_origin(self, session_id: str, origin: str) -> None:
+        """标记后续落库消息的回合出身（如"wakeup"）。
+
+        wakeup_relay据此把唤醒回合落库行实时推送给正连该会话的前端——唤醒回合
+        在无客户端headless实例/另一proxy实例执行，_notify_client天然no-op，
+        不打标记的行relay无法与普通回合行区分（普通行由子进程自己流式推送，
+        relay推了会重复）。"""
+        self._turn_origin[session_id] = origin
+
+    def clear_turn_origin(self, session_id: str) -> None:
+        """回合结束清除出身标记（窗口外落库行不带标记）"""
+        self._turn_origin.pop(session_id, None)
+
+    def _merge_turn_origin(self, session_id: str, metadata: str | None) -> str | None:
+        """把回合出身并入metadata JSON（kilocode #9同一metadata列）。
+
+        - 无标记窗口：metadata原样返回（普通回合行为零变化）；
+        - 已有metadata（记忆marker/cache_replay等）：解析后并入turn_origin键，
+          原键全部保留；
+        - 原metadata不可解析：原文保全在raw_metadata下，绝不静默丢数据。"""
+        origin = (getattr(self, "_turn_origin", None) or {}).get(session_id)
+        if not origin:
+            return metadata
+        try:
+            meta = json.loads(metadata) if metadata else {}
+            if not isinstance(meta, dict):
+                raise ValueError("metadata非JSON对象")
+        except (ValueError, TypeError):
+            meta = {"raw_metadata": metadata}
+        meta["turn_origin"] = origin
+        return json.dumps(meta, ensure_ascii=False)
+
     def _save_message(
         self,
         session_id: str,
@@ -343,6 +380,9 @@ class SoulMateAgent:
                 db.execute("SELECT metadata FROM agent_messages LIMIT 1")
             except sqlite3.OperationalError:
                 db.execute("ALTER TABLE agent_messages ADD COLUMN metadata TEXT")
+            # 回合出身标记并入metadata（wakeup_relay实时推送面识别唤醒回合行的依据；
+            # 无标记窗口行为零变化，见_merge_turn_origin）
+            metadata = self._merge_turn_origin(session_id, metadata)
             _last_row = db.execute(
                 "SELECT id FROM agent_messages WHERE session_id = ? ORDER BY id DESC LIMIT 1",
                 (session_id,),

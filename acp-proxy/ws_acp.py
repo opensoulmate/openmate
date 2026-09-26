@@ -255,6 +255,25 @@ async def ws_acp_endpoint(client_ws: WebSocket):
         await client_ws.close()
         return
 
+    # 唤醒回合实时可见（dev-reports 11:11遗留#3跨进程推送）：本WS连接正连期间，
+    # 由WakeupRelay把唤醒回合落库行（turn_origin=wakeup标记）补推给前端——唤醒
+    # 回合在headless实例/对端proxy实例执行，_notify_client天然no-op。仅soulmate
+    # 路由（agent_messages单一真源的agent）需要；acp_sid由_process_line捕获，
+    # relay自带等待（session/new响应透传途中）。连接结束在最终清理cancel。
+    relay_task = None
+    if agent_id == "soulmate":
+        try:
+            from agent.wakeup_relay import WakeupRelay
+
+            relay_task = asyncio.create_task(
+                WakeupRelay(
+                    session_id_getter=lambda: acp_state.get("acp_sid"),
+                    send=lambda payload: _send_acp(client_ws, payload),
+                ).run()
+            )
+        except Exception as e:
+            logger.warning(f"[ACP] wakeup relay start failed (非致命): {e}")
+
     # 双向透传：WebSocket ↔ subprocess
     async def ws_to_stdin():
         """WebSocket → subprocess stdin"""
@@ -456,6 +475,8 @@ async def ws_acp_endpoint(client_ws: WebSocket):
         t3.cancel()
     except Exception:
         pass
+    if relay_task is not None:
+        relay_task.cancel()
     if proc.returncode is None:
         try:
             proc.terminate()

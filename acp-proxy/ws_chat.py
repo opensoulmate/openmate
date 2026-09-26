@@ -448,6 +448,13 @@ async def ws_chat_health():
         payload["wakeup_executor"] = get_wakeup_executor().snapshot()
     except Exception:
         pass
+    # 唤醒回合实时可见推送面（11:11遗留#3跨进程relay）：rows_pushed/push_errors
+    # 可观测——"唤醒回合推没推给前端"直接看这里
+    try:
+        from agent.wakeup_relay import relay_stats
+        payload["wakeup_relay"] = relay_stats()
+    except Exception:
+        pass
     return payload
 
 

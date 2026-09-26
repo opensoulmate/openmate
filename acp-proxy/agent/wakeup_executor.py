@@ -48,6 +48,13 @@ logger = logging.getLogger("acp-proxy.wakeup_executor")
 # 不能算"回合已执行"——否则 LLM 故障期间唤醒循环被错误地标记为成功。
 _LLM_FAILURE_MARKERS = ("[LLM错误", "[LLM响应超时")
 
+# 唤醒回合出身标记（wakeup_relay实时推送面单一真源）：default_headless_fire在
+# prompt()窗口内给落库行打turn_origin=WAKEUP_TURN_ORIGIN，relay据此把唤醒回合
+# 行实时推给正连该会话的前端（跨proxy实例可见性，11:11遗留#3）。WAKEUP_PROMPT_MARKER
+# 是唤醒prompt的固定开头（识别/展示面复用，不自创第二份字面量）。
+WAKEUP_PROMPT_MARKER = "⏰ [ScheduleWakeup 到点唤醒"
+WAKEUP_TURN_ORIGIN = "wakeup"
+
 
 def _is_llm_failure_text(text: str | None) -> bool:
     """输出是否为LLM级失败机器标记（fail-closed只认肯定证据）。
@@ -152,7 +159,7 @@ def build_wakeup_prompt(event: dict) -> str:
     streak = (event or {}).get("streak", 0)
     noop = (event or {}).get("noop", False)
     return (
-        "⏰ [ScheduleWakeup 到点唤醒｜系统自动回合，非用户消息]\n"
+        f"{WAKEUP_PROMPT_MARKER}｜系统自动回合，非用户消息]\n"
         f"你之前自报的检查计划：{reason}\n"
         f"（上轮自报 noop={noop}，连续空转 streak={streak}）\n"
         "请执行该检查事项。完成后必须二选一，否则唤醒循环自然终止：\n"
@@ -213,10 +220,18 @@ def default_headless_fire(event: dict):
         sid = str(event.get("session_id") or "")
         # turn归因锚点：只把本轮新落库的assistant输出纳入LLM级失败判定
         pre_id = _max_assistant_id(agent, sid)
-        resp = await agent.prompt(
-            [{"type": "text", "text": build_wakeup_prompt(event)}],
-            sid,
-        )
+        # 回合出身标记（11:11遗留#3实时可见前提）：本回合落库行带
+        # turn_origin=wakeup——wakeup_relay据此补推给正连该会话的前端（唤醒回合
+        # 在headless实例/另一proxy实例执行，_notify_client天然no-op）。异常路径
+        # finally也清除，不残留污染下一回合。
+        agent.set_turn_origin(sid, WAKEUP_TURN_ORIGIN)
+        try:
+            resp = await agent.prompt(
+                [{"type": "text", "text": build_wakeup_prompt(event)}],
+                sid,
+            )
+        finally:
+            agent.clear_turn_origin(sid)
         stop_reason = str(getattr(resp, "stop_reason", "") or "")
         if stop_reason == "refusal":
             raise RuntimeError(

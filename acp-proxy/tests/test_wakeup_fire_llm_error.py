@@ -107,6 +107,13 @@ class FakeDbAgent:
         db.commit()
         db.close()
         self.calls = []
+        self.origin_log = []
+
+    def set_turn_origin(self, session_id, origin):
+        self.origin_log.append(("set", session_id, origin))
+
+    def clear_turn_origin(self, session_id):
+        self.origin_log.append(("clear", session_id))
 
     def _get_db(self):
         return sqlite3.connect(self._db_path)
