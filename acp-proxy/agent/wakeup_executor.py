@@ -63,7 +63,11 @@ def _is_llm_failure_text(text: str | None) -> bool:
 
 def _max_assistant_id(agent, session_id: str) -> int | None:
     """本轮开始前会话最新assistant消息id（turn归因锚点——旧轮的错误文本
-    不算本轮失败）。取数失败返回None（降级为只看最新一条，仍fail-open）。"""
+    不算本轮失败）。
+
+    会话尚无assistant消息→返回0（id从1起，0=时间原点锚点，id>0即全部新消息）；
+    取数失败→None（无法归因，判定侧fail-open）。此区分是零输出判定的前提：
+    "没有新输出"与"取数失败"必须可判别。"""
     try:
         db = agent._get_db()
         try:
@@ -73,7 +77,7 @@ def _max_assistant_id(agent, session_id: str) -> int | None:
             ).fetchone()
         finally:
             db.close()
-        return int(row[0]) if row and row[0] is not None else None
+        return int(row[0]) if row and row[0] is not None else 0
     except Exception as e:
         logger.warning("[wakeup] turn归因锚点取数失败（fail-open）: %s", e)
         return None
@@ -108,6 +112,33 @@ def _llm_failure_reply(agent, session_id: str, after_id: int | None) -> str | No
         return None
     except Exception as e:
         logger.warning("[wakeup] LLM失败判定取数失败（fail-open不判失败）: %s", e)
+        return None
+
+
+def _has_turn_output(agent, session_id: str, after_id: int | None) -> bool | None:
+    """本轮是否落库了非空assistant输出（turn归因锚点之后）。
+
+    返回False=本轮零输出（回合无声消失：跑了但什么都没留下）——按失败回执
+    释放重试，不假装成功（mem0 §1.1；13:40轮遗留#4"回合零输出判据"：此前
+    fail-open按成功，缓存丢回复等无声回合被记成唤醒成功）。纯空白输出同判
+    零输出（用户/前端看不见任何内容）。
+    返回None=无法判定（锚点缺失/取数失败）→fail-open不判失败——DB读故障
+    不得把成功回合误判成失败引发重试风暴。"""
+    if after_id is None:
+        return None
+    try:
+        db = agent._get_db()
+        try:
+            rows = db.execute(
+                "SELECT content FROM agent_messages "
+                "WHERE session_id=? AND role='assistant' AND id>?",
+                (session_id, int(after_id)),
+            ).fetchall()
+        finally:
+            db.close()
+        return any((r[0] or "").strip() for r in rows)
+    except Exception as e:
+        logger.warning("[wakeup] 零输出判定取数失败（fail-open不判失败）: %s", e)
         return None
 
 
@@ -197,6 +228,12 @@ def default_headless_fire(event: dict):
             raise RuntimeError(
                 "唤醒回合LLM级失败（provider错误/超时机器标记，按失败重试不假装成功）: "
                 + bad
+            )
+        # 零输出判定（13:40遗留#4）：回合无声消失（跑了但没落任何非空assistant
+        # 输出）不能记成功——按失败回执释放重试，让"说了会醒却什么都没做"可见
+        if _has_turn_output(agent, sid, pre_id) is False:
+            raise RuntimeError(
+                "唤醒回合零输出（本轮未落库任何非空assistant输出）——回合无声消失，按失败重试不假装成功"
             )
         return {"stop_reason": stop_reason}
 

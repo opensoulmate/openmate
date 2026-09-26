@@ -372,6 +372,35 @@ class SoulMateAgent:
             logger.error(f"Failed to save message: {e}")
             return None
 
+    async def _cache_replay(self, session_id: str, session: dict, cached: str) -> None:
+        """语义缓存命中回复的回放契约：脱敏展示 + 落库（与正常回合同一持久化契约）。
+
+        修复"缓存命中静默丢回复"：此前命中只把缓存文本推给客户端就return——
+        agent_messages不落行、session["messages"]不追加，历史里留下"有问无答"的
+        悬空回合（前端历史、后续LLM上下文、无客户端唤醒回合全部看不见这条回复，
+        唤醒回合还会因此被判零输出）。缓存重放也是真实回合输出，必须同契约落库
+        （mem0 §1.1：输出/数据可见性不得静默丢失）。
+        """
+        # P0输出侧护栏：缓存重放也是模型输出展示边界——历史缓存条目可能存有
+        # 修复前原文，展示与落库都走脱敏（防御纵深：未脱敏原文绝不落库）
+        display = redact_secrets(cached)[0]
+        if self._client:
+            await self._client.session_update(
+                session_id=session_id,
+                update=acp.update_agent_message_text(display),
+            )
+        if isinstance(session, dict) and isinstance(session.get("messages"), list):
+            session["messages"].append({"role": "assistant", "content": display})
+        self._save_message(
+            session_id,
+            "assistant",
+            display,
+            metadata=json.dumps(
+                {"cache_replay": True, "bytes": len(display.encode("utf-8"))},
+                ensure_ascii=False,
+            ),
+        )
+
     # ── 自我进化拦截（绕过LLM安全限制）──────────────────────────
 
 
@@ -3155,13 +3184,9 @@ You can send files to the user natively: to deliver a file, write a brief confir
             cached = self._semantic_cache.get(user_text)
             if cached and len(cached) > 20:
                 logger.info(f"[semantic-cache] 命中缓存，跳过LLM调用")
-                if self._client:
-                    await self._client.session_update(
-                        session_id=session_id,
-                        # P0输出侧护栏：缓存重放也是模型输出展示边界——历史缓存条目
-                        # 可能存有修复前原文，重放前同样脱敏（防御纵深）
-                        update=acp.update_agent_message_text(redact_secrets(cached)[0]),
-                    )
+                # 缓存命中回复=真实回合输出：脱敏展示+落库+session历史追加
+                # （_cache_replay，修复此前"只推客户端不落库"的静默丢回复）
+                await self._cache_replay(session_id, session, cached)
                 # 记录成本为0（缓存命中）
                 self._cost_tracker.record_usage(
                     model="cache", session_id=session_id,

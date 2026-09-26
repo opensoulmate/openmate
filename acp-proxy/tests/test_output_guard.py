@@ -266,7 +266,11 @@ class TestWiring:
         src = inspect.getsource(SoulMateAgent._run_llm_with_tools)
         assert src.count('redact_secrets(str(result))[0][:200]') == 2  # 两处result_preview
         ps_src = inspect.getsource(SoulMateAgent._prompt_inner)
-        assert "redact_secrets(cached)[0]" in ps_src  # 语义缓存重放脱敏
+        # 语义缓存重放脱敏：展示+落库统一走 _cache_replay（内部 redact_secrets(cached)[0]），
+        # 命中分支必须调用它——防止退回"只推客户端不脱敏/不落库"的静默丢回复
+        assert "self._cache_replay(" in ps_src
+        cr_src = inspect.getsource(SoulMateAgent._cache_replay)
+        assert "redact_secrets(cached)[0]" in cr_src
 
 
 # ════════════════════════════════════════════════════════════════

@@ -10,7 +10,8 @@
 验证面：
 1. _is_llm_failure_text 判定面（开头命中/末行命中/正文引用不算/空文本）
 2. default_headless_fire：本轮新落库的错误标记→抛异常（=ack ok=False 释放重试）；
-   旧轮错误文本不误判（turn归因锚点）；正常回复→成功；取数失败 fail-open
+   旧轮错误文本不误判（turn归因锚点）；正常回复→成功；取数失败 fail-open；
+   零输出（无新非空assistant输出）→失败（13:40遗留#4零输出判据，禁假装成功）
 3. WakeupExecutor last_error 语义：错误带 last_error_at 时间戳；
    干净poll一轮后归空（不再误导"现在还在错"）；脏一轮保留
 """
@@ -165,11 +166,16 @@ class TestDefaultFireLlmFailure:
         # 唤醒prompt仍以目标session为上下文
         assert agent.calls[0][1] == "om-llmfail"
 
-    def test_no_new_message_fail_open(self, monkeypatch):
-        # 回合结束但没落新assistant消息（如异常路径）→无肯定证据不判失败
+    def test_no_new_message_is_zero_output_failure(self, monkeypatch):
+        # 13:40遗留#4零输出判据：回合"跑完"但没落任何新assistant输出=回合无声
+        # 消失（实证案例：缓存命中回合曾不落库静默丢回复）——按失败回执释放
+        # 重试，不再假装成功（此测试原为fail-open断言，本轮按遗留#4翻转契约）
         agent = FakeDbAgent(None)
-        res = _fire_with_agent(monkeypatch, agent)
-        assert res == {"stop_reason": "end_turn"}
+        try:
+            _fire_with_agent(monkeypatch, agent)
+            raise AssertionError("零输出回合必须抛异常（禁止假装成功）")
+        except RuntimeError as e:
+            assert "零输出" in str(e)
 
     def test_db_read_failure_fail_open(self, monkeypatch):
         agent = FakeDbAgent(ERR402)
@@ -188,6 +194,49 @@ class TestDefaultFireLlmFailure:
             raise AssertionError("refusal必须抛异常")
         except RuntimeError as e:
             assert "拒绝给消失的会话造回合" in str(e)
+
+
+# ════════════════════════════════════════════════════════════════
+# ②-b 零输出判定面（13:40遗留#4）：turn归因 + 空白输出 + fail-open边界
+# ════════════════════════════════════════════════════════════════
+
+
+class TestZeroOutputJudgment:
+    def test_whitespace_only_output_is_zero_output(self, monkeypatch):
+        # 纯空白输出=用户/前端看不见任何内容，同判零输出
+        agent = FakeDbAgent("   \n\t ")
+        try:
+            _fire_with_agent(monkeypatch, agent)
+            raise AssertionError("纯空白输出必须判零输出")
+        except RuntimeError as e:
+            assert "零输出" in str(e)
+
+    def test_old_assistant_rows_not_counted_as_turn_output(self, monkeypatch):
+        # 旧轮assistant行不算本轮输出（turn归因锚点）——只有旧轮内容照样判零输出
+        agent = FakeDbAgent(
+            None, pre_messages=[("om-llmfail", "assistant", "旧轮回复")]
+        )
+        try:
+            _fire_with_agent(monkeypatch, agent)
+            raise AssertionError("只有旧轮输出必须判零输出")
+        except RuntimeError as e:
+            assert "零输出" in str(e)
+
+    def test_nonempty_new_output_ok(self, monkeypatch):
+        agent = FakeDbAgent("已检查CI：全部转绿。")
+        res = _fire_with_agent(monkeypatch, agent)
+        assert res == {"stop_reason": "end_turn"}
+
+    def test_db_read_failure_never_judged(self, monkeypatch):
+        # 取数失败→无法判定→fail-open（DB读故障不得引发重试风暴）
+        agent = FakeDbAgent(None)
+
+        def _broken_db():
+            raise RuntimeError("db炸了")
+
+        agent._get_db = _broken_db
+        res = _fire_with_agent(monkeypatch, agent)
+        assert res == {"stop_reason": "end_turn"}
 
 
 # ════════════════════════════════════════════════════════════════
