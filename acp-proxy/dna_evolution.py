@@ -51,6 +51,9 @@ PLAN_TIMEOUT = 120  # 等待伙伴执行计划的超时
 # evolution_loop的breaker管opensoul提案循环——两套breaker各管各的循环，无共享状态。
 LLM_BREAKER_STORM_WINDOW = 3  # 连续LLM失败≥N次=错误风暴
 LLM_BREAKER_COOLDOWN_S = 1800  # 熔断冷却30分钟（半开放行一次试探）
+# 通用（非LLM）失败风暴熔断——分域独立窗口（02:26遗留#2：窗口/计数绝不与LLM域混算）
+GEN_BREAKER_STORM_WINDOW = 3  # 连续同签名通用失败≥N次=错误风暴
+GEN_BREAKER_COOLDOWN_S = 1800  # 通用风暴熔断冷却（半开语义与LLM域同款）
 
 
 class StrandRole(Enum):
@@ -266,6 +269,14 @@ class DNAStrand:
         self._last_error = ""
         self._last_error_at = ""
 
+        # 通用失败风暴熔断（02:26遗留#2）：同签名连续失败≥GEN窗口=系统性故障。
+        # 与LLM域分账：窗口/计数/熔断状态互不混算（LLM风暴只开LLM闸，反之亦然）。
+        self._gen_failure_streak = 0  # 连续同签名通用失败次数（周期跑通或签名变化→重计）
+        self._gen_error_signature = ""  # 当前风暴签名（stage:异常类型，见_error_signature）
+        self._gen_breaker_open = False
+        self._gen_breaker_opened_at = 0.0
+        self._gen_breaker_suppressed = 0  # 通用熔断期间被抑制的进化次数（可见计数）
+
         # 实时日志文件（供SSE tail）
         self._log_file = Path(repo_root) / "acp-proxy" / "data" / f"dna_log_{strand_id}.jsonl"
 
@@ -416,6 +427,11 @@ class DNAStrand:
                 time_fallback = (now - last_evolution) > interval * 3
                 should_evolve = (now - last_evolution) > interval and (bool(unanalyzed) or time_fallback)
 
+                # 2. 自己的进化周期（agno §1.4熔断门：错误风暴期间不烧进化预算）
+                # 分域判定：LLM风暴/通用风暴各自独立拦截（谁开闸谁抑制，互不混算）
+                blocked_llm = should_evolve and self._breaker_is_open(now)
+                blocked_gen = should_evolve and self._breaker_is_open(now, domain="gen")
+
                 # 1. 先检查有没有伙伴给我的计划（review+执行）
                 self._load_partner_plans(partner_id)
                 pending = [p for p in self._partner_plans_for_me if p.status == "pending"]
@@ -432,15 +448,26 @@ class DNAStrand:
                         self._log("turn", f"❌ 拒绝伙伴计划 {plan.plan_id}")
                     self._partner_plans_for_me = []
 
-                # 2. 自己的进化周期（agno §1.4熔断门：错误风暴期间不烧进化预算）
-                elif should_evolve and self._breaker_is_open(now):
-                    self._breaker_suppressed += 1
-                    self._log("error", f"⛔ 进化被熔断抑制（LLM错误风暴，streak={self._llm_failure_streak}）", {
-                        "llm_failure_streak": self._llm_failure_streak,
-                        "suppressed_cycles": self._breaker_suppressed,
-                        "cooldown_remaining_s": round(
-                            LLM_BREAKER_COOLDOWN_S - (now - self._breaker_opened_at), 1),
-                    })
+                elif blocked_llm or blocked_gen:
+                    if blocked_llm:
+                        self._breaker_suppressed += 1
+                        self._log("error", f"⛔ 进化被熔断抑制（LLM错误风暴，streak={self._llm_failure_streak}）", {
+                            "domain": "llm",
+                            "llm_failure_streak": self._llm_failure_streak,
+                            "suppressed_cycles": self._breaker_suppressed,
+                            "cooldown_remaining_s": round(
+                                LLM_BREAKER_COOLDOWN_S - (now - self._breaker_opened_at), 1),
+                        })
+                    else:
+                        self._gen_breaker_suppressed += 1
+                        self._log("error", f"⛔ 进化被熔断抑制（通用错误风暴，streak={self._gen_failure_streak}, sig={self._gen_error_signature}）", {
+                            "domain": "gen",
+                            "gen_failure_streak": self._gen_failure_streak,
+                            "gen_error_signature": self._gen_error_signature,
+                            "suppressed_cycles": self._gen_breaker_suppressed,
+                            "cooldown_remaining_s": round(
+                                GEN_BREAKER_COOLDOWN_S - (now - self._gen_breaker_opened_at), 1),
+                        })
                     last_evolution = now  # 抑制窗口按正常节奏计时，熔断恢复后不回堆积
                 elif should_evolve:
                     self._log("turn", f"🚀 开始进化 (interval={interval}s)")
@@ -572,6 +599,11 @@ class DNAStrand:
             if cycle.success and cycle.changes:
                 await self._write_checkpoint(cycle)
 
+            # 周期完整跑通（无非LLM异常）=通用风暴结束：分域复位，只关gen闸不碰LLM闸
+            self._gen_failure_streak = 0
+            self._gen_error_signature = ""
+            self._breaker_close("cycle_success", domain="gen")
+
             self._save_state()
             self._sync_memory()  # 同步记忆到共享文件
 
@@ -620,6 +652,14 @@ class DNAStrand:
             # "跑了但炸了"在history/状态面不可见。现在与LLM失败分账（error键≠llm_error键）。
             self._last_error = str(e)[:300]
             self._last_error_at = datetime.now(timezone.utc).isoformat()
+            # 同错风暴计数（02:26遗留#2，分域独立）：签名=stage:异常类型——
+            # 同签名连续失败才累积，签名一变重计（不同故障不误熔断）
+            sig = self._error_signature(e, cycle.stage.value)
+            if sig == self._gen_error_signature:
+                self._gen_failure_streak += 1
+            else:
+                self._gen_error_signature = sig
+                self._gen_failure_streak = 1
             cycle.success = False
             cycle.error = f"[{cycle.stage.value}] {str(e)[:280]}"
             cycle.completed_at = datetime.now(timezone.utc).isoformat()
@@ -631,80 +671,136 @@ class DNAStrand:
                 "improvements_count": 0,
                 "success": False,
                 "error": str(e)[:200],
+                "error_signature": sig,
                 "stage": cycle.stage.value,
                 "timestamp": cycle.completed_at,
             })
+            # agno §1.4同款：同签名连续失败≥GEN窗口=系统性故障（如pipeline/import坏死）
+            # →gen熔断暂停自动进化。只在gen域计数开闸，绝不碰LLM域窗口（分域不混算）。
+            if self._gen_failure_streak >= GEN_BREAKER_STORM_WINDOW:
+                self._breaker_trip(
+                    f"连续{self._gen_failure_streak}次同签名通用失败（{sig}风暴）", domain="gen")
             self._save_state()
             self._log("error", f"❌ 进化周期异常失败（非LLM故障）: {str(e)[:120]}", {
                 "stage": cycle.stage.value,
+                "error_signature": sig,
+                "gen_failure_streak": self._gen_failure_streak,
             })
             logger.error(f"[{self.strand_id}] Cycle {cycle.cycle_id} failed at {cycle.stage.value}: {e}")
 
     # ── agno §1.4 错误风暴熔断（连续同错即停） ──────────────
+    # 双域实现：domain="llm"（LLM故障风暴）/ domain="gen"（非LLM同签名故障风暴）。
+    # 两域窗口/计数/闸门完全独立（02:26遗留#2"分域独立窗口，别混算"）。
 
-    def _breaker_is_open(self, now: float | None = None) -> bool:
+    @staticmethod
+    def _error_signature(exc: Exception, stage: str = "") -> str:
+        """同错风暴签名：stage:异常类型（agno error_type同款粒度）。
+
+        消息内容不进签名——同根因不同消息（如FileNotFoundError路径各异）仍算
+        同一故障模式；不同异常类型/不同stage=不同故障，streak重计不误熔断。
+        """
+        return f"{stage}:{type(exc).__name__}"
+
+    def _breaker_is_open(self, now: float | None = None, domain: str = "llm") -> bool:
         """熔断是否处于拦截态（调度门唯一判定点）。
 
         半开语义（agno/job_queue同款）：冷却过期后放行一次试探（返回False）——
         试探失败→_breaker_trip重新开闸（冷却重新计数），试探成功→_breaker_close复位。
         """
-        if not self._breaker_open:
+        opened = self._breaker_open if domain == "llm" else self._gen_breaker_open
+        opened_at = self._breaker_opened_at if domain == "llm" else self._gen_breaker_opened_at
+        cooldown = LLM_BREAKER_COOLDOWN_S if domain == "llm" else GEN_BREAKER_COOLDOWN_S
+        if not opened:
             return False
         now = time.time() if now is None else now
-        return (now - self._breaker_opened_at) < LLM_BREAKER_COOLDOWN_S
+        return (now - opened_at) < cooldown
 
-    def _breaker_trip(self, reason: str):
+    def _breaker_trip(self, reason: str, domain: str = "llm"):
         """开闸（或半开失败后再开闸=冷却重新计数）。开闸事件必须留痕。"""
-        was_blocking = self._breaker_is_open()
-        self._breaker_open = True
-        self._breaker_opened_at = time.time()
+        label = "LLM" if domain == "llm" else "通用"
+        was_blocking = self._breaker_is_open(domain=domain)
+        if domain == "llm":
+            self._breaker_open = True
+            self._breaker_opened_at = time.time()
+            streak, window, cooldown = self._llm_failure_streak, LLM_BREAKER_STORM_WINDOW, LLM_BREAKER_COOLDOWN_S
+        else:
+            self._gen_breaker_open = True
+            self._gen_breaker_opened_at = time.time()
+            streak, window, cooldown = self._gen_failure_streak, GEN_BREAKER_STORM_WINDOW, GEN_BREAKER_COOLDOWN_S
         if not was_blocking:
-            self._log("error", f"🔴 LLM错误风暴熔断开启（{reason}），暂停自动进化直至冷却{LLM_BREAKER_COOLDOWN_S}s", {
-                "llm_failure_streak": self._llm_failure_streak,
-                "cooldown_s": LLM_BREAKER_COOLDOWN_S,
-                "storm_window": LLM_BREAKER_STORM_WINDOW,
+            self._log("error", f"🔴 {label}错误风暴熔断开启（{reason}），暂停自动进化直至冷却{cooldown}s", {
+                "domain": domain,
+                "failure_streak": streak,
+                "cooldown_s": cooldown,
+                "storm_window": window,
             })
             logger.error(
-                f"[{self.strand_id}] LLM错误风暴熔断开启: {reason} "
-                f"(streak={self._llm_failure_streak}, cooldown={LLM_BREAKER_COOLDOWN_S}s)"
+                f"[{self.strand_id}] {label}错误风暴熔断开启: {reason} "
+                f"(streak={streak}, cooldown={cooldown}s)"
             )
 
-    def _breaker_close(self, why: str = "llm_success"):
-        """复位熔断（LLM恢复可用=风暴结束）。"""
-        if self._breaker_open:
-            self._breaker_open = False
-            self._breaker_opened_at = 0.0
-            self._log("turn", f"🟢 LLM错误风暴熔断复位（{why}），恢复自动进化调度")
-            logger.info(f"[{self.strand_id}] 熔断复位: {why}")
+    def _breaker_close(self, why: str = "llm_success", domain: str = "llm"):
+        """复位熔断（该域风暴结束）。分域：只关自己域的闸，不碰另一域。"""
+        label = "LLM" if domain == "llm" else "通用"
+        opened = self._breaker_open if domain == "llm" else self._gen_breaker_open
+        if opened:
+            if domain == "llm":
+                self._breaker_open = False
+                self._breaker_opened_at = 0.0
+            else:
+                self._gen_breaker_open = False
+                self._gen_breaker_opened_at = 0.0
+            self._log("turn", f"🟢 {label}错误风暴熔断复位（{why}），恢复自动进化调度", {"domain": domain})
+            logger.info(f"[{self.strand_id}] {label}熔断复位: {why}")
 
-    def reset_breaker(self) -> dict:
-        """人工复位熔断（job_queue.requeue同款语义：人工意图不受熔断拦截）。"""
-        was_open = self._breaker_open
-        self._breaker_open = False
-        self._breaker_opened_at = 0.0
-        self._log("turn", f"🔧 人工复位熔断（此前open={was_open}），恢复自动进化调度", {"by": "operator"})
-        logger.info(f"[{self.strand_id}] 熔断人工复位 (此前open={was_open})")
+    def reset_breaker(self, domain: str = "llm") -> dict:
+        """人工复位熔断（job_queue.requeue同款语义：人工意图不受熔断拦截）。
+
+        domain: "llm"（默认，向后兼容）/ "gen" / "all"（两域都复位）。
+        """
+        if domain not in ("llm", "gen", "all"):
+            raise ValueError(f"Unknown breaker domain: {domain!r} (known: llm/gen/all)")
+        domains = ("llm", "gen") if domain == "all" else (domain,)
+        for d in domains:
+            was_open = self._breaker_open if d == "llm" else self._gen_breaker_open
+            if d == "llm":
+                self._breaker_open = False
+                self._breaker_opened_at = 0.0
+            else:
+                self._gen_breaker_open = False
+                self._gen_breaker_opened_at = 0.0
+            label = "LLM" if d == "llm" else "通用"
+            self._log("turn", f"🔧 人工复位熔断（{label}域，此前open={was_open}），恢复自动进化调度",
+                      {"by": "operator", "domain": d})
+            logger.info(f"[{self.strand_id}] {label}熔断人工复位 (此前open={was_open})")
         return self.get_status()
 
-    def _breaker_status(self) -> dict:
+    def _breaker_status(self, domain: str = "llm") -> dict:
         now = time.time()
-        if not self._breaker_open:
+        label = "llm" if domain == "llm" else "gen"
+        opened = self._breaker_open if domain == "llm" else self._gen_breaker_open
+        opened_at = self._breaker_opened_at if domain == "llm" else self._gen_breaker_opened_at
+        suppressed = self._breaker_suppressed if domain == "llm" else self._gen_breaker_suppressed
+        window = LLM_BREAKER_STORM_WINDOW if domain == "llm" else GEN_BREAKER_STORM_WINDOW
+        cooldown = LLM_BREAKER_COOLDOWN_S if domain == "llm" else GEN_BREAKER_COOLDOWN_S
+        if not opened:
             state = "closed"
-        elif self._breaker_is_open(now):
+        elif self._breaker_is_open(now, domain=domain):
             state = "open"
         else:
             state = "half_open"  # 冷却已过，放行下次试探
         return {
+            "domain": label,
             "state": state,
-            "open": self._breaker_open,
-            "gating": self._breaker_is_open(now),
-            "opened_at": self._breaker_opened_at or None,
+            "open": opened,
+            "gating": self._breaker_is_open(now, domain=domain),
+            "opened_at": opened_at or None,
             "cooldown_remaining_s": round(
-                max(0.0, LLM_BREAKER_COOLDOWN_S - (now - self._breaker_opened_at)), 1
-            ) if self._breaker_open else 0.0,
-            "suppressed_cycles": self._breaker_suppressed,
-            "storm_window": LLM_BREAKER_STORM_WINDOW,
-            "cooldown_s": LLM_BREAKER_COOLDOWN_S,
+                max(0.0, cooldown - (now - opened_at)), 1
+            ) if opened else 0.0,
+            "suppressed_cycles": suppressed,
+            "storm_window": window,
+            "cooldown_s": cooldown,
         }
 
     # ── 执行伙伴的计划（交叉编程核心） ──────────────────
@@ -1846,6 +1942,13 @@ new_string是替换后的文本。
                 self._breaker_open = bool(breaker.get("open", False))
                 self._breaker_opened_at = float(breaker.get("opened_at", 0.0) or 0.0)
                 self._breaker_suppressed = int(breaker.get("suppressed", 0))
+                # 通用域熔断同款恢复（老state文件无新键→默认关闭不炸）
+                self._gen_failure_streak = state.get("gen_failure_streak", 0)
+                self._gen_error_signature = state.get("gen_error_signature", "")
+                gen_breaker = state.get("gen_breaker") or {}
+                self._gen_breaker_open = bool(gen_breaker.get("open", False))
+                self._gen_breaker_opened_at = float(gen_breaker.get("opened_at", 0.0) or 0.0)
+                self._gen_breaker_suppressed = int(gen_breaker.get("suppressed", 0))
                 # 恢复观察数据
                 for o in state.get("observations", []):
                     self._observations.append(Observation(
@@ -1889,6 +1992,13 @@ new_string是替换后的文本。
                         "open": self._breaker_open,
                         "opened_at": self._breaker_opened_at,
                         "suppressed": self._breaker_suppressed,
+                    },
+                    "gen_failure_streak": self._gen_failure_streak,
+                    "gen_error_signature": self._gen_error_signature,
+                    "gen_breaker": {
+                        "open": self._gen_breaker_open,
+                        "opened_at": self._gen_breaker_opened_at,
+                        "suppressed": self._gen_breaker_suppressed,
                     },
                     "observations": [
                         {"obs_id": o.obs_id, "type": o.obs_type, "content": o.content,
@@ -2009,6 +2119,9 @@ new_string是替换后的文本。
             "last_error": self._last_error,
             "last_error_at": self._last_error_at,
             "breaker": self._breaker_status(),
+            "gen_failure_streak": self._gen_failure_streak,
+            "gen_error_signature": self._gen_error_signature,
+            "gen_breaker": self._breaker_status(domain="gen"),
         }
 
 

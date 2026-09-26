@@ -384,5 +384,6 @@ class TestWiringGuards:
         here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         src = open(os.path.join(here, "routes", "evolution.py")).read()
         assert '"/strands/{strand_id}/reset-breaker"' in src
-        assert "strand.reset_breaker()" in src
+        # 双域复位接线（02:26遗留#2销账后reset_breaker带domain参数）
+        assert "strand.reset_breaker(domain=domain)" in src
         assert "llm_breaker_storm_window" in src  # 配置面可见

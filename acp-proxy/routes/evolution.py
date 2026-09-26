@@ -118,23 +118,30 @@ async def trigger_evolution():
 
 
 @router.post("/strands/{strand_id}/reset-breaker")
-async def reset_strand_breaker(strand_id: str):
-    """人工复位LLM错误风暴熔断（job_queue.requeue同款语义：人工意图不受熔断拦截）。
+async def reset_strand_breaker(strand_id: str, request: Optional[dict] = None):
+    """人工复位错误风暴熔断（job_queue.requeue同款语义：人工意图不受熔断拦截）。
 
-    场景：充值/换key修复LLM后立即恢复自动进化，无需等冷却过期。
+    场景：充值/换key修复LLM后、或修复pipeline/import故障后立即恢复自动进化，无需等冷却过期。
+    body可选：{"domain": "llm"(默认) | "gen" | "all"}——两域熔断独立复位，不混算。
     """
     engine = get_engine()
     if not engine:
         return {"error": "Evolution engine not initialized"}
+    domain = (request or {}).get("domain", "llm")
+    if domain not in ("llm", "gen", "all"):
+        return {"error": f"Unknown domain: {domain}", "known": ["llm", "gen", "all"]}
     strand = {"strand_a": engine.strand_a, "strand_b": engine.strand_b}.get(strand_id)
     if strand is None:
         return {"error": f"Unknown strand: {strand_id}", "known": ["strand_a", "strand_b"]}
-    status = strand.reset_breaker()
+    status = strand.reset_breaker(domain=domain)
     return {
         "ok": True,
         "strand_id": strand_id,
+        "domain": domain,
         "breaker": status.get("breaker"),
+        "gen_breaker": status.get("gen_breaker"),
         "llm_failure_streak": status.get("llm_failure_streak"),
+        "gen_failure_streak": status.get("gen_failure_streak"),
     }
 
 
@@ -449,6 +456,8 @@ async def get_evolution_config():
         "batch_analysis_interval": evolution.BATCH_ANALYSIS_INTERVAL,
         "llm_breaker_storm_window": dna_evolution.LLM_BREAKER_STORM_WINDOW,
         "llm_breaker_cooldown_s": dna_evolution.LLM_BREAKER_COOLDOWN_S,
+        "gen_breaker_storm_window": dna_evolution.GEN_BREAKER_STORM_WINDOW,
+        "gen_breaker_cooldown_s": dna_evolution.GEN_BREAKER_COOLDOWN_S,
     }
 
 
