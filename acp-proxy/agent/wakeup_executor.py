@@ -32,6 +32,7 @@ import asyncio
 import logging
 import os
 import time
+from collections import deque
 
 import httpx
 
@@ -266,6 +267,9 @@ class WakeupExecutor:
         self._fire_fn = fire_fn or default_headless_fire
         self._task: asyncio.Task | None = None
         self._running = False
+        # 活动流环形缓冲（monitoring面板"tail日志流"数据面）：每个claim/fire/ack
+        # 动作留一条可读记录，appendleft=最新在前，容量20防增长
+        self._recent: deque = deque(maxlen=20)
         self._stats: dict = {
             "polls": 0,
             "due_seen": 0,
@@ -286,6 +290,16 @@ class WakeupExecutor:
         last_error_at让监控面能判新鲜度；成功poll后整组归空见poll_once）。"""
         self._stats["last_error"] = msg[:300]
         self._stats["last_error_at"] = time.time()
+
+    def _note_activity(self, kind: str, event_id=None, detail: str = "") -> None:
+        """活动流留痕（monitoring面板tail数据面）：claim/fire/ack每个动作一条。
+
+        kind取值：claimed / claim_lost / claim_error / fire_ok / fire_failed /
+        ack_error / poll_error。与logger不同——logger进journal文件，这里进
+        snapshot().recent 供面板实时渲染"它刚才干了什么"。"""
+        self._recent.appendleft(
+            {"ts": time.time(), "kind": kind, "event_id": event_id, "detail": detail[:200]}
+        )
 
     # ── 生命周期 ────────────────────────────────────────────────
 
@@ -319,6 +333,7 @@ class WakeupExecutor:
                 break
             except Exception as e:
                 self._note_error(f"{type(e).__name__}: {e}")
+                self._note_activity("poll_error", None, f"{type(e).__name__}: {e}")
                 logger.warning("[wakeup] poll cycle error: %s", e)
             await asyncio.sleep(self._poll_interval_s)
 
@@ -365,19 +380,25 @@ class WakeupExecutor:
         except Exception as e:
             self._stats["claim_errors"] += 1
             self._note_error(f"claim {eid}: {type(e).__name__}: {e}")
+            self._note_activity("claim_error", eid, f"{type(e).__name__}: {e}")
             logger.warning("[wakeup] claim %s failed: %s", eid, e)
             return False
         if cresp.status_code == 409:
             # CAS输给对端实例=正常路径（at-most-once），不算错误
             self._stats["claim_lost"] += 1
+            self._note_activity("claim_lost", eid, "CAS输给对端实例（at-most-once正常路径）")
             return False
         if cresp.status_code != 200:
             # 非409非200=opensoul侧异常，必须可见（与CAS败北区分开）
             self._stats["claim_errors"] += 1
             self._note_error(f"claim {eid}: HTTP {cresp.status_code}")
+            self._note_activity("claim_error", eid, f"HTTP {cresp.status_code}")
             logger.warning("[wakeup] claim %s HTTP %s", eid, cresp.status_code)
             return False
         self._stats["claimed"] += 1
+        self._note_activity(
+            "claimed", eid, f"session={ev.get('session_id')} reason={(ev.get('reason') or '')[:60]}"
+        )
         ok, err = True, ""
         try:
             await asyncio.wait_for(self._fire_fn(ev), timeout=self._fire_timeout_s)
@@ -395,13 +416,16 @@ class WakeupExecutor:
             if aresp.status_code != 200:
                 self._stats["ack_errors"] += 1
                 self._note_error(f"ack {eid}: HTTP {aresp.status_code}")
+                self._note_activity("ack_error", eid, f"HTTP {aresp.status_code}")
         except Exception as e:
             self._stats["ack_errors"] += 1
             self._note_error(f"ack {eid}: {type(e).__name__}: {e}")
+            self._note_activity("ack_error", eid, f"{type(e).__name__}: {e}")
             logger.warning("[wakeup] ack %s failed: %s", eid, e)
         self._stats["fire_ok" if ok else "fire_failed"] += 1
         self._stats["last_fire_at"] = time.time()
         if ok:
+            self._note_activity("fire_ok", eid, f"session={ev.get('session_id')}")
             logger.info(
                 "[wakeup] fired event %s (session=%s reason=%r)",
                 eid,
@@ -411,6 +435,7 @@ class WakeupExecutor:
         else:
             # 失败必须可见（mem0 §1.1）：fire失败同样进last_error账本
             self._note_error(f"fire {eid}: {err}")
+            self._note_activity("fire_failed", eid, err)
             logger.warning("[wakeup] fire %s failed: %s", eid, err)
         return ok
 
@@ -422,6 +447,8 @@ class WakeupExecutor:
             "opensoul_url": self._opensoul_url,
             "poll_interval_s": self._poll_interval_s,
             "fire_timeout_s": self._fire_timeout_s,
+            # recent：活动流环形缓冲（最新在前，容量20）——monitoring面板tail数据面
+            "recent": list(self._recent),
             **self._stats,
         }
 

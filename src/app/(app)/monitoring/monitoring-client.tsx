@@ -290,6 +290,81 @@ interface ChainTraceEntry {
   [k: string]: unknown;
 }
 
+// P1: Wakeup执行器观测面板（ScheduleWakeup执行侧闭环——"它刚才干了什么"tail数据面）
+// 数据源：acp-proxy :8092/:8095 /api/agent/wakeup-executor（双实例CAS，snapshot含recent活动流）
+//        opensoul :8090/api/will/wakeup/overview（全键唤醒循环聚合）+ /wakeup/folded（noop折叠视图）
+interface WakeupActivity {
+  ts: number;
+  kind: string; // claimed / claim_lost / claim_error / fire_ok / fire_failed / ack_error / poll_error
+  event_id: number | null;
+  detail: string;
+}
+
+interface WakeupExecutorSnapshot {
+  running: boolean;
+  opensoul_url: string;
+  poll_interval_s: number;
+  polls: number;
+  due_seen: number;
+  claimed: number;
+  claim_lost: number;
+  claim_errors: number;
+  fire_ok: number;
+  fire_failed: number;
+  ack_errors: number;
+  last_poll_at: number | null;
+  last_fire_at: number | null;
+  last_error: string;
+  last_error_at: number | null;
+  recent: WakeupActivity[];
+}
+
+interface WakeupLoopStatus {
+  agent_id: string;
+  session_id: string;
+  active: boolean;
+  current_streak: number;
+  next_wakeup_at: number | null;
+  countdown_s: number | null;
+  total_events: number;
+  noop_events: number;
+  fire: { due_now: boolean; fired: number; exhausted: number };
+  last_event?: {
+    reason?: string;
+    noop?: boolean;
+    streak?: number;
+    ts?: number;
+    stopped?: boolean;
+    fired?: boolean;
+    fire_attempts?: number;
+    last_fire_error?: string;
+  } | null;
+}
+
+interface WakeupOverview {
+  total_keys: number;
+  active_count: number;
+  due_count: number;
+  loops: WakeupLoopStatus[];
+}
+
+interface WakeupFoldedItem {
+  kind: string; // wakeup / noop_streak
+  folded: boolean;
+  count?: number;
+  streak_max?: number;
+  first_ts?: number;
+  last_ts?: number;
+  first_reason?: string;
+  last_reason?: string;
+  reasons?: string[];
+  event_ids?: number[];
+  reason?: string;
+  noop?: boolean;
+  streak?: number;
+  ts?: number;
+}
+
 // ── Constants ────────────────────────────────────────────────
 
 type MonitoringTab = 'overview' | 'system' | 'benchmark' | 'activity' | 'agents' | 'architecture';
@@ -430,6 +505,14 @@ function sessionStatusColor(status: string): string {
   if (status === 'running') return 'text-emerald-500 bg-emerald-500/10';
   if (status === 'error' || status === 'aborted') return 'text-red-500 bg-red-500/10';
   return 'text-muted-foreground bg-muted'; // idle
+}
+
+// Wakeup活动流动作着色（claimed/fire_ok=正常推进，claim_lost=CAS败北中性，
+// 其余claim_error/fire_failed/ack_error/poll_error=失败必须可见红）
+function wakeupActivityColor(kind: string): string {
+  if (kind === 'fire_ok' || kind === 'claimed') return 'text-emerald-500 bg-emerald-500/10';
+  if (kind === 'claim_lost') return 'text-muted-foreground bg-muted';
+  return 'text-red-500 bg-red-500/10';
 }
 
 // ── Shared UI Components ────────────────────────────────────
@@ -677,6 +760,13 @@ export function MonitoringClient() {
   const [agentsLoading, setAgentsLoading] = useState(false);
   const [agentsUpdated, setAgentsUpdated] = useState<Date | null>(null);
 
+  // ── Wakeup observability state (P1 wakeup执行器观测面板) ─────
+  const [wakeupExecA, setWakeupExecA] = useState<WakeupExecutorSnapshot | null>(null);
+  const [wakeupExecB, setWakeupExecB] = useState<WakeupExecutorSnapshot | null>(null);
+  const [wakeupOverview, setWakeupOverview] = useState<WakeupOverview | null>(null);
+  const [wakeupFolded, setWakeupFolded] = useState<Record<string, WakeupFoldedItem[]>>({});
+  const [expandedWakeup, setExpandedWakeup] = useState<string | null>(null);
+
   // ── Detail selection state ─────────────────────────────────
   const [selectedOrganDetail, setSelectedOrganDetail] = useState<OrganResult | null>(null);
 
@@ -889,8 +979,9 @@ export function MonitoringClient() {
     const acpBase = typeof window !== 'undefined'
       ? `http://${window.location.hostname}:8092`
       : 'http://127.0.0.1:8092';
+    const acpBaseB = acpBase.replace(':8092', ':8095');
     // 各端点独立容错：单个服务挂掉不拖垮整个面板（fail-safe渲染"unavailable"）
-    const [peekRes, jhRes, jlRes, evoRes, glandRes, spillRes, attrRes] = await Promise.allSettled([
+    const [peekRes, jhRes, jlRes, evoRes, glandRes, spillRes, attrRes, wuARes, wuBRes, wuOvRes] = await Promise.allSettled([
       fetch(`${acpBase}/api/agent/peek`, { signal: AbortSignal.timeout(8000) }),
       fetch(`${apiBase}/api/will/jobs/health`, { signal: AbortSignal.timeout(8000) }),
       fetch(`${apiBase}/api/will/jobs?limit=20`, { signal: AbortSignal.timeout(8000) }),
@@ -898,6 +989,9 @@ export function MonitoringClient() {
       fetch(`${apiBase}/api/gland/health`, { signal: AbortSignal.timeout(8000) }),
       fetch(`${acpBase}/api/agent/tool-output/stats`, { signal: AbortSignal.timeout(8000) }),
       fetch(`${acpBase}/api/agent/token-attribution?limit=5`, { signal: AbortSignal.timeout(8000) }),
+      fetch(`${acpBase}/api/agent/wakeup-executor`, { signal: AbortSignal.timeout(8000) }),
+      fetch(`${acpBaseB}/api/agent/wakeup-executor`, { signal: AbortSignal.timeout(8000) }),
+      fetch(`${apiBase}/api/will/wakeup/overview`, { signal: AbortSignal.timeout(8000) }),
     ]);
     if (peekRes.status === 'fulfilled' && peekRes.value.ok) {
       try { setAgentPeek(await peekRes.value.json()); setPeekErr(''); } catch {}
@@ -922,6 +1016,15 @@ export function MonitoringClient() {
     if (attrRes.status === 'fulfilled' && attrRes.value.ok) {
       try { setTokenAttr(await attrRes.value.json()); } catch {}
     }
+    if (wuARes.status === 'fulfilled' && wuARes.value.ok) {
+      try { setWakeupExecA(await wuARes.value.json()); } catch {}
+    }
+    if (wuBRes.status === 'fulfilled' && wuBRes.value.ok) {
+      try { setWakeupExecB(await wuBRes.value.json()); } catch {}
+    }
+    if (wuOvRes.status === 'fulfilled' && wuOvRes.value.ok) {
+      try { setWakeupOverview(await wuOvRes.value.json()); } catch {}
+    }
     setAgentsUpdated(new Date());
     setAgentsLoading(false);
   }, [apiBase]);
@@ -932,6 +1035,39 @@ export function MonitoringClient() {
     const timer = setInterval(fetchAgentsData, 10000);
     return () => clearInterval(timer);
   }, [activeTab, fetchAgentsData]);
+
+  // Wakeup折叠视图（claude-code noop streak折叠——"连续空转"一眼可见）：
+  // 展开某个唤醒循环行时按需拉 /wakeup/folded 渲染折叠块
+  const fetchWakeupFolded = useCallback(async (agentId: string, sessionId: string) => {
+    const key = `${agentId}/${sessionId}`;
+    try {
+      const params = new URLSearchParams({ agent_id: agentId, session_id: sessionId, limit: '20' });
+      const res = await fetch(`${apiBase}/api/will/wakeup/folded?${params}`, { signal: AbortSignal.timeout(8000) });
+      if (res.ok) {
+        const d = await res.json();
+        setWakeupFolded(prev => ({ ...prev, [key]: d.items || [] }));
+      }
+    } catch {}
+  }, [apiBase]);
+
+  const toggleWakeupLoop = (agentId: string, sessionId: string) => {
+    const key = `${agentId}/${sessionId}`;
+    if (expandedWakeup === key) {
+      setExpandedWakeup(null);
+      return;
+    }
+    setExpandedWakeup(key);
+    if (!wakeupFolded[key]) fetchWakeupFolded(agentId, sessionId);
+  };
+
+  // 双实例活动流合并（tail数据面：按时间倒序取最新8条，标注来源实例）
+  const wakeupActivityFeed = useMemo(() => {
+    const all = [
+      ...(wakeupExecA?.recent || []).map(a => ({ ...a, src: 'a' })),
+      ...(wakeupExecB?.recent || []).map(a => ({ ...a, src: 'b' })),
+    ];
+    return all.sort((x, y) => y.ts - x.ts).slice(0, 8);
+  }, [wakeupExecA, wakeupExecB]);
 
   // ── Computed values ────────────────────────────────────────
 
@@ -2324,6 +2460,197 @@ export function MonitoringClient() {
                   <div className="pt-1.5 text-[10px] text-muted-foreground border-t border-border mt-2">
                     records {tokenAttr.total_records} · avg {tokenAttr.summary.avg_total_tokens ?? 0} tok · max {tokenAttr.summary.max_total_tokens ?? 0} tok · over_limit {tokenAttr.summary.over_limit_records ?? 0}
                   </div>
+                </div>
+              )}
+            </div>
+
+            {/* Card 6: Wakeup Executor — ScheduleWakeup执行侧闭环（到点真醒）
+                双实例CAS快照 + 活动流tail（"它刚才干了什么"）+ noop streak折叠UI */}
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
+              <div className="flex items-center gap-2 mb-3 flex-wrap">
+                <Clock size={14} className="text-cyan-500" />
+                <h4 className="text-xs font-medium">Wakeup Executor (ScheduleWakeup)</h4>
+                {wakeupOverview ? (
+                  <>
+                    <span
+                      className={cn(
+                        'rounded px-1.5 py-0.5 text-[10px] font-medium',
+                        wakeupOverview.active_count > 0 ? 'text-emerald-500 bg-emerald-500/10' : 'text-muted-foreground bg-muted',
+                      )}
+                    >
+                      {wakeupOverview.active_count} active / {wakeupOverview.total_keys} loops
+                    </span>
+                    {wakeupOverview.due_count > 0 && (
+                      <span className="rounded px-1.5 py-0.5 text-[10px] font-medium text-amber-500 bg-amber-500/10">
+                        due {wakeupOverview.due_count}
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <span className="text-[10px] text-muted-foreground ml-auto">unavailable</span>
+                )}
+              </div>
+
+              {/* 双实例executor快照（CAS互斥双跑防护：claim_lost=输给对端是正常路径） */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-3">
+                {[
+                  { label: 'proxy-a :8092', snap: wakeupExecA },
+                  { label: 'proxy-b :8095', snap: wakeupExecB },
+                ].map(({ label, snap }) => (
+                  <div key={label} className="rounded-lg border border-border bg-muted/30 p-2.5">
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span
+                        className={cn(
+                          'rounded px-1.5 py-0.5 text-[10px] font-medium',
+                          snap?.running ? 'text-emerald-500 bg-emerald-500/10' : 'text-red-500 bg-red-500/10',
+                        )}
+                      >
+                        {snap?.running ? 'running' : 'stopped'}
+                      </span>
+                      <span className="text-[10px] font-mono text-muted-foreground">{label}</span>
+                      {snap && (
+                        <span className="text-[10px] text-muted-foreground ml-auto font-mono">polls {snap.polls}</span>
+                      )}
+                    </div>
+                    {snap ? (
+                      <>
+                        <div className="flex items-center gap-2 flex-wrap text-[10px] text-muted-foreground">
+                          <span>claimed <span className="font-mono text-foreground">{snap.claimed}</span></span>
+                          <span title="CAS输给对端实例（at-most-once正常路径）">lost <span className="font-mono text-foreground">{snap.claim_lost}</span></span>
+                          <span>fire ok <span className="font-mono text-emerald-500">{snap.fire_ok}</span></span>
+                          <span>failed <span className={cn('font-mono', snap.fire_failed > 0 ? 'text-red-500' : 'text-foreground')}>{snap.fire_failed}</span></span>
+                          {(snap.claim_errors + snap.ack_errors) > 0 && (
+                            <span className="text-red-400">errors {snap.claim_errors + snap.ack_errors}</span>
+                          )}
+                        </div>
+                        {snap.last_error ? (
+                          <p className="text-[10px] text-red-400 mt-1 truncate" title={snap.last_error}>
+                            {snap.last_error_at ? `[${formatTimestamp(snap.last_error_at, t)}] ` : ''}
+                            {snap.last_error}
+                          </p>
+                        ) : (
+                          <p className="text-[10px] text-muted-foreground/50 mt-1">no recent errors</p>
+                        )}
+                      </>
+                    ) : (
+                      <p className="text-[10px] text-muted-foreground/50">unreachable</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {/* 活动流tail（类tail日志流：claim/fire/ack每个动作一条，最新在前） */}
+              <div className="mb-3">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <History size={11} className="text-muted-foreground" />
+                  <span className="text-[10px] text-muted-foreground">Recent Activity</span>
+                </div>
+                {wakeupActivityFeed.length === 0 ? (
+                  <p className="text-[10px] text-muted-foreground/50">no executor activity yet</p>
+                ) : (
+                  <div className="space-y-0.5 max-h-32 overflow-y-auto font-mono">
+                    {wakeupActivityFeed.map((a, i) => (
+                      <div key={`${a.src}-${a.ts}-${i}`} className="flex items-center gap-1.5 text-[10px]">
+                        <span className="text-muted-foreground/60 shrink-0">{formatTimestamp(a.ts, t)}</span>
+                        <span className={cn('rounded px-1 py-0.5 font-medium shrink-0', wakeupActivityColor(a.kind))}>
+                          {a.kind}
+                        </span>
+                        {a.event_id != null && <span className="text-muted-foreground shrink-0">#{a.event_id}</span>}
+                        <span className="text-muted-foreground truncate" title={a.detail}>{a.detail}</span>
+                        <span className="text-muted-foreground/40 ml-auto shrink-0">{a.src}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* 唤醒循环列表（全部键一屏可见）+ 展开noop折叠视图（claude-code streak折叠） */}
+              {!wakeupOverview || wakeupOverview.loops.length === 0 ? (
+                <div className="py-6 text-center text-muted-foreground/50">
+                  <Clock className="w-8 h-8 mx-auto mb-1.5" />
+                  <p className="text-xs">No wakeup loops scheduled</p>
+                  <p className="text-[10px] mt-1">Agent calls schedule_wakeup to start a loop (claude-code ScheduleWakeup)</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-border max-h-72 overflow-y-auto">
+                  {wakeupOverview.loops.map(loop => {
+                    const key = `${loop.agent_id}/${loop.session_id}`;
+                    const expanded = expandedWakeup === key;
+                    return (
+                      <div key={key} className="py-2 first:pt-0 last:pb-0">
+                        <button
+                          type="button"
+                          className="w-full text-left group"
+                          onClick={() => toggleWakeupLoop(loop.agent_id, loop.session_id)}
+                        >
+                          <div className="flex items-center gap-2 mb-1">
+                            {loop.fire.due_now ? (
+                              <span className="rounded px-1.5 py-0.5 text-[10px] font-medium text-amber-500 bg-amber-500/10">due now</span>
+                            ) : loop.active ? (
+                              <span className="rounded px-1.5 py-0.5 text-[10px] font-medium text-emerald-500 bg-emerald-500/10">active</span>
+                            ) : (
+                              <span className="rounded px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground bg-muted">stopped</span>
+                            )}
+                            {loop.fire.exhausted > 0 && (
+                              <span className="rounded px-1.5 py-0.5 text-[10px] font-medium text-red-500 bg-red-500/10">exhausted</span>
+                            )}
+                            <span className="text-xs font-mono truncate flex-1">{key}</span>
+                            {expanded ? <ChevronUp size={12} className="text-muted-foreground shrink-0" /> : <ChevronDown size={12} className="text-muted-foreground shrink-0" />}
+                          </div>
+                          <div className="flex items-center gap-3 flex-wrap text-[10px] text-muted-foreground">
+                            <span className={cn('font-mono', loop.current_streak >= 3 ? 'text-amber-500' : 'text-foreground')}>
+                              noop streak {loop.current_streak}
+                            </span>
+                            <span>events <span className="font-mono text-foreground">{loop.total_events}</span></span>
+                            <span>
+                              countdown{' '}
+                              <span className="font-mono text-foreground">
+                                {loop.countdown_s == null ? '—' : loop.countdown_s > 0 ? formatUptime(Math.round(loop.countdown_s)) : 'overdue'}
+                              </span>
+                            </span>
+                            <span>fire <span className="font-mono text-foreground">{loop.fire.fired}</span></span>
+                            {loop.last_event?.reason && (
+                              <span className="truncate max-w-[220px]" title={loop.last_event.reason}>
+                                {loop.last_event.noop ? 'noop: ' : ''}{loop.last_event.reason}
+                              </span>
+                            )}
+                          </div>
+                        </button>
+                        {expanded && (
+                          <div className="mt-2 ml-2 border-l-2 border-border pl-2.5 space-y-1">
+                            {(wakeupFolded[key] || []).length === 0 ? (
+                              <p className="text-[10px] text-muted-foreground/50">no events</p>
+                            ) : (
+                              (wakeupFolded[key] || []).map((item, i) =>
+                                item.kind === 'noop_streak' ? (
+                                  <div key={i} className="rounded bg-amber-500/10 border border-amber-500/20 px-2 py-1">
+                                    <div className="text-[10px] font-medium text-amber-500">
+                                      ×{item.count} noop streak (max {item.streak_max})
+                                    </div>
+                                    <div className="text-[10px] text-muted-foreground truncate" title={(item.reasons || []).join(' / ')}>
+                                      {item.first_reason} → {item.last_reason}
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div key={i} className="flex items-center gap-2 text-[10px]">
+                                    <span
+                                      className={cn(
+                                        'rounded px-1 py-0.5 font-medium shrink-0',
+                                        item.noop ? 'text-amber-500 bg-amber-500/10' : 'text-emerald-500 bg-emerald-500/10',
+                                      )}
+                                    >
+                                      {item.noop ? `noop${item.streak ? ` ×${item.streak}` : ''}` : 'progress'}
+                                    </span>
+                                    <span className="truncate text-muted-foreground" title={item.reason}>{item.reason}</span>
+                                  </div>
+                                ),
+                              )
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
