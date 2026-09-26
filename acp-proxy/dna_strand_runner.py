@@ -201,14 +201,19 @@ async def run_strand(strand_id: str, strategy: str):
 
     # 创建strand
     from dna_evolution import DNAStrand, StrandRole
+    from utils.llm_config import describe, resolve_llm_config
+    llm_cfg = resolve_llm_config()
+    if not llm_cfg["api_key"]:
+        logger.warning("进化strand无API key（MIMO_API_KEY/LLM_API_KEY均未配置），LLM调用将按'LLM失败'留痕")
+    logger.info(f"进化LLM配置: {describe(llm_cfg)}")
     strand = DNAStrand(
         strand_id=strand_id,
         role=StrandRole.PRIMARY if strand_id == "strand_a" else StrandRole.SHADOW,
         repo_root=str(Path(__file__).parent.parent),
-        llm_base_url="https://token-plan-cn.xiaomimimo.com/v1",
+        llm_base_url=llm_cfg["base_url"],
         strategy=strategy,
-        llm_api_key=os.environ.get("MIMO_API_KEY", ""),
-        llm_model="xiaomi/mimo-v2.5-pro",
+        llm_api_key=llm_cfg["api_key"],
+        llm_model=llm_cfg["model"],
     )
 
     partner_id = "strand_b" if strand_id == "strand_a" else "strand_a"

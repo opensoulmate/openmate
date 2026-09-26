@@ -76,14 +76,26 @@ async def _run_evolution_strand(instance_id: str, repo_root: str):
 
     logger.info(f"🧬 Starting evolution strand {strand_id} ({strategy})")
 
+    # 统一LLM配置解析（utils/llm_config单一真源）：禁止硬编码provider URL/模型名。
+    # 历史教训：曾硬编码token-plan-cn.xiaomimimo.com + MIMO_API_KEY（从未设置）→
+    # 无鉴权头401每小时空转。key缺失显式告警，不静默发无鉴权请求。
+    from utils.llm_config import describe, resolve_llm_config
+    llm_cfg = resolve_llm_config()
+    if not llm_cfg["api_key"]:
+        logger.warning(
+            "🧬 进化strand无API key（MIMO_API_KEY/LLM_API_KEY均未配置）——"
+            "LLM调用将失败并按'LLM失败'留痕（不会伪装成'无改进'）"
+        )
+    logger.info(f"🧬 进化LLM配置: {describe(llm_cfg)}")
+
     strand = DNAStrand(
         strand_id=strand_id,
         role=StrandRole.PRIMARY if instance_id == "a" else StrandRole.SHADOW,
         repo_root=repo_root,
-        llm_base_url="https://token-plan-cn.xiaomimimo.com/v1",
+        llm_base_url=llm_cfg["base_url"],
         strategy=strategy,
-        llm_api_key=os.environ.get("MIMO_API_KEY", ""),
-        llm_model="xiaomi/mimo-v2.5-pro",
+        llm_api_key=llm_cfg["api_key"],
+        llm_model=llm_cfg["model"],
     )
 
     # 自观察循环
@@ -134,9 +146,9 @@ async def _run_evolution_strand(instance_id: str, repo_root: str):
     from dna_evolution import DNAEvolutionEngine
     engine = DNAEvolutionEngine(
         repo_root=repo_root,
-        llm_base_url="https://token-plan-cn.xiaomimimo.com/v1",
-        llm_api_key=os.environ.get("MIMO_API_KEY", ""),
-        llm_model="xiaomi/mimo-v2.5-pro",
+        llm_base_url=llm_cfg["base_url"],
+        llm_api_key=llm_cfg["api_key"],
+        llm_model=llm_cfg["model"],
     )
     engine._running = True
     # 替换本实例的strand为真实的运行strand

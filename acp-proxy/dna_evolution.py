@@ -123,6 +123,17 @@ DEFAULT_GOALS: list[dict] = [
 ]
 
 
+class LLMCallError(RuntimeError):
+    """LLM调用失败（HTTP非200 / 空响应 / 传输异常）。
+
+    mem0 §1.1「失败必须可见，禁止静默降级」：禁止静默返回空字符串让上游把
+    "LLM挂了"记成"LLM说没有可改进项"。调用方必须把本异常记为**失败**，
+    与"LLM成功但无改进"走不同的记账分支。
+    """
+
+    partial_content: str = ""  # 续写中断时的半截输出（可选，调用方可取）
+
+
 class EvolutionStage(Enum):
     OBSERVE = "observe"
     REFLECT = "reflect"
@@ -145,6 +156,7 @@ class EvolutionCycle:
     changes: list[dict] = field(default_factory=list)
     verification: Optional[dict] = None
     success: bool = False
+    error: Optional[str] = None  # LLM/执行失败原因（mem0 §1.1失败可见；None=非失败）
     executed_by: str = ""  # 谁执行的（自己 or 伙伴）
     started_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     completed_at: Optional[str] = None
@@ -230,6 +242,11 @@ class DNAStrand:
         self._history: list[dict] = []
         self._cycle_count = 0
         self._running = False
+
+        # LLM失败可见账本（mem0 §1.1：失败≠无改进，必须可区分、可观察）
+        self._llm_failure_streak = 0  # 连续LLM失败次数（成功一次归零）
+        self._last_llm_error = ""
+        self._last_llm_error_at = ""
 
         # 实时日志文件（供SSE tail）
         self._log_file = Path(repo_root) / "acp-proxy" / "data" / f"dna_log_{strand_id}.jsonl"
@@ -538,6 +555,36 @@ class DNAStrand:
                 f"success={'✓' if cycle.success else 'pending'}"
             )
 
+        except LLMCallError as e:
+            # mem0 §1.1 失败必须可见：LLM挂了 ≠ "无改进"。此前 _call_llm 静默返空，
+            # 这里会记成"规划0项改进/pending"——LLM故障伪装成"进化没发现可改进项"
+            # （2026-09-26 live实锤：每小时401空转却Learned: 规划0项改进）。
+            # 现在：按失败记账（history带llm_error、streak计数、状态面可见），绝不冒充无改进。
+            self._llm_failure_streak += 1
+            self._last_llm_error = str(e)[:300]
+            self._last_llm_error_at = datetime.now(timezone.utc).isoformat()
+            cycle.success = False
+            cycle.error = str(e)[:300]
+            cycle.completed_at = datetime.now(timezone.utc).isoformat()
+            self._cycle_count += 1
+            self._cycles.append(cycle)
+            self._history.append({
+                "cycle_id": cycle.cycle_id,
+                "strand_id": self.strand_id,
+                "improvements_count": 0,
+                "success": False,
+                "llm_error": str(e)[:200],
+                "stage": cycle.stage.value,
+                "timestamp": cycle.completed_at,
+            })
+            self._save_state()
+            self._log("error", f"❌ LLM调用失败，本轮进化未执行（失败≠无改进）: {str(e)[:120]}", {
+                "llm_failure_streak": self._llm_failure_streak,
+            })
+            logger.error(
+                f"[{self.strand_id}] Cycle {cycle.cycle_id} LLM失败（不是'无改进'）: {e} "
+                f"(streak={self._llm_failure_streak})"
+            )
         except Exception as e:
             logger.error(f"[{self.strand_id}] Cycle failed: {e}")
 
@@ -814,7 +861,9 @@ class DNAStrand:
                 improvements = json.loads(m.group()).get("improvements", [])
                 return improvements[:self.max_improvements]
         except Exception:
-            pass
+            logger.warning(f"[{self.strand_id}] 规划JSON解析失败，按0项改进记账（LLM有响应但输出不可解析，非LLM故障）")
+        else:
+            logger.warning(f"[{self.strand_id}] 规划输出无JSON块，按0项改进记账（LLM有响应但输出不可解析，非LLM故障）")
         return []
 
     # ── 执行（写代码） ──────────────────────────────────
@@ -1263,7 +1312,13 @@ new_string是替换后的文本。
 
 返回JSON：{{"lesson": "一句话教训", "pattern": "可复用模式"}}"""
 
-            result = await self._call_llm(prompt)
+            try:
+                result = await self._call_llm(prompt)
+            except LLMCallError as e:
+                # 教训提炼失败不影响已成文的教训主体（cycle.summary仍记账）；
+                # 但必须留痕，不静默。
+                logger.warning(f"[{self.strand_id}] 教训提炼LLM失败（教训主体仍保留）: {e}")
+                result = ""
             try:
                 m = re.search(r'\{.*\}', result, re.DOTALL)
                 if m:
@@ -1390,7 +1445,11 @@ new_string是替换后的文本。
                         status = resp.status_code if resp else "no-response"
                         body = resp.text[:200] if resp else ""
                         logger.error(f"[{self.strand_id}] LLM call failed: {status} {body}")
-                        return full_content
+                        # mem0 §1.1：失败必须可见——抛LLMCallError，禁止静默返回
+                        # 空串让上游把"LLM挂了"记成"LLM说没有可改进项"。
+                        err = LLMCallError(f"LLM HTTP {status}: {body}")
+                        err.partial_content = full_content  # 续写中断时的半截输出（不丢，调用方可取）
+                        raise err
 
                     data = resp.json()
                     choice = data.get("choices", [{}])[0]
@@ -1419,10 +1478,16 @@ new_string是替换后的文本。
                         # 正常结束
                         break
 
+            if not full_content.strip():
+                # 200但空输出：对反思/规划/审查一律无意义，同判失败（不许伪装"无改进"）
+                raise LLMCallError("LLM返回空内容（HTTP 200但无输出）")
+            self._llm_failure_streak = 0  # 成功一次即清零连续失败计数
             return full_content
+        except LLMCallError:
+            raise
         except Exception as e:
             logger.error(f"[{self.strand_id}] LLM call failed: {e}")
-        return ""
+            raise LLMCallError(f"LLM调用异常: {e}") from e
 
     # ── Git ───────────────────────────────────────────────
 
@@ -1798,6 +1863,9 @@ new_string是替换后的文本。
             "my_plans_for_partner": len(self._my_plans_for_partner),
             "partner_plans_for_me": len(self._partner_plans_for_me),
             "memories": len(self._memory),
+            "llm_failure_streak": self._llm_failure_streak,
+            "last_llm_error": self._last_llm_error,
+            "last_llm_error_at": self._last_llm_error_at,
         }
 
 
