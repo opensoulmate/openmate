@@ -2651,3 +2651,41 @@
 3. cron环境新约束实录：`curl | python3`管道被tirith安全扫描判"pipe to interpreter"挂approval（cron无人值守无法批）——已改为`curl -o /tmp/x.json`落盘后`python3`读文件解析，后续live探针脚本沿用此模式。
 4. `due_wakeups`现为全表扫描取每key最新事件（ORDER BY ts DESC），事件量大后应加窗口/索引优化——当前单机cron场景量级无碍。
 5. 上轮遗留（环境变量密钥外发误伤面、污点分析作用域近似、双侧镜像人工同步）仍有效，非本轮范围。
+
+## [2026-09-26 11:11 CST] P0-4执行侧唤醒循环闭环——WakeupExecutor到点真醒（claude-code ScheduleWakeup runtime语义）——"说了60秒后再醒"终于真的会醒
+**目标**：上轮P0-4只落"登记意图+noop自报+streak折叠"，执行侧缺口（遗留#1标注"下轮P1首选"）：agent调schedule_wakeup只是登记，**到点没有人叫醒它**。本轮补齐claude-code runtime"delay到点后重新唤醒agent跑一轮"的执行语义，形成 定时唤醒→真跑回合→继续/停止 的完整闭环。
+**调研来源**：claude-code SDK ScheduleWakeup（feature-matrix/10-claude-code-source.md #4）：runtime在delaySeconds到点后重新唤醒agent；kilocode BackgroundJob注册表（作业必须有真实执行语义不是日志占位）；agno job_queue §5.2（CAS/幂等领取）；mem0 §1.1（失败必须可见禁止假装成功）。
+**改动文件**：
+- opensoul `src/will/wakeup.py`（增量+145/-5）：4新列+幂等ALTER迁移、claim_fire/ack_fire、due过滤、status fire计数
+- opensoul `src/api/will.py`（增量+52）：GET /wakeup/due、POST /wakeup/claim（409语义）、POST /wakeup/fire-result、schedule加source透传
+- opensoul `tests/test_wakeup_fire.py`（新268行，19测）
+- openmate `acp-proxy/agent/wakeup_executor.py`（新293行）：WakeupExecutor+default_headless_fire+build_wakeup_prompt
+- openmate `acp-proxy/app.py`（增量+31）：lifespan启停executor + GET /api/agent/wakeup-executor
+- openmate `acp-proxy/ws_chat.py`（增量+7）：/health加wakeup_executor键
+- openmate `acp-proxy/tests/test_wakeup_executor.py`（新324行，13测）
+**改动内容**：
+1. **opensoul状态面（单一真源）**：wakeup_events新增 `source/fired_at/fire_attempts/last_fire_error`（旧wakeup.db显式ALTER幂等迁移，测试用旧DDL重建验证）。`claim_fire`=SQLite CAS（`UPDATE ... SET fired_at=now, fire_attempts+1 WHERE id=? AND fired_at IS NULL AND fire_attempts<MAX` 的rowcount==1即唯一赢家）——acp-proxy a/b双实例都跑executor也**绝不双跑**（at-most-once）；`ack_fire`：ok=True保持fired终态清错误；ok=False未达上限→释放（fired_at=NULL）自动进入重试，达MAX_FIRE_ATTEMPTS=5→`EXHAUSTED after N attempts: ...`终态留痕**绝不无限重试烧钱**；`due_wakeups`过滤已领取/已终结。status()新增`fire:{due_now,fired,exhausted}`（"到点了还没人来叫醒我吗"一眼可见）。
+2. **acp-proxy执行面**：WakeupExecutor循环（默认15s轮询，env可调）：GET due→POST claim→无客户端SoulMateAgent跑唤醒回合（`agent.prompt([wakeup_prompt], session_id)`）→POST fire-result回执。fire_fn可注入（测试替身）；fire超时600s兜底；refusal（会话memory+DB均不存在）→抛异常→失败回执，**不给消失的会话造僵尸回合**。唤醒prompt显式声明"系统自动回合非用户消息"+闭环指令（必须再调schedule_wakeup继续或stop=true结束，noop如实自报）。
+3. **可观测**（用户铁律"必须有实时监控面板不能只说在运行"）：GET /api/agent/wakeup-executor + /health的wakeup_executor键→polls/due_seen/claimed/claim_lost/claim_errors/fire_ok/fire_failed/ack_errors/last_error实时计数。
+**接线位置**（grep证据，文件:行号）：
+- executor启动在**真实运行路径**：`acp-proxy/app.py:210 await wakeup_executor.start()`（lifespan，服务启动即跑）→ `agent/wakeup_executor.py:189 poll_once()`（循环）→ `:214 _fire_one()` → `:109 default_headless_fire→agent.prompt()`（真soulmate回合）→ `:224/:236 claim/ack HTTP`。
+- opensoul消费点：`src/api/will.py:831 due_wakeups()`、`:840 claim_fire()`、`:855 ack_fire()` → `src/will/wakeup.py:368/402/422`；router挂载既有 `src/main.py:547 include_router(will_router, prefix="/api/will")`。
+- 可观测消费点：`app.py:347 get_wakeup_executor().snapshot()`、`ws_chat.py:448`。
+**验证结果**：
+- 完整性✅：`git show --numstat`——opensoul `dacf6e9e`（3文件+465/-5）；openmate `6493388b`（4文件+655/-0，纯增量）。sibling并行改动（settings-client.tsx/locales/config/rbac_policy.csv）显式排除未入库。
+- 集成✅：上述grep链 + **live实锤**（重启后真服务）：三段HTTP全通——`GET /wakeup/due`→`POST /wakeup/claim`（已EXHAUSTED事件→**HTTP 409**`"wakeup事件8不可领取（已被领取/已终结/超过重试上限）"`）→`POST /wakeup/fire-result`（未知id→**HTTP 404**）；`:8092/:8095 /api/agent/wakeup-executor`返回`running:true, polls递增`；journal实录`[wakeup] fired event 11 (session=live-wakeup-fire-1790391602 reason='live执行侧闭环验证...')`。
+- 测试✅：opensoul `tests/test_wakeup_fire.py` **19 passed**（CAS单赢家/重试释放/EXHAUSTED终态留痕/旧库DDL迁移幂等/source留痕/status fire计数/截断显式标记）+ 既有`test_wakeup.py`无回归；opensoul全量`tests/ -m "not live"` **2177 passed 0 failed**（148.54s，=上轮2158+19新）。openmate `tests/test_wakeup_executor.py` **13 passed**（happy path三段HTTP断言/claim 409不fire/claim 5xx计claim_errors/fire异常超时回执ok=False/ack 5xx不吞/refusal转异常/循环与快照）；acp-proxy全量`tests/` **893 passed 0 failed**（285.62s，=上轮880+13新）。`systemic_test.py` **29/29 passed**（EXIT=0，S1-S6全绿）。
+- **live行为实锤**（重启后服务上）：
+  ① **happy path真跑通**：POST schedule（session=live-wakeup-fire-1790391602，delay=60）→到点11s内被领取（poll间隔15s）→**唤醒回合真实执行**：wakeup prompt作为user消息注入会话（agent_messages id 1172）+assistant回复落库（id 1173）——"到点真醒"闭环成立；status显示`fire.fired=1, fired_at已置`。
+  ② **CAS互斥live**：双实例同时轮询，proxy-a `claimed=6, claim_lost=1`、proxy-b `claimed=5, claim_lost=1`——输家拿409不fire，两事件总fire_attempts=10=2×MAX，零双跑。
+  ③ **EXHAUSTED终态live**：上轮遗留2个"会话已消失"事件被真实拒绝5次后进终态——`last_fire_error:"EXHAUSTED after 5 attempts: RuntimeError: 唤醒回合被拒：会话在服务端不存在…拒绝给消失的会话造回合"`, `exhausted:true, fire.due_now:false`——失败重试封顶+留痕，绝不无限烧。
+  ④ 启动瞬态可见：opensoul未就绪时首个poll报ConnectError进last_error（11:04:03一次），随后poll全200——失败可见而非静默。
+**服务重启**：`systemctl --user restart opensoul.service acp-proxy-a.service acp-proxy-b.service`→三服务active；/api/health=200、:8092/health=200、:8095/health=200；executor双实例running=true。
+**commit**：opensoul `dacf6e9e`；openmate `6493388b`。
+**遗留问题**：
+1. **⚠️环境问题（非本轮引入，需用户处理）**：soulmate的LLM供应商**余额不足**——live唤醒回合的assistant回复是`[LLM错误: LLM API error 402: Insufficient account balance]`，独立curl探针（acp-proxy/.env的LLM_BASE_URL+key，5 token请求）同样返回HTTP 402。执行侧机器已证闭环（回合真跑、消息真落库），但模型回复是错误文本。**该key余额不解决，所有soulmate LLM回合（含正常聊天）都会是402**。充值/换key后建议复跑一次live唤醒看真实模型回复。
+2. 唤醒回合LLM级失败（如402）目前按"回合已执行"ack ok=True（LLM错误文本在会话里可见）——agent无法调schedule_wakeup则循环自然终止。是否应把"[LLM错误"开头的回合判为fire失败进入重试（LLM故障期间5次机会）待讨论，涉及误伤面（模型拒答≠执行失败）。
+3. 唤醒回合以无客户端模式执行：消息落opensoul.db，前端下次加载可见，但**无实时流式推送**（_notify_client在client=None时no-op）。若会话正连在某个proxy的WS上，唤醒回合发生在赢得claim的实例里（可能不是连接所在实例），实时可见性不保证——如需"运行中可见"要接跨进程推送，归前端/编排轮。
+4. last_error只增不清（启动瞬态ConnectError在snapshot里一直挂着直到下一个错误覆盖）——语义是"最后一个错误"，但可能误导"现在还在错"；下轮可加last_error_at时间戳或成功poll后归空。
+5. due_wakeups仍是全表扫描取每key最新（上轮遗留#4同项），事件量大后需索引/窗口优化。
+6. 上轮遗留（OpenMate折叠UI未做、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步）仍有效，非本轮范围。
