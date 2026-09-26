@@ -2689,3 +2689,32 @@
 4. last_error只增不清（启动瞬态ConnectError在snapshot里一直挂着直到下一个错误覆盖）——语义是"最后一个错误"，但可能误导"现在还在错"；下轮可加last_error_at时间戳或成功poll后归空。
 5. due_wakeups仍是全表扫描取每key最新（上轮遗留#4同项），事件量大后需索引/窗口优化。
 6. 上轮遗留（OpenMate折叠UI未做、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步）仍有效，非本轮范围。
+
+## [2026-09-26 13:40 CST] 唤醒回合LLM级失败不再假装成功——P0-4遗留#2闭环（+last_error新鲜度语义遗留#4）
+**目标**：上轮P0-4执行侧闭环遗留#2明确标注的诚实性缺口——LLM级失败（如provider 402余额不足）的唤醒回合被按"回合已执行"ack ok=True记成功，"失败必须可见禁止假装成功"（mem0 §1.1）被违反；同时遗留#4：executor的last_error只增不清，启动瞬态错误永久挂着误导"现在还在错"。本轮两项一起闭环。
+**调研来源**：mem0 §1.1（失败必须可见禁止假装成功）；AIHawk SHOWN/SENT双预算显式标记纪律（截断/失败必须显式可见）；本仓库既有 infection_guard._TAGGED_FAILURE_PREFIX="[LLM错误" 判定惯例（同款机器标记语义复用，不自创）；claude-code ScheduleWakeup runtime语义（唤醒回合失败=该轮未完成）。
+**改动文件**：
+- openmate `acp-proxy/agent/wakeup_executor.py`（增量+120/-30内有效新增）：_LLM_FAILURE_MARKERS+_is_llm_failure_text+_max_assistant_id+_llm_failure_reply 4个判定函数；default_headless_fire._run 接判定；_note_error(last_error+last_error_at)；poll_once干净轮归空；fire失败进last_error账本
+- openmate `acp-proxy/tests/test_wakeup_fire_llm_error.py`（新~330行，18测）
+**改动内容**：
+1. **LLM级失败判定（遗留#2）**：唤醒回合结束、refusal检查之后，回执前检查**本轮新落库**的assistant输出（turn归因锚点：fire前MAX(id)之前的消息不算本轮，防旧轮错误文本误判）。命中机器标记即抛RuntimeError→ack ok=False→opensoul侧释放重试（最多MAX_FIRE_ATTEMPTS=5）→上限EXHAUSTED留痕。判定面：整段以"[LLM错误"/"[LLM响应超时"开头（chat()非流式整段错误）**或末行命中**（流式在已有内容后追加错误chunk，如上轮live实录的"\n[LLM错误: 402…]"）；正文中间引用该字样不判失败。取数失败/无新消息 fail-open 不判失败（DB读故障不得把成功回合误判成失败引发重试风暴）。
+2. **last_error新鲜度（遗留#4）**：错误记账统一走`_note_error(msg)`=last_error+last_error_at时间戳（监控面可判新鲜度）；poll_once整轮干净（claim_errors+ack_errors+fire_failed三计数零增量）后last_error/last_error_at整组归空——陈旧错误不再误导"现在还在错"；fire失败此前不进last_error账本（静默），本轮补齐（失败必须可见）。
+**接线位置**（grep证据，文件:行号）：
+- 真实fire路径：`acp-proxy/app.py:210 wakeup_executor.start()`（lifespan）→`agent/wakeup_executor.py:229 self._fire_fn = fire_fn or default_headless_fire`（默认执行体即判定所在）→`:183 pre_id=_max_assistant_id(...)`（fire前锚点）→`:195 bad=_llm_failure_reply(...)`（判定+抛异常）→`:376 self._note_error(f"fire {eid}: {err}")`（失败记账）。观测消费点：`app.py:347 get_wakeup_executor().snapshot()`（GET /api/agent/wakeup-executor，新键last_error_at随snapshot透出）+`ws_chat.py:447`（/health的wakeup_executor键）。
+- opensoul侧回执消费（既有，本轮语义受益方）：`src/api/will.py:835 claim / :855 fire-result`→`src/will/wakeup.py:445 ack_fire`（ok=False→释放重试/EXHAUSTED留痕）。
+**验证结果**：
+- 完整性✅：`git show --numstat`——openmate `710d2731`（3文件+472/-30，wakeup_executor.py增量patch非全量重写、新测试文件真实落盘）；并行改动（settings-client.tsx/locales）显式排除未入库。
+- 集成✅：上述grep调用链 + **live实锤**（重启后真服务，本轮新代码已加载）。
+- 测试✅：`tests/test_wakeup_fire_llm_error.py` **18 passed**（判定面7例：402整段/前导换行/超时标记/流式追加末行/正常回复/正文引用不算/空文本；fire路径7例：错误标记抛异常/流式追加抛异常/旧轮错误不误判/正常回复成功/无新消息fail-open/DB读故障fail-open/refusal先于判定；last_error语义4例：干净轮归空+时间戳/脏轮保留/快照含last_error_at）+ 既有`tests/test_wakeup_executor.py` 13例无回归；acp-proxy全量`tests/` **911 passed 0 failed**（292.01s，=上轮893+18新）；`systemic_test.py` **29/29 passed**（EXIT=0，S1-S6全绿）。
+- **live行为实锤**（event 12，session=live-wakeup-llmfail-1790400738，正是上轮遗留#1的402场景）：
+  ① **不再假装成功**：到点唤醒回合真实执行，assistant回复=provider 402错误标记→本轮判定生效，:8092 executor快照`claimed=2, fire_failed=2`，`last_error='fire 12: RuntimeError: 唤醒回合LLM级失败（provider错误/超时机器标记，按失败重试不假装成功）: [LLM错误: LLM API error 402: …Insufficient account balance…]'`；journal双实例实录`[wakeup] fire 12 failed: RuntimeError: 唤醒回合LLM级失败…`。
+  ② **重试→EXHAUSTED全链路**：opensoul status实录 `fire_attempts:4, fired_at:null, exhausted:false, due_now:true`（失败后真释放重试，上轮同场景会被记fired成功）→5次用尽后 `fire_attempts:5, exhausted:true, last_fire_error='EXHAUSTED after 5 attempts: RuntimeError: 唤醒回合LLM级失败…'`，`fire={due_now:False, fired:0, exhausted:1}`——失败留痕+封顶，绝不无限烧。
+  ③ **last_error新鲜度**：重启后双实例/health的wakeup_executor键含`last_error_at`字段；干净poll后last_error=''（错误可见到下一个干净轮为止，之后归空）。
+**服务重启**：`systemctl --user restart acp-proxy-a.service acp-proxy-b.service`→两服务active；:8092/health=200、:8095/health=200；executor双实例running=true（opensoul本轮零改动未重启）。
+**commit**：openmate `710d2731`（本轮仅openmate改动，无opensoul侧commit）。
+**遗留问题**：
+1. **⚠️环境问题仍在（非代码，需用户处理）**：soulmate LLM供应商**余额不足**（402 Insufficient account balance）依旧——本轮live实锤恰好用它验证了失败判定，但正常聊天/唤醒回合在充值或换key前都拿不到真实模型回复。充值/换key后建议复跑一次live唤醒（schedule→到点→应见fire_ok=1且模型真实回复）。
+2. 上轮遗留#3（唤醒回合无实时流式推送，跨proxy实例可见性不保证）仍有效——归前端/编排轮。
+3. 上轮遗留#5（due_wakeups全表扫描取每key最新，事件量大需索引/窗口优化）仍有效；本轮turn归因锚点的MAX(id)查询按session_id+role过滤，同样建议后续配索引（当前单机量级无碍）。
+4. 判定面近似：只认"本轮新落库assistant消息"的开头/末行标记；若回合异常中断未落消息则fail-open按成功（无肯定证据不判失败的有意取舍）——若后续出现"回合无声消失"案例，可补"回合零输出"判据。
+5. 上轮遗留（OpenMate折叠UI未做、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步）仍有效，非本轮范围。
