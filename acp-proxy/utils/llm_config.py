@@ -16,6 +16,12 @@
 
 调用方纪律：禁止在调用点硬编码 provider URL/模型名/自扫环境变量——一律走
 resolve_llm_config()；key 缺失要显式告警（401早知道），不得静默发出无鉴权请求。
+
+调用面（2026-09-27收口）：
+- DNA进化/后台调用：resolve_llm_config()（含 MIMO_* 覆写层）
+- ws_chat 用户侧agent代理：resolve_llm_config(include_mimo_overrides=False)
+  —— MIMO_* 是进化专用覆写，聊天流量绝不跟随（运维把进化指向另一套LLM时，
+     用户会话仍走系统LLM配置）。
 """
 
 from __future__ import annotations
@@ -49,11 +55,18 @@ def _default_env_files() -> list[str]:
     ]
 
 
-def resolve_llm_config(env_files: list[str] | None = None) -> dict:
+def resolve_llm_config(
+    env_files: list[str] | None = None,
+    *,
+    include_mimo_overrides: bool = True,
+) -> dict:
     """解析LLM配置，返回 {api_key, base_url, model, max_tokens, key_source}。
 
     key_source ∈ {"mimo_env", "env", "file", ""}（观测面可据此判key从哪来；
     key本身绝不进日志/状态面，只报key_source与key长度）。
+
+    include_mimo_overrides=False：跳过 MIMO_* 覆写层（ws_chat 用户侧代理用，
+    见模块docstring"调用面"）。
     """
     files = _default_env_files() if env_files is None else list(env_files)
     file_cfg: dict = {}
@@ -61,7 +74,10 @@ def resolve_llm_config(env_files: list[str] | None = None) -> dict:
         for k, v in _read_env_file(p).items():
             file_cfg.setdefault(k, v)  # 先者优先（opensoul/.env 在前）
 
-    mimo_key = os.environ.get("MIMO_API_KEY", "").strip()
+    def _override(name: str) -> str:
+        return os.environ.get(name, "").strip() if include_mimo_overrides else ""
+
+    mimo_key = _override("MIMO_API_KEY")
     env_key = os.environ.get("LLM_API_KEY", "").strip()
     file_key = file_cfg.get("LLM_API_KEY", "").strip()
 
@@ -75,17 +91,17 @@ def resolve_llm_config(env_files: list[str] | None = None) -> dict:
         api_key, key_source = "", ""
 
     base_url = (
-        os.environ.get("MIMO_BASE_URL", "").strip()
+        _override("MIMO_BASE_URL")
         or file_cfg.get("LLM_BASE_URL", "").strip()
         or os.environ.get("LLM_BASE_URL", "").strip()
     )
     model = (
-        os.environ.get("MIMO_MODEL", "").strip()
+        _override("MIMO_MODEL")
         or file_cfg.get("LLM_MODEL", "").strip()
         or os.environ.get("LLM_MODEL", "").strip()
     )
     raw_max_tokens = (
-        os.environ.get("MIMO_MAX_TOKENS", "").strip()
+        _override("MIMO_MAX_TOKENS")
         or file_cfg.get("LLM_MAX_TOKENS", "").strip()
         or os.environ.get("LLM_MAX_TOKENS", "").strip()
     )

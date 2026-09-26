@@ -104,10 +104,11 @@ class TestResolveLLMConfig:
         assert "key_source=mimo_env" in d
 
     def test_wiring_callers_use_single_source(self):
-        """接线护栏：app.py / dna_strand_runner.py 禁硬编码provider URL/模型名，必须走resolve_llm_config"""
+        """接线护栏：app.py / dna_strand_runner.py / ws_chat.py 禁硬编码provider URL/模型名，
+        必须走resolve_llm_config（ws_chat走include_mimo_overrides=False，见test_ws_chat_llm_config.py）"""
         import os
         here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        for fname in ("app.py", "dna_strand_runner.py"):
+        for fname in ("app.py", "dna_strand_runner.py", "ws_chat.py"):
             src = open(os.path.join(here, fname)).read()
             # 只禁"硬编码赋值"（注释里提教训原文不在此列）
             assert 'llm_base_url="https://token-plan-cn' not in src, f"{fname} 仍硬编码provider URL"

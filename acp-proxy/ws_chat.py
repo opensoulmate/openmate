@@ -22,6 +22,7 @@ import websockets
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from proxy import get_acp_process
+from utils.llm_config import describe, resolve_llm_config
 
 _OPENSOUL_ROOT = os.environ.get("OPENSOUL_ROOT", "/home/climbing/opensoul")
 _OPENSOUL_DB = f"{_OPENSOUL_ROOT}/data/opensoul.db"
@@ -160,30 +161,18 @@ async def _refresh_agent_list():
 
 
 def _get_llm_config() -> dict:
-    """Read system LLM config from OpenSoul .env or /api/llm/config."""
-    # Try reading from .env first (fast, no network)
-    env_path = os.path.join(os.path.dirname(__file__), "..", "..", "opensoul", ".env")
-    cfg: dict = {}
-    try:
-        with open(os.path.abspath(env_path)) as f:
-            for line in f:
-                line = line.strip()
-                if line.startswith("LLM_API_KEY="):
-                    cfg["api_key"] = line.split("=", 1)[1].strip()
-                elif line.startswith("LLM_BASE_URL="):
-                    cfg["base_url"] = line.split("=", 1)[1].strip()
-                elif line.startswith("LLM_MODEL="):
-                    cfg["model"] = line.split("=", 1)[1].strip()
-                elif line.startswith("LLM_MAX_TOKENS="):
-                    cfg["max_tokens"] = int(line.split("=", 1)[1].strip())
-    except Exception:
-        pass
-    # Fallback to environment variables
-    cfg.setdefault("api_key", os.environ.get("LLM_API_KEY", ""))
-    cfg.setdefault("base_url", os.environ.get("LLM_BASE_URL", ""))
-    cfg.setdefault("model", os.environ.get("LLM_MODEL", ""))
-    cfg.setdefault("max_tokens", int(os.environ.get("LLM_MAX_TOKENS", "65536")))
-    return cfg
+    """Read system LLM config — 收口 utils.llm_config.resolve_llm_config 单一真源。
+
+    2026-09-27销账00:10遗留#4：本函数曾自扫 opensoul/.env + 环境变量，与
+    resolve_llm_config 双入口并存——解析容错（旧实现在 try 外 int()，坏的
+    LLM_MAX_TOKENS 直接抛 ValueError 炸掉代理）、文件覆盖、key_source 观测
+    三处语义各走各的。现委托单一真源：opensoul/.env → acp-proxy/.env →
+    进程环境兜底，坏值容错，带 key_source 观测（key原文绝不进日志）。
+
+    include_mimo_overrides=False：MIMO_* 是进化strand专用覆写，聊天/agent
+    代理流量绝不跟随（运维把进化指向另一套LLM时用户会话仍走系统LLM配置）。
+    """
+    return resolve_llm_config(include_mimo_overrides=False)
 
 
 async def run_agent_proxy(agent_id: str, text: str) -> tuple[str, str, bool]:
@@ -204,6 +193,7 @@ async def run_agent_proxy(agent_id: str, text: str) -> tuple[str, str, bool]:
         # Always inject system LLM config — works for ALL agents
         env = os.environ.copy()
         llm_cfg = _get_llm_config()
+        logger.debug(f"agent-proxy[{agent_id}] LLM config: {describe(llm_cfg)}")
         if llm_cfg.get("api_key"):
             env["OPENAI_API_KEY"] = llm_cfg["api_key"]
             env["ANTHROPIC_API_KEY"] = llm_cfg["api_key"]  # Claude-style agents
