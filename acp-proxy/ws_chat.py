@@ -441,6 +441,13 @@ async def ws_chat_health():
         payload["context_budget"] = budget_snapshot()
     except Exception:
         pass
+    # P0-4 ScheduleWakeup执行侧闭环（claude-code runtime到点重新唤醒agent）：
+    # polls/claimed/fire_ok/fire_failed/claim_lost可观测——"到点有没有真醒"直接看这里
+    try:
+        from agent.wakeup_executor import get_wakeup_executor
+        payload["wakeup_executor"] = get_wakeup_executor().snapshot()
+    except Exception:
+        pass
     return payload
 
 

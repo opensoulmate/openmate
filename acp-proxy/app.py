@@ -199,7 +199,26 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Architecture init failed: {e}")
 
+    # P0-4 ScheduleWakeup执行侧闭环（claude-code runtime"到点重新唤醒agent"）：
+    # executor轮询opensoul due→CAS领取→无客户端唤醒回合→结果回执。
+    # a/b双实例都跑，opensoul claim CAS保证每次唤醒只执行一次（at-most-once）。
+    wakeup_executor = None
+    if os.environ.get("WAKEUP_EXECUTOR_ENABLED", "1") not in ("0", "false", ""):
+        try:
+            from agent.wakeup_executor import get_wakeup_executor
+            wakeup_executor = get_wakeup_executor()
+            await wakeup_executor.start()
+            logger.info("Wakeup executor started")
+        except Exception as e:
+            logger.warning(f"Wakeup executor failed to start: {e}")
+
     yield
+
+    if wakeup_executor:
+        try:
+            await wakeup_executor.stop()
+        except Exception as e:
+            logger.warning(f"Wakeup executor stop error: {e}")
 
     if evolution_task:
         evolution_task.cancel()
@@ -314,6 +333,18 @@ async def agent_token_attribution(limit: int = 20):
     top_consumers=什么最吃上下文，over_limit区分hard_limit/compaction_window两种超限性质"""
     try:
         return _token_attribution_stats(limit=min(max(limit, 1), 100))
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/agent/wakeup-executor")
+async def agent_wakeup_executor():
+    """P0-4 ScheduleWakeup执行侧闭环可观测（goose peek同款"它在干嘛"）：
+    polls/claimed/fire_ok/fire_failed/claim_lost计数 + last_error——
+    "到点到底有没有真醒"一眼可见，不是只告诉用户"在运行"。"""
+    try:
+        from agent.wakeup_executor import get_wakeup_executor
+        return get_wakeup_executor().snapshot()
     except Exception as e:
         return {"error": str(e)}
 
