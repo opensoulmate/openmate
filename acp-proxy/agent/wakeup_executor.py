@@ -37,6 +37,79 @@ import httpx
 
 logger = logging.getLogger("acp-proxy.wakeup_executor")
 
+# ── LLM级失败判定（P0-4执行侧遗留#2："LLM错误回合不能假装成功"）────────
+# LLMEngine 吞异常/超时时把机器标记当文本返回/追加（llm_engine.py
+# `return f"[LLM错误: {e}]"` / 流式 `yield f"\\n[LLM错误: {e}]"` /
+# `"\\n[LLM响应超时]"`），与 infection_guard._TAGGED_FAILURE_PREFIX 同语义——
+# 模型真实回复不会以此格式开头/收尾（正文引用不算，见 _is_llm_failure_text）。
+# mem0 §1.1 失败必须可见禁止假装成功：唤醒回合输出若是机器错误标记（如
+# provider 402 余额不足），必须按 fire 失败回执（释放重试/上限EXHAUSTED留痕），
+# 不能算"回合已执行"——否则 LLM 故障期间唤醒循环被错误地标记为成功。
+_LLM_FAILURE_MARKERS = ("[LLM错误", "[LLM响应超时")
+
+
+def _is_llm_failure_text(text: str | None) -> bool:
+    """输出是否为LLM级失败机器标记（fail-closed只认肯定证据）。
+
+    判定面：整段以标记开头（chat()非流式整段错误）或末行以标记开头
+    （流式在已有内容后追加错误chunk）。正文中间引用该字样不判失败。"""
+    t = (text or "").strip()
+    if not t:
+        return False
+    if t.startswith(_LLM_FAILURE_MARKERS):
+        return True
+    return t.splitlines()[-1].strip().startswith(_LLM_FAILURE_MARKERS)
+
+
+def _max_assistant_id(agent, session_id: str) -> int | None:
+    """本轮开始前会话最新assistant消息id（turn归因锚点——旧轮的错误文本
+    不算本轮失败）。取数失败返回None（降级为只看最新一条，仍fail-open）。"""
+    try:
+        db = agent._get_db()
+        try:
+            row = db.execute(
+                "SELECT MAX(id) FROM agent_messages WHERE session_id=? AND role='assistant'",
+                (session_id,),
+            ).fetchone()
+        finally:
+            db.close()
+        return int(row[0]) if row and row[0] is not None else None
+    except Exception as e:
+        logger.warning("[wakeup] turn归因锚点取数失败（fail-open）: %s", e)
+        return None
+
+
+def _llm_failure_reply(agent, session_id: str, after_id: int | None) -> str | None:
+    """检查本轮新落库的assistant输出是否为LLM级失败标记。
+
+    只认肯定证据（命中标记才判失败），取数失败/无新消息 fail-open 不判失败——
+    DB读故障不该把成功回合误判成失败引发重试风暴。"""
+    try:
+        db = agent._get_db()
+        try:
+            if after_id is None:
+                rows = db.execute(
+                    "SELECT content FROM agent_messages "
+                    "WHERE session_id=? AND role='assistant' ORDER BY id DESC LIMIT 1",
+                    (session_id,),
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    "SELECT content FROM agent_messages "
+                    "WHERE session_id=? AND role='assistant' AND id>? ORDER BY id",
+                    (session_id, int(after_id)),
+                ).fetchall()
+        finally:
+            db.close()
+        for r in rows:
+            content = r[0] or ""
+            if _is_llm_failure_text(content):
+                return content.strip()[-300:]
+        return None
+    except Exception as e:
+        logger.warning("[wakeup] LLM失败判定取数失败（fail-open不判失败）: %s", e)
+        return None
+
 
 def build_wakeup_prompt(event: dict) -> str:
     """唤醒回合prompt——显式声明是自动回合（不是用户消息），并给出闭环指令。
@@ -105,14 +178,25 @@ def default_headless_fire(event: dict):
 
     async def _run():
         agent = _get_headless_agent()
+        sid = str(event.get("session_id") or "")
+        # turn归因锚点：只把本轮新落库的assistant输出纳入LLM级失败判定
+        pre_id = _max_assistant_id(agent, sid)
         resp = await agent.prompt(
             [{"type": "text", "text": build_wakeup_prompt(event)}],
-            str(event.get("session_id") or ""),
+            sid,
         )
         stop_reason = str(getattr(resp, "stop_reason", "") or "")
         if stop_reason == "refusal":
             raise RuntimeError(
                 "唤醒回合被拒：会话在服务端不存在（memory+DB均未找到），拒绝给消失的会话造回合"
+            )
+        # LLM级失败判定（遗留#2）：回合"跑了"但输出是provider错误/超时的机器标记
+        # （如402余额不足）→按失败回执释放重试，禁止假装成功（mem0 §1.1）
+        bad = _llm_failure_reply(agent, sid, pre_id)
+        if bad:
+            raise RuntimeError(
+                "唤醒回合LLM级失败（provider错误/超时机器标记，按失败重试不假装成功）: "
+                + bad
             )
         return {"stop_reason": stop_reason}
 
@@ -157,7 +241,14 @@ class WakeupExecutor:
             "last_poll_at": None,
             "last_fire_at": None,
             "last_error": "",
+            "last_error_at": None,
         }
+
+    def _note_error(self, msg: str) -> None:
+        """记录最近错误+发生时刻（遗留#4：last_error只增不清会误导"现在还在错"，
+        last_error_at让监控面能判新鲜度；成功poll后整组归空见poll_once）。"""
+        self._stats["last_error"] = msg[:300]
+        self._stats["last_error_at"] = time.time()
 
     # ── 生命周期 ────────────────────────────────────────────────
 
@@ -190,7 +281,7 @@ class WakeupExecutor:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                self._stats["last_error"] = f"{type(e).__name__}: {e}"[:300]
+                self._note_error(f"{type(e).__name__}: {e}")
                 logger.warning("[wakeup] poll cycle error: %s", e)
             await asyncio.sleep(self._poll_interval_s)
 
@@ -205,6 +296,11 @@ class WakeupExecutor:
     async def poll_once(self) -> dict:
         self._stats["polls"] += 1
         self._stats["last_poll_at"] = time.time()
+        err_before = (
+            self._stats["claim_errors"]
+            + self._stats["ack_errors"]
+            + self._stats["fire_failed"]
+        )
         resp = await self._http("get", "/api/will/wakeup/due")
         resp.raise_for_status()
         due = (resp.json() or {}).get("due") or []
@@ -213,6 +309,16 @@ class WakeupExecutor:
         for ev in due:
             if await self._fire_one(ev):
                 fired += 1
+        err_after = (
+            self._stats["claim_errors"]
+            + self._stats["ack_errors"]
+            + self._stats["fire_failed"]
+        )
+        if err_after == err_before:
+            # 成功poll后归空（遗留#4）：干净一轮清掉历史last_error，
+            # 配合last_error_at判新鲜度，监控面不再被陈旧错误误导"现在还在错"
+            self._stats["last_error"] = ""
+            self._stats["last_error_at"] = None
         return {"due": len(due), "fired": fired}
 
     async def _fire_one(self, ev: dict) -> bool:
@@ -221,7 +327,7 @@ class WakeupExecutor:
             cresp = await self._http("post", "/api/will/wakeup/claim", json={"event_id": eid})
         except Exception as e:
             self._stats["claim_errors"] += 1
-            self._stats["last_error"] = f"claim {eid}: {type(e).__name__}: {e}"[:300]
+            self._note_error(f"claim {eid}: {type(e).__name__}: {e}")
             logger.warning("[wakeup] claim %s failed: %s", eid, e)
             return False
         if cresp.status_code == 409:
@@ -231,7 +337,7 @@ class WakeupExecutor:
         if cresp.status_code != 200:
             # 非409非200=opensoul侧异常，必须可见（与CAS败北区分开）
             self._stats["claim_errors"] += 1
-            self._stats["last_error"] = f"claim {eid}: HTTP {cresp.status_code}"[:300]
+            self._note_error(f"claim {eid}: HTTP {cresp.status_code}")
             logger.warning("[wakeup] claim %s HTTP %s", eid, cresp.status_code)
             return False
         self._stats["claimed"] += 1
@@ -251,10 +357,10 @@ class WakeupExecutor:
             )
             if aresp.status_code != 200:
                 self._stats["ack_errors"] += 1
-                self._stats["last_error"] = f"ack {eid}: HTTP {aresp.status_code}"[:300]
+                self._note_error(f"ack {eid}: HTTP {aresp.status_code}")
         except Exception as e:
             self._stats["ack_errors"] += 1
-            self._stats["last_error"] = f"ack {eid}: {type(e).__name__}: {e}"[:300]
+            self._note_error(f"ack {eid}: {type(e).__name__}: {e}")
             logger.warning("[wakeup] ack %s failed: %s", eid, e)
         self._stats["fire_ok" if ok else "fire_failed"] += 1
         self._stats["last_fire_at"] = time.time()
@@ -266,6 +372,8 @@ class WakeupExecutor:
                 (ev.get("reason") or "")[:60],
             )
         else:
+            # 失败必须可见（mem0 §1.1）：fire失败同样进last_error账本
+            self._note_error(f"fire {eid}: {err}")
             logger.warning("[wakeup] fire %s failed: %s", eid, err)
         return ok
 
