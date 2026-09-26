@@ -1435,6 +1435,50 @@ You can send files to the user natively: to deliver a file, write a brief confir
         }
         builtin_tools.append(recall_tool)
 
+        # schedule_wakeup — claude-code SDK ScheduleWakeup（noop自报+streak折叠）：
+        # agent 自主定下次唤醒延迟 + 自报本轮是否空转（"我都不知道他们在干嘛"的教科书解）。
+        # 状态落 opensoul will/wakeup（SQLite），延迟钳制/折叠由 opensoul 侧统一裁决。
+        wakeup_tool = {
+            "type": "function",
+            "function": {
+                "name": "schedule_wakeup",
+                "description": (
+                    "自主安排下次唤醒：告诉运行时多久后再检查一次，并自报本次检查是否空转"
+                    "（noop）。用于轮询/看护/等待类长任务。规则："
+                    "①delay_seconds会被运行时钳到[60,3600]秒（钳制结果会显式返回）；"
+                    "②reason必填一句话——这次唤醒检查了什么/为什么还要再醒（会展示给用户）；"
+                    "③noop=true表示本次检查什么都没发生，false表示有进展——连续noop会被"
+                    "折叠显示并统计streak，用户据此判断你是否空转，必须诚实自报；"
+                    "④任务完成或无需再检查时必须调用stop=true结束唤醒循环，不要留悬挂循环。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "reason": {
+                            "type": "string",
+                            "description": "一句话：这次检查了什么/为什么还要再醒（必填）",
+                        },
+                        "noop": {
+                            "type": "boolean",
+                            "description": "true=本次检查什么都没发生（空转）；false=有进展",
+                        },
+                        "delay_seconds": {
+                            "type": "number",
+                            "description": "下次唤醒延迟秒数（会被钳到[60,3600]，默认60）",
+                            "default": 60,
+                        },
+                        "stop": {
+                            "type": "boolean",
+                            "description": "true=结束唤醒循环（任务完成/无需再检查时必须调用）",
+                            "default": False,
+                        },
+                    },
+                    "required": ["reason", "noop"],
+                },
+            },
+        }
+        builtin_tools.append(wakeup_tool)
+
         # 添加进化引擎工具（支持直接对象或HTTP API两种模式）
         evolution_tools = []
         has_evolution = self._evolution_engine is not None or hasattr(self, '_evolution_api_url')
@@ -2262,6 +2306,52 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             else:
                                 status, skills, quality = {}, [], {}
                             result = json.dumps({"status": status, "skills": skills, "quality": quality}, ensure_ascii=False, indent=2)
+                        elif func_name == "schedule_wakeup":
+                            # ── claude-code ScheduleWakeup（noop自报+streak折叠）：
+                            # agent自主定下次唤醒延迟+自报本轮是否空转。延迟钳制/streak/
+                            # 折叠由opensoul侧will/wakeup统一裁决（SQLite持久化，重启不丢）；
+                            # 失败必须可见——opensoul不可用/非200一律返回显式错误文本，
+                            # 禁止假装调度成功。──
+                            _wu_payload = {
+                                "agent_id": "soulmate",
+                                "session_id": session_id or "",
+                                "reason": str(func_args.get("reason", "") or ""),
+                                "noop": bool(func_args.get("noop", False)),
+                                "delay_seconds": func_args.get("delay_seconds", 60),
+                                "stop": bool(func_args.get("stop", False)),
+                            }
+                            try:
+                                async with httpx.AsyncClient(timeout=10.0) as client:
+                                    _wu_resp = await client.post(
+                                        "http://127.0.0.1:8090/api/will/wakeup/schedule",
+                                        json=_wu_payload,
+                                    )
+                                if _wu_resp.status_code == 200:
+                                    _wu = _wu_resp.json()
+                                    _wu_clamp_note = (
+                                        ", 已钳制到[60,3600]" if _wu.get("clamped") else ""
+                                    )
+                                    _wu_fold_note = (
+                                        "（连续空转，已进入折叠区）" if _wu.get("folded") else ""
+                                    )
+                                    _wu_stop_note = (
+                                        "\n⏹ 唤醒循环已结束（stop）" if _wu.get("stop") else ""
+                                    )
+                                    result = (
+                                        f"✅ 唤醒已调度: {int(_wu.get('delay_s', 0))}s后"
+                                        f"（请求{_wu.get('requested_delay_s')}s{_wu_clamp_note}）\n"
+                                        f"noop自报={_wu.get('noop')} streak={_wu.get('streak')}"
+                                        f"{_wu_fold_note}\n"
+                                        f"next_wakeup_at={_wu.get('next_wakeup_at')}"
+                                        f"{_wu_stop_note}"
+                                    )
+                                else:
+                                    result = (
+                                        f"⚠️ schedule_wakeup被拒绝({_wu_resp.status_code}): "
+                                        f"{_wu_resp.text[:200]}"
+                                    )
+                            except Exception as _wu_err:
+                                result = f"⚠️ wakeup调度不可用: {_wu_err}"
                         elif func_name == "batch_execute":
                             # ── P1 Code Mode工具批量化（goose code_execution+kilocode
                             # code-mode两方定案）：N次工具调用批成1个脚本执行。内层每次
