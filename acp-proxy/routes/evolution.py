@@ -117,6 +117,27 @@ async def trigger_evolution():
     }
 
 
+@router.post("/strands/{strand_id}/reset-breaker")
+async def reset_strand_breaker(strand_id: str):
+    """人工复位LLM错误风暴熔断（job_queue.requeue同款语义：人工意图不受熔断拦截）。
+
+    场景：充值/换key修复LLM后立即恢复自动进化，无需等冷却过期。
+    """
+    engine = get_engine()
+    if not engine:
+        return {"error": "Evolution engine not initialized"}
+    strand = {"strand_a": engine.strand_a, "strand_b": engine.strand_b}.get(strand_id)
+    if strand is None:
+        return {"error": f"Unknown strand: {strand_id}", "known": ["strand_a", "strand_b"]}
+    status = strand.reset_breaker()
+    return {
+        "ok": True,
+        "strand_id": strand_id,
+        "breaker": status.get("breaker"),
+        "llm_failure_streak": status.get("llm_failure_streak"),
+    }
+
+
 @router.get("/checkpoint")
 async def get_checkpoint():
     """获取共享检查点（成功的进化经验）"""
@@ -426,6 +447,8 @@ async def get_evolution_config():
         "observe_interval": dna_strand_runner.OBSERVE_INTERVAL,
         "reflection_interval": evolution.REFLECTION_INTERVAL,
         "batch_analysis_interval": evolution.BATCH_ANALYSIS_INTERVAL,
+        "llm_breaker_storm_window": dna_evolution.LLM_BREAKER_STORM_WINDOW,
+        "llm_breaker_cooldown_s": dna_evolution.LLM_BREAKER_COOLDOWN_S,
     }
 
 

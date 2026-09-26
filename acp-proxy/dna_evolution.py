@@ -44,6 +44,14 @@ SOLO_CONFIRM_MISSES = 6  # 连续6次心跳丢失才确认伙伴死亡
 EVOLUTION_INTERVAL = 3600  # 1小时（可通过API动态修改）
 PLAN_TIMEOUT = 120  # 等待伙伴执行计划的超时
 
+# agno §1.4 错误风暴熔断（2026-09-27 00:10轮遗留#2销账）：连续同错=系统性故障
+# （provider宕机/余额402/密钥失效），不是N条独立失败——streak≥窗口即熔断暂停
+# 自动进化调度，防每小时空转烧调用+把同一故障记成N条独立失败污染进化样本。
+# 分工声明：此处只管openmate DNA strand自身的进化调度；opensoul heredity
+# evolution_loop的breaker管opensoul提案循环——两套breaker各管各的循环，无共享状态。
+LLM_BREAKER_STORM_WINDOW = 3  # 连续LLM失败≥N次=错误风暴
+LLM_BREAKER_COOLDOWN_S = 1800  # 熔断冷却30分钟（半开放行一次试探）
+
 
 class StrandRole(Enum):
     PRIMARY = "primary"
@@ -248,6 +256,16 @@ class DNAStrand:
         self._last_llm_error = ""
         self._last_llm_error_at = ""
 
+        # agno §1.4 错误风暴熔断：streak≥窗口→暂停自动进化调度直至冷却过期
+        # （半开：冷却后放行一次试探，成功复位/失败重新计数冷却）
+        self._breaker_open = False
+        self._breaker_opened_at = 0.0
+        self._breaker_suppressed = 0  # 熔断期间被抑制的进化次数（可见计数）
+
+        # 通用失败账本（非LLM故障，与last_llm_error分账；00:10遗留#3）
+        self._last_error = ""
+        self._last_error_at = ""
+
         # 实时日志文件（供SSE tail）
         self._log_file = Path(repo_root) / "acp-proxy" / "data" / f"dna_log_{strand_id}.jsonl"
 
@@ -414,7 +432,16 @@ class DNAStrand:
                         self._log("turn", f"❌ 拒绝伙伴计划 {plan.plan_id}")
                     self._partner_plans_for_me = []
 
-                # 2. 自己的进化周期
+                # 2. 自己的进化周期（agno §1.4熔断门：错误风暴期间不烧进化预算）
+                elif should_evolve and self._breaker_is_open(now):
+                    self._breaker_suppressed += 1
+                    self._log("error", f"⛔ 进化被熔断抑制（LLM错误风暴，streak={self._llm_failure_streak}）", {
+                        "llm_failure_streak": self._llm_failure_streak,
+                        "suppressed_cycles": self._breaker_suppressed,
+                        "cooldown_remaining_s": round(
+                            LLM_BREAKER_COOLDOWN_S - (now - self._breaker_opened_at), 1),
+                    })
+                    last_evolution = now  # 抑制窗口按正常节奏计时，熔断恢复后不回堆积
                 elif should_evolve:
                     self._log("turn", f"🚀 开始进化 (interval={interval}s)")
                     await self._evolve()
@@ -578,6 +605,9 @@ class DNAStrand:
                 "timestamp": cycle.completed_at,
             })
             self._save_state()
+            # agno §1.4：连续同错≥窗口=系统性故障不是N条独立失败→熔断暂停自动进化
+            if self._llm_failure_streak >= LLM_BREAKER_STORM_WINDOW:
+                self._breaker_trip(f"连续{self._llm_failure_streak}次LLM失败（同错风暴）")
             self._log("error", f"❌ LLM调用失败，本轮进化未执行（失败≠无改进）: {str(e)[:120]}", {
                 "llm_failure_streak": self._llm_failure_streak,
             })
@@ -586,7 +616,96 @@ class DNAStrand:
                 f"(streak={self._llm_failure_streak})"
             )
         except Exception as e:
-            logger.error(f"[{self.strand_id}] Cycle failed: {e}")
+            # 通用失败记账（00:10遗留#3）：非LLM异常此前只logger.error不留账本，
+            # "跑了但炸了"在history/状态面不可见。现在与LLM失败分账（error键≠llm_error键）。
+            self._last_error = str(e)[:300]
+            self._last_error_at = datetime.now(timezone.utc).isoformat()
+            cycle.success = False
+            cycle.error = f"[{cycle.stage.value}] {str(e)[:280]}"
+            cycle.completed_at = datetime.now(timezone.utc).isoformat()
+            self._cycle_count += 1
+            self._cycles.append(cycle)
+            self._history.append({
+                "cycle_id": cycle.cycle_id,
+                "strand_id": self.strand_id,
+                "improvements_count": 0,
+                "success": False,
+                "error": str(e)[:200],
+                "stage": cycle.stage.value,
+                "timestamp": cycle.completed_at,
+            })
+            self._save_state()
+            self._log("error", f"❌ 进化周期异常失败（非LLM故障）: {str(e)[:120]}", {
+                "stage": cycle.stage.value,
+            })
+            logger.error(f"[{self.strand_id}] Cycle {cycle.cycle_id} failed at {cycle.stage.value}: {e}")
+
+    # ── agno §1.4 错误风暴熔断（连续同错即停） ──────────────
+
+    def _breaker_is_open(self, now: float | None = None) -> bool:
+        """熔断是否处于拦截态（调度门唯一判定点）。
+
+        半开语义（agno/job_queue同款）：冷却过期后放行一次试探（返回False）——
+        试探失败→_breaker_trip重新开闸（冷却重新计数），试探成功→_breaker_close复位。
+        """
+        if not self._breaker_open:
+            return False
+        now = time.time() if now is None else now
+        return (now - self._breaker_opened_at) < LLM_BREAKER_COOLDOWN_S
+
+    def _breaker_trip(self, reason: str):
+        """开闸（或半开失败后再开闸=冷却重新计数）。开闸事件必须留痕。"""
+        was_blocking = self._breaker_is_open()
+        self._breaker_open = True
+        self._breaker_opened_at = time.time()
+        if not was_blocking:
+            self._log("error", f"🔴 LLM错误风暴熔断开启（{reason}），暂停自动进化直至冷却{LLM_BREAKER_COOLDOWN_S}s", {
+                "llm_failure_streak": self._llm_failure_streak,
+                "cooldown_s": LLM_BREAKER_COOLDOWN_S,
+                "storm_window": LLM_BREAKER_STORM_WINDOW,
+            })
+            logger.error(
+                f"[{self.strand_id}] LLM错误风暴熔断开启: {reason} "
+                f"(streak={self._llm_failure_streak}, cooldown={LLM_BREAKER_COOLDOWN_S}s)"
+            )
+
+    def _breaker_close(self, why: str = "llm_success"):
+        """复位熔断（LLM恢复可用=风暴结束）。"""
+        if self._breaker_open:
+            self._breaker_open = False
+            self._breaker_opened_at = 0.0
+            self._log("turn", f"🟢 LLM错误风暴熔断复位（{why}），恢复自动进化调度")
+            logger.info(f"[{self.strand_id}] 熔断复位: {why}")
+
+    def reset_breaker(self) -> dict:
+        """人工复位熔断（job_queue.requeue同款语义：人工意图不受熔断拦截）。"""
+        was_open = self._breaker_open
+        self._breaker_open = False
+        self._breaker_opened_at = 0.0
+        self._log("turn", f"🔧 人工复位熔断（此前open={was_open}），恢复自动进化调度", {"by": "operator"})
+        logger.info(f"[{self.strand_id}] 熔断人工复位 (此前open={was_open})")
+        return self.get_status()
+
+    def _breaker_status(self) -> dict:
+        now = time.time()
+        if not self._breaker_open:
+            state = "closed"
+        elif self._breaker_is_open(now):
+            state = "open"
+        else:
+            state = "half_open"  # 冷却已过，放行下次试探
+        return {
+            "state": state,
+            "open": self._breaker_open,
+            "gating": self._breaker_is_open(now),
+            "opened_at": self._breaker_opened_at or None,
+            "cooldown_remaining_s": round(
+                max(0.0, LLM_BREAKER_COOLDOWN_S - (now - self._breaker_opened_at)), 1
+            ) if self._breaker_open else 0.0,
+            "suppressed_cycles": self._breaker_suppressed,
+            "storm_window": LLM_BREAKER_STORM_WINDOW,
+            "cooldown_s": LLM_BREAKER_COOLDOWN_S,
+        }
 
     # ── 执行伙伴的计划（交叉编程核心） ──────────────────
 
@@ -1482,6 +1601,7 @@ new_string是替换后的文本。
                 # 200但空输出：对反思/规划/审查一律无意义，同判失败（不许伪装"无改进"）
                 raise LLMCallError("LLM返回空内容（HTTP 200但无输出）")
             self._llm_failure_streak = 0  # 成功一次即清零连续失败计数
+            self._breaker_close("llm_success")  # LLM恢复可用=风暴结束，自动复位熔断
             return full_content
         except LLMCallError:
             raise
@@ -1716,6 +1836,16 @@ new_string是替换后的文本。
                 self._memory = state.get("memory", [])
                 self._cycle_count = state.get("cycle_count", 0)
                 self._history = state.get("history", [])
+                # 恢复失败账本+熔断状态（重启不重置错误风暴计数——比job_queue内存态熔断更进一步）
+                self._llm_failure_streak = state.get("llm_failure_streak", 0)
+                self._last_llm_error = state.get("last_llm_error", "")
+                self._last_llm_error_at = state.get("last_llm_error_at", "")
+                self._last_error = state.get("last_error", "")
+                self._last_error_at = state.get("last_error_at", "")
+                breaker = state.get("breaker") or {}
+                self._breaker_open = bool(breaker.get("open", False))
+                self._breaker_opened_at = float(breaker.get("opened_at", 0.0) or 0.0)
+                self._breaker_suppressed = int(breaker.get("suppressed", 0))
                 # 恢复观察数据
                 for o in state.get("observations", []):
                     self._observations.append(Observation(
@@ -1750,6 +1880,16 @@ new_string是替换后的文本。
                     "cycle_count": self._cycle_count,
                     "memory": self._memory[-50:],
                     "history": self._history[-100:],
+                    "llm_failure_streak": self._llm_failure_streak,
+                    "last_llm_error": self._last_llm_error,
+                    "last_llm_error_at": self._last_llm_error_at,
+                    "last_error": self._last_error,
+                    "last_error_at": self._last_error_at,
+                    "breaker": {
+                        "open": self._breaker_open,
+                        "opened_at": self._breaker_opened_at,
+                        "suppressed": self._breaker_suppressed,
+                    },
                     "observations": [
                         {"obs_id": o.obs_id, "type": o.obs_type, "content": o.content,
                          "analyzed": o.analyzed, "timestamp": o.timestamp}
@@ -1866,6 +2006,9 @@ new_string是替换后的文本。
             "llm_failure_streak": self._llm_failure_streak,
             "last_llm_error": self._last_llm_error,
             "last_llm_error_at": self._last_llm_error_at,
+            "last_error": self._last_error,
+            "last_error_at": self._last_error_at,
+            "breaker": self._breaker_status(),
         }
 
 
