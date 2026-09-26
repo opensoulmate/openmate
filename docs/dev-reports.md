@@ -2864,3 +2864,42 @@
 4. 配置解析双入口并存：ws_chat._get_llm_config仍自读.env（语义已被resolve_llm_config镜像，本次未动以控爆炸半径）——后续可改ws_chat委托utils/llm_config收口单一真源。
 5. 上轮遗留（relay消息级粒度、relay每WS轮询、唤醒触发行agent_message透出、前端视觉走查登录墙、overview() N+1、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步）仍有效非本轮范围。
 6. cron环境约束实录：含$()嵌套sed的命令被tirith判"malformed payload"BLOCKED→拆成简单命令；长inline git commit message触发"env/config redirection"误判pending approval→改`git commit -F /tmp/commit_msg.txt`模式（新惯例，后续commit沿用）。
+
+## [2026-09-27 02:26 CST] DNA进化strand错误风暴熔断（agno §1.4）+ 非LLM失败通用记账——streak数据接上"连续同错即停"机制（00:10遗留#2/#3双销账）
+**目标**：销账00:10轮遗留#2（明确标注"下一步"）——连续LLM失败streak已计数入状态面但**未接熔断机制**，provider 402等系统性故障时每小时空转烧LLM调用，且同一故障被记成N条独立失败污染进化样本；顺带销账遗留#3——`_evolve`非LLM异常只logger.error不留账本，"跑了但炸了"在history/状态面不可见。两件同属失败记账域，一轮闭环。
+**调研来源**：42-agno-source.md §1.4错误风暴熔断（"前storm_window个attempt全部error且error_type相同→停止整个rollout，防API key失效时烧完K×N次调用"）；opensoul job_queue 20:36轮同款熔断实现（`_breaker_record_failure`签名同错≥window→open、`[breaker_open]`前缀、cooldown半开、`requeue`人工通道不受熔断拦截——本轮reset_breaker逐字对齐该语义）；mem0 §1.1（失败必须可见——开闸事件/抑制计数/通用失败全部留痕）；evolution-engine-patterns.md §1.4（"失败记忆的第一道闸门是别把系统性故障记成N条独立失败"）。与opensoul heredity evolution_loop既有breaker的分工：本breaker只管openmate DNA strand自身进化调度，两套breaker各管各的循环、无共享状态，不打架（docstring声明）。
+**改动文件**：
+- openmate `acp-proxy/dna_evolution.py`（+147/-18增量）：熔断常量+五方法+调度门+通用失败记账+持久化+get_status新键
+- openmate `acp-proxy/routes/evolution.py`（+23）：reset-breaker端点+config透出熔断参数
+- openmate `acp-proxy/tests/test_dna_error_storm_breaker.py`（新388行，18测）
+**改动内容**：
+1. **熔断机制（遗留#2）**：`LLM_BREAKER_STORM_WINDOW=3`/`LLM_BREAKER_COOLDOWN_S=1800`；`_evolve`的LLM失败分支streak≥窗口→`_breaker_trip`开闸（冷却重新计数但开闸事件只记一次）；run()主循环调度门`should_evolve and self._breaker_is_open(now)`→抑制自动进化+`_breaker_suppressed`可见计数+JSONL"⛔进化被熔断抑制"留痕（抑制窗口按正常节奏计时`last_evolution=now`，熔断恢复后不回堆积）；半开语义：冷却过期`_breaker_is_open`放行一次试探——试探失败再开闸（冷却重新计数）、试探成功（真实`_call_llm`成功路径`_breaker_close("llm_success")`）自动复位；`reset_breaker()`人工复位通道（job_queue.requeue同款：人工意图不受熔断拦截，POST /trigger直调`_evolve`同样绕过调度门）。
+2. **通用失败记账（遗留#3）**：`except Exception`分支从只logger.error升级为完整记账——`cycle.error`带stage前缀、history写`{error, stage, timestamp, success:False}`（**error键≠llm_error键**，两账分立）、`_last_error/_last_error_at`状态面、JSONL"❌进化周期异常失败（非LLM故障）"留痕；非LLM失败**不**进LLM风暴熔断（不同故障域）。
+3. **熔断状态持久化**：state文件新增breaker/streak/last_error字段+`_load_state`恢复——**重启不重置风暴计数**（比job_queue内存态熔断更进一步，其遗留#1就此在本子系统不成立）；老state文件无新键默认关闭不炸。
+4. **可观测**：`get_status()`新增`breaker`{state(open/half_open/closed), gating, opened_at, cooldown_remaining_s, suppressed_cycles, storm_window, cooldown_s}+`last_error/last_error_at`；`GET /api/evolution/config`透出熔断参数。
+**接线位置**（grep证据，文件:行号）：
+- `dna_evolution.py:645 _breaker_is_open`（调度门唯一判定点）→ `:436 run()主循环` `elif should_evolve and self._breaker_is_open(now)`（真实自动进化路径：app.py lifespan→`_run_evolution_strand`→`DNAStrand.run()`）→ `:437 _breaker_suppressed += 1`；
+- 开闸：`:610 _evolve except LLMCallError分支` `self._breaker_trip(...)`（真实进化路径：run()→_evolve；API路径`routes/evolution.py:98 POST /trigger`→`strand._evolve()`）；
+- 复位：`:1604 _call_llm成功路径` `self._breaker_close("llm_success")`；
+- 状态面：`:2011 get_status()["breaker"]` → 消费点`routes/evolution.py:68 /status`、`:78 /strands`（router挂载`app.py:261 include_router(evolution_router)`既有）；
+- 人工通道：`routes/evolution.py:120 POST /strands/{strand_id}/reset-breaker` → `:132 strand.reset_breaker()`；
+- 通用记账：`:618-640 except Exception` → `_save_state`持久化 → `/api/evolution/history`消费。
+**验证结果**：
+- 完整性✅：`git diff --cached --stat` 133d1321（4文件+577/-23：dna_evolution.py/routes/evolution.py均增量hunk零全量重写，test新文件388行真实落盘）；sibling并行改动（settings-client.tsx/locales/*.json/.mmb-render/e2e_probe2.py）显式排除未入库。
+- 集成✅：上述grep调用链 + live实锤（见下）。
+- 测试✅：新`tests/test_dna_error_storm_breaker.py` **18 passed**（开闸4：窗口下不开闸/达窗口开闸+status+留痕/半开前重复失败冷却刷新但开闸只记一次/非LLM失败5次不进LLM熔断；调度门3：**真实run()主循环spin**熔断开→_evolve零调用+suppressed计数+日志、对照组熔断关→_evolve调用1次（防恒抑制死代码）、手动直调绕门执行；半开+复位5：冷却过期half_open放行/试探失败再开闸冷却重计/真实_call_llm成功自动复位/reset_breaker人工通道+留痕/完整_evolve成功复位；通用记账2：非LLM异常按失败记账（error键+stage+last_error状态面+cycle.error+反"无改进"话术断言+不污染LLM账本）/连续2次可见累积且不进streak；持久化2：重启恢复breaker+streak+suppressed/老state文件无新键不炸；接线护栏2）；既有回归`-k "dna or evolution or wakeup or job"` **114 passed**无回归；acp-proxy全量`tests/` **992 passed 0 failed**（312.67s，=上轮974+18新，无回归）；`systemic_test.py` **29/29 passed**（EXIT=0，S1-S6全绿）。本轮纯后端无前端改动，npm build不适用。
+- **live行为实锤**（重启后真服务+真实402风暴端到端）：
+  ① 新观测键live：GET /api/evolution/config→`llm_breaker_storm_window:3, llm_breaker_cooldown_s:1800`；GET /strands→breaker键全量在响应，且strand_a `streak=1`是**state文件持久化的真实旧账**（重启后未清零，持久化live生效）；
+  ② **真实风暴驱动熔断**：POST /api/evolution/trigger×3（真实LLM请求→402余额不足）→strand_a streak=1→4、strand_b 0→3→**双双breaker open, gating=True, cooldown_remaining_s=1794.1**，last_llm_error实录真实402响应体；
+  ③ 开闸留痕：dna_log_strand_a/b.jsonl各**恰好1条**`🔴 LLM错误风暴熔断开启（连续3次LLM失败（同错风暴）），暂停自动进化直至冷却1800s`（含streak/cooldown/storm_window details，"开闸只记一次"live实证）；
+  ④ 人工通道：POST /strands/strand_a/reset-breaker→200 `breaker.state=closed`且**streak=4保留**（复位熔断不清账本）；strand_b同；未知strand→显式error+known列表不炸；复位后GET /strands→双链state=closed, gating=False；
+  ⑤ 失败记账live：GET /history→14条新条目带`llm_error+stage:"reflect"`（修复后），36条旧条目无llm_error（修复前伪装条目），修复前后同框对照。
+**服务重启**：`systemctl --user restart acp-proxy-a.service acp-proxy-b.service`→两服务active；:8092/health=200、:8095/health=200（opensoul本轮零改动未重启）。
+**commit**：openmate `133d1321`（本轮仅openmate改动，无opensoul侧commit）。
+**遗留问题**：
+1. **⚠️环境问题仍在（非代码，需用户处理）**：LLM供应商**余额不足（402 Insufficient account balance）**——本轮熔断全部live证据借真实402驱动（正好是设计场景）；充值/换key后建议先`POST /api/evolution/strands/{id}/reset-breaker`清账（或等冷却半开自愈），再`POST /api/evolution/trigger`验证真实进化输出。
+2. 熔断只覆盖LLM失败风暴；**通用（非LLM）失败的同错风暴未熔断**（本轮只做记账）——若pipeline/import类错误循环出现仍会每周期重试。下轮候选：通用失败streak同款熔断（分域独立窗口，注意别把LLM窗口和通用窗口混算）。
+3. 半开语义是"冷却后放行直至下次失败"而非严格"只放行一次"——strand每次试探间隔≥EVOLUTION_INTERVAL(1800s)且串行，实践中等价；若未来并发进化周期需收紧为严格单试探。
+4. 00:10遗留#4（ws_chat._get_llm_config与resolve_llm_config双入口并存，应委托收口单一真源）仍有效，下轮P1候选。
+5. 上轮遗留（relay消息级粒度、relay每WS轮询、唤醒触发行agent_message透出、前端视觉走查登录墙、overview() N+1、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步）仍有效非本轮范围。
+6. cron环境约束实录：`tail -N`接管道仍报"exit_code被tail掩盖"——长测试命令不接管道直跑（本轮992全量直跑）；大文件dev-reports.md追加用`cat >>`（write_file全量覆盖禁用惯例沿用）。
