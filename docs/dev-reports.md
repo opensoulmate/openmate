@@ -2753,3 +2753,41 @@
 4. 上轮遗留#2（唤醒回合无实时流式推送，跨proxy实例可见性不保证）与#5（due_wakeups全表扫描）仍有效；本轮`_has_turn_output`/`_max_assistant_id`的MAX(id)/id>?查询按session_id+role过滤，同建议后续配索引（当前单机量级无碍）。
 5. 上轮遗留（OpenMate折叠UI未做、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步）仍有效，非本轮范围。
 6. cron环境约束再实录：`curl | python3`管道继续被tirith判"pipe to interpreter"挂approval——继续沿用"curl -o落盘+python3读文件"模式。
+
+## [2026-09-26 18:55 CST] Wakeup执行器观测面板（tail活动流+noop折叠UI）+ due_wakeups窗口化销账全表扫描
+**目标**：①后台wakeup执行器"在干嘛"此前只有curl快照可见——按用户铁律"任何后台运行的系统必须有实时监控面板（类tail日志流）"补齐monitoring页观测面板；②销账多轮遗留"due_wakeups全表扫描取每key最新，事件量大后需索引/窗口优化"（11:11/13:40/16:20三轮挂着）；③销账08:31遗留#2"OpenMate折叠UI未做（下轮P2）"（folded_view数据面早已就绪）。
+**调研来源**：goose peek三指标（"不知道它在干嘛"行业首个完整实现——本轮为其执行器动作账本化）；kilocode BackgroundJob（作业必须有真实执行语义+可观测）；claude-code ScheduleWakeup noop streak折叠（noop_streak块=UI契约）；mem0 §1.1（失败必须可见——活动流里fire_failed/poll_error与成功同等留痕）。
+**改动文件**：
+- opensoul `src/will/wakeup.py`（+35/-4）：overview()全键聚合 + due_wakeups窗口化查询
+- opensoul `src/api/will.py`（+11）：GET /api/will/wakeup/overview
+- opensoul `tests/test_wakeup_overview.py`（新8测）
+- openmate `acp-proxy/agent/wakeup_executor.py`（+27）：_note_activity环形缓冲+9动作留痕点+snapshot().recent
+- openmate `acp-proxy/tests/test_wakeup_observability.py`（新8测）
+- openmate `src/app/(app)/monitoring/monitoring-client.tsx`（+328/-1）：Wakeup卡片
+**改动内容**：
+1. **due_wakeups窗口化（遗留销账）**：查询改 `WHERE id IN (SELECT MAX(id) FROM wakeup_events GROUP BY agent_id, session_id)`——每key只取最新一行（id自增≡ts序，record()是唯一写入路径），不再全表加载进Python做per-key去重；行为不变由既有测试+新增回归护栏（旧到点事件被新stop事件顶掉不得复活/精确判最新行/50事件×3键每key至多一次）证明。
+2. **overview()全键聚合**：全部(agent_id, session_id)键的status()语义摘要（active/current_streak/countdown/fire执行侧状态），逐键复用status()单一真源不复制判定；due_count与due_wakeups同谓词；排序=最早到点在前、stopped沉底。
+3. **executor活动流（tail数据面）**：`_note_activity`环形缓冲maxlen=20最新在前，claimed/claim_lost/claim_error/fire_ok/fire_failed/ack_error/poll_error七类动作各留{ts,kind,event_id,detail}；snapshot()新增recent键（与聚合计数器并存）。
+4. **monitoring页Wakeup卡片**（改造现有Agents & Jobs tab，未新建页面）：①双实例executor快照（running/polls/claimed/lost/fire_ok/failed/errors/last_error+last_error_at新鲜度前缀）；②双实例活动流合并tail（按ts倒序取最新8条、标注来源a/b实例）；③唤醒循环列表（due now/active/stopped/exhausted徽章+noop streak高亮≥3+events/countdown/fire计数/last reason）；④点击行展开拉/wakeup/folded渲染折叠块（noop_streak：`×N noop streak (max M)`+first_reason→last_reason；单条：noop×streak/progress）。
+**接线位置**（grep证据，文件:行号）：
+- opensoul：`src/will/wakeup.py:395 def overview` → `src/api/will.py:811 wakeup_overview`（GET /api/will/wakeup/overview）→ router挂载`src/main.py:547 include_router(will_router, prefix="/api/will")`（既有include，无需新增）；窗口化后的`due_wakeups`消费点=`src/api/will.py:831 GET /wakeup/due`（executor轮询入口，真实调度路径）。
+- acp-proxy：`agent/wakeup_executor.py:294 _note_activity`定义 → 9个真实动作路径调用点：`:336 poll_error`/`:383,:395 claim_error`/`:389 claim_lost`/`:399 claimed`/`:419,:423 ack_error`/`:428 fire_ok`/`:438 fire_failed` → `:451 snapshot()['recent']` → 消费点`app.py:340/347 GET /api/agent/wakeup-executor`+`ws_chat.py:448 /health`。
+- 前端：`monitoring-client.tsx:992-994` fetch三数据源（:8092/:8095 wakeup-executor + :8090 wakeup/overview）→ `:1045` 展开拉/wakeup/folded → `:1064 wakeupActivityFeed` 双实例合并 → `:2548+` 渲染（agents tab既有10s轮询fetchAgentsData，非死代码）。
+**验证结果**：
+- 完整性✅：`git show --numstat`——opensoul `17b3e2d0`（3文件+204/-4，wakeup.py/will.py均增量hunk非全量重写）；openmate `2fcc339f`（3文件+550/-1，wakeup_executor.py纯+27增量、monitoring-client.tsx增量插入）。sibling并行改动（opensoul config/rbac_policy.csv、openmate settings-client.tsx/locales/*.json）显式排除未入库。
+- 集成✅：上述grep调用链 + live实锤（见下）。
+- 测试✅：opensoul `tests/test_wakeup_overview.py` **8 passed** + 既有test_wakeup.py/test_wakeup_fire.py无回归（wakeup家族合计50 passed 0 failed）；opensoul全量`tests/ -m "not live"` **2185 passed 0 failed**（189.86s，=上轮2177+8新，无回归）；acp-proxy `tests/test_wakeup_observability.py` **8 passed**（7类动作留痕/真实时序断言/claim败北不fire/环形上限20+最新在前/JSON可序列化/poll_error留痕）+ 既有wakeup家族45例无回归（合计53 passed）；acp-proxy全量`tests/` **931 passed 0 failed**（290.89s，=上轮923+8新，无回归）；`systemic_test.py` **29/29 passed**（EXIT=0，S1-S6全绿）；`npm run build` ✅通过（type-check+编译，0 error）。
+- **live行为实锤**（重启后真服务）：
+  ① GET /api/will/wakeup/overview→**HTTP 200**，total_keys=6历史全聚合（前几轮live探针的exhausted/fired状态如实可见）；
+  ② POST /wakeup/schedule（event 14）→overview出现该循环+GET /wakeup/folded返回items（wakeup项含reason）；
+  ③ **活动流tail端到端**：双实例snapshot含recent键并实录完整动作链——启动瞬态`poll_error: ConnectError: All connection attempts failed`可见（失败可见而非静默）→event 14到点后A实例`claim_lost #14 CAS输给对端实例（at-most-once正常路径）`、B实例`claimed #14 session=… reason=LIVE观测面板probe…`→`fire_failed #14 RuntimeError: 唤醒回合被拒：会话在服务端不存在…`（probe会话故意不存在，refusal→失败重试语义正确）→释放后再次被领（B claimed=2）——CAS互斥/重试/失败留痕在recent里按时间倒序全部可读，"它刚才干了什么"一屏可见；
+  ④ 前端：openmate-web.service重启后新bundle `.next/static/chunks/2as983g07u3tf.js` 含"Wakeup Executor (ScheduleWakeup)"/"noop streak"面板字符串+三端点fetch接线（grep命中），/monitoring HTTP 200。
+**服务重启**：`systemctl --user restart opensoul.service acp-proxy-a.service acp-proxy-b.service openmate-web.service`→四服务active；:8090/api/health=200、:8092/health=200、:8095/health=200、:3000/monitoring=200。
+**commit**：opensoul `17b3e2d0`；openmate `2fcc339f`。
+**遗留问题**：
+1. **前端视觉走查被登录墙挡住**：浏览器打开:3000/monitoring是Sign in页（无凭据，按纪律不猜测不注册），Wakeup卡片像素级渲染未人工过目——已证：build过、部署bundle含面板+接线字符串、面板消费的全部数据端点live返回契约形状。用户登录后到 Monitoring → Agents & Jobs 看一眼即可，如有渲染瑕疵下轮修。
+2. probe事件14的fire是refusal（会话故意不存在），证明了失败可见语义但没走到LLM回合；**LLM余额402环境问题依旧**（非本轮引入，需用户充值/换key）——之后建议跑一次真实会话live唤醒看fire_ok=1+模型真实回复。
+3. event 14失败重试仍在进行（MAX 5次后EXHAUSTED留痕）——by design，可在新面板直接观察。
+4. overview()逐键调status()（N+1查询，N=键数）——单机量级无碍；键数上千时改聚合SQL（与due_wakeups窗口化同款优化）。
+5. 上轮遗留#2（唤醒回合无实时流式推送，跨proxy实例可见性不保证）仍有效——本轮是10s轮询级"运行中可见"，流式级归后续；08:31遗留#2折叠UI本轮已销账✅。环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步仍有效非本轮范围。
+6. cron环境约束实录：`curl | python3`管道继续"curl -o落盘+python3读文件"；`tail -3`在该shell报option context错误→改`tail -n N`。
