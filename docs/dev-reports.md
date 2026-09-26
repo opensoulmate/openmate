@@ -2718,3 +2718,38 @@
 3. 上轮遗留#5（due_wakeups全表扫描取每key最新，事件量大需索引/窗口优化）仍有效；本轮turn归因锚点的MAX(id)查询按session_id+role过滤，同样建议后续配索引（当前单机量级无碍）。
 4. 判定面近似：只认"本轮新落库assistant消息"的开头/末行标记；若回合异常中断未落消息则fail-open按成功（无肯定证据不判失败的有意取舍）——若后续出现"回合无声消失"案例，可补"回合零输出"判据。
 5. 上轮遗留（OpenMate折叠UI未做、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步）仍有效，非本轮范围。
+
+## [2026-09-26 16:20 CST] 缓存命中回合静默丢回复P1修复 + 唤醒回合零输出判据（13:40遗留#4销账）——"跑了但什么都没留下"不再假装成功
+**目标**：本轮开发调研中发现一个实证P1 bug：`_prompt_inner`语义缓存命中分支只把缓存文本推给客户端就return——**agent_messages不落行、session["messages"]不追加**，历史里留下"有问无答"的悬空回合（前端历史/后续LLM上下文/无客户端唤醒回合全部看不见这条回复）。该实证案例恰好满足上轮遗留#4的补判条件（"若后续出现'回合无声消失'案例，可补'回合零输出'判据"），本轮两件一起闭环：①缓存命中回复按正常回合同契约落库；②唤醒回合零输出（无新非空assistant输出）判失败进重试，不再记成功。
+**调研来源**：mem0 §1.1（输出/数据可见性不得静默丢失、失败必须可见禁止假装成功）；P0输出侧护栏（Warp secret_redaction——缓存重放也是模型输出展示边界，落库侧同走脱敏，"未脱敏原文绝不落库"）；kilocode #9 消息级metadata留痕（cache_replay合成标记可审计）；13:40轮遗留#4原文（零输出判据触发条件已满足）。
+**改动文件**：
+- openmate `acp-proxy/agent/soulmate_agent.py`（增量+35/-13）：新增`_cache_replay`方法（:375）+ 缓存命中分支改调它（:3189）
+- openmate `acp-proxy/agent/wakeup_executor.py`（增量+37/-4）：`_max_assistant_id`锚点语义升级（:64）+ 新增`_has_turn_output`（:118）+ `_run`零输出判定（:234）
+- openmate `acp-proxy/tests/test_cache_replay_persist.py`（新133行，8测）
+- openmate `acp-proxy/tests/test_wakeup_fire_llm_error.py`（增量：翻转1测+新增TestZeroOutputJudgment 4测）
+- openmate `acp-proxy/tests/test_output_guard.py`（6行：接线断言跟随重构更新，安全声明不变）
+**改动内容**：
+1. **`_cache_replay`（P1修复）**：缓存命中回复=真实回合输出，与正常回合同一持久化契约——①脱敏展示（`redact_secrets(cached)[0]`，历史缓存条目可能存有修复前原文，展示与落库都走脱敏，未脱敏原文绝不落库）；②`session["messages"].append`（后续LLM回合上下文不再"有问无答"）；③`_save_message`落agent_messages行，metadata=`{"cache_replay": true, "bytes": N}`（消息级可审计，UI可据此显示"缓存重放"badge）。每次命中逐次落行不合并（每次命中都是一个真实回合输出）。
+2. **零输出判据（遗留#4销账）**：`_has_turn_output(agent, session_id, after_id)`——锚点后新落库assistant输出中**任一非空**才算有输出；返回False=零输出（含纯空白输出）→`default_headless_fire`抛RuntimeError→ack ok=False→释放重试（MAX 5次后EXHAUSTED留痕），"说了会醒却什么都没做"必须可见。返回None（锚点缺失/取数失败）→fail-open不判失败——DB读故障不得引发重试风暴（有意保留的边界）。
+3. **锚点语义升级（零输出判定的前提）**：`_max_assistant_id`此前"无先前assistant消息"与"取数失败"都返回None不可判别；现改为：会话尚无assistant消息→**0**（id从1起，0=时间原点锚点，id>0即全部新消息）、取数失败→None。"没有新输出"与"取数失败"从此可判别。`_llm_failure_reply`兼容（after_id=0→id>0全量新行，比原"只看最新一条"覆盖更全）。
+4. **测试契约翻转**：`test_no_new_message_fail_open`（原断言零输出fail-open按成功）→`test_no_new_message_is_zero_output_failure`（断言抛"零输出"）——该翻转即遗留#4明示的契约变更，测试注释留痕"原为fail-open断言，本轮按遗留#4翻转契约"。`test_output_guard.test_preview_and_cache_callsites`的安全声明（缓存重放必须脱敏）保持并加强：断言命中分支调用`_cache_replay`且其内部含`redact_secrets(cached)[0]`（防止退回"只推不脱敏/不落库"）。
+**接线位置**（grep证据，文件:行号）：
+- 缓存落库：`acp-proxy/agent/soulmate_agent.py:375` 定义`_cache_replay` → `:3189` `_prompt_inner`语义缓存命中分支调用（**真实聊天路径**：WS /ws/acp → agent.prompt → _prompt_inner；无客户端唤醒回合同走此路径）。
+- 零输出判定：`acp-proxy/agent/wakeup_executor.py:118` 定义`_has_turn_output` → `:234` `default_headless_fire._run`内调用（**真实fire路径**：`app.py:210` lifespan `wakeup_executor.start()` → `poll_once` → `_fire_one` → `default_headless_fire` → `_run`）；`:64` `_max_assistant_id` → `:214` 同在`_run`。
+**验证结果**：
+- 完整性✅：`git show --numstat`——openmate `e621be6f`（6文件+289/-34，soulmate_agent.py/wakeup_executor.py均为增量hunk零全量重写，新测试文件真实落盘）；sibling并行改动（settings-client.tsx/locales/*.json）显式排除未入库。
+- 集成✅：上述grep调用链 + **live实锤**（见下）。
+- 测试✅：新`tests/test_cache_replay_persist.py` **8 passed**（落行/历史追加/脱敏落库（前提断言：测试密钥必须命中脱敏规则）/metadata标记/客户端收脱敏文本/session无messages键不炸/多次命中逐行/接线回归护栏）；`tests/test_wakeup_fire_llm_error.py` **22 passed**（含翻转1测+零输出4测：纯空白判零输出/旧轮行不算本轮输出/非空输出成功/读故障fail-open）+ 既有`tests/test_wakeup_executor.py` 13例无回归；acp-proxy全量`tests/` **923 passed 0 failed**（303.09s，EXIT=0，=上轮911+12新/翻转，无回归）；`systemic_test.py` **29/29 passed**（EXIT=0，S1-S6全绿）。
+- **live E2E实锤**（重启后真服务，缓存命中→落库→fire判定ok全链路，LLM余额402不影响——缓存命中分支完全不调LLM）：
+  ① **缓存命中回复真落库**：种入语义缓存（与服务同库）+ POST /wakeup/schedule（event 13，session=live-wakeup-llmfail-1790400738，delay=60）→到点executor真实fire→唤醒回合`_prompt_inner`语义缓存命中→`_cache_replay`落库：agent_messages **id=1186** `role=assistant content='LIVE-CACHE-REPLAY-PROBE 缓存重放回复落库验证文本…' metadata={"cache_replay": true, "bytes": 99}`——此前该回合**零落库**（这正是零输出判据会误伤的场景），现在与正常回合同契约。
+  ② **fire判定ok**：:8092 executor快照`claimed=1, fire_ok=1, fire_failed=0, last_error=''`——`_has_turn_output`看到落库的非空输出→ack ok=True；journal实录`[wakeup] fired event 13 (session=… reason='LIVE缓存落库验证probe-1790410671')`+`[turn] close turn_… reason=completed`；opensoul status `fire={due_now:false, fired:1}`。
+  ③ CAS单赢家保持：:8092 claimed=1，:8095 due_seen=0（输家连due都没重复看到）。
+**服务重启**：`systemctl --user restart acp-proxy-a.service acp-proxy-b.service`→两服务active；:8092/health=200、:8095/health=200；/health的wakeup_executor键`running:true`（opensoul本轮零改动未重启）。
+**commit**：openmate `e621be6f`（本轮仅openmate改动，无opensoul侧commit）。
+**遗留问题**：
+1. **⚠️环境问题仍在（非代码，需用户处理）**：soulmate LLM供应商**余额不足**（402 Insufficient account balance）依旧——本轮live探针特意走缓存命中分支绕开LLM验证执行链，但正常聊天/非缓存唤醒回合在充值或换key前拿不到真实模型回复。
+2. 零输出判定的deferral近似：插话队列（writer fencing busy）/pending choice路径返回end_turn不落行，会被判零输出进重试——headless executor场景实际不可达（独立SoulMateAgent实例+串行poll，无并发turn），且"检查没跑成→重试"方向安全；若未来唤醒回合与用户回合共实例/并发，需重评（可能引入"已转交插话队列"的第三态）。
+3. 缓存命中现在逐次落行：同一缓存条目多次命中=多行assistant消息（符合"每次命中=真实回合输出"契约），长会话行数增长略快——如需合并显示归前端渲染轮。
+4. 上轮遗留#2（唤醒回合无实时流式推送，跨proxy实例可见性不保证）与#5（due_wakeups全表扫描）仍有效；本轮`_has_turn_output`/`_max_assistant_id`的MAX(id)/id>?查询按session_id+role过滤，同建议后续配索引（当前单机量级无碍）。
+5. 上轮遗留（OpenMate折叠UI未做、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步）仍有效，非本轮范围。
+6. cron环境约束再实录：`curl | python3`管道继续被tirith判"pipe to interpreter"挂approval——继续沿用"curl -o落盘+python3读文件"模式。
