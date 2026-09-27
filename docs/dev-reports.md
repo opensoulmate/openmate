@@ -3208,3 +3208,34 @@
 5. 402余额期间chat()返回"[LLM错误: …]"，续写/重发收益需真实流量观察：journal统计`[LLM] finish_reason=length截断，自动续写`出现=截断被自动补齐的直接证据。
 6. 上轮遗留观察项（relay消息级粒度、relay每WS轮询、唤醒触发行agent_message透出、前端视觉走查登录墙、overview() N+1、环境变量密钥外发误伤面、污点分析近似、model_gateway/gateway.py:135 provider凭据映射表低优先）仍有效非本轮范围。
 7. cron环境约束实录：sibling并行会话共用工作树——commit必须显式git add白名单+`git diff`先核实目标文件无sibling改动混入；pytest用`~/opensoul/.venv/bin/python3 -m pytest`（系统python3是SearXNG venv无pytest）；全量415s后台跑`process wait`（180s clamp二次wait）；`process notify_on_complete`在cron一次性runner不可用，用wait轮询。
+
+## [2026-09-28 14:20 CST] P2流式纯文本截断自动续写——chat_stream/chat_stream_with_tools接线Aider续写入真实SSE传输（上轮遗留#2点名候选销账）
+**目标**：chat()已有续写防护（上轮17851c7b），但**流式**真实传输路径的纯文本finish_reason=length截断仍静默半截收尾、无任何标记——soulmate真实回复（agent/soulmate_agent.py:1762）、engine._stream_to_client（engine.py:132）、_agent_loop（engine.py:174）、discussion_engine（discussion_engine.py:500）全走流式，用户看到被腰斩的回答且零提示，违反AIHawk"截断必须显式标记"铁律。上轮遗留#2原文："chat_stream/chat_stream_with_tools已有自己的finish_reason=length tool_calls _truncated标记机制（442-447行），但纯文本流式截断仍无续写——流式续写需拼流语义，下轮P2候选"。
+**调研来源**：上轮遗留#2点名（本轮第1优先）+ Aider base_coder续写方案（utils.llm_safety既有引注，本轮让流式路径同样消费）+ AIHawk SHOWN/SENT双预算"截断必须显式标记"（SUMMARY P0-2）→续写补齐=完整输出不标记、放弃=显式标记不静默 + mem0失败必须可见。
+**改动文件**（openmate commit `b23dde16`，2文件+602/-23，全部增量hunk）：
+- `acp-proxy/agent/llm_engine.py`（+97/-23）：chat_stream/chat_stream_with_tools纯文本截断续写
+- `acp-proxy/tests/test_stream_continuation.py`（新21测）
+**改动内容**：
+1. **续写拼流语义**：finish_reason=length纯文本截断→`build_continuation_messages`按段续写（段语义递归：assistant只放本段防重复入history，各段流式无缝拼接，消费方无感），最多MAX_CONTINUATION=3次续写（总请求≤4与chat()一致，`_continuation_depth`递归深度参数严格封顶）；次数用尽/空段→显式截断标记"\n\n[输出因max_tokens截断，续写次数已用尽]"（AIHawk：绝不静默半截收尾）；cancel_event已设→不续写不标记（用户主动停止≠截断）。
+2. **with_tools契约保全**：tool_calls截断仍走`_truncated`标记调用方决策（不递归，回归钉）；纯文本截断才续写；**续写段不发射中间usage**（判定在usage发射之前）——防消费方token_attribution对同一逻辑回合双重backfill（backfill_actual是append-only账本，双行会污染calibration_factor）；usage先于tool_calls发射顺序保留（soulmate收tool_calls即break）。
+3. **两收尾路径合流**：[DONE]与流耗尽（非标准provider）此前是两份重复发射代码，本轮合流单一收尾块（`_got_done`跳出），上轮P1 usage回填（last_usage/usage chunk）契约原样保留。
+4. **单一真源**：check_finish_reason/build_continuation_messages/MAX_CONTINUATION全部引utils.llm_safety（:17-19 import），llm_engine零续写文案副本（镜像漂移防线延续上轮三镜像收口）。
+**接线位置**（grep证据，文件:行号）：
+- chat_stream：`agent/llm_engine.py:269 check_finish_reason(choices[0])`、`:288 _continuation_depth < MAX_CONTINUATION`、`:294 build_continuation_messages(messages, _segment_text)`、`:296 _continuation_depth=_continuation_depth + 1`（方法体内）
+- chat_stream_with_tools：`agent/llm_engine.py:461 check_finish_reason(choice)`、`:532/:538`续写判定+build、`:540 depth+1`
+- 真实运行时调用点（防护自此覆盖）：`agent/soulmate_agent.py:1762`（真实回复主路径）、`engine.py:132`（_stream_to_client）、`engine.py:174`（_agent_loop）、`discussion_engine.py:500`
+- 单一真源：`grep "Continue from where you left off" agent/llm_engine.py` **0命中**（文案只在utils/llm_safety.py:111）
+**验证结果**：
+- 完整性✅：`git diff --stat`=`agent/llm_engine.py | 120 +++...`（97+/23-）+新测试文件；diff hunk全部落在chat_stream(:162-305)/chat_stream_with_tools(:315-550)编辑区，无sibling混入（工作树sibling改动settings-client.tsx/locales×3/systemic_test_results.json显式白名单排除）；两文件`ast.parse`通过。
+- 集成✅：上述grep调用链完整（llm_safety定义→两方法内联调用→4个真实运行时消费点）；接线钉测试断言两方法源码含三件套+`_continuation_depth=_continuation_depth + 1`+文案副本绝迹。
+- 测试✅：新`tests/test_stream_continuation.py` **21 passed**（①chat_stream行为7：stop单发不变/length续写拼流+续写请求形状[assistant本段+user续写指令+system注入保留]/深度有界4发+末尾显式标记/空段不续写但标记/取消零副作用/无[DONE]流耗尽路径同样续写/多段链第3发带前两段段链；②with_tools行为7：纯文本续写+usage只发1次+tools透传/tool_calls截断_truncated不续写回归/完整tool_calls不变/usage先于tool_calls顺序回归/深度用尽标记+usage单次/取消；③消费方契约2：engine._agent_loop消费模式拼装完整回复+_stream_to_client消费模式；④接线钉5）；相关存量（chat_output_protection+stream/usage/llm/safety×7文件）合计**152 passed**零回归；acp-proxy全量`tests/` **1162 passed 0 failed**（435.10s，=上轮1141基线+21新）；`systemic_test.py` **29/29 passed**（S1-S6全绿，含10端点并发/20次health）。
+- **live实锤**（/tmp/stream_continue_live_demo.py，真实LLMEngine.chat_stream*/真实httpx SSE传输+本地stub provider，非monkeypatch）：①场景1一直length：请求4次（MAX_CONTINUATION+1严格用尽），拼接"第1段回答，第2段续写，第3段续写，第4段续写"+末尾显式标记，第2发messages尾部=[assistant:'第1段回答', user:'Continue from where you left off…']（段语义实锤）；②场景2首段截断续写补齐：请求2次，输出"完整回答的前半部分。后半部分补齐完成。"无标记=完整输出；③场景3 with_tools纯文本：请求2次拼接完整、usage chunk恰好1个（续写段不发中间usage实锤）、第2发tools透传。3/3全过。
+**服务重启**：`systemctl --user restart acp-proxy-a.service acp-proxy-b.service`→两服务active；:8092/health=200（status:ok，含token_attribution/calibration完整读数）、:8095/health=200；重启后systemic_test 29/29（opensoul零改动未重启；前端零改动npm build不适用）。
+**commit**：openmate `b23dde16`。
+**遗留问题**：
+1. **⚠️环境问题仍在（非代码，需用户处理）**：LLM供应商余额不足（402）——真实流量下续写收益待充值/换key后观察journal"`[LLM] 流式finish_reason=length截断，自动续写`"出现频次。
+2. 流式omission占位符防护未接（结构性限制非遗漏）：流式delta已实时送达消费方，无法像chat()那样"整体重新生成"撤回已流出内容——正确解法在消费方侧（holdback缓冲/Warp式secret_redaction），归入输出侧护栏（SUMMARY P0-7 immune）专项，本轮不冒进。
+3. 续写递归每段新建httpx.AsyncClient（与既有with_tools每attempt重建client同策略）；极端深度4发=4连接，MAX_CONTINUATION封顶可接受。
+4. 上轮遗留#3（safe_llm_call/llm_call无生产调用点、三套传输实现并存需先统一错误契约）仍有效——本轮续写策略已两路（chat/chat_stream*）消费同一llm_safety真源，传输层合并未动。
+5. 上轮遗留观察项（relay消息级粒度、唤醒触发行agent_message透出、前端视觉走查登录墙、overview() N+1、环境变量密钥外发误伤面、污点分析近似、provider凭据映射表）仍有效非本轮范围。
+6. cron环境约束实录：sibling并行会话共用工作树——commit显式git add白名单+先`git diff`核实目标文件无sibling混入；pytest用`~/opensoul/.venv/bin/python3 -m pytest`；全量435s后台跑`process wait`（180s clamp两次wait取回）；live demo自身断言文案含"截断"字样会误伤断言（demo文本与标记词冲突教训：断言词≠样本词）。
