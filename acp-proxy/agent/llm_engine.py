@@ -162,16 +162,23 @@ class LLMEngine:
 
     async def chat_stream(
         self, messages: list[dict], cancel_event: Optional[asyncio.Event] = None,
-        system_prompt: Optional[str] = None
+        system_prompt: Optional[str] = None, _continuation_depth: int = 0
     ) -> AsyncGenerator[str, None]:
         """流式输出LLM响应 — 每个yield是一个纯文本delta片段
 
         如果启用了ModelRouter，每次请求会根据prompt动态选择最优模型。
 
+        输出防护（P2流式续写，2026-09-28接线，与chat()同一策略单一真源
+        utils.llm_safety）：finish_reason=length纯文本截断时按段自动续写
+        （Aider方案，各段流式无缝拼接，最多MAX_CONTINUATION次），次数用尽/
+        空段不续写→显式截断标记（AIHawk"截断必须显式标记"，不静默半截收尾）。
+        已取消（cancel_event）不续写不标记。
+
         Args:
             messages: 对话历史（不含system提示词，会自动注入）
             cancel_event: 取消信号，设置后停止流式输出
-            system_prompt: 自定义system prompt，None时使用默认
+            system_prompt: 自定义system提示词，None时使用默认
+            _continuation_depth: 续写递归深度（内部参数，外部调用方勿传）
         """
         # 通过router解析模型（无router时返回固定配置）
         resolved_model, resolved_base_url, resolved_api_key = self._resolve_model(messages)
@@ -192,6 +199,10 @@ class LLMEngine:
         # OpenAI标准：流式usage默认不发，stream_options.include_usage显式请求
         if self._stream_options_ok:
             payload["stream_options"] = {"include_usage": True}
+        # P2流式续写状态：本段文本累积（段语义，只放本段防重复入history）
+        # + 观察到的finish_reason（check_finish_reason单一真源归一）
+        _segment_parts: list[str] = []
+        _last_finish: str | None = None
         try:
             async with client:
                 req = client.build_request("POST", "/chat/completions", json=payload)
@@ -205,13 +216,17 @@ class LLMEngine:
                             # （flag已置False，递归不会二次进入本分支）
                             self._stream_options_ok = False
                             logger.warning("[LLM] provider不支持stream_options，已回退并重试")
-                            async for _c in self.chat_stream(messages, cancel_event, system_prompt):
+                            async for _c in self.chat_stream(
+                                messages, cancel_event, system_prompt,
+                                _continuation_depth=_continuation_depth,
+                            ):
                                 yield _c
                             return
                         raise RuntimeError(f"LLM API error {response.status_code}: {_err}")
                     buffer = ""
                     latest_usage = None
                     stream_finished = False
+                    _got_done = False
                     async for chunk in response.aiter_bytes():
                         if cancel_event and cancel_event.is_set():
                             logger.info("LLM stream cancelled by event")
@@ -224,10 +239,9 @@ class LLMEngine:
                                 continue
                             data_str = line[6:].strip()
                             if data_str == "[DONE]":
-                                # P1 provider usage回填：plain路径同样回填last_usage
-                                # （此前chat_stream全程不消费usage，plain路径校准样本为零）
-                                self.last_usage = latest_usage
-                                return
+                                # 流正常收尾：跳出到统一收尾块（usage回填+续写判定）
+                                _got_done = True
+                                break
                             try:
                                 obj = json.loads(data_str)
                                 # usage捕获必须在choices判空之前——OpenAI标准流式形态
@@ -247,7 +261,12 @@ class LLMEngine:
                                 content = delta.get("content")
                                 if content:
                                     logger.debug(f"[LLM RAW] content='{content}'")
+                                    _segment_parts.append(content)
                                     yield content
+                                _fr_raw = choices[0].get("finish_reason")
+                                if _fr_raw:
+                                    # check_finish_reason单一真源归一（length/stop/unknown）
+                                    _last_finish = check_finish_reason(choices[0])
                                 if choices[0].get("finish_reason") in ("stop", "tool_calls", "length"):
                                     # 不直接return：finish_reason之后provider可能还有
                                     # trailing usage-only chunk（OpenAI标准usage位置）。
@@ -256,8 +275,31 @@ class LLMEngine:
                                     stream_finished = True
                             except json.JSONDecodeError:
                                 continue
-                    # 流耗尽（无[DONE]的非标准provider）：已捕获usage照样回填
+                        if _got_done:
+                            break
+                    # 流结束统一收尾（[DONE]与流耗尽同路径）：
+                    # P1 provider usage回填：plain路径同样回填last_usage
+                    # （此前chat_stream全程不消费usage，plain路径校准样本为零）；
+                    # P2纯文本截断续写：finish_reason=length→按段续写无缝拼流，
+                    # 次数用尽/空段→显式截断标记（不静默半截收尾），已取消不处理
                     self.last_usage = latest_usage
+                    _segment_text = "".join(_segment_parts)
+                    if _last_finish == "length" and not (cancel_event and cancel_event.is_set()):
+                        if _segment_text.strip() and _continuation_depth < MAX_CONTINUATION:
+                            logger.warning(
+                                f"[LLM] 流式finish_reason=length截断，自动续写 "
+                                f"(attempt {_continuation_depth+1}/{MAX_CONTINUATION})"
+                            )
+                            async for _c in self.chat_stream(
+                                build_continuation_messages(messages, _segment_text),
+                                cancel_event, system_prompt,
+                                _continuation_depth=_continuation_depth + 1,
+                            ):
+                                yield _c
+                        else:
+                            logger.warning("[LLM] 流式续写次数用尽/空段，输出可能仍不完整")
+                            yield "\n\n[输出因max_tokens截断，续写次数已用尽]"
+                    return
                 finally:
                     await response.aclose()
         except httpx.ReadTimeout:
@@ -273,6 +315,7 @@ class LLMEngine:
         tools: Optional[list[dict]] = None,
         cancel_event: Optional[asyncio.Event] = None,
         system_prompt: Optional[str] = None,
+        _continuation_depth: int = 0,
     ) -> AsyncGenerator[str | dict, None]:
         """流式输出LLM响应 — 支持function calling工具调用
 
@@ -281,10 +324,17 @@ class LLMEngine:
         与chat_stream的区别：解析SSE中的tool_calls增量数据，
         按index累积arguments字符串，最终yield完整的tool_calls列表。
 
+        输出防护（P2流式续写，2026-09-28接线，与chat()同一策略单一真源
+        utils.llm_safety）：**纯文本**finish_reason=length截断时按段自动续写
+        （各段流式无缝拼接，最多MAX_CONTINUATION次；续写段不发射中间usage，
+        防消费方对同一逻辑回合双重backfill）。tool_calls截断仍走_truncated标记
+        调用方决策（不递归，契约不变）。次数用尽/空段→显式截断标记。
+
         Args:
             messages: 对话历史（不含system提示词，会自动注入）
             tools: OpenAI function calling格式的工具定义列表
             cancel_event: 取消信号，设置后停止流式输出
+            _continuation_depth: 续写递归深度（内部参数，外部调用方勿传）
 
         Yields:
             str: 普通文本delta片段
@@ -322,6 +372,9 @@ class LLMEngine:
 
         # 按index累积tool_calls的arguments（SSE中arguments是增量拼接的）
         accumulated_tool_calls: dict[int, dict] = {}  # index → {id, type, function: {name, arguments}}
+        # P2流式续写状态：本段文本累积（段语义）+ 观察到的finish_reason
+        _segment_parts: list[str] = []
+        _last_finish: str | None = None
 
         for _retry in range(3):
             try:
@@ -361,6 +414,7 @@ class LLMEngine:
                         _stream_finished = False
                         _final_tc_payload = None
                         latest_usage = None
+                        _got_done = False
                         async for chunk in response.aiter_bytes():
                             if cancel_event and cancel_event.is_set():
                                 logger.info("LLM stream cancelled by event")
@@ -373,19 +427,10 @@ class LLMEngine:
                                     continue
                                 data_str = line[6:].strip()
                                 if data_str == "[DONE]":
-                                    # 发射顺序：usage先于tool_calls——消费方（soulmate_agent）
-                                    # 收到tool_calls后break出async for，后到chunk会被丢弃
-                                    self.last_usage = latest_usage
-                                    if latest_usage:
-                                        yield {"usage": latest_usage}
-                                    if _final_tc_payload is not None:
-                                        yield _final_tc_payload
-                                    elif accumulated_tool_calls:
-                                        yield {"tool_calls": [
-                                            accumulated_tool_calls[i]
-                                            for i in sorted(accumulated_tool_calls.keys())
-                                        ]}
-                                    return
+                                    # 流正常收尾：跳出到统一收尾块（与流耗尽同路径，
+                                    # 单遍消费不二次aiter_bytes）
+                                    _got_done = True
+                                    break
                                 try:
                                     obj = json.loads(data_str)
                                     # P1 provider usage回填：usage捕获必须在choices判空之前
@@ -408,7 +453,12 @@ class LLMEngine:
                                     content = delta.get("content")
                                     if content:
                                         logger.debug(f"[LLM RAW] content='{content}'")
+                                        _segment_parts.append(content)
                                         yield content
+                                    _fr_raw = choice.get("finish_reason")
+                                    if _fr_raw:
+                                        # check_finish_reason单一真源归一
+                                        _last_finish = check_finish_reason(choice)
                                     tool_calls_delta = delta.get("tool_calls") or []
                                     for tc_delta in tool_calls_delta:
                                         idx = tc_delta.get("index", 0)
@@ -466,9 +516,33 @@ class LLMEngine:
                                         continue  # tail模式：继续解析缓冲区/后续字节，只认usage/[DONE]
                                 except json.JSONDecodeError:
                                     continue
-                        # 流自然结束（[DONE]路径已在上方return）：统一发射已捕获的
-                        # usage/tool_calls（非标准provider无finish_reason/[DONE]同样覆盖）
+                            if _got_done:
+                                break
+                        # 流结束统一收尾（[DONE]与流耗尽同路径，非标准provider无
+                        # finish_reason/[DONE]同样覆盖）。发射顺序：usage先于tool_calls
+                        # ——消费方（soulmate_agent）收到tool_calls后break出async for，
+                        # 后到chunk会被丢弃。P2纯文本截断续写判定必须在usage发射之前：
+                        # 续写不发射中间段usage（防消费方对同一逻辑回合双重backfill），
+                        # 最终段usage随递归自然发射
                         self.last_usage = latest_usage
+                        if (_final_tc_payload is None and not accumulated_tool_calls
+                                and _last_finish == "length"
+                                and not (cancel_event and cancel_event.is_set())):
+                            _seg = "".join(_segment_parts)
+                            if _seg.strip() and _continuation_depth < MAX_CONTINUATION:
+                                logger.warning(
+                                    f"[LLM] 流式finish_reason=length纯文本截断，自动续写 "
+                                    f"(attempt {_continuation_depth+1}/{MAX_CONTINUATION})"
+                                )
+                                async for _c in self.chat_stream_with_tools(
+                                    build_continuation_messages(messages, _seg),
+                                    tools, cancel_event, system_prompt,
+                                    _continuation_depth=_continuation_depth + 1,
+                                ):
+                                    yield _c
+                                return
+                            logger.warning("[LLM] 流式续写次数用尽/空段，输出可能仍不完整")
+                            yield "\n\n[输出因max_tokens截断，续写次数已用尽]"
                         if latest_usage:
                             yield {"usage": latest_usage}
                         if _final_tc_payload is not None:
