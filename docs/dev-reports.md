@@ -3144,3 +3144,33 @@
 5. gene skill_learner 上报成功（skill_a680fa7d78ad，success=true）。
 6. 上轮遗留观察项（gen签名粒度 stage:异常类型、relay消息级粒度、relay每WS轮询、唤醒触发行agent_message透出、前端视觉走查登录墙、overview() N+1、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步、llm_gateway.llm_call无生产调用点、model_gateway/gateway.py:135 provider凭据映射表低优先）仍有效非本轮范围。
 7. cron环境约束实录：commit msg 用唯一文件名 `/tmp/commit_msg_mem3f_c7c2.txt` 防 sibling 撞车；live 验证脚本 write_file 落 /tmp 后直跑（`python3 -c` 含 IP 字面量会触发审批，全程用 localhost）；全量 pytest 442s 后台跑 `process wait`（180s clamp 二次 poll）；dev-reports.md 追加用"write_file 写 /tmp/report.md + 短 cat 追加"两步走；git add 显式白名单（2文件）避开 sibling 并行改动。
+
+## [2026-09-28 10:40 CST] 任务延续判定链路复活——LLM judge死路径(AttributeError)+实体提取恒空双修复
+**目标**：修复 `_prompt_inner` 任务状态判断块的双重静默失效，任务延续判定完全瘫痪：①**P0死路径**——LLM judge分支调用**不存在的** `self._llm_call`（全类AST扫描实证：SoulMateAgent只有`_llm_plan_call`/`_infection_llm_call`，无`_llm_call`定义、无`__getattr__`），AttributeError被同块try/except吞掉→judge从未真实执行、规则不明时一律"new"→旧任务被误完成、多轮任务延续失效；②**P1恒空缺陷**——实体提取`[w for w in user_text if len(w) > 1 ...]`按**字符**迭代字符串，`len(w)>1`恒False→entities恒为空→judge_task_continuation规则C（实体→continue）与规则F的has_old_entity永不命中→全部推向llm_judge（恰是死路径）→双重失效叠加。**生产journal live实锤**（发现依据，非推测）：`Sep 24 08:19:48 ... WARNING: [TaskState] LLM judge failed: 'SoulMateAgent' object has no attribute '_llm_call', defaulting new`（7天窗口2次命中=真实消息路径真的踩到）。
+**调研来源**：dev-reports多轮"写了≠接线了"教训（本轮是调用点符号级死路径的新变体：调用面存在、定义不存在、异常被吞）+ SUMMARY.md P0-4可观测性"失败必须可见"（mem0 §1.1，异常吞掉=静默降级禁令）+ DeerMem/memory_retrieval `query_relevance`确定性切词（拉丁整词+CJK bigram，无嵌入依赖——实体提取复用同款词法，"文件不得上传云端"约束下的确定性实现）+ 既有测试harness惯例（tests/test_steering.py make_agent：`SoulMateAgent.__new__`轻量构造+FakeLLM注入）。
+**改动文件**（openmate commit `7d12a203`，3文件+317/-18，全部增量hunk）：
+- `acp-proxy/agent/soulmate_agent.py`（+37/-18）：import行扩extract_entities、新方法`_judge_task_continuation_llm`（+29）、内联judge块收口（-15/+5）、两处实体listcomp替换、注释同步
+- `acp-proxy/utils/task_state_manager.py`（+44/-0）：`extract_entities()`单一真源+`_ENTITY_STOP_CHARS`停用词集+import re
+- `acp-proxy/tests/test_task_judge_wiring.py`（新19测）：守护1 LLM judge真实调用6 + 守护2 调用点接线2 + 守护3 extract_entities 6 + 规则C端到端5
+**改动内容**：
+1. **LLM judge死路径复活**：内联块收口为`_judge_task_continuation_llm(current_task, user_text)`方法（与`_llm_plan_call`/`_infection_llm_call`同款包装面），走`self.llm_engine.chat`单一传输真源；请求形状不变（system=任务判断器prompt，user=当前任务goal+用户消息）。新增归一化：LLM返回未知action（"ask"/拼写错误/大小写漂移/缺字段）一律归一"new"，不许透传进状态机分支；JSON解析失败**上抛**，由调用点except兜底"new"+warning留痕（失败必须可见——旧实现的教训正是异常被吞）。
+2. **实体提取单一真源**：`extract_entities(user_text, limit=10)`——拉丁/数字整词（保留原大小写，规则C匹配是大小写敏感子串）+ CJK连续段切bigram（不足2字取原字，DeerMem同款）+ 过滤（长度<2、纯停用词token、保序去重、limit封顶10=旧`entities[:10]`契约）；替换new/ask两分支的恒空字符迭代（`entities[:10]`切片保留，行为契约不变）。
+3. **全类AST护栏**（bug类绝迹）：测试`test_no_missing_self_call_attrs_in_soulmate_agent`扫描SoulMateAgent所有`self.X(`调用，X必须解析到方法或self已赋值属性（含方法内self.X=、类级赋值、property），违例即fail并列出死调用——本bug（`_llm_call`）正是该护栏的最小检出案例；合法动态属性留`_DYNAMIC_ATTRS`白名单（现为空）。
+**接线位置**（grep证据，文件:行号）：
+- 新方法定义：`agent/soulmate_agent.py:780 _judge_task_continuation_llm`；**调用点**：`agent/soulmate_agent.py:3393 action = await self._judge_task_continuation_llm(current_task, user_text)`（`_prompt_inner`任务判断块——OpenMate聊天页 :8092 ws→SoulMateAgent.prompt→_prompt_inner真实消息路径，`judge_task_continuation`返回"llm_judge"时进入）；内部`self.llm_engine.chat(judge_messages)`（:809）；
+- 单一真源定义：`utils/task_state_manager.py:204 extract_entities`；调用点：`agent/soulmate_agent.py:50`（import）、`:3407`（action=new分支→create_task实体）、`:3413`（action=ask分支→create_task实体）；
+- 死调用残留grep：`grep -n "self._llm_call(" agent/soulmate_agent.py` **零命中**（仅docstring历史引用）；`grep -n "for w in user_text" `全库**零命中**。
+**验证结果**：
+- 完整性✅：`git show --numstat 7d12a203`=3文件+317/-18（soulmate_agent +37/-18、task_state_manager +44/-0均增量hunk零全量重写，新test真实落盘19测）；两文件`ast.parse`通过；sibling并行改动（settings-client.tsx/locales×3/systemic_test_results.json/.mmb-render/e2e_probe2.py）显式白名单排除未入库。
+- 集成✅：上述grep调用链 + AST全类扫描（测试护栏：missing空集）+ Pyright静态实证（改前LSP报`3369: Cannot access attribute "_llm_call"`，改后该诊断消失）。
+- 测试✅：新`tests/test_task_judge_wiring.py` **19 passed**（①LLM judge真实调用6：真实走到llm_engine.chat且请求含goal+用户消息（P0回归钉）/continue与new两个方向/fenced JSON剥离/未知action4种归一new/非JSON上抛/LLM传输错误上抛不吞；②调用点接线2：`await self._judge_task_continuation_llm(`在场+`await self._llm_call(`绝迹+失败兜底warning契约在场/全类AST护栏零死调用；③extract_entities 6：典型中文句子非空（P1恒空回归钉）/拉丁词保大小写/CJK bigram与短段/纯停用词丢弃（"的了"丢"目的"留）/去重保序+limit/空输入；④规则C端到端5含对照：**有实体→continue（`匹配实体: ['部署','署服','服务','务配','配置']`）vs 旧恒空→ask（`消息过短(11字)`）**——同一消息判向翻转=修复的用户可感知语义差）；相关存量（plan_execution/steering/turn_lifecycle/no_silent_truncation+新）合计**125 passed**；acp-proxy全量`tests/` **1128 passed 0 failed**（430.58s，=上轮1109基线+19新，零回归）；`systemic_test.py` **29/29 passed**（S1-S6全绿）。
+- **live实锤**（/tmp/task_judge_live_demo.py，真实类语义）：①`hasattr(SoulMateAgent,'_llm_call')=False`、`hasattr(...,'_judge_task_continuation_llm')=True`（旧符号根本不存在=死路径实证）；②旧字符迭代`entities=[]` vs 新`extract_entities=7 token`（对照）；③真实`_judge_task_continuation_llm`→`action=continue`、chat调用1次、prompt含goal+用户消息；④规则C端到端翻转对照（continue vs ask）；⑤非JSON→JSONDecodeError上抛（失败可见）。
+**服务重启**：`systemctl --user restart acp-proxy-a.service acp-proxy-b.service`→两服务active；:8092/health=200、:8095/health=200（status: ok）；journalctl 3分钟窗口error/traceback**0命中**（opensoul零改动未重启；前端零改动npm build不适用）。
+**commit**：openmate `7d12a203`。
+**遗留问题**：
+1. **⚠️环境问题仍在（非代码，需用户处理）**：LLM供应商余额不足（402）——进化链路待充值/换key后`POST /api/evolution/strands/{id}/reset-breaker`清闸验证。
+2. LLM judge修复后的真实LLM裁决效果需生产流量观察：402余额问题期间chat()返回"[LLM错误: …]"非JSON→上抛→兜底"new"（与旧行为相同但**现在有warning留痕**，journal可统计`[TaskState] LLM judge failed`出现率下降作为复活证据）。充值后可在journal验证`[TaskState] LLM judge: action=continue`真实出现。
+3. 实体提取是确定性近似（CJK bigram滑窗会产出"整部/署服"等跨词bigram，作为子串匹配特征可用但非语言学实体）——与memory relevance因子同款取向（无嵌入依赖），未来接本地embedding可升级为真名词短语而规则C匹配语义不变。
+4. "ask"语义仍是"不阻塞降级为新任务"（既有注释声明的取向，本轮未动）——若后续前端加确认交互面，可改为真询问。
+5. 上轮遗留观察项（llm_gateway.llm_call无生产调用点、`LLMEngine.chat()`非流式无finish_reason=length续写/omission防护（llm_gateway._call_with_protection的保护层未接进真实传输——本轮judge JSON路径受益于兜底但截断风险仍在）、relay消息级粒度、relay每WS轮询、唤醒触发行agent_message透出、前端视觉走查登录墙、overview() N+1、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步、model_gateway/gateway.py:135 provider凭据映射表低优先）仍有效非本轮范围——下轮P1候选：chat()输出防护接线（Aider续写+Gemini CLI omission，策略单一真源在llm_gateway，正好销账"无生产调用点"）。
+6. cron环境约束实录：嵌套`$(grep...)`命令触发command parser hardline拦截→改read_file/sed直读；commit msg用唯一文件名`/tmp/commit_msg_taskjudge_c7c3.txt`防sibling撞车；全量pytest 431s后台跑`process wait`（180s clamp二次poll）；dev-reports.md大段追加用"write_file写/tmp/report.md+短cat追加"两步走；git add显式白名单（3文件）避开sibling并行改动。
