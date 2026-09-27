@@ -19,8 +19,9 @@ resolve_llm_config()；key 缺失要显式告警（401早知道），不得静�
 
 调用面（2026-09-27收口）：
 - DNA进化/后台调用：resolve_llm_config()（含 MIMO_* 覆写层）
-- ws_chat 用户侧agent代理：resolve_llm_config(include_mimo_overrides=False)
-  —— MIMO_* 是进化专用覆写，聊天流量绝不跟随（运维把进化指向另一套LLM时，
+- ws_chat 用户侧agent代理 / utils.token_manager 模型限额 / utils.llm_gateway 默认模型：
+  resolve_llm_config(include_mimo_overrides=False)
+  —— MIMO_* 是进化专用覆写，用户/业务流量绝不跟随（运维把进化指向另一套LLM时，
      用户会话仍走系统LLM配置）。
 """
 
@@ -55,12 +56,29 @@ def _default_env_files() -> list[str]:
     ]
 
 
+def parse_int(raw: str, default: int) -> int:
+    """安全int解析：空值/坏值回退default不抛。
+
+    历史教训：token_manager 曾在 import 期 int(os.environ.get("LLM_MAX_TOKENS"))
+    ——坏值直接 ValueError 炸掉整个模块 import（agent 子系统全灭）。
+    一切限额解析走本函数。
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
 def resolve_llm_config(
     env_files: list[str] | None = None,
     *,
     include_mimo_overrides: bool = True,
 ) -> dict:
-    """解析LLM配置，返回 {api_key, base_url, model, max_tokens, key_source}。
+    """解析LLM配置，返回 {api_key, base_url, model, max_tokens, context_window,
+    input_limit, key_source}。
 
     key_source ∈ {"mimo_env", "env", "file", ""}（观测面可据此判key从哪来；
     key本身绝不进日志/状态面，只报key_source与key长度）。
@@ -105,16 +123,22 @@ def resolve_llm_config(
         or file_cfg.get("LLM_MAX_TOKENS", "").strip()
         or os.environ.get("LLM_MAX_TOKENS", "").strip()
     )
-    try:
-        max_tokens = int(raw_max_tokens) if raw_max_tokens else 65536
-    except ValueError:
-        max_tokens = 65536
+    max_tokens = parse_int(raw_max_tokens, 65536)
+
+    # 模型限额（token_manager 域，2026-09-27收口）：与上面同款"文件>env+坏值容错"。
+    # LLM_CONTEXT_WINDOW 默认131072；LLM_INPUT_LIMIT=0=未声明单窗口模型
+    # （kilocode model.limit.input 双限额语义，见 utils/token_manager 注释）。
+    def _limit(name: str, default: int) -> int:
+        raw = file_cfg.get(name, "").strip() or os.environ.get(name, "").strip()
+        return parse_int(raw, default)
 
     return {
         "api_key": api_key,
         "base_url": base_url,
         "model": model,
         "max_tokens": max_tokens,
+        "context_window": _limit("LLM_CONTEXT_WINDOW", 131072),
+        "input_limit": _limit("LLM_INPUT_LIMIT", 0),
         "key_source": key_source,
     }
 

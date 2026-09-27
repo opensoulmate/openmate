@@ -179,14 +179,25 @@ async def lifespan(app: FastAPI):
     if loaded_plugins:
         logger.info("已加载 %d 个插件: %s", len(loaded_plugins), ", ".join(loaded_plugins))
 
-    # 启动时探测模型能力（只执行一次）
+    # 启动时探测模型能力（只执行一次）——配置走 utils.llm_config 单一真源
+    # （旧实现自扫 os.environ：key 只写在 opensoul/.env 时探测被静默跳过，
+    #   且与 resolve_llm_config"文件>env"语义不一致）
     try:
+        from utils.llm_config import resolve_llm_config
         from utils.token_manager import probe_model_capabilities
-        base_url = os.environ.get("LLM_BASE_URL", "")
-        api_key = os.environ.get("LLM_API_KEY", "")
-        model = os.environ.get("LLM_MODEL", "")
-        if base_url and api_key:
-            probe_model_capabilities(base_url, api_key, model)
+        probe_cfg = resolve_llm_config()
+        if probe_cfg["base_url"] and probe_cfg["api_key"]:
+            probe_model_capabilities(
+                probe_cfg["base_url"],
+                probe_cfg["api_key"],
+                probe_cfg["model"],
+                max_tokens=probe_cfg["max_tokens"],
+            )
+        else:
+            logger.warning(
+                "Token probe skipped: LLM配置缺失（key_source=%s）",
+                probe_cfg.get("key_source") or "<unset>",
+            )
     except Exception as e:
         logger.warning(f"Token probe failed: {e}")
 

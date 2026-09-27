@@ -290,7 +290,7 @@ class LLMEngine:
             "messages": self._build_messages(messages, system_prompt),
             "stream": True,
             "temperature": 0.7,
-            "max_tokens": int(os.environ.get("LLM_MAX_TOKENS", "65536")),
+            "max_tokens": get_max_output_tokens(),
         }
         # OpenAI标准：流式usage默认不发，stream_options.include_usage显式请求
         # （usage回填/校准样本积累的结构性前提；不支持的server报错后永久回退）
@@ -503,7 +503,7 @@ class LLMEngine:
             "messages": self._build_messages(messages),
             "stream": False,
             "temperature": 0.7,
-            "max_tokens": int(os.environ.get("LLM_MAX_TOKENS", "65536")),
+            "max_tokens": get_max_output_tokens(),
         }
         try:
             async with client:

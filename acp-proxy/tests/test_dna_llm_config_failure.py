@@ -108,7 +108,8 @@ class TestResolveLLMConfig:
         必须走resolve_llm_config（ws_chat走include_mimo_overrides=False，见test_ws_chat_llm_config.py）"""
         import os
         here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        for fname in ("app.py", "dna_strand_runner.py", "ws_chat.py"):
+        for fname in ("app.py", "dna_strand_runner.py", "ws_chat.py",
+                      "utils/token_manager.py", "utils/llm_gateway.py"):
             src = open(os.path.join(here, fname)).read()
             # 只禁"硬编码赋值"（注释里提教训原文不在此列）
             assert 'llm_base_url="https://token-plan-cn' not in src, f"{fname} 仍硬编码provider URL"

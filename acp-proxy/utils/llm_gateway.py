@@ -26,6 +26,8 @@ from typing import Any
 
 import httpx
 
+from utils.llm_config import resolve_llm_config
+
 logger = logging.getLogger(__name__)
 
 # ── 常量 ──────────────────────────────────────────────
@@ -51,16 +53,24 @@ class ModelConfig:
     enabled: bool = True
 
 
-# 默认模型配置（从环境变量读取）
-DEFAULT_MODELS = [
-    ModelConfig(
+# 默认模型配置——统一走 utils.llm_config 单一真源（2026-09-27收口，00:10遗留#4第一批）。
+# 调用面：业务/用户侧流量 → include_mimo_overrides=False（MIMO_* 进化覆写不跟随）。
+# 旧实现自扫 os.environ（key 只写在 .env 时拿到空key→可选鉴权头→静默401）且硬编码
+# provider URL/模型名兜底（https://api.mimo.ai/v1 + "mimo-v2"）——两条均违反
+# llm_config 调用方纪律，已移除：base_url/model 缺失=配置错误，由 llm_call
+# fail-closed 显式报错拒绝调用，不许瞎猜默认值、不许发无鉴权请求。
+def _default_model_config() -> ModelConfig:
+    cfg = resolve_llm_config(include_mimo_overrides=False)
+    return ModelConfig(
         name="mimo",
-        base_url=os.environ.get("LLM_BASE_URL", "https://api.mimo.ai/v1"),
-        api_key=os.environ.get("LLM_API_KEY", ""),
-        model=os.environ.get("LLM_MODEL", "mimo-v2"),
+        base_url=cfg["base_url"],
+        api_key=cfg["api_key"],
+        model=cfg["model"],
         priority=0,
-    ),
-]
+    )
+
+
+DEFAULT_MODELS = [_default_model_config()]
 
 # 模型注册表
 _model_registry: dict[str, ModelConfig] = {}
@@ -80,6 +90,13 @@ def get_model(name: str = "default") -> ModelConfig | None:
             return min(available, key=lambda m: m.priority)
         return None
     return _model_registry.get(name)
+
+
+def refresh_default_model() -> ModelConfig:
+    """（重新）从单一真源解析默认模型并注册（配置变更/测试可显式重载）。"""
+    cfg_m = _default_model_config()
+    register_model(cfg_m)
+    return cfg_m
 
 
 # 初始化默认模型
@@ -135,6 +152,16 @@ async def llm_call(
     config = get_model(model)
     if not config:
         logger.error(f"[{strand_id}] No available model: {model}")
+        return ""
+    if not config.api_key or not config.base_url:
+        # fail-closed：缺key/base_url 一律拒绝调用（llm_config 调用方纪律：
+        # "key缺失要显式告警（401早知道），不得静默发出无鉴权请求"）。
+        # 旧实现把鉴权头做成可选（if config.api_key:）→ 空key照发请求→静默401。
+        logger.error(
+            f"[{strand_id}] LLM配置缺失，拒绝调用: "
+            f"base_url={config.base_url or '<unset>'}, "
+            f"model={config.model or '<unset>'}, key_len={len(config.api_key or '')}"
+        )
         return ""
     
     # 参数覆盖
