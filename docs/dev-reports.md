@@ -3174,3 +3174,37 @@
 4. "ask"语义仍是"不阻塞降级为新任务"（既有注释声明的取向，本轮未动）——若后续前端加确认交互面，可改为真询问。
 5. 上轮遗留观察项（llm_gateway.llm_call无生产调用点、`LLMEngine.chat()`非流式无finish_reason=length续写/omission防护（llm_gateway._call_with_protection的保护层未接进真实传输——本轮judge JSON路径受益于兜底但截断风险仍在）、relay消息级粒度、relay每WS轮询、唤醒触发行agent_message透出、前端视觉走查登录墙、overview() N+1、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步、model_gateway/gateway.py:135 provider凭据映射表低优先）仍有效非本轮范围——下轮P1候选：chat()输出防护接线（Aider续写+Gemini CLI omission，策略单一真源在llm_gateway，正好销账"无生产调用点"）。
 6. cron环境约束实录：嵌套`$(grep...)`命令触发command parser hardline拦截→改read_file/sed直读；commit msg用唯一文件名`/tmp/commit_msg_taskjudge_c7c3.txt`防sibling撞车；全量pytest 431s后台跑`process wait`（180s clamp二次poll）；dev-reports.md大段追加用"write_file写/tmp/report.md+短cat追加"两步走；git add显式白名单（3文件）避开sibling并行改动。
+
+## [2026-09-28 04:41 CST] P1 chat()输出防护接线——Aider续写+Gemini CLI omission入真实传输 + omission pattern三镜像收口单一真源（上轮遗留#5点名的下轮P1目标销账）
+**目标**：`LLMEngine.chat()`是soulmate真实消息路径的非流式传输真源（`_judge_task_continuation_llm`/`_llm_plan_call`/`_infection_llm_call`/标题生成/上下文压缩全走它），但Aider续写（finish_reason=length）与Gemini CLI omission占位符防护只存在于`utils.llm_gateway._call_with_protection`与`utils.llm_safety.safe_llm_call`两个**零生产调用点**的死路径——chat()真实传输裸奔：max_tokens截断静默半截输出（judge JSON半截=解析失败兜底"new"、计划/摘要半截即废），omission占位符照单全收。顺手销账"双侧镜像人工同步"遗留：omission pattern三副本已实际漂移（dna_evolution 7条 vs 权威9条缺`/* ... existing code ... */`与`<!-- ... -->`两条）。
+**调研来源**：上轮遗留#5点名（"下轮P1候选：chat()输出防护接线（Aider续写+Gemini CLI omission，策略单一真源在llm_gateway，正好销账'无生产调用点'）"）+ SUMMARY P0-2工具结果溢出/截断显式标记（AIHawk"截断必须显式标记"铁律→续写优于静默截断）+ Aider base_coder续写方案与Gemini CLI omission检测（utils/llm_safety.py docstring既有引注，本轮让它从死模块变生产活代码）+ mem0 §1.1失败必须可见（失败契约"[LLM错误: …]"保持不变不吞）。
+**改动文件**（openmate commit `17851c7b`，5文件+351/-63，全部增量hunk）：
+- `acp-proxy/agent/llm_engine.py`（+72/-10）：顶部import llm_safety三件套、chat()收口防护循环
+- `acp-proxy/utils/llm_safety.py`（+4/-0）：`OMISSION_PATTERNS`公开别名（单一真源引用面）
+- `acp-proxy/utils/llm_gateway.py`（+18/-35）：删9条pattern副本+_check_omission内联实现+两处内联续写/重发文案，改引llm_safety（保留`_check_omission`/`_OMISSION_PATTERNS`名称兼容既有调用面）
+- `acp-proxy/dna_evolution.py`（+6/-11）：删7条漂移pattern副本，类属性改引`OMISSION_PATTERNS`
+- `acp-proxy/tests/test_chat_output_protection.py`（新13测）
+**改动内容**：
+1. **chat()防护循环**（`for attempt in range(MAX_CONTINUATION + 1)`）：①finish_reason=length→`build_continuation_messages`按段续写、各段拼接返回（**段语义**：assistant消息只放本段，防llm_gateway式全量累积重复入history）；②omission占位符→`check_omission`命中即整体重新生成（full_content重置，"Start from the beginning"）；③次数用尽→warning留痕返回已累积（不无限空转）；④失败契约不变：传输/HTTP错误返回"[LLM错误: …]"；⑤provider usage回填last_usage契约保留（每次尝试均写）。
+2. **单一真源收口**：pattern与续写/重发文案唯一权威=`utils/llm_safety`（`OMISSION_PATTERNS`/`check_omission`/`check_finish_reason`/`build_continuation_messages`），llm_gateway与dna_evolution引用不再复制；dna旧7条副本漂移（缺2条）随收口修复。
+3. **测试即护栏**：接线钉（chat源码必须真实调用三件套+循环在chat非stream）+镜像钉（三模块pattern同一对象`is`+9条计数+副本绝迹grep）+行为钉（fake传输下6场景）+真实路径集成钉。
+**接线位置**（grep证据，文件:行号）：
+- 防护真实调用：`agent/llm_engine.py:550 check_omission(full_content)`、`:556/:568 build_continuation_messages(...)`、`:563 check_finish_reason(choice)`、`:529 for attempt in range(MAX_CONTINUATION + 1)`（chat方法体内）
+- chat()真实消息路径调用点（防护自此覆盖全部）：`agent/soulmate_agent.py:778`（_llm_plan_call）、`:801`（_judge_task_continuation_llm）、`:898`（_infection_llm_call）、`:3948`（标题生成）、`agent/context.py:125`（上下文压缩）
+- 单一真源引用：`utils/llm_gateway.py:33-37`（import）、`:218/:222/:235`（调用）；`dna_evolution.py:39`（import）、`:1699`（类属性）、`:1786`（_call_llm循环消费）
+- 副本绝迹：`grep "re.compile" utils/llm_gateway.py` **0命中**；dna_evolution pattern列表**0命中**（仅引用）
+**验证结果**：
+- 完整性✅：`git show --numstat 17851c7b`=5文件+351/-63（4改文件全增量hunk零全量重写）；4文件`ast.parse`通过；sibling并行改动（settings-client.tsx/locales×3/systemic_test_results.json/e2e_probe2.py/.mmb-render）显式白名单排除未入库。⚠️过程中patch工具报告dna_evolution.py被sibling '823f60e6'动过，`git diff`核实该文件当时仅含我的+4行，无内容冲突。
+- 集成✅：上述grep调用链完整（定义→chat()调用→真实消息路径5调用点→llm_gateway/dna消费）；接线钉测试（chat方法体源码断言三件套在场+循环在chat非stream）。
+- 测试✅：新`tests/test_chat_output_protection.py` **13 passed**（①防护行为6：stop单发不变/length续写拼接+段语义防重复+单一真源文案/omission重发不带脏输出/次数有界MAX_CONTINUATION+1=4发/失败契约"[LLM错误:"含402/usage回填；②真实路径集成1：`SoulMateAgent._judge_task_continuation_llm`半截JSON `{"action": "cont`+续写段→拼接后json.loads成功→真裁决"continue"（无防护必炸走兜底"new"=用户可感知语义差）；③单一真源4：9条计数/llm_gateway两符号`is`同一对象/DNAStrand._OMISSION_PATTERNS`is`同一对象/两文件源码pattern副本绝迹；④接线钉2）；相关存量（llm_gateway_config/safety_mechanisms/safety_1000/llm_stream_usage_emission/task_judge_wiring/dna×4/plan_execution）合计**142 passed**零回归；acp-proxy全量`tests/` **1141 passed 0 failed**（415.04s，=上轮1128基线+13新）；`systemic_test.py` **29/29 passed**（S1-S6全绿）。
+- **live实锤**（/tmp/chat_protect_live_demo.py，真实LLMEngine.chat()+真实httpx传输+本地stub provider，非monkeypatch）：①场景1 length：provider收到2请求（续写真实发生），返回拼接 `{"action": "continue", "reason": "继续"}`，第2发尾部=[assistant:'{"action": "cont', user:'Continue from where you left off…']，last_usage回填；②场景2 omission：2请求（重发真实发生），返回'完整输出无占位符'，第2发尾部含'Your previous output had issues: Omission placeholder detected: [...]'。控制台同步可见`[LLM] finish_reason=length截断，自动续写 (attempt 1/4)`与`[LLM] Omission placeholder detected: [...]，整体重新生成 (attempt 1/4)`防护日志。
+**服务重启**：`systemctl --user restart acp-proxy-a.service acp-proxy-b.service`→两服务active；:8092/health=200、:8095/health=200（status: ok）；重启后systemic_test 29/29含10端点并发/20次health全绿（opensoul零改动未重启；前端零改动npm build不适用）。
+**commit**：openmate `17851c7b`。
+**遗留问题**：
+1. **⚠️环境问题仍在（非代码，需用户处理）**：LLM供应商余额不足（402）——进化链路待充值/换key后`POST /api/evolution/strands/{id}/reset-breaker`清闸验证。
+2. chat()续写只对非流式路径生效：`chat_stream`/`chat_stream_with_tools`已有自己的finish_reason=length tool_calls `_truncated`标记机制（442-447行），但**纯文本流式截断仍无续写**——流式续写需拼流语义，下轮P2候选。
+3. `utils/llm_safety.safe_llm_call`与`utils/llm_gateway.llm_call`仍无生产调用点（本轮把**策略**收口为单一真源并接入真实传输，未把两个封装入口本身接线）——两者与dna `_call_llm`三套传输实现仍并存，长期应收口为一个传输封装（涉及错误契约差异：LLMCallError.partial_content/[LLM错误:]串/空串三态，需先统一契约再合并，冒进合并会破坏既有失败可见性测试）。
+4. MAX_CONTINUATION/MAX_OUTPUT_TOKENS/MAX_TOOL_OUTPUT_CHARS常量在llm_safety与llm_gateway各有一份（值一致的简单常量，非pattern级漂移）——可顺手收口但收益低。
+5. 402余额期间chat()返回"[LLM错误: …]"，续写/重发收益需真实流量观察：journal统计`[LLM] finish_reason=length截断，自动续写`出现=截断被自动补齐的直接证据。
+6. 上轮遗留观察项（relay消息级粒度、relay每WS轮询、唤醒触发行agent_message透出、前端视觉走查登录墙、overview() N+1、环境变量密钥外发误伤面、污点分析近似、model_gateway/gateway.py:135 provider凭据映射表低优先）仍有效非本轮范围。
+7. cron环境约束实录：sibling并行会话共用工作树——commit必须显式git add白名单+`git diff`先核实目标文件无sibling改动混入；pytest用`~/opensoul/.venv/bin/python3 -m pytest`（系统python3是SearXNG venv无pytest）；全量415s后台跑`process wait`（180s clamp二次wait）；`process notify_on_complete`在cron一次性runner不可用，用wait轮询。
