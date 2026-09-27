@@ -20,13 +20,20 @@ LLM Gateway — 统一调用入口 + 统一防护
 
 import logging
 import os
-import re
 from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
 
 from utils.llm_config import resolve_llm_config
+# 防护策略单一真源=utils.llm_safety（2026-09-28收口）：旧本文件自有9条pattern副本
+# +内联续写/重发文案，与llm_safety/dna_evolution三处镜像漂移（dna 7条缺2条），
+# 现统一引用llm_safety的pattern与消息构建器，禁止再复制。
+from utils.llm_safety import (
+    OMISSION_PATTERNS as _OMISSION_PATTERNS,
+    build_continuation_messages,
+    check_omission as _check_omission,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -105,27 +112,8 @@ for config in DEFAULT_MODELS:
 
 
 # ── Omission占位符检测（Gemini CLI方案）────────────────
-
-_OMISSION_PATTERNS = [
-    re.compile(r"\(rest of methods \.\.\.\)"),
-    re.compile(r"# \.\.\. existing code \.\.\."),
-    re.compile(r"// \.\.\. rest of the function"),
-    re.compile(r"\[\.\.\.\]"),
-    re.compile(r"\(truncated\)"),
-    re.compile(r"// \.\.\. remaining code"),
-    re.compile(r"# \.\.\. rest of"),
-    re.compile(r"/\* \.\.\. existing code \.\.\. \*/"),
-    re.compile(r"<!-- \.\.\. existing code \.\.\. -->"),
-]
-
-
-def _check_omission(text: str) -> str | None:
-    """检测LLM输出中的省略占位符"""
-    for pattern in _OMISSION_PATTERNS:
-        match = pattern.search(text)
-        if match:
-            return f"Omission placeholder detected: {match.group()}"
-    return None
+# pattern与check_omission已收口 utils.llm_safety 单一真源（见顶部import），
+# 此处保留 _check_omission 名称为既有调用面/测试兼容。
 
 
 # ── 统一调用入口 ──────────────────────────────────────
@@ -229,15 +217,10 @@ async def _call_with_protection(
                     omission = _check_omission(full_content)
                     if omission:
                         logger.warning(f"[{strand_id}] {omission}")
-                        current_messages.append({"role": "assistant", "content": full_content})
-                        current_messages.append({
-                            "role": "user",
-                            "content": (
-                                f"Your previous output had issues: {omission}\n\n"
-                                "Please provide the COMPLETE implementation without any shortcuts, "
-                                "placeholders, or omissions. Start from the beginning."
-                            ),
-                        })
+                        # 重发文案单一真源=llm_safety.build_continuation_messages
+                        current_messages = build_continuation_messages(
+                            current_messages, full_content, error_hint=omission
+                        )
                         full_content = ""  # 重置，让LLM重新完整输出
                         continue
                     
@@ -247,11 +230,10 @@ async def _call_with_protection(
                             f"[{strand_id}] LLM output truncated (finish_reason=length), "
                             f"attempt {attempt+1}/{max_continuation}"
                         )
-                        current_messages.append({"role": "assistant", "content": full_content})
-                        current_messages.append({
-                            "role": "user",
-                            "content": "Continue from where you left off. Do not repeat any content already provided.",
-                        })
+                        # 续写文案单一真源=llm_safety.build_continuation_messages
+                        current_messages = build_continuation_messages(
+                            current_messages, full_content
+                        )
                         continue
                     
                     # 正常结束

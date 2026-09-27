@@ -34,6 +34,10 @@ from typing import Any, Optional
 
 import httpx
 
+# omission占位符pattern单一真源=utils.llm_safety（2026-09-28收口）：旧本类7条副本
+# 已漂移（缺 /* ... existing code ... */ 与 <!-- ... --> 两条），禁止再复制pattern
+from utils.llm_safety import OMISSION_PATTERNS
+
 logger = logging.getLogger("acp-proxy.dna_evolution")
 
 # ── 配置 ──────────────────────────────────────────────────
@@ -1690,16 +1694,9 @@ new_string是替换后的文本。
 
     # ── LLM ───────────────────────────────────────────────
 
-    # omission占位符模式（Gemini CLI方案）
-    _OMISSION_PATTERNS = [
-        re.compile(r"\(rest of methods \.\.\.\)"),
-        re.compile(r"# \.\.\. existing code \.\.\."),
-        re.compile(r"// \.\.\. rest of the function"),
-        re.compile(r"\[\.\.\.\]"),
-        re.compile(r"\(truncated\)"),
-        re.compile(r"// \.\.\. remaining code"),
-        re.compile(r"# \.\.\. rest of"),
-    ]
+    # omission占位符模式（Gemini CLI方案）——单一真源 utils.llm_safety.OMISSION_PATTERNS
+    # （旧本地7条副本漂移缺2条，已收口，见顶部import）
+    _OMISSION_PATTERNS = OMISSION_PATTERNS
 
     # ── 出站脱敏（immune/moderator.py模式，Warp 20正则子集）──
     _REDACT_PATTERNS = [

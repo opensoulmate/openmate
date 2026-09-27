@@ -10,6 +10,15 @@ import json
 import logging
 from utils.token_manager import get_max_output_tokens
 from utils.llm_config import describe, resolve_agent_llm_config
+# 输出防护策略单一真源=utils.llm_safety（2026-09-28接线）：此前Aider续写/
+# Gemini CLI omission防护只存在于llm_gateway/llm_safety死路径，chat()真实传输
+# 裸奔（finish_reason=length静默截断、omission占位符照单全收）
+from utils.llm_safety import (
+    MAX_CONTINUATION,
+    build_continuation_messages,
+    check_finish_reason,
+    check_omission,
+)
 import os
 from typing import AsyncGenerator, Optional, TYPE_CHECKING
 
@@ -494,9 +503,16 @@ class LLMEngine:
                 yield f"\n[LLM错误: {e}]"
 
     async def chat(self, messages: list[dict]) -> str:
-        """非流式完整输出 — 等待完整响应后返回
+        """非流式完整输出 — 等待完整响应后返回（带输出防护）
 
         如果启用了ModelRouter，会根据prompt动态选择最优模型。
+
+        输出防护（2026-09-28接线，策略单一真源=utils.llm_safety，此前只存在于
+        llm_gateway/llm_safety死路径、本真实传输裸奔）：
+        1. finish_reason=length自动续写（Aider方案，最多MAX_CONTINUATION次，
+           各段拼接返回——此前静默截断，judge JSON/计划/摘要半截即废）
+        2. omission占位符检测+整体重新生成（Gemini CLI方案）
+        失败契约不变：传输/HTTP错误返回"[LLM错误: …]"（失败必须可见，不吞）。
         """
         # 通过router解析模型（无router时返回固定配置）
         resolved_model, resolved_base_url, resolved_api_key = self._resolve_model(messages)
@@ -506,27 +522,59 @@ class LLMEngine:
             headers={"Authorization": f"Bearer {resolved_api_key}"} if resolved_api_key else {},
             timeout=httpx.Timeout(connect=10, read=120, write=10, pool=10),
         )
-        payload = {
-            "model": resolved_model,
-            "messages": self._build_messages(messages),
-            "stream": False,
-            "temperature": 0.7,
-            "max_tokens": get_max_output_tokens(),
-        }
+        current_history = list(messages)  # 不含system（每次请求由_build_messages统一注入）
+        full_content = ""
         try:
             async with client:
-                resp = await client.post("/chat/completions", json=payload)
-                if resp.status_code != 200:
-                    raise RuntimeError(f"LLM API error {resp.status_code}: {resp.text[:200]}")
-                data = resp.json()
-                # P1 provider usage回填：非流式响应的权威usage同样写入last_usage
-                _nusage = data.get("usage")
-                if isinstance(_nusage, dict) and _nusage:
-                    self.last_usage = _nusage
-                return data["choices"][0]["message"]["content"]
+                for attempt in range(MAX_CONTINUATION + 1):
+                    payload = {
+                        "model": resolved_model,
+                        "messages": self._build_messages(current_history),
+                        "stream": False,
+                        "temperature": 0.7,
+                        "max_tokens": get_max_output_tokens(),
+                    }
+                    resp = await client.post("/chat/completions", json=payload)
+                    if resp.status_code != 200:
+                        raise RuntimeError(f"LLM API error {resp.status_code}: {resp.text[:200]}")
+                    data = resp.json()
+                    # P1 provider usage回填：非流式响应的权威usage同样写入last_usage
+                    _nusage = data.get("usage")
+                    if isinstance(_nusage, dict) and _nusage:
+                        self.last_usage = _nusage
+                    choice = data.get("choices", [{}])[0]
+                    segment = (choice.get("message", {}) or {}).get("content") or ""
+                    full_content += segment
+
+                    # 防护1：omission占位符→整体重新生成（Gemini CLI方案）
+                    omission = check_omission(full_content)
+                    if omission:
+                        logger.warning(
+                            f"[LLM] {omission}，整体重新生成 "
+                            f"(attempt {attempt+1}/{MAX_CONTINUATION+1})"
+                        )
+                        current_history = build_continuation_messages(
+                            current_history, segment, error_hint=omission
+                        )
+                        full_content = ""  # 重置：要求从头完整重出
+                        continue
+
+                    # 防护2：finish_reason=length→续写（Aider方案）
+                    if check_finish_reason(choice) == "length":
+                        logger.warning(
+                            f"[LLM] finish_reason=length截断，自动续写 "
+                            f"(attempt {attempt+1}/{MAX_CONTINUATION+1})"
+                        )
+                        current_history = build_continuation_messages(current_history, segment)
+                        continue
+
+                    break  # 正常结束（stop/未知finish_reason按结束处理）
+                else:
+                    logger.warning("[LLM] 续写/重发次数用尽，返回已累积输出（可能仍不完整）")
         except Exception as e:
             logger.error(f"LLM chat error: {e}", exc_info=True)
             return f"[LLM错误: {e}]"
+        return full_content
 
     def _build_messages(self, history: list[dict], system_prompt: str = None) -> list[dict]:
         """构建OpenAI格式消息数组 — 注入system提示词

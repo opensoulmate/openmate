@@ -34,6 +34,10 @@ _OMISSION_PATTERNS = [
     re.compile(r"<!-- \.\.\. existing code \.\.\. -->"),
 ]
 
+# 公开别名：跨模块单一真源引用面（llm_engine/llm_gateway/dna_evolution统一引用此处，
+# 禁止各文件再维护pattern副本——旧三副本已发生漂移：dna_evolution 7条 vs 此处9条）
+OMISSION_PATTERNS = _OMISSION_PATTERNS
+
 
 def check_omission(text: str) -> str | None:
     """检测LLM输出中的省略占位符
