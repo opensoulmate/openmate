@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 from utils.token_manager import get_max_output_tokens
+from utils.llm_config import describe, resolve_agent_llm_config
 import os
 from typing import AsyncGenerator, Optional, TYPE_CHECKING
 
@@ -74,10 +75,17 @@ class LLMEngine:
             model_router: ModelRouter实例（可选），启用后每次chat根据prompt选择模型
             agent_id: agent标识符（可选），配合router做agent级模型覆盖
         """
-        # 原有逻辑: 从参数或环境变量读取固定配置
-        self.api_key = api_key or os.environ.get("LLM_API_KEY", os.environ.get("OPENAI_API_KEY", ""))
-        self.base_url = base_url or os.environ.get("LLM_BASE_URL", os.environ.get("OPENAI_BASE_URL", "http://localhost:11434/v1"))
-        self.model = model or os.environ.get("LLM_MODEL", os.environ.get("OPENAI_MODEL", "deepseek-r1:latest"))
+        # LLM配置收口单一真源（2026-09-27）：显式参数 > 宿主注入OPENAI_* >
+        # resolve_llm_config静态真源 > 裸机本地Ollama兜底——契约见
+        # utils/llm_config.resolve_agent_llm_config docstring。旧实现此处自扫
+        # LLM_*elseOPENAI_* + 硬编码模型名兜底，与全系统单一真源双源漂移
+        # （此处deepseek-r1:latest vs start/wakeup的qwen3:8b），已销账。
+        _cfg = resolve_agent_llm_config(api_key=api_key, base_url=base_url, model=model)
+        self.api_key = _cfg["api_key"]
+        self.base_url = _cfg["base_url"]
+        self.model = _cfg["model"]
+        # P0-4可观测：key从哪来（param/openai_env/file/env/""），key原文绝不进日志
+        self.key_source = _cfg["key_source"]
         self.system_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
 
         # ModelRouter智能路由（可选）
@@ -95,7 +103,7 @@ class LLMEngine:
         # 置False永久回退，探测只发生一次，不影响后续请求
         self._stream_options_ok = True
 
-        logger.info(f"LLM Engine init: base_url={self.base_url}, model={self.model}, router={'enabled' if model_router else 'disabled'}")
+        logger.info(f"LLM Engine init: {describe(_cfg)}, router={'enabled' if model_router else 'disabled'}")
 
     def _make_client(self) -> httpx.AsyncClient:
         """创建新的HTTP客户端实例

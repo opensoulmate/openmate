@@ -189,13 +189,18 @@ def _get_headless_agent():
         from agent import arch_monitor
         from agent.llm_engine import LLMEngine
         from agent.soulmate_agent import SoulMateAgent
+        from utils.llm_config import describe, resolve_agent_llm_config
 
+        # LLM配置收口单一真源（2026-09-27销账遗留#2）：旧实现此处自扫
+        # LLM_*elseOPENAI_* + 硬编码 qwen3:8b 兜底，与 llm_engine/start 三处
+        # 双源漂移。现委托 agent 调用面契约（显式参数 > 宿主注入OPENAI_* >
+        # 静态单一真源 > 裸机本地Ollama兜底），返回形状保持不变（LLMEngine(**)零改动）。
+        _cfg = resolve_agent_llm_config()
+        logger.info("[wakeup] LLM config: %s", describe(_cfg))
         llm_config = {
-            "api_key": os.environ.get("LLM_API_KEY", os.environ.get("OPENAI_API_KEY", "")),
-            "base_url": os.environ.get(
-                "LLM_BASE_URL", os.environ.get("OPENAI_BASE_URL", "http://localhost:11434/v1")
-            ),
-            "model": os.environ.get("LLM_MODEL", os.environ.get("OPENAI_MODEL", "qwen3:8b")),
+            "api_key": _cfg["api_key"],
+            "base_url": _cfg["base_url"],
+            "model": _cfg["model"],
         }
         engine = LLMEngine(**llm_config)
         prev_arch = arch_monitor.get_architecture()

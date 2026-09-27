@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 from agent.llm_engine import LLMEngine
+from utils.llm_config import describe, resolve_agent_llm_config
 
 logger = logging.getLogger("acp-agent")
 
@@ -30,13 +31,17 @@ logging.basicConfig(
 
 
 def load_llm_config() -> dict:
-    config = {
-        "api_key": os.environ.get("LLM_API_KEY", os.environ.get("OPENAI_API_KEY", "")),
-        "base_url": os.environ.get("LLM_BASE_URL", os.environ.get("OPENAI_BASE_URL", "http://localhost:11434/v1")),
-        "model": os.environ.get("LLM_MODEL", os.environ.get("OPENAI_MODEL", "qwen3:8b")),
-    }
-    logger.info(f"LLM config: base_url={config['base_url']}, model={config['model']}")
-    return config
+    """读取内置Agent LLM配置——收口 utils.llm_config.resolve_agent_llm_config 单一真源。
+
+    2026-09-27销账遗留#2：本函数曾自扫 LLM_*elseOPENAI_* + 硬编码 qwen3:8b 兜底，
+    与 llm_engine/wakeup_executor 三处双源漂移。现委托 agent 调用面契约
+    （显式参数 > 宿主注入OPENAI_* > 静态单一真源 > 裸机本地Ollama兜底），
+    key_source 可观测，key原文绝不进日志。返回形状保持 {api_key, base_url, model}
+    不变（LLMEngine(**config) 零改动）。
+    """
+    cfg = resolve_agent_llm_config()
+    logger.info(f"LLM config: {describe(cfg)}")
+    return {"api_key": cfg["api_key"], "base_url": cfg["base_url"], "model": cfg["model"]}
 
 
 async def main():

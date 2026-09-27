@@ -1700,7 +1700,9 @@ You can send files to the user natively: to deliver a file, write a brief confir
             # 逐轮快照+provider usage逐轮回填，estimate_gap按轮时序配对）──
             try:
                 _window = int(os.environ.get("AGENT_CONTEXT_WINDOW", "32000"))
-                _model = os.environ.get("LLM_MODEL", "")
+                # 模型标签收口（2026-09-27）：引擎已解析的model是单一真源（file/注入/参数
+                # 任一来源），env自扫只是兜底——旧实现只见env不见文件，归因标签常为空。
+                _model = getattr(self.llm_engine, "model", "") or os.environ.get("LLM_MODEL", "")
                 _msg_items = list(attr_items)
                 _conv = 0
                 _tres = 0

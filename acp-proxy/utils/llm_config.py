@@ -27,11 +27,17 @@ resolve_llm_config()；key 缺失要显式告警（401早知道），不得静�
   + 极端兜底 resolve_llm_config(include_mimo_overrides=False)（系统默认LLM单一真源）。
   注意：model_router 的 MIMO_API_KEY = mimo 提供商凭据（与 OPENAI_API_KEY 同级的
   历史命名），不是"进化覆写"语义——两语义并存，见 model_router 模块docstring。
+- agent/内嵌soulmate引擎（LLMEngine/start/wakeup）：resolve_agent_llm_config()
+  —— 专属调用面契约，见该函数docstring（显式参数 > 宿主注入OPENAI_* > 静态
+  单一真源 > 裸机本地Ollama兜底）。
 """
 
 from __future__ import annotations
 
+import logging
 import os
+
+logger = logging.getLogger("acp.llm_config")
 
 
 def _read_env_file(path: str) -> dict:
@@ -182,6 +188,102 @@ def resolve_llm_config(
         "input_limit": _limit("LLM_INPUT_LIMIT", 0),
         "key_source": key_source,
     }
+
+
+# ── agent/内嵌soulmate引擎调用面（2026-09-27定案）────────────────────
+# 裸机本地Ollama兜底（deliberate，不是遗留）：Ollama默认端口+本地常见小模型。
+# 仅当显式参数/宿主注入/静态单一真源三层全空时才生效，且必须显式warning——
+# 缺key=无鉴权请求（本地Ollama合法；远程provider=401早知道，禁止静默）。
+AGENT_LOCAL_BASE_URL = "http://localhost:11434/v1"
+AGENT_LOCAL_MODEL = "qwen3:8b"
+
+
+def resolve_agent_llm_config(
+    *,
+    api_key: str = "",
+    base_url: str = "",
+    model: str = "",
+    env_files: list[str] | None = None,
+) -> dict:
+    """agent/内嵌soulmate引擎LLM配置解析——专属调用面契约（2026-09-27定案）。
+
+    背景（销账遗留#2）：agent/llm_engine.py、agent/start.py、agent/wakeup_executor.py
+    三处各自 `os.environ.get("LLM_*", os.environ.get("OPENAI_*", 默认))` 自扫，与全系统
+    resolve_llm_config 单一真源双源漂移：①只经 load_dotenv 见 acp-proxy/.env，永远
+    不见 opensoul/.env 主配置（源优先级与全系统相反）；②同一兜底槽位两个硬编码模型名
+    （deepseek-r1:latest vs qwen3:8b）；③key缺失静默发无鉴权请求（DNA进化strand 401
+    事故同款根因）；④无key_source观测。
+
+    调用面契约——三个回退语义的定案（遗留#2"刻意还是遗留"）：
+    - LLM_*elseOPENAI_* 双别名 = **刻意**，但语义是"宿主注入契约"：ws_chat.
+      run_agent_proxy 对agent子进程注入 OPENAI_API_KEY/OPENAI_BASE_URL/OPENAI_MODEL
+      （OpenAI兼容事实标准环境变量，ws_chat.py注释"System LLM config (OPENAI_API_KEY
+      etc.) is injected for ALL agents"）。运行时注入必须**盖过静态文件**（注入=本次
+      运行的定向意图，.env=静态真源；旧实现load_dotenv把文件合并进env反向遮蔽注入，
+      契约失效——本函数修复）。
+    - OPENAI_BASE_URL默认 http://localhost:11434/v1 = **刻意**的裸机本地Ollama兜底
+      （Ollama默认端口，零配置开发可用，保留）。
+    - OPENAI_MODEL默认模型名 = **遗留漂移**（同一槽位deepseek-r1:latest/qwen3:8b
+      两个值），本轮统一为 AGENT_LOCAL_MODEL（多数派）。
+
+    优先级（先者优先，逐字段独立解析，调用方只传自己要覆写的字段）：
+    1. 显式构造参数（调用方定向覆写，最高优先）
+    2. 宿主注入契约 OPENAI_API_KEY / OPENAI_BASE_URL / OPENAI_MODEL（进程环境）
+    3. 静态单一真源 resolve_llm_config(include_mimo_overrides=False)
+       （opensoul/.env → acp-proxy/.env → LLM_*进程env兜底）
+    4. 裸机本地Ollama兜底 AGENT_LOCAL_BASE_URL / AGENT_LOCAL_MODEL（仅base_url/model）
+
+    MIMO_* 进化覆写绝不跟随（include_mimo_overrides=False）——用户/agent运行时与
+    进化strand调用面隔离，见模块docstring。
+
+    返回 {api_key, base_url, model, key_source}；key_source ∈ {"param","openai_env",
+    "file","env",""}——api_key从哪来可观测（key原文绝不进日志，用describe()）。
+    """
+    static = resolve_llm_config(env_files=env_files, include_mimo_overrides=False)
+
+    # api_key：param > OPENAI_API_KEY(注入) > 静态真源
+    if api_key:
+        api_key_out, key_source = api_key, "param"
+    else:
+        injected_key = os.environ.get("OPENAI_API_KEY", "").strip()
+        if injected_key:
+            api_key_out, key_source = injected_key, "openai_env"
+        else:
+            api_key_out, key_source = static["api_key"], static.get("key_source") or ""
+
+    # base_url：param > OPENAI_BASE_URL(注入) > 静态真源 > 裸机本地Ollama兜底
+    base_url_out = (
+        base_url
+        or os.environ.get("OPENAI_BASE_URL", "").strip()
+        or static["base_url"]
+        or AGENT_LOCAL_BASE_URL
+    )
+
+    # model：param > OPENAI_MODEL(注入) > 静态真源 > 统一兜底（销双源漂移）
+    model_out = (
+        model
+        or os.environ.get("OPENAI_MODEL", "").strip()
+        or static["model"]
+        or AGENT_LOCAL_MODEL
+    )
+
+    cfg = {
+        "api_key": api_key_out,
+        "base_url": base_url_out,
+        "model": model_out,
+        "key_source": key_source,
+    }
+    # 失败必须可见（mem0 §1.1）：缺key=无鉴权请求，缺配置=兜底已触发
+    if not api_key_out:
+        logger.warning(
+            "agent LLM api_key为空——将发出无鉴权请求（本地Ollama合法；远程provider=401早知道）: %s",
+            describe(cfg),
+        )
+    if not (base_url or os.environ.get("OPENAI_BASE_URL", "").strip() or static["base_url"]):
+        logger.warning("agent LLM base_url缺失，回退裸机本地Ollama兜底: %s", describe(cfg))
+    if not (model or os.environ.get("OPENAI_MODEL", "").strip() or static["model"]):
+        logger.warning("agent LLM model缺失，回退统一兜底 %s: %s", AGENT_LOCAL_MODEL, describe(cfg))
+    return cfg
 
 
 def describe(cfg: dict) -> str:
