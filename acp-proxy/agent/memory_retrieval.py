@@ -2,10 +2,19 @@
 记忆检索引擎 — 借鉴Mem0/Zep/MemGPT的分层记忆系统
 核心思想：短期记忆（对话上下文）→ 工作记忆（当前任务）→ 长期记忆（持久化知识）
 针对OpenSoul的四层记忆体系设计
+
+P0 gap (SUMMARY.md: "hippo | 三因子检索 ... generative-agents ... | P0")：
+检索排序升级为 generative-agents 三因子公式（69-generative-agents-source.md
+#1："recency=0.99^i衰减 + importance=poignancy + relevance=cos_sim，三者
+normalize到[0,1]后等权相加取top"）。此前 retrieve() 的排序键 relevance_score
+与 query 完全无关（query 只做 FTS 候选过滤）——高重要性但答非所问的记忆会
+挤掉真正相关的记忆。本模块 relevance 因子用 token 覆盖度做 cos_sim 的确定性
+代理（无嵌入模型依赖；CJK 用 bigram，DeerMem 同款做法）。
 """
 
 import logging
 import json
+import re
 import time
 import sqlite3
 import hashlib
@@ -50,13 +59,64 @@ class MemoryEntry:
 
     @property
     def relevance_score(self) -> float:
-        """综合相关性分数（重要性 + 新近度 + 使用频率）"""
+        """旧启发式综合分（重要性 + 新近度 + 使用频率）。
+
+        注意：与 query 无关（历史命名遗留）。检索排序已升级为三因子公式
+        three_factor_score(entry, query)（generative-agents），query 为空时
+        本属性作为退化排序键保留。
+        """
         age_hours = (time.time() - self.created_at) / 3600
         recency = 1.0 / (1.0 + self.decay_rate * age_hours)
         frequency = min(1.0, self.access_count / 10.0)
         importance = self.importance.value / 5.0
 
         return 0.4 * importance + 0.3 * recency + 0.3 * frequency
+
+
+# ── 三因子检索（generative-agents retrieve.py 祖师爷公式，~40行核心） ──────
+# 因子1 recency：0.99^i 衰减序列的时间版等价物（沿用本模块既有遗忘曲线，
+#       归一到 (0,1]）；因子2 importance：poignancy 1-10 的本模块等价物
+#       （MemoryImportance 1-5 / 5）；因子3 relevance：cos_sim 嵌入相似度的
+#       确定性代理（token 覆盖度；CJK bigram，DeerMem 同款）。三者归一到
+#       [0,1] 后等权相加（generative-agents 等权归一，不加权）。
+
+_TOKEN_RE = re.compile(r"[a-zA-Z0-9_]+|[\u4e00-\u9fff]+")
+
+
+def _relevance_tokens(text: str) -> set[str]:
+    """检索 token 集合：拉丁/数字词整词小写 + CJK 连续段切 bigram（不足2字取原字）。"""
+    tokens: set[str] = set()
+    for m in _TOKEN_RE.finditer(text or ""):
+        seg = m.group(0)
+        if "\u4e00" <= seg[0] <= "\u9fff":
+            if len(seg) == 1:
+                tokens.add(seg)
+            else:
+                tokens.update(seg[i:i + 2] for i in range(len(seg) - 1))
+        else:
+            tokens.add(seg.lower())
+    return tokens
+
+
+def query_relevance(query: str, content: str) -> float:
+    """relevance 因子 ∈ [0,1]：query token 被 content 覆盖的比例（cos_sim 代理）。"""
+    q = _relevance_tokens(query)
+    if not q:
+        return 0.0
+    d = _relevance_tokens(content)
+    if not d:
+        return 0.0
+    return len(q & d) / len(q)
+
+
+def three_factor_score(entry: MemoryEntry, query: str, *, now: Optional[float] = None) -> float:
+    """generative-agents 三因子分：(recency + importance + relevance) / 3，各因子 ∈ [0,1]。"""
+    ts = time.time() if now is None else now
+    age_hours = max(0.0, (ts - entry.created_at) / 3600)
+    recency = 1.0 / (1.0 + entry.decay_rate * age_hours)  # (0,1]
+    importance = entry.importance.value / 5.0              # [0.2,1]
+    relevance = query_relevance(query, entry.content)      # [0,1]
+    return (recency + importance + relevance) / 3.0
 
 
 class MemoryRetrievalEngine:
@@ -211,8 +271,22 @@ class MemoryRetrievalEngine:
             )
             entries.append(entry)
 
-        # 按相关性排序
-        entries.sort(key=lambda e: -e.relevance_score)
+        # fallback（LIKE）路径SQL侧不带type/importance/session过滤——在此统一
+        # 补过滤（FTS路径已过滤，重施无害），fail-closed：过滤条件不满足不许混入
+        entries = [
+            e for e in entries
+            if (memory_type is None or e.memory_type == memory_type)
+            and (not session_id or e.session_id == session_id)
+            and e.importance.value >= min_importance.value
+        ]
+
+        # 三因子排序（generative-agents：recency+importance+relevance等权归一，
+        # relevance=query相关度——修复旧排序与query无关的缺陷）；query为空时
+        # 退化为旧启发式relevance_score；memory_id做确定性tie-break
+        if query and query.strip():
+            entries.sort(key=lambda e: (-three_factor_score(e, query), e.memory_id))
+        else:
+            entries.sort(key=lambda e: (-e.relevance_score, e.memory_id))
 
         # 更新访问计数
         for entry in entries[:limit]:
