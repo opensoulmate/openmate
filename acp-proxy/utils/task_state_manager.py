@@ -5,6 +5,7 @@ TaskStateManager — 独立任务状态管理（不放进LLM上下文）
 import time
 import uuid
 import json
+import re
 import sqlite3
 import logging
 from dataclasses import dataclass, field, asdict
@@ -193,6 +194,49 @@ class TaskStateManager:
         ))
         conn.commit()
         conn.close()
+
+
+# 实体提取停用词（纯虚词token进实体会污染匹配——单字/虚词bigram几乎命中一切消息，
+# 规则C会把无关消息误判continue）
+_ENTITY_STOP_CHARS = set("的了是在有和与对也都而把被让给从到很还不就个们我你他她它们这那时会能可要说做一二两")
+
+
+def extract_entities(user_text: str, limit: int = 10) -> list[str]:
+    """从用户消息提取关键实体（规则C实体匹配词料；匹配语义=子串 `e in user_message`）。
+
+    P1修复（2026-09-28）：旧调用面 `[w for w in user_text if len(w) > 1 ...]` 按
+    **字符**迭代字符串，len(w)>1 恒False → entities 恒为空 → 规则C（实体→continue）
+    与规则F的 has_old_entity 永不命中，任务延续判定全被推向 llm_judge（当时还是死
+    路径）→ 任务延续完全失效。单一真源收口到本函数，调用面不得再自扫切词。
+
+    词法（DeerMem / memory_retrieval.query_relevance 同款确定性切词，无嵌入依赖）：
+    - 拉丁/数字：整词（保留原大小写——规则C匹配是大小写敏感子串）
+    - CJK连续段：切bigram（不足2字取原字）
+    - 过滤：长度<2、纯停用词token、重复（保序去重）；limit封顶（默认10，
+      与TaskState.entities[:10]旧契约一致）
+    """
+    if not user_text:
+        return []
+    tokens: list[str] = re.findall(r"[A-Za-z0-9_]+", user_text)
+    for seg in re.findall(r"[\u4e00-\u9fff]+", user_text):
+        if len(seg) < 2:
+            tokens.append(seg)
+        else:
+            tokens.extend(seg[i:i + 2] for i in range(len(seg) - 1))
+    seen: set[str] = set()
+    out: list[str] = []
+    for tok in tokens:
+        if len(tok) < 2:
+            continue
+        if all(ch in _ENTITY_STOP_CHARS for ch in tok):
+            continue
+        if tok in seen:
+            continue
+        seen.add(tok)
+        out.append(tok)
+        if len(out) >= limit:
+            break
+    return out
 
 
 def judge_task_continuation(

@@ -47,7 +47,7 @@ from utils.token_manager import truncate_tool_result
 from agent.tool_output_handler import ToolOutputHandler, degraded_spill
 from agent.architecture_enhanced import EnhancedArchitecture
 from agent import arch_monitor
-from utils.task_state_manager import TaskStateManager, judge_task_continuation
+from utils.task_state_manager import TaskStateManager, judge_task_continuation, extract_entities
 # P1/P2 架构组件
 from agent.semantic_cache import SemanticCache
 from agent.context_compression import ContextCompressor
@@ -776,6 +776,35 @@ class SoulMateAgent:
     async def _llm_plan_call(self, messages: list[dict]) -> str:
         """轻量 LLM 调用，只返回文本（不带工具），用于规划和自省"""
         return await self.llm_engine.chat(messages)
+
+    async def _judge_task_continuation_llm(self, current_task, user_text: str) -> str:
+        """规则层无法确定时的LLM任务边界裁决 — 返回 "continue" | "new"。
+
+        P0修复（2026-09-28）：本逻辑原为 _prompt_inner 内联块，调用的是**不存在的**
+        self._llm_call——AttributeError 被调用点 try/except 吞掉，LLM judge 从未真实
+        执行过（生产 journal 实锤："[TaskState] LLM judge failed: 'SoulMateAgent'
+        object has no attribute '_llm_call'"），规则不明时一律"new"→旧任务被误完成、
+        任务延续失效。现收口到本方法走 self.llm_engine.chat 单一传输真源
+        （与 _llm_plan_call/_infection_llm_call 同款包装面）。
+
+        契约：JSON解析失败向上抛，由调用点 except 兜底"new"并 warning 留痕
+        （失败必须可见）；LLM给未知 action（拼写错误/"ask"等）归一"new"，
+        不许透传进状态机分支。
+        """
+        judge_messages = [
+            {"role": "system", "content": (
+                "你是任务判断器。判断用户新消息是继续旧任务还是新任务。\n"
+                "返回JSON: {\"action\": \"continue\"|\"new\", \"reason\": \"...\"}"
+            )},
+            {"role": "user", "content": f"当前任务: {current_task.goal}\n用户消息: {user_text}"},
+        ]
+        raw = await self.llm_engine.chat(judge_messages)
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        llm_judge = json.loads(raw)
+        action = llm_judge.get("action", "new")
+        return action if action in ("continue", "new") else "new"
 
     @property
     def _turn_read_view(self) -> TurnReadView:
@@ -3357,21 +3386,11 @@ You can send files to the user natively: to deliver a file, write a brief confir
         logger.info(f"[TaskState] judgment: action={action}, reason={judgment['reason']}")
 
         if action == "llm_judge":
-            # 规则无法确定，调用LLM判断
-            judge_messages = [
-                {"role": "system", "content": (
-                    "你是任务判断器。判断用户新消息是继续旧任务还是新任务。\n"
-                    "返回JSON: {\"action\": \"continue\"|\"new\", \"reason\": \"...\"}"
-                )},
-                {"role": "user", "content": f"当前任务: {current_task.goal}\n用户消息: {user_text}"},
-            ]
+            # 规则无法确定，调用LLM判断（P0修复：旧内联块调用不存在的self._llm_call，
+            # AttributeError被本except吞掉→judge死路径、一律"new"，journal live实锤；
+            # 现收口到_judge_task_continuation_llm走llm_engine.chat单一传输真源）
             try:
-                raw = await self._llm_call(judge_messages)
-                raw = raw.strip()
-                if raw.startswith("```"):
-                    raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-                llm_judge = json.loads(raw)
-                action = llm_judge.get("action", "new")
+                action = await self._judge_task_continuation_llm(current_task, user_text)
                 logger.info(f"[TaskState] LLM judge: action={action}")
             except Exception as e:
                 logger.warning(f"[TaskState] LLM judge failed: {e}, defaulting new")
@@ -3384,14 +3403,14 @@ You can send files to the user natively: to deliver a file, write a brief confir
             # 新任务，完成旧任务，创建新任务
             if current_task:
                 self._task_state_manager.complete_task(session_id)
-            # 从消息中提取关键实体（简单实现：取名词短语）
-            entities = [w for w in user_text if len(w) > 1 and w not in "的了是在有和与对"]
+            # 从消息中提取关键实体（extract_entities单一真源：拉丁整词+CJK bigram）
+            entities = extract_entities(user_text)
             self._task_state_manager.create_task(session_id, goal=user_text, entities=entities[:10])
         elif action == "ask":
             # 短消息无法判断 → 视为新任务继续执行（不阻塞）
             if current_task:
                 self._task_state_manager.complete_task(session_id)
-            entities = [w for w in user_text if len(w) > 1 and w not in "的了是在有和与对"]
+            entities = extract_entities(user_text)
             self._task_state_manager.create_task(session_id, goal=user_text, entities=entities[:10])
 
 
