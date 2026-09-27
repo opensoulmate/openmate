@@ -2903,3 +2903,117 @@
 4. 00:10遗留#4（ws_chat._get_llm_config与resolve_llm_config双入口并存，应委托收口单一真源）仍有效，下轮P1候选。
 5. 上轮遗留（relay消息级粒度、relay每WS轮询、唤醒触发行agent_message透出、前端视觉走查登录墙、overview() N+1、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步）仍有效非本轮范围。
 6. cron环境约束实录：`tail -N`接管道仍报"exit_code被tail掩盖"——长测试命令不接管道直跑（本轮992全量直跑）；大文件dev-reports.md追加用`cat >>`（write_file全量覆盖禁用惯例沿用）。
+
+## [2026-09-27 04:55 CST] DNA进化strand通用（非LLM）失败同错风暴熔断——分域独立窗口+签名判重（02:26遗留#2销账）
+**目标**：销账02:26轮遗留#2（明确标注"下轮候选"）——LLM错误风暴熔断只覆盖LLM故障，**通用（非LLM）失败的同错风暴未熔断**，pipeline/import类错误循环出现时每周期仍重试烧进化预算；且按遗留#2原话"分域独立窗口，注意别把LLM窗口和通用窗口混算"实现双域隔离。
+**调研来源**：42-agno-source.md §1.4错误风暴熔断（"前storm_window个attempt全部error且**error_type相同**→停止整个rollout"——error_type判重语义本轮落成`_error_signature`）；opensoul job_queue 20:36轮breaker+上轮LLM breaker（半开/cooldown/留痕语义逐字对齐）；evolution-engine-patterns.md §1.4（"失败记忆的第一道闸门是别把系统性故障记成N条独立失败"）；mem0 §1.1（失败必须可见——开闸/抑制/复位全部留痕）。
+**改动文件**：
+- openmate `acp-proxy/dna_evolution.py`（+160/-49增量）：GEN_BREAKER常量2个+`_error_signature`+通用streak签名计数+五方法domain参数化+调度门双域拦截+成功路径分域复位+state持久化+get_status新键
+- openmate `acp-proxy/routes/evolution.py`（+15/-2增量）：reset-breaker端点body可选domain参数+/config透出gen熔断参数
+- openmate `acp-proxy/tests/test_dna_gen_error_storm_breaker.py`（新~380行，23测）
+- openmate `acp-proxy/tests/test_dna_error_storm_breaker.py`（+2/-1：接线护栏断言随契约更新，行为断言零改动）
+**改动内容**：
+1. **同错风暴签名判重（agno error_type语义）**：`_error_signature(exc, stage)=f"{stage}:{type(exc).__name__}"`——消息内容**不进签名**（同根因不同消息如FileNotFoundError路径各异仍算同一故障模式），异常类型或stage一变=不同故障→streak重计不误熔断。通用失败streak按签名累积（`_gen_failure_streak`/`_gen_error_signature`），≥`GEN_BREAKER_STORM_WINDOW`(3)→`_breaker_trip(domain="gen")`开闸。
+2. **分域独立窗口（遗留#2核心要求）**：`GEN_BREAKER_STORM_WINDOW=3`/`GEN_BREAKER_COOLDOWN_S=1800`独立于LLM域常量；五方法（`_breaker_is_open/_breaker_trip/_breaker_close/reset_breaker/_breaker_status`）全部`domain`参数化（llm/gen，向后兼容默认llm）；LLM风暴只开LLM闸、gen风暴只开gen闸，计数/窗口/闸门/抑制计数互不污染。周期完整跑通（无非LLM异常）→gen streak清零+gen闸复位（`_breaker_close("cycle_success", domain="gen")`）**只关gen闸不碰LLM闸**；`reset_breaker(domain=...)`支持llm/gen/all，复位不清账本（streak保留）。
+3. **调度门双域拦截**：run()主循环`blocked_llm/blocked_gen`分域判定（保留既有`should_evolve and self._breaker_is_open(now)`子串语义），谁开闸谁抑制——各自`_breaker_suppressed`/`_gen_breaker_suppressed`独立可见计数+分域留痕（domain/streak/signature/cooldown_remaining_s）。
+4. **持久化+状态面**：state文件新增`gen_failure_streak/gen_error_signature/gen_breaker{open,opened_at,suppressed}`，`_load_state`恢复（**重启不重置风暴计数**，老state无新键默认关闭不炸）；`get_status()`透出`gen_breaker{domain,state,open,gating,opened_at,cooldown_remaining_s,suppressed_cycles,storm_window,cooldown_s}`+`gen_failure_streak`+`gen_error_signature`（/api/evolution/status、/strands消费）。
+5. **API面**：`POST /strands/{id}/reset-breaker` body可选`{"domain":"llm"(默认)/"gen"/"all"}`（无body调用向后兼容），响应带domain+双breaker状态；`GET /config`透出`gen_breaker_storm_window/gen_breaker_cooldown_s`。
+**接线位置**（grep证据，文件:行号）：
+- 计数+开闸：`dna_evolution.py:657 sig = self._error_signature(e, cycle.stage.value)`（`_evolve`的`except Exception`真实失败路径）→ `:680-682 if self._gen_failure_streak >= GEN_BREAKER_STORM_WINDOW: self._breaker_trip(..., domain="gen")`；
+- 调度门：`dna_evolution.py:433 blocked_gen = should_evolve and self._breaker_is_open(now, domain="gen")` → `:451 elif blocked_llm or blocked_gen:` → `self._gen_breaker_suppressed += 1`（真实自动进化路径：app.py lifespan→`_run_evolution_strand`→`DNAStrand.run()`）；
+- 成功复位：`dna_evolution.py:605 self._breaker_close("cycle_success", domain="gen")`（`_evolve`成功路径）；
+- 状态面：`dna_evolution.py:2124 "gen_breaker": self._breaker_status(domain="gen")` → 消费点`routes/evolution.py:68 /status`、`:78 /strands`（router挂载`app.py:261 include_router(evolution_router)`既有）；
+- 人工通道：`routes/evolution.py:136 strand.reset_breaker(domain=domain)` → `/config` `:459-460`。
+**验证结果**：
+- 完整性✅：`git show --numstat` 891101bc（5文件+585/-75：dna_evolution.py/routes/evolution.py均增量hunk零全量重写，新test文件真实落盘）；sibling并行改动（settings-client.tsx/locales/*.json/.mmb-render/e2e_probe2.py）显式排除未入库。
+- 集成✅：上述grep调用链 + live实锤（见下）。
+- 测试✅：新`tests/test_dna_gen_error_storm_breaker.py` **23 passed**（①开闸5：同签名窗口下不开闸/达窗口开闸+status+留痕+**gen风暴不碰LLM闸/LLM计数**/签名变化交错6次streak恒1不误熔断/签名粒度（stage+类型，消息不进签名）/history带error_signature与llm_error分账；②分域隔离3：LLM风暴3次只开LLM闸gen纹丝不动/gen风暴只开gen闸/双闸独立开关互不影响；③调度门3：gen开闸→**真实run()主循环spin**_evolve零调用+gen域独立抑制计数（LLM域计数0）+分域留痕/对照组gen闸关→_evolve调用1次/手动直调绕门；④半开复位7：冷却过期half_open放行/试探失败再开闸冷却重计/**周期跑通只关gen闸LLM闸保持open（分域live语义）**/reset domain=gen清闸不清账本/domain=all双清/非法domain抛ValueError/无参默认llm域向后兼容；⑤持久化2：重启恢复gen breaker+streak+signature+suppressed/老state无新键不炸；⑥状态面形状+接线护栏3）；既有`tests/test_dna_error_storm_breaker.py` **18 passed**（1处接线护栏断言随契约更新`reset_breaker(domain=domain)`，行为断言零改动）；acp-proxy全量`tests/` **1015 passed 0 failed**（376.77s，=上轮992+23新，无回归）；`systemic_test.py` **29/29 passed**（EXIT=0，S1-S6全绿）。本轮纯后端无前端改动，npm build不适用。
+- **live实锤**（重启后真服务:8092）：
+  ① 新配置面live：GET /api/evolution/config→`gen_breaker_storm_window:3, gen_breaker_cooldown_s:1800`；GET /strands→strand_a `gen_breaker{domain:"gen",state:"closed",...}`+`gen_failure_streak:0`+`gen_error_signature:""`（新键全量在真实响应）；
+  ② **持久化live**（最坏场景：停服务→state文件注入gen风暴态（open+streak=3+sig=reflect:ValueError+suppressed=2）→起服务）：GET /strands→strand_a `gen_breaker.state:"open", gating:true, cooldown_remaining_s:1786.9, suppressed_cycles:2, gen_failure_streak:3, gen_error_signature:"reflect:ValueError"`——**重启不重置风暴计数live实证**；
+  ③ **人工通道live端到端**：POST /strands/strand_a/reset-breaker `{"domain":"gen"}`→200 `gen_breaker.state=closed`且`gen_failure_streak=3`保留（复位不清账本）、**同响应里LLM域breaker仍state=open（分域隔离live实锤：gen复位绝不碰LLM闸）**；`{"domain":"bogus"}`→显式error+known=["llm","gen","all"]不炸；无body→`domain:"llm"`（向后兼容默认域live实证）。
+  ④ 调度门抑制的live观察受EVOLUTION_INTERVAL=3600s限制本轮窗口等不到——由pytest真实run()主循环spin钉住（含对照组防恒抑制死代码）。
+**服务重启**：`systemctl --user restart acp-proxy-a.service acp-proxy-b.service`（持久化验证中途stop/start一次）→两服务active；:8092/health=200、:8095/health=200（opensoul本轮零改动未重启）。
+**commit**：openmate `891101bc`（本轮仅openmate改动，无opensoul侧commit）。
+**遗留问题**：
+1. **⚠️环境问题仍在（非代码，需用户处理）**：LLM供应商**余额不足（402）**——live时strand_a的LLM域breaker处于open（上轮风暴真实旧账，冷却半开后若再触发会再开闸，by design）；充值/换key后`POST /strands/{id}/reset-breaker`（domain=all）清闸再`POST /trigger`验证真实进化输出。
+2. 半开语义沿用上轮"冷却后放行直至下次失败"（非严格单试探）——双域同此语义，遗留#3观察项仍有效。
+3. gen签名粒度=stage:异常类型（消息不进签名）——若未来出现"同类型但根因不同"的混杂风暴（如多个不同bug都是reflect:ValueError），可升级为消息聚类前缀签名；当前粒度与agno error_type对齐，宁可漏判不误判（签名变化重计保证不误熔断）。
+4. 00:10遗留#4（ws_chat._get_llm_config与resolve_llm_config双入口并存，应委托收口单一真源）仍有效，下轮P1候选；relay消息级粒度、relay每WS轮询、唤醒触发行agent_message透出、前端视觉走查登录墙、overview() N+1、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步仍有效非本轮范围。
+5. cron环境约束实录：`curl | python3`管道继续被tirith判BLOCKED→`curl -o落盘+python3读文件`惯例沿用；write_file写/tmp/commit_msg.txt+`git commit -F`惯例沿用；sibling并行任务（settings-client/locales前端改动）与本轮文件零交集，git add显式白名单提交。
+
+## [2026-09-27 05:55 CST] ws_chat LLM配置解析收口resolve_llm_config单一真源——销账00:10遗留#4
+**目标**：销账00:10遗留#4（连续两轮标注"下轮P1候选"）——`ws_chat._get_llm_config`自扫opensoul/.env+环境变量，与`utils/llm_config.resolve_llm_config`双入口并存，三处真实语义偏差：①容错：旧实现在try外`int()`，坏的LLM_MAX_TOKENS直接抛ValueError**炸掉agent代理**；且.env里坏值行中断其后所有键解析（try包整个循环）；②覆盖面：旧实现只读opensoul/.env，单一真源另覆盖acp-proxy/.env+MIMO_*层；③观测：旧实现无key_source（"key从哪来"不可见，401/402排查靠猜）。
+**调研来源**：00:10轮遗留#4原话"应委托收口单一真源"；SUMMARY.md P0-4可观测性（claude-code SDKContextUsage"每项多少token从哪来"的归因思想→key_source归因）；utils/llm_config.py既有docstring"调用方纪律：禁止在调用点自扫环境变量——一律走resolve_llm_config()"（本轮把纪律真正落到ws_chat这个漏网点）。
+**改动文件**：
+- openmate `acp-proxy/utils/llm_config.py`（+22/-4增量）：`resolve_llm_config`新增keyword参数`include_mimo_overrides: bool = True`+`_override()`helper+docstring"调用面"说明
+- openmate `acp-proxy/ws_chat.py`（+16/-30增量）：`_get_llm_config`整函数改为委托`resolve_llm_config(include_mimo_overrides=False)`（保留函数名与返回形状，调用点零改动）；顶部import `describe, resolve_llm_config`；`run_agent_proxy`注入点新增`logger.debug(describe(llm_cfg))`观测
+- openmate `acp-proxy/tests/test_ws_chat_llm_config.py`（新~150行，10测）
+- openmate `acp-proxy/tests/test_dna_llm_config_failure.py`（+3/-2：接线护栏tuple扩到ws_chat.py，行为断言零改动）
+**改动内容**：
+1. **单一真源委托**：`_get_llm_config`不再自解析.env/自扫env，直接`return resolve_llm_config(include_mimo_overrides=False)`——解析容错（坏max_tokens→65536不炸）、文件覆盖（opensoul/.env→acp-proxy/.env先者优先→进程env兜底）、key_source观测三处语义与DNA进化侧完全同源。
+2. **MIMO_*覆写分面隔离（本轮唯一语义决策）**：MIMO_API_KEY/BASE_URL/MODEL/MAX_TOKENS按既有docstring是"进化strand专用覆写（运维显式把进化指向另一套LLM时才设置）"；盲目委托会把进化覆写泄漏到用户聊天流量。故`resolve_llm_config`加`include_mimo_overrides`开关：进化侧默认True（行为零变化），ws_chat传False（用户会话永远走系统LLM配置）。一个实现两种调用面，不产生第二套解析。
+3. **观测面**：run_agent_proxy每次注入前debug日志`agent-proxy[id] LLM config: base_url=…, model=…, key_source=…, key_len=…`（key原文绝不进日志，沿用describe()纪律）。
+4. **回归钉**：旧崩溃路径（env坏LLM_MAX_TOKENS→ValueError未捕获）与旧丢键路径（.env坏值行后所有键丢失）各一个测试钉死。
+**接线位置**（grep证据，文件:行号）：
+- 委托点：`ws_chat.py:175 return resolve_llm_config(include_mimo_overrides=False)`（`_get_llm_config`函数体）；
+- 真实调用路径：`ws_chat.py:195 llm_cfg = _get_llm_config()`（`run_agent_proxy`内，system agent二进制子进程env注入前）→ `ws_chat.py:672 response_text, source, success = await run_agent_proxy(agent_id, text)`（WS消息处理真实路径，agent消息路由）；
+- 观测点：`ws_chat.py:196 logger.debug(f"agent-proxy[{agent_id}] LLM config: {describe(llm_cfg)}")`；
+- 单一真源本体：`utils/llm_config.py:58 resolve_llm_config(...)`，消费方grep：`resolve_llm_config`命中app.py:83/dna_strand_runner.py:205/ws_chat.py:175+测试。
+**验证结果**：
+- 完整性✅：`git show --numstat 6d842e56` 4文件+198/-31（ws_chat.py/llm_config.py均增量hunk零全量重写）；sibling并行改动（settings-client.tsx/locales/*.json/dev-reports.md追加）显式排除白名单提交。
+- 集成✅：上述grep调用链+live实锤（见下）。
+- 测试✅：新`tests/test_ws_chat_llm_config.py` **10 passed**（①委托等价3：文件优先于env+key_source=file透出/与resolve_llm_config(include_mimo_overrides=False)结果全等/无文件走env+key_source=env；②MIMO覆写隔离2：设MIMO_*后ws_chat仍返回系统配置key_source=file（对照resolve默认返回mimo_env）/无文件时chat落env不落mimo；③坏值容错2：env坏LLM_MAX_TOKENS→65536不炸（旧ValueError回归钉）/.env坏值行后其余键不丢（旧丢键回归钉）；④接线护栏2：ws_chat源码禁`startswith("LLM_API_KEY=")`自解析+禁`os.environ.get("LLM_API_KEY"`自扫+必须含`resolve_llm_config(include_mimo_overrides=False)`/run_agent_proxy函数体内含`llm_cfg = _get_llm_config()`与`describe(llm_cfg)`；⑤缺key返回""不编造1）；既有`tests/test_dna_llm_config_failure.py` **18 passed**（接线护栏tuple扩ws_chat.py后全绿）；acp-proxy全量`tests/` **1025 passed 0 failed**（358.56s，=上轮1015+10新，无回归）；`systemic_test.py` **29/29 passed**（EXIT=0，S1-S6全绿，跨模块协同确认）。本轮纯后端无前端改动，npm build不适用。
+- **live实锤**（重启后真服务+真实env文件）：
+  ① 真实配置解析live：`ws_chat._get_llm_config()`→`base_url=https://api.xiaomimimo.com/v1, model=mimo-v2.5-pro, key_source=file, key_len=51`（真实opensoul/.env命中，key原文未打印）；
+  ② **MIMO覆写隔离live对照**：进程注入`MIMO_API_KEY/MIMO_MODEL`后，ws_chat仍返回file配置（覆写不泄漏✅）、`resolve_llm_config()`默认返回`key_source=mimo_env`（进化侧覆写仍生效✅）——同一真源两种调用面live实证；
+  ③ 坏值容错live：注入`LLM_MAX_TOKENS=not-a-number`→`max_tokens=65536`不炸（旧代码此处ValueError）。
+  ④ 服务重启后health：:8092=200、:8095=200，systemic S4的WS消息并发3/3成功（agent消息路径`run_agent_proxy`所在模块加载正常）。
+**服务重启**：`systemctl --user restart acp-proxy-a.service acp-proxy-b.service`→两服务active；:8092/health=200、:8095/health=200（opensoul本轮零改动未重启）。
+**commit**：openmate `6d842e56`（本轮仅openmate改动，无opensoul侧commit）。
+**遗留问题**：
+1. **⚠️环境问题仍在（非代码，需用户处理）**：LLM供应商余额不足（402）账未清——充值/换key后`POST /strands/{id}/reset-breaker`（domain=all）清闸再`POST /trigger`验证真实进化输出。
+2. **同类双入口仍在别处（下轮P1候选）**：本轮只收口ws_chat（遗留#4点名对象）。grep显示`model_router.py:86,407-410`、`utils/llm_gateway.py:58-60`、`agent/llm_engine.py:78-80`、`agent/wakeup_executor.py:194-198`、`utils/token_manager.py:13,73`仍直接`os.environ.get("LLM_*")`——其中agent/是内嵌soulmate引擎（带OPENAI_*回退语义，收口需先确认其独立配置契约），model_router/llm_gateway是另一调用面。建议下轮按"先无回退语义的纯LLM_*消费点（token_manager/llm_gateway）→model_router→agent/子系统"顺序逐个收口，每处都要像本轮一样先定"MIMO_*是否允许泄漏"的调用面语义再委托。
+3. include_mimo_overrides是keyword-only参数，未来新调用点必须显式表态（默认True=进化语义），禁止想当然——已写入llm_config.py docstring"调用面"节。
+4. 上轮遗留观察项（半开语义非严格单试探、gen签名粒度、relay消息级粒度、relay每WS轮询、唤醒触发行agent_message透出、前端视觉走查登录墙、overview() N+1、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步）仍有效非本轮范围。
+5. cron环境约束实录：后台跑pytest用`process wait`（notify_on_complete在cron不可用，wait被clamp到180s需多次poll）；`curl | python3`管道BLOCKED惯例沿用（本轮python验证用heredoc直跑）；大文件dev-reports.md追加用`cat >>`；sibling并行任务（settings-client/locales前端改动）与本轮文件零交集，git add显式白名单提交。
+
+## [2026-09-27 09:45 CST] LLM_*直读收口第一批——token_manager/llm_gateway/app启动探测统一resolve_llm_config单一真源（00:10遗留#4第一批，05:55遗留#2点名顺序）
+**目标**：销账05:55轮遗留#2点名的收口顺序第一批（"先无回退语义的纯LLM_*消费点（token_manager/llm_gateway）→model_router→agent/子系统"）。四个真实问题：①token_manager在import期`int(os.environ.get("LLM_MAX_TOKENS"))`自扫env——坏值直接ValueError炸掉模块import（agent/llm_engine/soulmate_agent/context_budget全灭，P0级崩溃面）；②只读进程环境，.env里的LLM_MAX_TOKENS/LLM_CONTEXT_WINDOW/LLM_INPUT_LIMIT被无视（与resolve_llm_config"文件>env"语义漂移——现网acp-proxy/.env就写着LLM_MAX_TOKENS=65536，旧实现根本看不见）；③probe_model_capabilities内部又一遍自扫env+int()；app.py启动探测同款自扫→key只写在opensoul/.env时探测被静默跳过（TokenProbe零日志）；④llm_gateway硬编码provider URL/模型名兜底（"https://api.mimo.ai/v1"+"mimo-v2"）+鉴权头做成可选（if config.api_key:）→空key静默发无鉴权请求→401（与DNA进化strand硬编码401事故同款根因，llm_config纪律"key缺失要显式告警，不得静默发出无鉴权请求"的直接违反者）。
+**调研来源**：05:55轮遗留#2收口顺序原话；SUMMARY.md P0-4可观测性（claude-code SDKContextUsage"每项多少token从哪来"归因思想→key_source/限额同源归因）；utils/llm_config.py既有docstring调用方纪律（"禁止在调用点自扫环境变量/硬编码provider URL——一律走resolve_llm_config()"）；上轮ws_chat收口（6d842e56）的include_mimo_overrides调用面范式逐字沿用。
+**改动文件**：
+- openmate `acp-proxy/utils/llm_config.py`（+30/-7增量）：`parse_int`坏值容错helper+resolve返回体扩context_window/input_limit+调用面docstring登记
+- openmate `acp-proxy/utils/token_manager.py`（+55/-13增量）：限额收口`reload_model_cache()`+TOOL_RESULT_MAX_CHARS容错+probe签名扩max_tokens参数+去自扫env
+- openmate `acp-proxy/utils/llm_gateway.py`（+35/-8增量）：默认模型走单一真源+`refresh_default_model()`+llm_call fail-closed缺配置拒绝
+- openmate `acp-proxy/app.py`（+19/-7增量）：启动探测配置走resolve_llm_config+缺配置显式warning
+- openmate `acp-proxy/agent/llm_engine.py`（+2/-2）：293/506两处LLM_MAX_TOKENS改get_max_output_tokens()（与:173同文件同源，消除同文件双源读数）
+- openmate `acp-proxy/tests/test_token_manager_config.py`（新165行，14测）
+- openmate `acp-proxy/tests/test_llm_gateway_config.py`（新168行，7测）
+- openmate `acp-proxy/tests/test_dna_llm_config_failure.py`（+2/-1：接线护栏tuple扩token_manager/llm_gateway两文件）
+**改动内容**：
+1. **单一真源扩面**：`resolve_llm_config`返回体新增`context_window`(默认131072)/`input_limit`(默认0，kilocode model.limit.input双限额语义)——限额键与key/URL同款"文件>env+坏值容错"；新增公开`parse_int(raw, default)`（空/坏值回退不抛，"一切限额解析走本函数"）。
+2. **token_manager收口**：`_model_cache`不再import期字面量自扫env，改由`reload_model_cache(*, include_mimo_overrides=False, env_files=None)`调用resolve_llm_config回填（import期自动调用一次，配置变更/测试可显式重载，reload把probed重置False）；**调用面语义决策**：本模块服务用户侧agent运行时（soulmate_agent/context_budget/llm_engine真实消息路径）→include_mimo_overrides=False（MIMO_*进化覆写绝不跟随），未来进化侧调用点必须显式传True（docstring声明）；probe签名扩`max_tokens: int | None = None`，内部configured_max改"调用方传入>缓存"（旧int(os.environ.get)崩溃点删除）。
+3. **llm_gateway收口+fail-closed**：DEFAULT_MODELS改`_default_model_config()=resolve_llm_config(include_mimo_overrides=False)`（业务/用户侧调用面），删除硬编码URL/模型名兜底（base_url/model缺失=配置错误，不许瞎猜默认值）；`llm_call`新增fail-closed守卫——缺api_key或base_url显式logger.error并return ""（零HTTP请求），根治旧"鉴权头可选→空key静默401"；`refresh_default_model()`显式重载通道。
+4. **app.py启动探测收口**：探测配置改`probe_cfg = resolve_llm_config()`（key只写在.opensoul/.env时探测不再被静默跳过）+缺配置显式warning带key_source；max_tokens显式传参进probe。
+5. **llm_engine同文件双源消除**：293/506两处payload的max_tokens改`get_max_output_tokens()`（:173早已用此函数）——只动LLM_MAX_TOKENS纯限额键，api_key/base_url的OPENAI_*回退契约未触碰（agent/子系统专项留待后续）。
+**接线位置**（grep证据，文件:行号）：
+- 单一真源本体：`utils/llm_config.py:75 resolve_llm_config` / `:58 parse_int`；消费方grep：`app.py:83`（进化strand）、`app.py:188`（启动探测`probe_cfg = resolve_llm_config()`→`:190 probe_model_capabilities(...)`，lifespan真实启动路径）、`dna_strand_runner.py:205`、`ws_chat.py:175`、`utils/token_manager.py:45`（`reload_model_cache()`→`:60` import期真实回填）、`utils/llm_gateway.py:63`；
+- token_manager真实消息路径（限额消费点）：`agent/llm_engine.py:173,293,506`（LLM请求payload max_tokens）、`agent/context_budget.py:381`、`agent/soulmate_agent.py:3137`（真实消息路径预算推导）；
+- fail-closed：`utils/llm_gateway.py:~156`（llm_call内守卫，llm_call_simple/llm_call_with_system均委托llm_call）；refresh通道`utils/llm_gateway.py:95`。
+**验证结果**：
+- 完整性✅：`git show --numstat 7bbf331b`（8文件+495/-39：5个源文件均增量hunk零全量重写，2个新test真实落盘，sibling并行改动settings-client.tsx/locales/*.json/.mmb-render/e2e_probe2.py显式排除未入库）。
+- 集成✅：上述grep调用链 + live实锤（见下）。
+- 测试✅：新`tests/test_token_manager_config.py` **14 passed**（文件优先于env+三限额同源2/env兜底1/全缺省默认值1/坏值容错不抛1（旧import期int()崩溃回归钉）/reload重置probed1/MIMO调用面隔离2（默认不跟随+显式opt-in跟随）/probe用参数不读env1（旧probe内int()崩溃回归钉，mock httpx 200）/probe无参回退缓存1/TOOL_RESULT坏值import不炸1/接线护栏4（token_manager禁自扫LLM_*+app.py禁LLM_BASE_URL/API_KEY/MODEL自扫+llm_engine同源≥3处+消费点存在性））；新`tests/test_llm_gateway_config.py` **7 passed**（文件优先收口1/MIMO不泄漏1/缺key fail-closed零HTTP1（BoomClient构造即炸断言）/缺base_url同1/正向真实请求带Bearer头+URL+model 1（防恒拒绝死代码）/硬编码赋值+env自扫绝迹1/便捷函数委托2）；既有`tests/test_dna_llm_config_failure.py` **18 passed**（接线护栏tuple扩两文件后全绿）+`test_ws_chat_llm_config.py` 10 passed+`test_reserved_buffer.py` 32 passed；acp-proxy全量`tests/` **1046 passed 0 failed**（407.07s，=上轮1025+21新，零回归）；`systemic_test.py` **29/29 passed**（S1-S6全绿，跨模块协同确认）。前端零改动npm build不适用。
+- **live实锤**（重启后真服务+真实.env配置）：
+  ① 单一真源live：`resolve_llm_config(include_mimo_overrides=False)`→`key_source=file, key_len=51, model=mimo-v2.5-pro`（真实opensoul/.env命中）；`token_manager._model_cache`={max_output_tokens:65536, context_window:131072, input_limit:0}与resolve同源断言通过；`llm_gateway.get_model("default")`→base_url/model/key_len=51全部来自file（**修复前同shell下api_key=""→静默401路径**）；
+  ② **启动探测接线前后对照（本轮最强证据）**：journalctl显示今日TokenProbe日志**恰好1条**（09:34本次重启`[TokenProbe] 连通失败: 402`——真实出站到provider，402=已知余额问题），09:33前**0条**（此前所有启动因key只写在.env被静默跳过）——探测从"死配置"变"真实出站+失败可见"live实证；
+  ③ 服务重启后health：:8092=200、:8095=200，systemic S4/S6并发全绿（agent消息路径run_agent_proxy所在模块加载正常）。
+**服务重启**：`systemctl --user restart acp-proxy-a.service acp-proxy-b.service`→两服务active；:8092/health=200、:8095/health=200（opensoul本轮零改动未重启）。
+**commit**：openmate `7bbf331b`（本轮仅openmate改动，无opensoul侧commit）。docs commit另含04:55轮滞后未提交的报告文本（其代码891101bc早已入库）。
+**遗留问题**：
+1. **⚠️环境问题仍在（非代码，需用户处理）**：LLM供应商余额不足（402）——本轮TokenProbe的402即真实实证；充值/换key后进化strand需`POST /strands/{id}/reset-breaker`（domain=all）清闸再验证。
+2. **收口下一批（按遗留#2既定顺序）**：`model_router.py:86,407-410`（另一调用面，需先定调用面语义）→`agent/wakeup_executor.py:194-198`+`agent/llm_engine.py:78-79`的api_key/base_url（OPENAI_*回退契约，收口前须确认其独立配置契约——本轮只动了llm_engine纯限额键未碰回退）。
+3. **诚实标注**：llm_gateway.llm_call目前**无生产调用点**（grep全库唯一引用是自身docstring/便捷函数）——本轮对其收口属防御性加固（防未来接入时重蹈401），行为级证据来自直接调用测试（fail-closed零请求+正向Bearer头）而非生产路径；token_manager/app.py/llm_engine侧则全部有真实路径证据。
+4. probe探测会真实发1次max_tokens=1的LLM小请求（既有行为，本轮未改）——402余额下探测失败可见但不阻塞启动（by design）。
+5. 上轮遗留观察项（半开语义非严格单试探、gen签名粒度、relay消息级粒度、relay每WS轮询、唤醒触发行agent_message透出、前端视觉走查登录墙、overview() N+1、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步）仍有效非本轮范围。
+6. cron环境约束实录：`python3 -m pytest | tail`管道被hint判"exit码被tail掩盖"——全量pytest直跑不接管道（本轮407s直跑）；`curl | python3`管道BLOCKED惯例沿用（本轮live验证用heredoc直跑）；后台pytest用`process wait`（session_id必填，wait被clamp 180s需多次poll）；写/tmp/commit_msg.txt+`git commit -F`惯例沿用；大文件dev-reports.md追加用`cat >>`；sibling并行任务与本轮文件零交集，git add显式白名单提交。
