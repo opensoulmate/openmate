@@ -2,16 +2,33 @@
 
 提供4种路由模式（cost/balance/intelligence/auto），支持多provider配置，
 通过环境变量覆盖默认模型配置，实现智能的成本-质量平衡。
+
+调用面语义（2026-09-27收口，00:10遗留#4第二批——先定语义再收口）：
+1. 本模块=**多提供商路由面**（用户/业务流量）：每个provider有自己的凭据/端点
+   （MIMO_API_KEY/OPENAI_API_KEY/CLAUDE_API_KEY/...），统一走
+   utils.llm_config.resolve_env_value() 单一真源解析——**.env文件优先于进程环境**
+   （opensoul/.env/acp-proxy/.env是运维配置真源）。旧实现import期直接
+   os.environ.get：key只写在.env时解析成""→选中的模型不带鉴权→静默401
+   （与DNA进化strand/llm_gateway同款根因，禁止重犯）。
+2. MIMO_API_KEY 在本模块= **mimo提供商凭据**（与OPENAI_API_KEY同级的历史命名），
+   不是 resolve_llm_config 的"进化覆写"语义——两语义并存：
+   提供商凭据查 MIMO_API_KEY，极端兜底（全tier无可用模型）查系统默认LLM
+   resolve_llm_config(include_mimo_overrides=False)（不跟随MIMO_*进化覆写）。
+3. fail-closed-lite：requires_auth的provider若key解析为空→该模型**不参选**
+   （显式warning给出期望配置名，401早知道），绝不静默发无鉴权请求；
+   ollama等本地provider免key合法。无鉴权本地server的逃逸口=设任意非空
+   MODEL_<MODEL名>_API_KEY 或 provider级API_KEY。
 """
 
 import logging
-import os
 import re
 import time
 from dataclasses import dataclass, field
 from enum import Enum
 from threading import Lock
 from typing import Optional
+
+from utils.llm_config import resolve_env_value, resolve_llm_config
 
 logger = logging.getLogger("acp-proxy.model_router")
 
@@ -40,6 +57,8 @@ class ModelConfig:
     tier: str = "balance"  # 模型层级: cost / balance / intelligence
     max_tokens: int = 4096  # 最大输出token数
     temperature: float = 0.7  # 默认温度
+    key_source: str = ""  # key来源（provider路径=file:NAME/env:NAME；兜底路径=resolve_llm_config词表file/env/mimo_env；key原文不进日志）
+    requires_auth: bool = True  # False=本地provider（ollama）免key合法
 
 
 @dataclass
@@ -52,6 +71,7 @@ class ModelSelection:
     mode_used: str      # 实际使用的路由模式
     complexity: float   # 估算的复杂度分数（0-1）
     reason: str         # 选择原因说明
+    key_source: str = ""  # key来源（两真源各自词表如实透传，见ModelConfig.key_source注释）
 
 
 # ============================================================
@@ -79,33 +99,72 @@ DEFAULT_MODEL_TABLE: dict[str, list[dict]] = {
     ],
 }
 
-# provider的默认API配置 — 从环境变量读取
-PROVIDER_DEFAULTS: dict[str, dict] = {
+# provider 凭据/端点解析表 — 只存"环境变量别名 + 公开默认端点"，值一律惰性解析。
+# 2026-09-27收口（00:10遗留#4第二批）：旧 PROVIDER_DEFAULTS 在 import 期直接
+# os.environ.get（key 只写在 .env 文件时解析成 "" → 选中模型不带鉴权 → 静默401），
+# 现统一走 resolve_env_value 单一真源（文件优先 + key_source 可观测）。
+# api_key_env/base_url_env：别名列表，先者优先（专用别名在前，通用兜底在后）。
+# requires_auth=False 的本地 provider（ollama）免 key 合法。
+PROVIDER_ENV: dict[str, dict] = {
     "mimo": {
-        "base_url": os.environ.get("MIMO_BASE_URL", "https://token-plan-cn.xiaomimimo.com/v1"),
-        "api_key": os.environ.get("MIMO_API_KEY", os.environ.get("LLM_API_KEY", "")),
+        # MIMO_API_KEY 在此= mimo 提供商凭据（历史命名），非"进化覆写"语义（见模块docstring）
+        "api_key_env": ["MIMO_API_KEY", "LLM_API_KEY"],
+        "base_url_env": ["MIMO_BASE_URL"],
+        "default_base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+        "requires_auth": True,
     },
     "openai": {
-        "base_url": os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
-        "api_key": os.environ.get("OPENAI_API_KEY", ""),
+        "api_key_env": ["OPENAI_API_KEY"],
+        "base_url_env": ["OPENAI_BASE_URL"],
+        "default_base_url": "https://api.openai.com/v1",
+        "requires_auth": True,
     },
     "claude": {
-        "base_url": os.environ.get("CLAUDE_BASE_URL", "https://api.anthropic.com/v1"),
-        "api_key": os.environ.get("CLAUDE_API_KEY", os.environ.get("ANTHROPIC_API_KEY", "")),
+        "api_key_env": ["CLAUDE_API_KEY", "ANTHROPIC_API_KEY"],
+        "base_url_env": ["CLAUDE_BASE_URL"],
+        "default_base_url": "https://api.anthropic.com/v1",
+        "requires_auth": True,
     },
     "deepseek": {
-        "base_url": os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"),
-        "api_key": os.environ.get("DEEPSEEK_API_KEY", ""),
+        "api_key_env": ["DEEPSEEK_API_KEY"],
+        "base_url_env": ["DEEPSEEK_BASE_URL"],
+        "default_base_url": "https://api.deepseek.com/v1",
+        "requires_auth": True,
     },
     "qwen": {
-        "base_url": os.environ.get("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
-        "api_key": os.environ.get("QWEN_API_KEY", os.environ.get("DASHSCOPE_API_KEY", "")),
+        "api_key_env": ["QWEN_API_KEY", "DASHSCOPE_API_KEY"],
+        "base_url_env": ["QWEN_BASE_URL"],
+        "default_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "requires_auth": True,
     },
     "ollama": {
-        "base_url": os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
-        "api_key": os.environ.get("OLLAMA_API_KEY", ""),
+        "api_key_env": ["OLLAMA_API_KEY"],
+        "base_url_env": ["OLLAMA_BASE_URL"],
+        "default_base_url": "http://localhost:11434/v1",
+        "requires_auth": False,
     },
 }
+
+
+def resolve_provider_config(provider: str) -> dict:
+    """惰性解析 provider 凭据/端点 — 单一真源（.env文件优先于进程环境）。
+
+    返回 {base_url, api_key, key_source, base_url_source, requires_auth}；
+    key_source/base_url_source ∈ {"file:NAME", "env:NAME", ""}（可观测，key不进日志）。
+    未知 provider 返回空配置（requires_auth=True → 视为无鉴权不参选）。
+    """
+    spec = PROVIDER_ENV.get(provider, {})
+    api_key, key_source = resolve_env_value(spec.get("api_key_env", []))
+    base_url, base_url_source = resolve_env_value(
+        spec.get("base_url_env", []), default=spec.get("default_base_url", "")
+    )
+    return {
+        "base_url": base_url,
+        "api_key": api_key,
+        "key_source": key_source,
+        "base_url_source": base_url_source,
+        "requires_auth": spec.get("requires_auth", True),
+    }
 
 # 环境变量覆盖: MODEL_ROUTER_COST / MODEL_ROUTER_BALANCE / MODEL_ROUTER_INTELLIGENCE
 # 格式: "provider:model_name" 如 "mimo:mimo-auto,claude:claude-haiku-4-20250514"
@@ -185,11 +244,11 @@ class ModelRouter:
         )
 
     def _build_model_table(self):
-        """构建模型配置表 — 从环境变量读取覆盖，否则用硬编码默认值"""
+        """构建模型配置表 — tier覆盖/每模型覆盖/provider凭据全部走单一真源惰性解析"""
         for tier in ["cost", "balance", "intelligence"]:
-            # 检查环境变量覆盖
+            # 检查环境变量覆盖（MODEL_ROUTER_<TIER>，文件优先于进程环境）
             env_key = f"MODEL_ROUTER_{tier.upper()}"
-            env_models = _parse_env_model_list(os.environ.get(env_key, ""))
+            env_models = _parse_env_model_list(resolve_env_value([env_key])[0])
 
             if env_models:
                 # 使用环境变量配置
@@ -203,18 +262,20 @@ class ModelRouter:
             configs = []
             for raw in raw_models:
                 provider = raw["provider"]
-                provider_cfg = PROVIDER_DEFAULTS.get(provider, {})
+                provider_cfg = resolve_provider_config(provider)
 
-                # 允许每个模型通过环境变量单独覆盖 base_url 和 api_key
+                # 允许每个模型通过 MODEL_<MODEL名>_* 单独覆盖（优先级最高，文件优先）
                 model_env_prefix = raw["name"].replace("-", "_").replace(".", "_").upper()
-                base_url = os.environ.get(
-                    f"MODEL_{model_env_prefix}_BASE_URL",
-                    provider_cfg.get("base_url", ""),
-                ) or ""
-                api_key = os.environ.get(
-                    f"MODEL_{model_env_prefix}_API_KEY",
-                    provider_cfg.get("api_key", ""),
-                ) or ""
+                base_url, _ = resolve_env_value(
+                    [f"MODEL_{model_env_prefix}_BASE_URL"],
+                    default=provider_cfg["base_url"],
+                )
+                api_key, key_source = resolve_env_value(
+                    [f"MODEL_{model_env_prefix}_API_KEY"],
+                    default=provider_cfg["api_key"],
+                )
+                if key_source == "" and provider_cfg["key_source"]:
+                    key_source = provider_cfg["key_source"]
 
                 configs.append(ModelConfig(
                     name=raw["name"],
@@ -222,6 +283,8 @@ class ModelRouter:
                     base_url=base_url,
                     api_key=api_key,
                     tier=tier,
+                    key_source=key_source,
+                    requires_auth=provider_cfg["requires_auth"],
                 ))
 
             self._model_table[tier] = configs
@@ -319,8 +382,12 @@ class ModelRouter:
     def _select_model_from_tier(self, tier: str, agent_id: str = "") -> Optional[ModelConfig]:
         """从指定tier的候选列表中选择一个可用模型
 
-        策略: 按顺序选择第一个有api_key的模型（首选优先）。
-        如果agent有专属模型配置（环境变量），优先使用。
+        策略: 按顺序选择第一个"可用"的模型（首选优先）。
+        可用 = 有api_key，或provider免鉴权（requires_auth=False，如ollama）。
+        requires_auth的模型缺key → 不参选（绝不静默发无鉴权请求），显式告警
+        给出期望配置名（401早知道）；全tier都缺key时返回None，由select_model
+        统一走系统默认LLM兜底（单一真源，缺失=显式报错）。
+        如果agent有专属模型配置（AGENT_<ID>_MODEL=provider:model），优先使用。
 
         Args:
             tier: 模型层级（cost/balance/intelligence）
@@ -334,9 +401,9 @@ class ModelRouter:
             logger.warning("Tier %s 没有候选模型", tier)
             return None
 
-        # 检查agent专属配置
+        # 检查agent专属配置（文件优先于进程环境）
         if agent_id:
-            agent_model_env = os.environ.get(f"AGENT_{agent_id.upper()}_MODEL", "")
+            agent_model_env, _ = resolve_env_value([f"AGENT_{agent_id.upper()}_MODEL"])
             if agent_model_env:
                 # 格式: "provider:model_name"
                 if ":" in agent_model_env:
@@ -346,15 +413,20 @@ class ModelRouter:
                             logger.info("Agent %s 使用专属模型: %s", agent_id, name)
                             return cfg
 
-        # 默认: 选第一个有api_key的模型（或第一个模型，本地provider如ollama不需要key）
+        # 默认: 选第一个可用模型（有api_key，或本地provider免key）
+        skipped: list[str] = []
         for cfg in candidates:
-            # 本地provider（ollama）不需要api_key
-            if cfg.provider == "ollama" or cfg.api_key:
+            if not cfg.requires_auth or cfg.api_key:
                 return cfg
+            expected = PROVIDER_ENV.get(cfg.provider, {}).get("api_key_env", [])
+            skipped.append(f"{cfg.name}(期望 {expected} 或 MODEL_{cfg.name.replace('-', '_').replace('.', '_').upper()}_API_KEY)")
 
-        # 所有模型都没有api_key，返回第一个（让调用方报错）
-        logger.warning("Tier %s 所有模型都缺少api_key，使用首选: %s", tier, candidates[0].name)
-        return candidates[0]
+        # 全部缺key：不参选（fail-closed-lite），告警给出期望配置名后交给上层兜底
+        logger.warning(
+            "Tier %s 所有模型都缺少api_key，不参选: %s",
+            tier, "; ".join(skipped),
+        )
+        return None
 
     def select_model(
         self,
@@ -371,6 +443,10 @@ class ModelRouter:
 
         Returns:
             ModelSelection 包含选择结果和元信息
+
+        Raises:
+            RuntimeError: 所有tier无可用模型且系统默认LLM配置不完整（fail-closed，
+                绝不返回无鉴权/瞎猜的配置——调用方可自行降级）
         """
         with self._lock:
             self._stats["total_requests"] += 1
@@ -401,14 +477,28 @@ class ModelRouter:
             reason += " (回退到balance)"
 
         if not model_cfg:
-            # 极端情况: balance也没有，返回环境变量默认配置
-            logger.error("所有tier都没有可用模型，使用环境变量默认配置")
+            # 极端情况: 所有tier都无可用模型 → 系统默认LLM单一真源兜底。
+            # include_mimo_overrides=False：用户/业务流量不跟随MIMO_*进化覆写；
+            # 禁止硬编码模型名/URL/自扫env（llm_config调用方纪律）——配置不完整=显式报错。
+            cfg = resolve_llm_config(include_mimo_overrides=False)
+            missing = [k for k in ("api_key", "base_url", "model") if not cfg.get(k)]
+            if missing:
+                logger.error(
+                    "所有tier都没有可用模型，且系统默认LLM配置缺失 %s（key_source=%s）——拒绝猜测默认值",
+                    missing, cfg.get("key_source", ""),
+                )
+                raise RuntimeError(f"model_router: 无可用模型且系统默认LLM配置不完整，缺失={missing}")
+            logger.warning(
+                "所有tier都没有可用模型，回退系统默认LLM（key_source=%s, key_len=%d）",
+                cfg["key_source"], len(cfg["api_key"]),
+            )
             model_cfg = ModelConfig(
-                name=os.environ.get("LLM_MODEL", "mimo-v2.5-pro"),
+                name=cfg["model"],
                 provider="default",
-                base_url=os.environ.get("LLM_BASE_URL", ""),
-                api_key=os.environ.get("LLM_API_KEY", ""),
+                base_url=cfg["base_url"],
+                api_key=cfg["api_key"],
                 tier="default",
+                key_source=cfg["key_source"],
             )
 
         # 更新统计
@@ -429,6 +519,7 @@ class ModelRouter:
             mode_used=actual_mode,
             complexity=complexity,
             reason=reason,
+            key_source=model_cfg.key_source,
         )
 
         logger.info(
@@ -449,6 +540,7 @@ class ModelRouter:
                     "provider": m.provider,
                     "base_url": m.base_url[:30] + "..." if len(m.base_url) > 30 else m.base_url,
                     "has_api_key": bool(m.api_key),
+                    "key_source": m.key_source,
                 }
                 for m in models
             ]

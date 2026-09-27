@@ -23,6 +23,10 @@ resolve_llm_config()；key 缺失要显式告警（401早知道），不得静�
   resolve_llm_config(include_mimo_overrides=False)
   —— MIMO_* 是进化专用覆写，用户/业务流量绝不跟随（运维把进化指向另一套LLM时，
      用户会话仍走系统LLM配置）。
+- model_router 多提供商路由面：resolve_env_value()（逐提供商凭据/端点，多别名）
+  + 极端兜底 resolve_llm_config(include_mimo_overrides=False)（系统默认LLM单一真源）。
+  注意：model_router 的 MIMO_API_KEY = mimo 提供商凭据（与 OPENAI_API_KEY 同级的
+  历史命名），不是"进化覆写"语义——两语义并存，见 model_router 模块docstring。
 """
 
 from __future__ import annotations
@@ -54,6 +58,43 @@ def _default_env_files() -> list[str]:
         os.path.join(opensoul_root, ".env"),
         os.path.join(here, ".env"),
     ]
+
+
+def read_merged_env_files(env_files: list[str] | None = None) -> dict:
+    """合并 .env 文件配置（先者优先：opensoul/.env → acp-proxy/.env）。"""
+    files = _default_env_files() if env_files is None else list(env_files)
+    merged: dict = {}
+    for p in files:
+        for k, v in _read_env_file(p).items():
+            merged.setdefault(k, v)
+    return merged
+
+
+def resolve_env_value(
+    names: list[str],
+    *,
+    env_files: list[str] | None = None,
+    default: str = "",
+) -> tuple[str, str]:
+    """按 names 顺序解析单个配置值——多别名/多提供商配置的通用单一真源件。
+
+    语义（两个独立优先级轴，禁止混淆）：
+    1. names 之间：先者优先（专用别名在前，通用兜底别名在后）；
+    2. 同一 name 内部：.env 文件优先于进程环境（与 resolve_llm_config 同款
+       "文件优先"合同——.env 是运维管理的配置真源，进程环境可能不含key）。
+
+    返回 (value, source)；source ∈ {"file:NAME", "env:NAME", ""}——key从哪来可观测，
+    key 本身绝不进日志。找不到返回 (default, "")。
+    """
+    merged = read_merged_env_files(env_files)
+    for name in names:
+        v = merged.get(name, "").strip()
+        if v:
+            return v, f"file:{name}"
+        v = os.environ.get(name, "").strip()
+        if v:
+            return v, f"env:{name}"
+    return default, ""
 
 
 def parse_int(raw: str, default: int) -> int:
