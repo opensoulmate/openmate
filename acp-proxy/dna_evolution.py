@@ -277,6 +277,13 @@ class DNAStrand:
         self._gen_breaker_opened_at = 0.0
         self._gen_breaker_suppressed = 0  # 通用熔断期间被抑制的进化次数（可见计数）
 
+        # 半开严格单试探（多轮遗留"半开语义非严格单试探"销账）：冷却过期≠放行一切
+        # ——只放行**一次**试探周期，试探在飞期间其余调度继续拦截；试探结果立即裁决
+        # （成功→复位/失败→重新开闸冷却重新计数），不等streak再爬窗口。
+        # 进程内存态（不持久化）：重启后标记清零=重新放行一次试探，语义仍是
+        # "每个进程同一时刻最多一个在飞试探"（at-most-one probe per process）。
+        self._probe_in_flight = {"llm": False, "gen": False}
+
         # 实时日志文件（供SSE tail）
         self._log_file = Path(repo_root) / "acp-proxy" / "data" / f"dna_log_{strand_id}.jsonl"
 
@@ -455,6 +462,7 @@ class DNAStrand:
                             "domain": "llm",
                             "llm_failure_streak": self._llm_failure_streak,
                             "suppressed_cycles": self._breaker_suppressed,
+                            "probe_in_flight": self._probe_in_flight.get("llm", False),
                             "cooldown_remaining_s": round(
                                 LLM_BREAKER_COOLDOWN_S - (now - self._breaker_opened_at), 1),
                         })
@@ -465,6 +473,7 @@ class DNAStrand:
                             "gen_failure_streak": self._gen_failure_streak,
                             "gen_error_signature": self._gen_error_signature,
                             "suppressed_cycles": self._gen_breaker_suppressed,
+                            "probe_in_flight": self._probe_in_flight.get("gen", False),
                             "cooldown_remaining_s": round(
                                 GEN_BREAKER_COOLDOWN_S - (now - self._gen_breaker_opened_at), 1),
                         })
@@ -496,6 +505,11 @@ class DNAStrand:
             stage=EvolutionStage.OBSERVE,
             trigger=f"{self.strategy}_auto",
         )
+
+        # 半开严格单试探准入：本轮充当在飞试探（仅标记"open且冷却已过且无试探在飞"
+        # 的域；closed域/冷却未过域不标记）。手动trigger走同一路径=人工周期同样
+        # 是试探（结果同样裁决），语义统一。
+        self._breaker_probe_start()
 
         try:
             # 1. Observe
@@ -603,6 +617,9 @@ class DNAStrand:
             self._gen_failure_streak = 0
             self._gen_error_signature = ""
             self._breaker_close("cycle_success", domain="gen")
+            # 半开试探裁决：周期完整跑通=试探成功→复位在飞域的闸（含LLM域——真实
+            # 周期必经_call_llm，跑通即LLM健康的间接证据；stub场景由测试自证）
+            self._breaker_probe_resolve(ok=True, why="cycle_completed")
 
             self._save_state()
             self._sync_memory()  # 同步记忆到共享文件
@@ -640,6 +657,9 @@ class DNAStrand:
             # agno §1.4：连续同错≥窗口=系统性故障不是N条独立失败→熔断暂停自动进化
             if self._llm_failure_streak >= LLM_BREAKER_STORM_WINDOW:
                 self._breaker_trip(f"连续{self._llm_failure_streak}次LLM失败（同错风暴）")
+            # 半开严格单试探裁决：试探期一次失败即重新开闸（冷却重新计数），
+            # 不等streak再爬窗口——遗留"半开语义非严格单试探"销账
+            self._breaker_probe_resolve(ok=False, why=f"llm {str(e)[:80]}")
             self._log("error", f"❌ LLM调用失败，本轮进化未执行（失败≠无改进）: {str(e)[:120]}", {
                 "llm_failure_streak": self._llm_failure_streak,
             })
@@ -680,6 +700,9 @@ class DNAStrand:
             if self._gen_failure_streak >= GEN_BREAKER_STORM_WINDOW:
                 self._breaker_trip(
                     f"连续{self._gen_failure_streak}次同签名通用失败（{sig}风暴）", domain="gen")
+            # 半开严格单试探裁决：试探期一次失败即重新开闸（冷却重新计数）——
+            # 裁决粒度=周期级（保守）：周期没跑通=没有恢复证据，在飞域全部判失败
+            self._breaker_probe_resolve(ok=False, why=f"gen {sig}")
             self._save_state()
             self._log("error", f"❌ 进化周期异常失败（非LLM故障）: {str(e)[:120]}", {
                 "stage": cycle.stage.value,
@@ -687,6 +710,11 @@ class DNAStrand:
                 "gen_failure_streak": self._gen_failure_streak,
             })
             logger.error(f"[{self.strand_id}] Cycle {cycle.cycle_id} failed at {cycle.stage.value}: {e}")
+        finally:
+            # 非常规出口兜底（取消/BaseException等）：释放未裁决的试探标记——
+            # 无证据不误判（不重新开闸也不复位），闸保持原状，下轮可再放行一次试探。
+            # 常规路径（成功/两类失败）已裁决，此处为no-op。
+            self._breaker_probe_release()
 
     # ── agno §1.4 错误风暴熔断（连续同错即停） ──────────────
     # 双域实现：domain="llm"（LLM故障风暴）/ domain="gen"（非LLM同签名故障风暴）。
@@ -702,10 +730,15 @@ class DNAStrand:
         return f"{stage}:{type(exc).__name__}"
 
     def _breaker_is_open(self, now: float | None = None, domain: str = "llm") -> bool:
-        """熔断是否处于拦截态（调度门唯一判定点）。
+        """熔断是否处于拦截态（调度门唯一判定点，只读无副作用）。
 
-        半开语义（agno/job_queue同款）：冷却过期后放行一次试探（返回False）——
-        试探失败→_breaker_trip重新开闸（冷却重新计数），试探成功→_breaker_close复位。
+        半开严格单试探：冷却过期后**只**放行一次试探（_breaker_probe_start接管
+        in-flight标记），试探在飞期间继续拦截其余调度（返回True）；试探裁决由
+        _breaker_probe_resolve做出——成功→_breaker_close复位，失败→重新开闸
+        （冷却重新计数）。无试探在飞且冷却已过=返回False（下一次周期即试探）。
+
+        注意保持只读：status查询/reset_breaker都调用本判定，若在此处放行试探会把
+        监控轮询误当试探消费掉（strict single probe的正确性前提）。
         """
         opened = self._breaker_open if domain == "llm" else self._gen_breaker_open
         opened_at = self._breaker_opened_at if domain == "llm" else self._gen_breaker_opened_at
@@ -713,7 +746,78 @@ class DNAStrand:
         if not opened:
             return False
         now = time.time() if now is None else now
-        return (now - opened_at) < cooldown
+        if (now - opened_at) < cooldown:
+            return True
+        # 冷却已过：试探在飞=继续拦截（严格单试探），否则放行（下一次周期即试探）
+        return bool(self._probe_in_flight.get(domain, False))
+
+    # ── 半开严格单试探（at-most-one probe） ──────────────────
+
+    def _breaker_probe_start(self, now: float | None = None) -> list[str]:
+        """半开域接管试探标记（试探准入点）。返回本轮充当试探的域名列表。
+
+        仅标记「open且冷却已过且无试探在飞」的域：closed域=正常周期不标记；
+        冷却未过=仍拦截不标记；已有试探在飞=拒绝（严格单试探）。一个周期可
+        同时充当LLM域与通用域的试探。
+        """
+        now = time.time() if now is None else now
+        probing: list[str] = []
+        for domain in ("llm", "gen"):
+            cooldown = LLM_BREAKER_COOLDOWN_S if domain == "llm" else GEN_BREAKER_COOLDOWN_S
+            opened = self._breaker_open if domain == "llm" else self._gen_breaker_open
+            opened_at = self._breaker_opened_at if domain == "llm" else self._gen_breaker_opened_at
+            if (
+                opened
+                and (now - opened_at) >= cooldown
+                and not self._probe_in_flight.get(domain, False)
+            ):
+                self._probe_in_flight[domain] = True
+                probing.append(domain)
+        if probing:
+            self._log("turn", f"🟡 半开试探开始（{','.join(probing)}域，严格单试探在飞）",
+                      {"domains": probing})
+            logger.info(f"[{self.strand_id}] 半开试探开始 (domains={probing})")
+        return probing
+
+    def _breaker_probe_resolve(self, ok: bool, why: str = "") -> None:
+        """试探裁决（一次裁决全部在飞域）：成功→复位各域闸；失败→重新开闸冷却重计。
+
+        裁决粒度=周期级（保守取向）：周期未完整跑通（无论LLM失败还是通用异常）
+        则在飞域全部判失败——没有恢复证据就不再放行（fail-closed）；反之周期
+        跑通=试探成功（真实周期必经_call_llm，跑通即LLM健康的间接证据）。
+        无试探在飞时no-op（closed态的普通失败不走此裁决，仍按streak窗口开闸）。
+        """
+        domains = [d for d, flying in self._probe_in_flight.items() if flying]
+        if not domains:
+            return
+        now = time.time()
+        for d in domains:
+            self._probe_in_flight[d] = False
+            label = "LLM" if d == "llm" else "通用"
+            cooldown = LLM_BREAKER_COOLDOWN_S if d == "llm" else GEN_BREAKER_COOLDOWN_S
+            if ok:
+                self._breaker_close(f"probe_success({why})" if why else "probe_success", domain=d)
+            else:
+                # 试探失败→重新开闸（冷却重新计数），不等streak再爬窗口
+                if d == "llm":
+                    self._breaker_open = True
+                    self._breaker_opened_at = now
+                else:
+                    self._gen_breaker_open = True
+                    self._gen_breaker_opened_at = now
+                self._log("error",
+                          f"🔴 半开试探失败（{label}域），重新熔断冷却{cooldown}s（{why}）",
+                          {"domain": d, "why": why[:200], "cooldown_s": cooldown})
+                logger.error(
+                    f"[{self.strand_id}] {label}半开试探失败，重新熔断: {why[:120]}")
+
+    def _breaker_probe_release(self) -> None:
+        """释放未裁决的试探标记（非常规出口兜底：取消/BaseException）。不作裁决——
+        无证据不误判（不重新开闸也不复位），闸保持原状，下轮可再放行一次试探。"""
+        for d in list(self._probe_in_flight):
+            if self._probe_in_flight[d]:
+                self._probe_in_flight[d] = False
+                self._log("turn", f"🟡 半开试探标记释放（{d}域，无裁决）", {"domain": d})
 
     def _breaker_trip(self, reason: str, domain: str = "llm"):
         """开闸（或半开失败后再开闸=冷却重新计数）。开闸事件必须留痕。"""
@@ -740,7 +844,12 @@ class DNAStrand:
             )
 
     def _breaker_close(self, why: str = "llm_success", domain: str = "llm"):
-        """复位熔断（该域风暴结束）。分域：只关自己域的闸，不碰另一域。"""
+        """复位熔断（该域风暴结束）。分域：只关自己域的闸，不碰另一域。
+
+        同时清掉该域在飞试探标记（成功证据已到=试探已裁决成功，如_call_llm
+        成功路径的llm_success复位——证据驱动的提前裁决）。
+        """
+        self._probe_in_flight[domain] = False
         label = "LLM" if domain == "llm" else "通用"
         opened = self._breaker_open if domain == "llm" else self._gen_breaker_open
         if opened:
@@ -763,6 +872,7 @@ class DNAStrand:
         domains = ("llm", "gen") if domain == "all" else (domain,)
         for d in domains:
             was_open = self._breaker_open if d == "llm" else self._gen_breaker_open
+            self._probe_in_flight[d] = False  # 人工复位=在飞试探作废（无裁决）
             if d == "llm":
                 self._breaker_open = False
                 self._breaker_opened_at = 0.0
@@ -785,15 +895,18 @@ class DNAStrand:
         cooldown = LLM_BREAKER_COOLDOWN_S if domain == "llm" else GEN_BREAKER_COOLDOWN_S
         if not opened:
             state = "closed"
-        elif self._breaker_is_open(now, domain=domain):
+        elif (now - opened_at) < cooldown:
             state = "open"
         else:
-            state = "half_open"  # 冷却已过，放行下次试探
+            # 冷却已过=半开：无试探在飞时下个周期即试探；在飞时gating仍True
+            # （严格单试探——其余调度继续拦截，状态面probe_in_flight可见）
+            state = "half_open"
         return {
             "domain": label,
             "state": state,
             "open": opened,
             "gating": self._breaker_is_open(now, domain=domain),
+            "probe_in_flight": self._probe_in_flight.get(label, False),
             "opened_at": opened_at or None,
             "cooldown_remaining_s": round(
                 max(0.0, cooldown - (now - opened_at)), 1
