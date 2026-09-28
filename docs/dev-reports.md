@@ -3340,3 +3340,36 @@
 5. MCP重连依赖mcp-client(:8094)服务在线：不可达时跳过记errors（live实证⑥），且当前registry无注册Server（checked=0）——真实Server断网恢复重连效果待有远程MCP Server配置后验证。
 6. 上轮遗留观察项（LLMCallError三态统一后合并llm_gateway/dna_evolution传输、chat_stream续写×重试联合封顶、relay消息级粒度、唤醒触发行agent_message透出、前端视觉走查登录墙、overview() N+1、环境变量密钥外发误伤面、model_gateway/gateway.py:135凭据映射表、secret redaction UI i18n key）仍有效非本轮范围。
 7. cron环境约束实录：测试替身穿透坑——llm_engine存量测试monkeypatch `httpx.AsyncClient`/`asyncio.sleep`全局属性，新模块若运行时动态解析同名属性会被fake替身骗成"离线"且睡眠混入退避时长断言（`waits==[2.0]`挂）——解法=import时捕获类/函数引用（_PROBE_CLIENT_CLS/_sleep）seam；httpx.ConnectError裸文案（"all failed"/"refused"）不命中disconnected判定（kilocode msgs表无此形态，判定走errno/消息模式），测试构造断网错误要用表内文案或errno链。
+
+## [2026-09-28 23:45 CST] P1 mirror真隔离沙箱——bubblewrap命名空间隔离+E2B网络策略热更新+snapshot-fork（SUMMARY §五 mirror差距行销账）
+**目标**：SUMMARY.md §五 mirror差距「真隔离沙箱（E2B snapshot-fork/网络策略热更新）| E2B（现为目录级假沙箱）| P1」——grep+通读确认`src/mirror/sandbox.py`是纯目录/变量管理器：**零命令执行能力、零隔离**（任何执行者都是宿主直跑）、无网络策略、snapshot只存变量JSON不携文件系统、无fork。"沙箱"名不副实=安全面裸奔。
+**调研来源**：SUMMARY.md §五 mirror行+E2B snapshot-fork/网络策略热更新语义；evolution-engine-patterns.md §4.2 Letta fail-closed（"无sandbox直接报错不降级"）+§3.2 SWE-agent per-instance成本上限+§3.3 CAMEL python_verifier"执行验证"哲学（测试真实跑不mock）；P0-2 AIHawk SHOWN/SENT双预算"截断必须显式标记"；mem0 §1.2审计语义（exec留痕）。按用户约束"纯开源+本地处理"不引E2B云服务，改用Linux namespace/bubblewrap（0.12.0本机已装）开源本地实现，语义对应：microVM文件系统隔离→mount namespace、snapshot-fork→workspace快照拷贝、网络策略热更新→per-exec读取策略。
+**改动文件**（opensoul commit `7725071d`，4文件+980/-1，其中改动文件+218/-1全为增量hunk，唯一删除行是import替换，逐hunk核实sibling零混入）：
+- `src/mirror/isolation.py`（新405行）：真隔离单一真源
+- `src/mirror/sandbox.py`（+122纯增量）：exec入口+热更新+snapshot-fork
+- `src/api/mirror.py`（+97纯增量）：3端点
+- `tests/test_sandbox_isolation.py`（新27测，真实bwrap零mock）
+**改动内容**：
+1. **isolation.py**（真隔离单一真源）：①`build_bwrap_argv`——user/pid/uts/ipc命名空间+文件系统只暴露`--bind workspace /workspace`（`/usr`只读、`/bin`等symlink、`/tmp` tmpfs、**`/home`等宿主路径完全不bind**）+`--clearenv`环境白名单（LANG/LC_ALL/TERM/TZ+显式env按需放行——凭据类变量默认不进沙箱，顺带收窄遗留观察项"环境变量密钥外发误伤面"）；②网络策略：`deny`→`--unshare-net`，`allow`→放行+只读bind resolv.conf/hosts/ssl；③输出AIHawk SHOWN/SENT双预算：管道增量drain超cap只计数不存内存（防OOM）、截断必带"…[N more characters truncated — output capped at C bytes]"显式标记+`stdout_preview`独立SHOWN预览；④超时→进程组SIGKILL+stderr显式"timed out"原因；⑤prlimit资源上限（cpu/fsize/nproc/nofile/as，SWE-agent成本上限语义）；⑥**fail-closed**：probe_isolation探测失败→`IsolationUnavailable`拒绝执行，绝不宿主直跑（Letta §4.2）。
+2. **sandbox.py**：`Sandbox.workspace`字段+`exec()`（缺失→None/404、暂停→SandboxNotActive/409、隔离不可用→503、成功失败一律log_action审计留痕）+`set_network_policy()`（**热更新**：改config后下次exec即时生效不重建沙箱）+`snapshot()`扩为携workspace目录快照+`fork_from_snapshot()`（E2B snapshot-fork：新沙箱workspace=快照拷贝+变量恢复+血缘config记forked_from/forked_from_snapshot+网络策略继承）。
+3. **api/mirror.py**：`POST /sandboxes/{id}/exec`（asyncio.to_thread不阻塞事件循环，404/409/503/200语义分明）+`/network-policy`（非法策略400）+`/fork`（404兜底）+mirror health/stats新增`isolation_available`可观测。
+4. **坑留痕（两个真实bug）**：①RLIMIT_NPROC**按线程计数**——静态小值128/1024低于宿主存量task数（/proc/loadavg显示1334，Node/Chromium线程远超进程数），fork直接EAGAIN"Creating new namespace failed"全部执行失败；解法=`nproc_limit()`从/proc/loadavg动态取task总数+1024余量（下限4096），回归钉固化；②bwrap新mount根内无任何bind时probe的`/bin/true`找不到——probe命令须带最小ro-bind集。
+**接线位置**（grep证据，文件:行号）：
+- 定义：`src/mirror/isolation.py:270 run_in_sandbox` / `:103 probe_isolation` / `:166 validate_policy` / `:160 nproc_limit`
+- 消费链：`src/mirror/sandbox.py:277 isolation.run_in_sandbox`（manager.exec内）→ `src/api/mirror.py:195 manager.exec`（exec端点）/`:203 IsolationUnavailable→503`/`:230 validate_policy`/fork端点`src/api/mirror.py:241 manager.fork_from_snapshot`
+- 路由挂载：`src/main.py:60 from src.api.mirror import router` + `:557 app.include_router(mirror_router, prefix="/api/mirror")`
+- 真实运行时消费点：opensoul :8090 `/api/mirror/*` 全部端点（live curl实证见下）
+**验证结果**：
+- 完整性✅：`git show --numstat 7725071d`=4文件+980/-1；改动文件`git diff`+218/-1（唯一删除行=import替换，全为增量hunk零全量重写，逐hunk核实sibling的`config/rbac_policy.csv`混入=0，显式git add白名单排除）；4文件`ast.parse`全过。
+- 集成✅：上述grep调用链完整（isolation定义→sandbox.exec内联→api三端点→main.py路由挂载）；live curl实锤重启后新代码在线：`GET /api/mirror/health`返回`isolation_available:true`（新字段在运行进程）；三个新端点经:8090真实API路径全链路验证（live demo 9/9）。
+- 测试✅：新`tests/test_sandbox_isolation.py` **27 passed**（①argv语义7：deny=--unshare-net/allow放行/workspace独占bind+`/home`绝不bind构造层证据/env白名单+显式放行/未知策略拒绝/nproc回归钉；②真隔离执行10：基本执行/宿主家目录+密钥文件不可见/workspace持久化+tmp隔离/网络策略热更新（同沙箱deny失败→allow即时生效访问本地HTTP 200）/超时2s杀30s睡眠（timed_out+原因显式）/输出截断显式标记（total≥20万B+marker+SHOWN预览）/环境变量canary不泄漏+显式放行/fail-closed（probe失败拒执行且canary未创建=从未在任何环境跑过）/暂停拒绝/缺失None/审计留痕；③snapshot-fork 5：快照携workspace+变量/恢复不受源后续变异影响/血缘+策略继承/分叉独立互不可见/未知快照None）；存量`tests/test_mirror.py` **4 passed**零回归；合并**31 passed**；`systemic_test.py` **29/29 passed**（S1-S6全绿）。
+- **live实锤**（/tmp/mirror_sandbox_live_demo.py，真实API:8090全链路+真实bwrap+本地HTTP服务，9/9过）：①exec exit=0 isolation=bubblewrap；②`test -d /home`→HIDDEN+读/home/climbing/.hermes/config.yaml→SECRET_HIDDEN（宿主密钥文件沙箱内不可见）；③环境变量默认CANARY=ABSENT→显式env=CANARY=explicit-value；④网络热更新deny_exit=1→POST network-policy allow→同沙箱allow_exit=0 HTTP_STATUS=200（**不重建沙箱**）；⑤sleep 30超时2s→timed_out=True exit=-9 duration=2.002s；⑥30万B输出→total=300001B sent=262211B(SENT cap)+preview=2000B(SHOWN cap)+truncation marker在场；⑦快照→源变异→fork恢复fork-state+变量{k:v}；⑧fork血缘forked_from/snapshot_id正确+分叉独立（mutated未串入）；⑨暂停409+非法策略400。
+**服务重启**：`systemctl --user restart opensoul.service`→active；`GET /api/mirror/health`=200（isolation_available:true）；重启后systemic_test 29/29（acp-proxy/前端零改动未重启，npm build不适用）。
+**commit**：opensoul `7725071d`。
+**遗留问题**：
+1. **exec尚无运行时agent消费方**：新能力经API暴露（curl/测试/前端可调），但agent工具面（如soulmate terminal工具）仍宿主直跑未接入沙箱——把"agent执行不可信命令"路由进沙箱涉及acp-proxy工具面策略改动，需用户确认哪些工具/场景该进沙箱（安全策略类改动按规矩先讨论）。
+2. **GET /sandboxes/{id}不返回config**：血缘（forked_from等）只能从POST /fork响应或日志看，UI要显示血缘需扩GET响应（小改动下轮顺手）。
+3. **快照为目录全量拷贝非增量**：大workspace多快照会占盘；E2B的CoW语义可用hardlink（cp -al）优化，暂未做；destroy()随data_dir删除所有快照（快照生命周期绑源沙箱）。
+4. **网络allow仍共享宿主网络栈**：等价E2B"出网放行"，但无域名白名单/出网审计——与immune出网白名单（遗留观察项"环境变量密钥外发误伤面"同族）合并做为后续安全专项。
+5. 上轮遗留观察项（HITL网络等待交互卡、turn级park合并、MCP重连真实Server验证、LLMCallError三态统一后合并llm_gateway/dna_evolution传输、chat_stream续写×重试联合封顶、relay消息级粒度、唤醒触发行agent_message透出、前端视觉走查登录墙、overview() N+1、model_gateway/gateway.py:135凭据映射表、secret redaction UI i18n key）仍有效非本轮范围。
+6. cron环境约束实录：**RLIMIT_NPROC按线程计数**是本轮最大坑（静态上限在繁忙宿主上让所有沙箱执行fork EAGAIN必败，且报错文案"Creating new namespace failed"极具误导性）——任何rlimit类防护上限都要按宿主动态取值；bwrap空根probe缺bind；demo断言口径要对齐API层常量（20万B<262144B SENT cap不会触发截断，直调用10KB cap测过≠API层测过）。
