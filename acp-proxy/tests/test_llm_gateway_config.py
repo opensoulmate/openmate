@@ -18,6 +18,7 @@ import pytest
 
 import utils.llm_config as llm_config
 from utils import llm_gateway
+from utils.llm_errors import LLMCallError
 
 HERE = Path(__file__).resolve().parent.parent
 
@@ -111,14 +112,15 @@ class TestDefaultModelFromSingleSource:
 
 class TestFailClosedNoUnauthedRequest:
     def test_missing_key_refuses_without_http(self, monkeypatch, tmp_path):
-        """旧实现：空key照样发请求（鉴权头可选）→ 静默401。现在 fail-closed"""
+        """旧实现：空key照样发请求（鉴权头可选）→ 静默401。现在 fail-closed
+        且失败可见（2026-09-29错误契约收口：LLMCallError，静默返""第三态废除）"""
         f = tmp_path / "env"
         f.write_text("LLM_BASE_URL=https://x/v1\nLLM_MODEL=m-x\n")  # 无key
         monkeypatch.setattr(llm_config, "_default_env_files", lambda: [str(f)])
         llm_gateway.refresh_default_model()
         monkeypatch.setattr(llm_gateway.httpx, "AsyncClient", _BoomClient)
-        out = asyncio.run(llm_gateway.llm_call([{"role": "user", "content": "hi"}]))
-        assert out == ""
+        with pytest.raises(LLMCallError):
+            asyncio.run(llm_gateway.llm_call([{"role": "user", "content": "hi"}]))
 
     def test_missing_base_url_refuses_without_http(self, monkeypatch, tmp_path):
         f = tmp_path / "env"
@@ -126,8 +128,8 @@ class TestFailClosedNoUnauthedRequest:
         monkeypatch.setattr(llm_config, "_default_env_files", lambda: [str(f)])
         llm_gateway.refresh_default_model()
         monkeypatch.setattr(llm_gateway.httpx, "AsyncClient", _BoomClient)
-        out = asyncio.run(llm_gateway.llm_call([{"role": "user", "content": "hi"}]))
-        assert out == ""
+        with pytest.raises(LLMCallError):
+            asyncio.run(llm_gateway.llm_call([{"role": "user", "content": "hi"}]))
 
 
 class TestRealRequestCarriesAuth:

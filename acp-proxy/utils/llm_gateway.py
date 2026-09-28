@@ -18,6 +18,7 @@ LLM Gateway — 统一调用入口 + 统一防护
 4. 多模型路由+降级
 """
 
+import asyncio
 import logging
 import os
 from dataclasses import dataclass, field
@@ -33,6 +34,20 @@ from utils.llm_safety import (
     OMISSION_PATTERNS as _OMISSION_PATTERNS,
     build_continuation_messages,
     check_omission as _check_omission,
+)
+
+# LLM传输错误契约+重试策略+离线park 单一真源（2026-09-29收口）：本模块曾对
+# 失败静默返回""/半截（return full_content），上游无法区分"LLM挂了"与"LLM说
+# 没有可改进项"。现统一（契约见utils/llm_errors.py）：失败=raise LLMCallError
+# （partial_content=半截输出）、HTTP 200空输出同判失败——"空串=失败"第三态废除；
+# 重试策略/离线park与agent.llm_engine、dna_evolution同源import，禁止再复制。
+from utils import network_state
+from utils.llm_errors import LLMCallError
+from utils.llm_retry import (
+    MAX_ATTEMPTS,
+    backoff_ms,
+    is_retryable_status,
+    is_transient_error,
 )
 
 logger = logging.getLogger(__name__)
@@ -133,14 +148,18 @@ async def llm_call(
     2. omission占位符检测+重新生成（Gemini CLI方案）
     3. 输出字符数限制（Cline方案）
     4. 多模型路由+降级
+    5. HTTP重试（utils.llm_retry单一真源）+断网park（utils.network_state）
     
-    返回：LLM输出文本（已保证安全）
+    返回：LLM输出文本（已保证安全）。
+    失败：raise LLMCallError（partial_content=半截输出；HTTP 200空输出同判
+    失败）——"静默返空串"第三态废除（契约见utils/llm_errors.py）。
     """
     # 获取模型配置
     config = get_model(model)
     if not config:
         logger.error(f"[{strand_id}] No available model: {model}")
-        return ""
+        # 失败必须可见（mem0 §1.1）：raise而非静默返空串——"空串=失败"第三态废除
+        raise LLMCallError(f"No available model: {model}")
     if not config.api_key or not config.base_url:
         # fail-closed：缺key/base_url 一律拒绝调用（llm_config 调用方纪律：
         # "key缺失要显式告警（401早知道），不得静默发出无鉴权请求"）。
@@ -150,7 +169,11 @@ async def llm_call(
             f"base_url={config.base_url or '<unset>'}, "
             f"model={config.model or '<unset>'}, key_len={len(config.api_key or '')}"
         )
-        return ""
+        raise LLMCallError(
+            f"[{strand_id}] LLM配置缺失，拒绝调用: "
+            f"base_url={config.base_url or '<unset>'}, "
+            f"model={config.model or '<unset>'}, key_len={len(config.api_key or '')}"
+        )
     
     # 参数覆盖
     temp = temperature if temperature is not None else config.temperature
@@ -189,22 +212,60 @@ async def _call_with_protection(
         async with httpx.AsyncClient(timeout=httpx.Timeout(config.timeout)) as client:
             for attempt in range(max_continuation + 1):
                 try:
-                    resp = await client.post(
-                        f"{config.base_url}/chat/completions",
-                        headers=headers,
-                        json={
-                            "model": config.model,
-                            "messages": current_messages,
-                            "temperature": temperature,
-                            "max_tokens": max_tokens,
-                        },
-                    )
-                    
-                    if resp.status_code != 200:
-                        logger.error(
-                            f"[{strand_id}] LLM call failed: {resp.status_code} {resp.text[:200]}"
+                    # HTTP重试（策略单一真源utils.llm_retry，kilocode retry.ts）：
+                    # 429/408/5xx听Retry-After三格式可重试、瞬时传输错误重试、
+                    # 400/401/402等请求/凭证级fail-fast——接线前本传输零HTTP重试
+                    resp = None
+                    for _http_retry in range(MAX_ATTEMPTS):
+                        try:
+                            resp = await client.post(
+                                f"{config.base_url}/chat/completions",
+                                headers=headers,
+                                json={
+                                    "model": config.model,
+                                    "messages": current_messages,
+                                    "temperature": temperature,
+                                    "max_tokens": max_tokens,
+                                },
+                            )
+                        except httpx.TransportError as e:
+                            # 网络离线三态（utils.network_state，kilocode SessionNetwork）：
+                            # 全局断连→park等恢复自动续跑；非离线/恢复后走下方重试记账
+                            await network_state.maybe_park(e)
+                            if _http_retry < MAX_ATTEMPTS - 1 and is_transient_error(e):
+                                _wait = backoff_ms(_http_retry + 1) / 1000.0
+                                logger.warning(
+                                    f"[{strand_id}] 传输错误{e.__class__.__name__}，"
+                                    f"{_wait:.1f}s后重试 ({_http_retry+1}/{MAX_ATTEMPTS})"
+                                )
+                                await asyncio.sleep(_wait)
+                                continue
+                            raise
+                        if resp.status_code == 200 or not is_retryable_status(resp.status_code):
+                            break
+                        if _http_retry >= MAX_ATTEMPTS - 1:
+                            break
+                        # 有头听头：Retry-After三格式（ms头/秒数/HTTP date），无头才指数退避
+                        _wait = backoff_ms(
+                            _http_retry + 1, getattr(resp, "headers", None)
+                        ) / 1000.0
+                        logger.warning(
+                            f"[{strand_id}] LLM API {resp.status_code}，{_wait:.1f}s后重试 "
+                            f"({_http_retry+1}/{MAX_ATTEMPTS})"
                         )
-                        return full_content
+                        await asyncio.sleep(_wait)
+
+                    if resp is None or resp.status_code != 200:
+                        status = resp.status_code if resp else "no-response"
+                        body = resp.text[:200] if resp else ""
+                        logger.error(
+                            f"[{strand_id}] LLM call failed: {status} {body}"
+                        )
+                        # 失败必须可见（mem0 §1.1）：raise而非静默返半截——
+                        # 已生成部分挂partial_content不丢，调用方可取
+                        err = LLMCallError(f"LLM HTTP {status}: {body}")
+                        err.partial_content = full_content
+                        raise err
                     
                     data = resp.json()
                     choice = data.get("choices", [{}])[0]
@@ -239,12 +300,27 @@ async def _call_with_protection(
                     # 正常结束
                     break
                     
+                except LLMCallError:
+                    raise
                 except Exception as e:
+                    # 失败必须可见：旧实现log后break静默返半截/空串——改为带
+                    # partial_content的LLMCallError（与dna_evolution同契约）
                     logger.error(f"[{strand_id}] LLM call exception: {e}")
-                    break
+                    err = LLMCallError(f"LLM调用异常: {e}")
+                    err.partial_content = full_content
+                    raise err from e
     
+    except LLMCallError:
+        raise
     except Exception as e:
         logger.error(f"[{strand_id}] LLM client exception: {e}")
+        err = LLMCallError(f"LLM调用异常: {e}")
+        err.partial_content = full_content
+        raise err from e
+    
+    if not full_content.strip():
+        # 200但空输出：与dna_evolution同判失败（"空串=失败"第三态废除，契约统一）
+        raise LLMCallError("LLM返回空内容（HTTP 200但无输出）")
     
     # 输出字符数限制
     if len(full_content) > MAX_TOOL_OUTPUT_CHARS:

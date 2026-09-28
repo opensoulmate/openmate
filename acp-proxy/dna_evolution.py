@@ -38,6 +38,22 @@ import httpx
 # 已漂移（缺 /* ... existing code ... */ 与 <!-- ... --> 两条），禁止再复制pattern
 from utils.llm_safety import OMISSION_PATTERNS
 
+# LLM传输错误契约+重试策略+离线park 单一真源（2026-09-29收口，多轮遗留项
+# "先统一错误契约再合并传输"第一步）：
+# - LLMCallError：utils.llm_errors（旧本模块自有类已删除；保留
+#   `dna_evolution.LLMCallError` 兼容再导出，既有 import 面/测试不变）
+# - 重试策略：utils.llm_retry（kilocode retry.ts：Retry-After三格式/5xx无条件
+#   可重试/瞬时传输错误重试）——替换旧 _retry_delay 副本（只认秒数、传输错误零重试）
+# - 离线park：utils.network_state（kilocode SessionNetwork三态，断网等恢复续跑）
+from utils import network_state
+from utils.llm_errors import LLMCallError  # noqa: F401（兼容再导出）
+from utils.llm_retry import (
+    MAX_ATTEMPTS,
+    backoff_ms,
+    is_retryable_status,
+    is_transient_error,
+)
+
 logger = logging.getLogger("acp-proxy.dna_evolution")
 
 # ── 配置 ──────────────────────────────────────────────────
@@ -138,15 +154,11 @@ DEFAULT_GOALS: list[dict] = [
 ]
 
 
-class LLMCallError(RuntimeError):
-    """LLM调用失败（HTTP非200 / 空响应 / 传输异常）。
-
-    mem0 §1.1「失败必须可见，禁止静默降级」：禁止静默返回空字符串让上游把
-    "LLM挂了"记成"LLM说没有可改进项"。调用方必须把本异常记为**失败**，
-    与"LLM成功但无改进"走不同的记账分支。
-    """
-
-    partial_content: str = ""  # 续写中断时的半截输出（可选，调用方可取）
+# LLMCallError 定义已收口 utils.llm_errors 单一真源（顶部import再导出）。
+# 旧自有类（2026-09-27 00:10轮加的 partial_content 契约）并入该模块，
+# 与 utils.llm_gateway 的"失败静默返空串"统一为一种失败形态：
+# 程序化调用面失败=LLMCallError（partial_content=半截输出），契约见
+# utils/llm_errors.py docstring。
 
 
 class EvolutionStage(Enum):
@@ -1712,21 +1724,10 @@ new_string是替换后的文本。
             text = pat.sub(repl, text)
         return text
 
-    # ── 重试策略（cortex/llm_retry.py模式：429/5xx重试，尊重Retry-After）──
-    _RETRY_MAX = 3
-    _RETRY_BASE_DELAY = 2.0
-
-    @staticmethod
-    def _retry_delay(resp_status: int, attempt: int, retry_after: str = "") -> float | None:
-        """返回重试延迟秒数，None=不重试"""
-        if resp_status == 429 or resp_status >= 500:
-            if retry_after:
-                try:
-                    return min(float(retry_after), 30.0)
-                except ValueError:
-                    pass
-            return min(2.0 ** attempt * 2.0, 15.0)
-        return None  # 401/400/404等不重试
+    # ── 重试策略：单一真源=utils.llm_retry（kilocode retry.ts，2026-09-29收口）──
+    # 旧本类 _RETRY_MAX/_RETRY_BASE_DELAY/_retry_delay 副本已删除（只认
+    # retry-after秒数一种格式、429/5xx硬编码、瞬时传输错误零重试、无离线park）
+    # ——状态分类/退避时长/尝试上限全部顶部import，禁止再复制。
 
     async def _call_llm(self, prompt: str) -> str:
         """调用LLM，支持finish_reason检测+自动续写（Aider方案）+ omission检测（Gemini CLI方案）
@@ -1747,24 +1748,48 @@ new_string是替换后的文本。
 
             async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
                 for attempt in range(max_continuation):
-                    # 带重试的HTTP请求
+                    # 带重试的HTTP请求（策略单一真源utils.llm_retry，kilocode retry.ts）：
+                    # 429/408/5xx听Retry-After三格式可重试、瞬时传输错误重试、
+                    # 400/401/402等请求/凭证级fail-fast（不烧3次调用）
                     resp = None
-                    for retry in range(self._RETRY_MAX):
-                        resp = await client.post(
-                            f"{self.llm_base_url}/chat/completions",
-                            headers=headers,
-                            json={
-                                "model": self.llm_model,
-                                "messages": messages,
-                                "temperature": self.temperature,
-                                "max_tokens": 4096,
-                            },
-                        )
-                        delay = self._retry_delay(resp.status_code, retry, resp.headers.get("retry-after", ""))
-                        if delay is None or retry + 1 >= self._RETRY_MAX:
+                    for _http_retry in range(MAX_ATTEMPTS):
+                        try:
+                            resp = await client.post(
+                                f"{self.llm_base_url}/chat/completions",
+                                headers=headers,
+                                json={
+                                    "model": self.llm_model,
+                                    "messages": messages,
+                                    "temperature": self.temperature,
+                                    "max_tokens": 4096,
+                                },
+                            )
+                        except httpx.TransportError as e:
+                            # 网络离线三态（utils.network_state，kilocode SessionNetwork）：
+                            # 全局断连→park等恢复自动续跑；非离线/恢复后走下方重试记账
+                            await network_state.maybe_park(e)
+                            if _http_retry < MAX_ATTEMPTS - 1 and is_transient_error(e):
+                                _wait = backoff_ms(_http_retry + 1) / 1000.0
+                                logger.warning(
+                                    f"[{self.strand_id}] 传输错误{e.__class__.__name__}，"
+                                    f"{_wait:.1f}s后重试 ({_http_retry+1}/{MAX_ATTEMPTS})"
+                                )
+                                await asyncio.sleep(_wait)
+                                continue
+                            raise
+                        if resp.status_code == 200 or not is_retryable_status(resp.status_code):
                             break
-                        logger.warning(f"[{self.strand_id}] LLM HTTP {resp.status_code}, retry {retry+1}/{self._RETRY_MAX} in {delay:.1f}s")
-                        await asyncio.sleep(delay)
+                        if _http_retry >= MAX_ATTEMPTS - 1:
+                            break
+                        # 有头听头：Retry-After三格式（ms头/秒数/HTTP date），无头才指数退避
+                        _wait = backoff_ms(
+                            _http_retry + 1, getattr(resp, "headers", None)
+                        ) / 1000.0
+                        logger.warning(
+                            f"[{self.strand_id}] LLM HTTP {resp.status_code}, "
+                            f"retry {_http_retry+1}/{MAX_ATTEMPTS} in {_wait:.1f}s"
+                        )
+                        await asyncio.sleep(_wait)
 
                     if resp is None or resp.status_code != 200:
                         status = resp.status_code if resp else "no-response"
