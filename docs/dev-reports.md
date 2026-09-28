@@ -3373,3 +3373,38 @@
 4. **网络allow仍共享宿主网络栈**：等价E2B"出网放行"，但无域名白名单/出网审计——与immune出网白名单（遗留观察项"环境变量密钥外发误伤面"同族）合并做为后续安全专项。
 5. 上轮遗留观察项（HITL网络等待交互卡、turn级park合并、MCP重连真实Server验证、LLMCallError三态统一后合并llm_gateway/dna_evolution传输、chat_stream续写×重试联合封顶、relay消息级粒度、唤醒触发行agent_message透出、前端视觉走查登录墙、overview() N+1、model_gateway/gateway.py:135凭据映射表、secret redaction UI i18n key）仍有效非本轮范围。
 6. cron环境约束实录：**RLIMIT_NPROC按线程计数**是本轮最大坑（静态上限在繁忙宿主上让所有沙箱执行fork EAGAIN必败，且报错文案"Creating new namespace failed"极具误导性）——任何rlimit类防护上限都要按宿主动态取值；bwrap空根probe缺bind；demo断言口径要对齐API层常量（20万B<262144B SENT cap不会触发截断，直调用10KB cap测过≠API层测过）。
+
+## [2026-09-29 02:15 CST] LLM传输错误契约统一——LLMCallError单一真源消灭静默空串 + dna/gateway并入llm_retry重试与network_state离线park单一真源（21:40轮遗留#3"统一错误契约"销账）
+**目标**：多轮dev-report遗留项"先统一错误契约再合并传输"的第一步——接线前LLM传输层**三种失败形态并存**：①dna_evolution抛LLMCallError（partial_content）、②llm_engine返回"[LLM错误: …]"可见串、③utils.llm_gateway**静默return ''/半截**（mem0 §1.1反模式："静默导致上游无法区分'不可用'和'无事实'"——LLM挂了会被记成"LLM说没有可改进项"）；且dna的`_retry_delay`副本（只认retry-after秒数**一种**格式、瞬时传输错误**零重试**、无离线park）与llm_gateway零HTTP重试都没消费utils.llm_retry策略单一真源，断网/瞬时限流直接掐断进化循环与业务调用。21:40轮dev-report遗留#3原文："先统一错误契约（LLMCallError.partial_content/[LLM错误:]串/空串三态）再合并传输……策略单一真源已就位，合并时直接import即可"。
+**调研来源**：mem0 §1.1（失败必须可见，禁止静默降级）；kilocode retry.ts（Retry-After三格式/5xx无条件/fail-fast，utils.llm_retry既有移植）；kilocode SessionNetwork三态（utils.network_state既有移植）；21:40轮/09:30轮两轮dev-report遗留#3的合并路线（本轮=第一步"统一错误契约"，传输合并仍留待后续）。
+**改动文件**（openmate commit `6e1bde27`，6文件+590/-64，全部增量hunk）：
+- `acp-proxy/utils/llm_errors.py`（新56行）：LLMCallError契约单一真源
+- `acp-proxy/dna_evolution.py`（+71/-34增量）：本地类删除+重试/park接线
+- `acp-proxy/utils/llm_gateway.py`（+88/-24增量）：失败可见化+重试/park接线
+- `acp-proxy/tests/test_llm_error_contract.py`（新25测）
+- `acp-proxy/tests/test_llm_gateway_config.py`/`test_dna_llm_config_failure.py`（各2处契约断言随契约升级改写）
+**改动内容**：
+1. **utils/llm_errors.py契约单一真源**（两面收口，第三态"空串=失败"废除）：程序化调用面（dna._call_llm/gateway.llm_call）成功=返回str、失败=raise LLMCallError（partial_content=半截输出不丢）、HTTP 200空输出同判失败；会话面（llm_engine chat/chat_stream*）"[LLM错误: …]"可见字符串契约**不动**（面向用户的失败必须可展示）。
+2. **dna_evolution并入单一真源**：本地`class LLMCallError`删除（顶部import兼容再导出，`dna_evolution.LLMCallError is utils.llm_errors.LLMCallError`，既有import面/测试不变）；`_RETRY_MAX/_RETRY_BASE_DELAY/_retry_delay`副本删除；_call_llm HTTP重试环改消费`is_retryable_status/backoff_ms/is_transient_error/MAX_ATTEMPTS`（429/408/5xx听Retry-After三格式可重试、瞬时传输错误重试、400/401/402 fail-fast只1发）；`except httpx.TransportError`分支接`network_state.maybe_park(e)`（断网park等恢复自动续跑，语义不变只加等待）。
+3. **utils.llm_gateway失败可见化+同源接线**：配置缺失/无模型→raise LLMCallError（旧return ""）；HTTP非200→raise LLMCallError带partial_content（旧return full_content静默半截）；异常→LLMCallError包装（旧log后break静默）；200空输出→"空内容"失败（与dna同判）；零HTTP重试→同一utils.llm_retry策略环+TransportError分支maybe_park。
+4. **测试即护栏**：新25测=契约6（类同一对象/dna无本地副本/gateway失败=异常非空串/会话面契约不动）+dna重试7（Retry-After-MS毫秒头0.3s实值/无头指数2s/504耗尽3发[2.0,4.0]/402单发/瞬时ConnectError重试自愈/非瞬时ValueError不重试/disconnect类错误park接线在场）+gateway5（429听头/401单发/partial_content/空输出失败/传输错误重试+park）+接线钉7（三传输全部import utils.llm_retry、旧_retry_delay绝迹、gateway只剩成功return一次、park在TransportError分支内）。
+**接线位置**（grep证据，文件:行号）：
+- 契约定义：`utils/llm_errors.py:24 class LLMCallError`（partial_content）
+- dna消费：`dna_evolution.py:49 from utils.llm_errors import LLMCallError`（兼容再导出）、`:1770 await network_state.maybe_park(e)`、`:1771 is_transient_error(e)`、`:1772 backoff_ms(...)`、`:1780 is_retryable_status(...)`、`:1800 raise LLMCallError(...)`带partial_content
+- gateway消费：`utils/llm_gateway.py:45 from utils.llm_errors import LLMCallError`、`:234 maybe_park(e)`、`:235 is_transient_error`、`:238 backoff_ms`、`:253 is_retryable_status`、`:162/:172 raise LLMCallError`（配置缺失/无模型）
+- 真实运行时消费点：dna进化循环（`DNAEvolutionEngine`调度的`DNAStrand._call_llm`——进化strand每小时真实LLM流量）、`llm_call`业务调用面（infection_guard docstring面+后续业务接入面）
+- 旧副本绝迹：`grep "def _retry_delay" dna_evolution.py` **0命中**；`grep "self._RETRY_MAX" dna_evolution.py` **0命中**（接线钉固化）
+**验证结果**：
+- 完整性✅：`git show --numstat 6e1bde27`=6文件+590/-64；4个改动文件`git diff`逐hunk核实全为本轮改动（sibling并行会话的settings-client.tsx/locales/*.json显式排除未入库；systemic_test_results.json测试产物不入库）；3个源文件`ast.parse`全过。
+- 集成✅：上述grep调用链完整（llm_errors定义→dna/gateway两路内联消费→dna进化循环真实流量面）；service实际解释器（hermes-agent venv python）import smoke：`dna_evolution.LLMCallError is utils.llm_errors.LLMCallError` ✓ identity OK；重启后:8092/health、:8095/health=200、:8092/api/network/status=200。
+- 测试✅：新`tests/test_llm_error_contract.py` **25 passed**；`test_llm_gateway_config.py`+`test_dna_llm_config_failure.py`（契约断言升级）+dna breaker×3+chat_output_protection+llm_retry_policy+network_offline_park合并**144 passed**零回归；acp-proxy全量`tests/` **1260 passed 0 failed**（430.95s，=上轮1235基线+25新）；`systemic_test.py` **29/29 passed**（S1-S6全绿）。
+- **live实锤**（/tmp/llm_error_contract_live_demo.py，真实DNAStrand+真实llm_gateway+真实httpx传输+本地HTTP stub provider，真实sleep非monkeypatch，8/8过）：①dna 429+`Retry-After-MS: 300`→2次请求耗时**0.36s**（毫秒头实锤——旧_retry_delay副本只认秒数此路必错退避）；②dna 500无头→**2.02s**指数退避实锤；③dna 402→**只1发**0.01s fail-fast+LLMCallError可见失败；④dna 200空输出→"空内容"失败；⑤gateway 401→LLMCallError**非空串**（旧实现return ""静默，本轮核心修复实锤）；⑥gateway 429+`Retry-After: 1`→**1.01s**听头；⑦gateway 200空输出→失败；⑧gateway死端口→3发重试耗尽6.37s（2s+4s退避+park真实探测）→"LLM调用异常"可见失败。控制台可见"[live] LLM HTTP 429, retry 1/3 in 0.3s"/"[live] 传输错误ConnectError，2.0s后重试"防护日志。
+**服务重启**：`systemctl --user restart acp-proxy-a.service acp-proxy-b.service`→两服务active；:8092/health=200、:8095/health=200、:8092/api/network/status=200；重启后systemic_test 29/29（opensoul/前端零改动未重启，npm build不适用）。
+**commit**：openmate `6e1bde27`。
+**遗留问题**：
+1. **传输合并仍未做**（遗留#3的第二步）：llm_gateway/dna仍是两条并行httpx传输（本轮统一的是错误契约+重试/park策略），把两者改为委托llm_engine或公共传输核心仍留待——但契约已统一、策略已同源，合并时不再破坏失败可见性测试。
+2. **⚠️环境问题仍在（非代码，需用户处理）**：LLM供应商余额不足（402）——本轮live用本地stub provider验证（真实httpx/真实计时），真实流量下的收益待充值/换key后观察journal"[LLM] …后重试"与"[网络] 离线park"出现频次。
+3. llm_call目前无生产调用方（infection_guard走注入式llm_call_fn、docstring面提及）——失败可见化是为后续业务接入面立契约，当前生效面是dna进化循环（真实每小时流量）。
+4. chat_stream/chat()续写×重试联合封顶（4续写×3重试理论上限12发/逻辑回合）仍按21:40轮决定"暂不加复杂度"挂账。
+5. 上轮遗留观察项（turn级park合并、MCP重连真实Server验证、relay消息级粒度、唤醒触发行agent_message透出、前端视觉走查登录墙、overview() N+1、model_gateway/gateway.py:135凭据映射表、secret redaction UI i18n key、HITL网络等待交互卡）仍有效非本轮范围。
+6. cron环境约束实录：sibling并行会话共用工作树（settings-client.tsx/locales被sibling改）——commit显式git add白名单+逐hunk核实；测试接线钉自查坑：断言"旧副本绝迹"的关键词会命中自己写的"旧副本已删除"留痕注释——接线钉须剥整行注释再断言（_code()helper）；`class R: text = text`类体自赋值陷阱（改为__init__内赋值）。
