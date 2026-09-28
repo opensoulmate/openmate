@@ -29,6 +29,10 @@ from utils.llm_retry import (
     is_retryable_status,
     is_transient_error,
 )
+# 网络离线三态=utils.network_state（网络恢复专项，kilocode SessionNetwork移植）：
+# 传输错误先过离线判定——全局断网则park等待恢复（3URL竞速探测+3s轮询+10s宽限
+# 自动续跑，有界park），恢复后继续原有重试；端点级故障/非断网走原有退避不变
+from utils import network_state
 import os
 from typing import AsyncGenerator, Optional, TYPE_CHECKING
 
@@ -344,6 +348,10 @@ class LLMEngine:
                 finally:
                     await response.aclose()
         except httpx.TransportError as e:
+            # 网络离线三态（utils.network_state，kilocode SessionNetwork）：
+            # 全局断连→park等恢复（3s轮询探测+10s宽限自动续跑，有界）；恢复/非离线
+            # 走下方原有重试记账，aborted也回落原失败契约——原有语义不变只加等待
+            await network_state.maybe_park(e, cancel_event)
             # 瞬时传输错误重试（utils.llm_retry单一真源，kilocode TRANSIENT判定）：
             # 仅当本attempt尚无任何输出——已流出内容再重试=同一回复发两遍；
             # 不重试/次数用尽保持原失败契约（ReadTimeout→"[LLM响应超时]"、其余→
@@ -635,6 +643,10 @@ class LLMEngine:
                         await response.aclose()
                 break  # 成功，退出重试循环
             except httpx.TransportError as e:
+                # 网络离线三态（utils.network_state，kilocode SessionNetwork）：
+                # 全局断连→park等恢复（3s轮询探测+10s宽限自动续跑，有界）；恢复/
+                # 非离线走下方原有重试记账，aborted回落原失败契约——语义不变只加等待
+                await network_state.maybe_park(e, cancel_event)
                 # 瞬时传输错误重试（utils.llm_retry单一真源，kilocode TRANSIENT判定）：
                 # 仅当本attempt零输出（文本与tool_calls均未累积）——已流出/已累积再
                 # 重试=双份回复或tool_calls状态串attempt污染；否则保持原失败契约
@@ -715,6 +727,10 @@ class LLMEngine:
                         try:
                             resp = await client.post("/chat/completions", json=payload)
                         except httpx.TransportError as e:
+                            # 网络离线三态（utils.network_state，kilocode SessionNetwork）：
+                            # 全局断连→park等恢复（3s竞速探测+10s宽限自动续跑，有界）；
+                            # 恢复/非离线走下方原有重试记账（chat()无cancel_event）
+                            await network_state.maybe_park(e)
                             if _http_retry < MAX_ATTEMPTS - 1 and is_transient_error(e):
                                 _wait = backoff_ms(_http_retry + 1) / 1000.0
                                 logger.warning(

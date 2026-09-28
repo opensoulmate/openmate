@@ -423,6 +423,26 @@ async def sandbox_policy_clear(session_id: str):
     return {"ok": ok, "session_id": session_id}
 
 
+# 网络恢复回调注册（kilocode network.ts reply()的MCP重连语义）：离线park恢复
+# 后把mcp-client(:8094)里status=="error"的Server重新connect（跨进程HTTP）
+try:
+    from utils import network_state as _network_state
+    _network_state.register_restore_callback(_network_state.reconnect_failed_mcp_servers)
+except Exception:
+    _network_state = None
+
+
+@app.get("/api/network/status")
+async def network_status():
+    """网络离线三态可观测（kilocode SessionNetwork wait/peek语义）：
+    汇总（parks/resumed/aborted/pending）+ 全部wait记录（blocked/resumed/aborted）。
+    "agent是不是在等网络恢复"必须可见——直接回答用户可观测性诉求，
+    不新建页面（monitoring页/health探测本端点即可）。"""
+    if _network_state is None:
+        return {"error": "network_state unavailable"}
+    return {"stats": _network_state.stats(), "waits": _network_state.list_waits()}
+
+
 @app.get("/health")
 async def health():
     """⚠️ 本路由被ws_chat.py的/health遮蔽——app.py:224 include_router(ws_router)先注册，
