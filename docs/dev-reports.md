@@ -3274,3 +3274,36 @@
 5. 新UI文案（'显示/脱敏/显示敏感数据'）暂为硬编码中文（代码库既有先例chat-client.tsx'正在思考...'），未加locale key——sibling会话正在改locales×3，为避免混提交暂不碰；后续加`markdown.revealSecrets`等key属i18n收口。
 6. 上轮遗留观察项（relay消息级粒度/relay每WS轮询（有意接受的上限）、唤醒触发行agent_message透出、前端视觉走查登录墙、overview() N+1、环境变量密钥外发误伤面（需先讨论误伤容忍度）、污点分析近似、model_gateway/gateway.py:135 provider凭据映射表低优先）仍有效非本轮范围。
 7. cron环境约束实录：unified的rehypePlugins数组元素是**attacher（工厂）不是transformer**——`rehypePlugins={[rehypeSecretMask()]}`会被以0参数调用工厂而静默失效/崩溃，正确形态`[rehypeSecretMask]`（教训已写进rehype-secret-mask.ts docstring+render-test接线钉）；sibling并行共用工作树commit显式白名单；render测试临时目录崩溃残留需手动rm（.ssr-render-*）；systemic_test_results.json是测试产物不入库。
+
+## [2026-09-28 21:40 CST] P0 LLM重试策略单一真源——Retry-After三格式+5xx无条件重试接线三条传输路径（SUMMARY §五 cortex缺口销账）
+**目标**：LLM调用瞬时故障（429限流/5xx抖动/网络闪断）当前直接整体失败——`chat()`（judge/计划/摘要/标题的非流式真实路径）与`chat_stream()`（soulmate真实回复主路径，soulmate_agent.py:1762）**零HTTP重试**，瞬时429/5xx直接"[LLM错误: …]"掐断；`chat_stream_with_tools()`有重试环但固定2^n退避不听Retry-After、可重试集`(400, 429, 500, 502, 503)`把400（请求级错误）当可重试却漏501/504等其余5xx。SUMMARY.md §五 cortex缺口表「LLM重试策略（Retry-After三格式+5xx重试+离线三态）| kilocode retry.ts | P0」。
+**调研来源**：kilocode-source-supplement6 §2 retry.ts重试策略（"Retry-After三格式：retry-after-ms毫秒头→retry-after秒数→HTTP date格式，全部cap到i32上限；无头时才fallback指数退避（2s×2^n）且封顶30s——有头听头；5xx无条件重试（SDK没标也重试）；不可重试精确排除；limit参数防无限"）+本地源码~/agent-research-src/kilocode/packages/opencode/src/session/retry.ts（delay()/retryable()逐行对照移植）+ mem0 §1.1失败必须可见（失败契约"[LLM错误: …]"保持不变不吞）。
+**改动文件**（openmate commit `242b5e8c`，3文件+845/-19，全部增量hunk）：
+- `acp-proxy/utils/llm_retry.py`（新131行）：重试策略单一真源
+- `acp-proxy/agent/llm_engine.py`（+152/-19）：三路接线（7个增量hunk）
+- `acp-proxy/tests/test_llm_retry_policy.py`（新40测）
+**改动内容**：
+1. **utils/llm_retry.py策略单一真源**（kilocode retry.ts逐点移植）：①`parse_retry_after_ms`三格式解析（retry-after-ms毫秒头→retry-after秒数→HTTP date(parsedate−now只认未来)），大小写不敏感、NaN/负值拒绝、全部cap i32上限；②`backoff_ms(attempt, headers)`有头听头（解析失败→指数退避只cap i32，kilocode语义）、**无头才**指数退避2s×2^n封顶30s；③`is_retryable_status`：429/408可重试+**5xx无条件可重试**（"transient server failures"），400/401/402/403/404等fail-fast；④`is_transient_error`：httpx.TransportError家族+kilocode TRANSIENT_MESSAGES文案兜底；⑤MAX_ATTEMPTS=3防无限（kilocode limit参数）。
+2. **三路接线**：`chat()`新增HTTP重试环（`for _http_retry in range(MAX_ATTEMPTS)`：429/5xx听头重试、瞬时传输错误重试、非可重试即抛保持"[LLM错误: …]"契约）——**接线前零重试**；`chat_stream()`重试走既有递归模式（新增`_retry_count`参数，429/5xx递归重试+瞬时传输错误**仅本attempt零输出时**重试（已流出内容重试=同一回复发两遍））——**接线前零重试**；`chat_stream_with_tools()`状态分类改`is_retryable_status`（400不再重试、501/504等补上）、退避改`backoff_ms`听头、瞬时传输错误零输出重试（文本/tool_calls已累积不重试，防状态串attempt污染）。
+3. **测试即护栏**：策略单元16（三格式解析/退避语义/分类表）+chat()集成8+chat_stream集成5+with_tools集成4（含行为修正钉：400不重试；回归钉：504重试、已输出不重试防双份）+接线钉5（旧`(400, 429, 500, 502, 503)`/`2 ** _retry`/`range(3)`绝迹、常量与kilocode逐值一致）。
+**接线位置**（grep证据，文件:行号）：
+- 策略定义：`utils/llm_retry.py:73 parse_retry_after_ms`、`:117 backoff_ms`、`:133 is_retryable_status`、`:144 is_transient_error`
+- chat()消费：`agent/llm_engine.py:714 for _http_retry in range(MAX_ATTEMPTS)`、`:737 backoff_ms(_http_retry + 1, getattr(resp, "headers", None))`、`:730 is_retryable_status(resp.status_code)`
+- chat_stream()消费：`agent/llm_engine.py:244 is_retryable_status(response.status_code)`、`:251 backoff_ms(...)`、`:353-354 is_transient_error(e)`（except httpx.TransportError分支）、`:_retry_count=_retry_count + 1`递归
+- with_tools消费：`agent/llm_engine.py:446 for _retry in range(MAX_ATTEMPTS)`、`:469 is_retryable_status`、`:479 backoff_ms`、`:645 is_transient_error`
+- 真实运行时调用点（防护自此覆盖）：`agent/soulmate_agent.py:1762`（真实回复主路径）、`agent/soulmate_agent.py:778/801/898/3948`（judge/计划/感染/标题，chat()）、`engine.py:132/174`、`discussion_engine.py:500`
+- 旧策略绝迹：`grep "(400, 429, 500, 502, 503)" agent/llm_engine.py` **0命中**；`grep "2 \*\* _retry" agent/llm_engine.py` **0命中**（测试接线钉固化）
+**验证结果**：
+- 完整性✅：`git show --numstat 242b5e8c`=3文件+845/-19（llm_engine 7个增量hunk零全量重写，逐hunk核对无sibling混入）；3文件`ast.parse`通过。
+- 集成✅：上述grep调用链完整（llm_retry定义→三路方法内联消费→5个真实运行时消费点）；接线钉测试断言三路源码消费策略符号+旧策略绝迹。
+- 测试✅：新`tests/test_llm_retry_policy.py` **40 passed**（①策略16：三格式×6/退避×4（含kilocode"有头无可解析值不封30s"语义）/分类×6；②chat()集成8：429听头重试成功+退避值断言/5xx耗尽3发可见失败/401 fail-fast只1发/400不重试/504重试/瞬时ConnectError重试/传输错误耗尽/非瞬时ValueError不重试；③chat_stream集成5：429重试/401只1发/零输出ReadTimeout重试/**已输出ReadTimeout不重试防双份**/耗尽可见；④with_tools集成4：504重试/**Retry-After退避时长0.5s断言**/400只1发/已输出不重试；⑤接线钉5）；相关存量（chat_output_protection/stream_continuation/llm_stream_usage/ws_chat_llm_config/llm_gateway_config/safety×2/plan_execution/task_judge_wiring）**110 passed**零回归；acp-proxy全量`tests/` **1202 passed 0 failed**（426.50s，=上轮1162基线+40新）；`systemic_test.py` **29/29 passed**（S1-S6全绿）。
+- **live实锤**（/tmp/llm_retry_live_demo.py，真实LLMEngine+真实httpx传输+本地stub HTTP provider，真实sleep非monkeypatch，5/5过）：①chat() 429+`Retry-After: 1`（秒格式）→2次请求耗时**1.09s**（听头实锤，非盲目退避）返回"恢复后的回答"；②chat() 500无头→2次请求耗时**2.01s**（指数退避2s×2^0实锤）；③chat_stream() 500+`Retry-After-MS: 300`（ms格式）→2次请求耗时**0.34s**，输出"流式回答完整收尾"完整无双份；④with_tools 504+retry-after-ms:200→2次请求耗时**0.24s**（5xx无条件重试实锤，旧硬编码此路必失败），tool_calls完整；⑤chat() 401→**只1次请求0.02s** fail-fast（不烧3次调用）。控制台同步可见"[LLM] API 429，1.0s后重试 (1/3)"等防护日志，401走"[LLM错误: …]"可见失败契约。
+**服务重启**：`systemctl --user restart acp-proxy-a.service acp-proxy-b.service`→两服务active；:8092/health=200、:8095/health=200；重启后systemic_test 29/29（opensoul/前端零改动未重启，npm build不适用）。
+**commit**：openmate `242b5e8c`。
+**遗留问题**：
+1. **⚠️环境问题仍在（非代码，需用户处理）**：LLM供应商余额不足（402）——真实流量下重试收益待充值/换key后观察journal"[LLM] API …后重试"出现频次。
+2. **离线三态未移植**（调研项"Retry-After三格式+5xx重试+离线三态"的第三件）：kilocode SessionNetwork离线handler（retry/blocked/aborted三态+3URL竞速探测+3s轮询+10s宽限自动续跑+MCP重连，~120行）是turn层语义，与本轮"调用失败怎么重试"正交——归入网络恢复专项（SUMMARY与OpenMate传输层重连use-sse/global-websocket也是正交层）。
+3. `utils/llm_gateway.py`/`dna_evolution._call_llm`两套并行传输未消费llm_retry（沿袭上轮遗留#3决定：先统一错误契约（LLMCallError.partial_content/[LLM错误:]串/空串三态）再合并传输，冒进合并会破坏既有失败可见性测试）——但策略单一真源已就位，合并时直接import即可。
+4. chat_stream/chat()续写递归与HTTP重试递归相互独立（4续写×3重试理论上限12发/逻辑回合，实际截断+限流同时发生的概率极低且各有日志可见）；如需联合封顶可在_llm_safety加总预算，暂不加复杂度。
+5. 上轮遗留观察项（relay消息级粒度、relay每WS轮询、唤醒触发行agent_message透出、前端视觉走查登录墙、overview() N+1、环境变量密钥外发误伤面、污点分析近似、model_gateway/gateway.py:135 provider凭据映射表、secret redaction UI i18n key）仍有效非本轮范围。
+6. cron环境约束实录：sibling并行会话共用工作树——commit显式git add白名单+`git diff`逐hunk核实无sibling混入（本轮llm_engine收到sibling修改warning但git diff核实10个hunk全为自己改动）；pytest用`~/opensoul/.venv/bin/python3 -m pytest`；全量426s后台跑`process wait`（180s clamp两次wait取回）；**demo断言的预期函数是async忘了await/asyncio.run套asyncio.run两连坑**（一次修掉：主函数改同步、各场景协程各自asyncio.run）。
