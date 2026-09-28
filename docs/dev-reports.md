@@ -3239,3 +3239,38 @@
 4. 上轮遗留#3（safe_llm_call/llm_call无生产调用点、三套传输实现并存需先统一错误契约）仍有效——本轮续写策略已两路（chat/chat_stream*）消费同一llm_safety真源，传输层合并未动。
 5. 上轮遗留观察项（relay消息级粒度、唤醒触发行agent_message透出、前端视觉走查登录墙、overview() N+1、环境变量密钥外发误伤面、污点分析近似、provider凭据映射表）仍有效非本轮范围。
 6. cron环境约束实录：sibling并行会话共用工作树——commit显式git add白名单+先`git diff`核实目标文件无sibling混入；pytest用`~/opensoul/.venv/bin/python3 -m pytest`；全量435s后台跑`process wait`（180s clamp两次wait取回）；live demo自身断言文案含"截断"字样会误伤断言（demo文本与标记词冲突教训：断言词≠样本词）。
+
+## [2026-09-28 17:50 CST] P1流式输出脱敏展示——正文密钥遮蔽+点击揭示（Warp reveal UX），补齐SecretScanBadge缺的"遮蔽展示"半边
+**目标**：聊天流式输出里的API key/凭据**原文直出**聊天界面（屏幕共享/截图/录屏即泄露），SUMMARY.md §四前端差距表「流式输出脱敏展示 | 无 | 完全没有 | Warp secret_redaction（hover点击揭示UX） | P1」。现状盘点发现上一轮已建`src/lib/secret-redaction.ts`（24正则扫描）+`src/components/secret-scan-badge.tsx`（检测徽章）且已接线（chat-client.tsx:2502），但徽章只是"消息下方警告"——**密钥原文仍在正文完整可见**，"脱敏展示"（遮蔽+揭示）半边缺失。本轮补齐：正文里的密钥默认遮蔽为前4后4预览+风险chip，点击眼睛揭示原文，再点隐藏。
+**调研来源**：SUMMARY.md §四 P1差距项（Warp secret_redaction hover点击揭示UX）+ 上轮dev-report遗留#2（"正确解法在消费方侧（holdback缓冲/Warp式secret_redaction），归入输出侧护栏专项"——本轮做secret_redaction展示半边，holdback半边仍归immune专项）+ 既有secret-redaction.ts安全声明（本地浏览器扫描、原文留内存）+ 前轮render-test-memory-marker.cjs的tsc transpileModule+react-dom/server真实渲染测试范式（直接复用为本轮测试harness）。
+**改动文件**（openmate commit `acc3699c`，5文件+430/-5，全部增量hunk）：
+- `src/lib/secret-redaction.ts`（+47/-0）：`splitSecretSegments`（唯一分段真源）+`maskCodeInText`
+- `src/lib/rehype-secret-mask.ts`（新105行）：rehype插件HAST层遮蔽
+- `src/components/secret-pill.tsx`（新91行）：SecretPill胶囊+SecretAwareSpan
+- `src/components/markdown-content.tsx`（+29/-5）：rehypePlugins/components.span/CodeBlock遮蔽接线
+- `render-test-secret-redaction.cjs`（新163行）：36断言真实渲染测试
+**改动内容**：
+1. **分段单一真源**：`splitSecretSegments(text, minRisk)`按scanForSecrets（已排序+重叠合并）切成[text|finding]段；`maskCodeInText`把每段finding替换为maskSecret预览。散文路径（rehype插件）与围栏代码路径（CodeBlock）**同消费一个分段函数**，遮蔽语义零漂移。
+2. **rehype插件（rehype-secret-mask.ts）**：在markdown解析后、渲染前的HAST树上把含密钥的文本节点替换为`<span>`（`node.data.secretMeta=SecretFinding`，unic规范data字段，ReactMarkdown把node原样传给自定义组件——密钥原文不进DOM属性），结构不破坏（列表/加粗/表格内密钥原位遮蔽，不需要拆markdown文档）；`pre`子树跳过（SyntaxHighlighter吃纯字符串，span拆分破坏高亮）。
+3. **SecretPill（Warp reveal UX）**：默认遮蔽=maskSecret前4后4预览+类型chip（riskToBadgeClasses复用）+Eye按钮；点击揭示原文（红虚线框+EyeOff再隐藏）；title=类型（风险）+操作提示。`SecretAwareSpan`=ReactMarkdown `components.span`替换：带secretMeta→胶囊，普通span透传。
+4. **CodeBlock围栏代码遮蔽**：hasSecrets时默认渲染`displayCode=maskCodeInText(code)`，头部新增"显示/脱敏"眼睛按钮；**复制WYSIWYG**（未揭示复制遮蔽文本，剪贴板不落真密钥）；进入编辑自动揭示（否则遮蔽文本入编辑器会损坏代码）。
+5. **阈值取向**：minRisk='high'（high/critical遮蔽：API key/JWT/密码泄露/身份证/银行卡/带凭证URL；手机号/邮箱/IP低风险不遮蔽防噪音）——与SecretScanBadge调用点（chat-client.tsx:2502 minRisk="high"）一致。
+**接线位置**（grep证据，文件:行号）：
+- 定义：`src/lib/secret-redaction.ts:244 splitSecretSegments`、`:267 maskCodeInText`、`src/lib/rehype-secret-mask.ts:101 rehypeSecretMask`、`src/components/secret-pill.tsx:23 SecretPill`、`:78 SecretAwareSpan`
+- 消费链（真实渲染路径）：`chat-client.tsx:2498`（消息text part→MarkdownContent）与`:1062`（thinking块→MarkdownContent）→ `markdown-content.tsx:216 rehypePlugins={[rehypeSecretMask]}`、`:209 span: SecretAwareSpan`、`:32-34 scanForSecrets/maskCodeInText`、`:161 {displayCode}`；插件内部`rehype-secret-mask.ts:74 splitSecretSegments(child.value,'high')`
+- 测试文件grep全量命中（render-test接线钉5条断言固化上述形状）
+**验证结果**：
+- 完整性✅：`git show --numstat acc3699c`=5文件+430/-5（2改文件全增量hunk零全量重写）；sibling并行改动（settings-client.tsx/locales×3/systemic_test_results.json/e2e_probe2.py/.mmb-render）显式白名单排除未入库。
+- 集成✅：上述grep调用链完整（lib定义→rehype插件/CodeBlock消费→MarkdownContent真实渲染路径→chat-client消息/thinking两消费点）；served build实锤：`grep .next/static/chunks/1ikkq75u2hor8.js`含`secretMeta`×2+`secret-redacted`+`显示敏感数据`×2，`curl :3000/_next/static/chunks/1ikkq75u2hor8.js`=200（重启后新build在线）。
+- 测试✅：`node render-test-secret-redaction.cjs` **36/36 PASS**（tsc transpileModule+react-dom/server真实渲染，非字符串断言）：①splitSecretSegments 8（无密钥单段/3段+位置/低风险email不遮蔽/高危JWT遮蔽/双密钥5段）②maskCodeInText 3（原文绝迹/周边代码保留/遮蔽预览）③HAST插件 5（拆3节点/span包装/node.data.secretMeta携带finding/span子文本已遮蔽/pre子树不动/纯文本树不动）④SecretPill 6（**默认HTML绝不含原文**（核心安全断言）/前4后4预览/类型label/揭示按钮/tooltip/切换逻辑源码在场）⑤SecretAwareSpan 2（普通span透传/secretMeta→无原文胶囊）⑥ReactMarkdown E2E 6（**真实markdown→HTML中key与JWT双双绝迹**/周边散文完好/揭示按钮渲染/围栏代码走pre不被插件动）⑦接线钉5（attacher形态在场+**transformer误用形态绝迹**（本轮踩过的坑固化为回归钉）+span override+CodeBlock遮蔽+displayCode渲染）。过程中修复2个真实bug（测试抓出）：walk不处理type:'root'节点（E2E崩溃）、secretSpan子文本未遮蔽（原文进HAST）。
+- `npm run build` ✅ exit 0（type-check+96页生成）。
+**服务重启**：`systemctl --user restart openmate-web.service`→is-active active→`GET :3000/`=200；重启后`systemic_test.py` **29/29 passed**（EXIT=0，S1-S6全绿）；acp-proxy/opensoul零改动未重启。
+**commit**：openmate `acc3699c`。
+**遗留问题**：
+1. **⚠️环境问题仍在（非代码，需用户处理）**：LLM供应商余额不足（402）——进化链路待充值/换key后`POST /api/evolution/strands/{id}/reset-breaker`清闸验证。
+2. 揭示交互（点击Eye切换）无法用renderToStaticMarkup验证（无DOM测试设施），以源码断言兜底——用户登录后在聊天页看一眼：发一条含假key的消息（或查看含key的历史回复）应显示遮蔽胶囊+眼睛按钮。⚠️本轮视觉渲染同样受登录墙保护未人工过目（cron无凭证不猜测登录，前例同）。
+3. 遮蔽是**展示层**肩窥防护：原文仍在消息文本（复制按钮/导出getMessageText走原文——用户主动复制自己的数据保留原文语义）与浏览器内存中；流式传输本身未加密脱敏（WS明文传输本地）。若需传输层脱敏需配合消费方holdback缓冲，归入immune输出侧护栏专项（上轮遗留#2 holdback半边仍未做）。
+4. 跨文本节点边界的密钥（如`sk-**abc**`被加粗拆开）检测不到（按节点扫描）；围栏代码内遮蔽是显示遮蔽，SyntaxHighlighter拿到的是遮蔽后字符串（复制同WYSIWYG）。低风险PII（手机号/邮箱/IP）有意不遮蔽（噪音）。
+5. 新UI文案（'显示/脱敏/显示敏感数据'）暂为硬编码中文（代码库既有先例chat-client.tsx'正在思考...'），未加locale key——sibling会话正在改locales×3，为避免混提交暂不碰；后续加`markdown.revealSecrets`等key属i18n收口。
+6. 上轮遗留观察项（relay消息级粒度/relay每WS轮询（有意接受的上限）、唤醒触发行agent_message透出、前端视觉走查登录墙、overview() N+1、环境变量密钥外发误伤面（需先讨论误伤容忍度）、污点分析近似、model_gateway/gateway.py:135 provider凭据映射表低优先）仍有效非本轮范围。
+7. cron环境约束实录：unified的rehypePlugins数组元素是**attacher（工厂）不是transformer**——`rehypePlugins={[rehypeSecretMask()]}`会被以0参数调用工厂而静默失效/崩溃，正确形态`[rehypeSecretMask]`（教训已写进rehype-secret-mask.ts docstring+render-test接线钉）；sibling并行共用工作树commit显式白名单；render测试临时目录崩溃残留需手动rm（.ssr-render-*）；systemic_test_results.json是测试产物不入库。
