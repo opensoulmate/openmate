@@ -19,6 +19,16 @@ from utils.llm_safety import (
     check_finish_reason,
     check_omission,
 )
+# LLM重试策略单一真源=utils.llm_retry（2026-09-28接线，kilocode retry.ts移植）：
+# Retry-After三格式+5xx无条件重试+指数退避封顶30s。接线前chat()/chat_stream()
+# 零HTTP重试（瞬时429/5xx直接"[LLM错误: …]"掐断）、with_tools固定退避不听头
+# 且把400当可重试却漏501/504等其余5xx
+from utils.llm_retry import (
+    MAX_ATTEMPTS,
+    backoff_ms,
+    is_retryable_status,
+    is_transient_error,
+)
 import os
 from typing import AsyncGenerator, Optional, TYPE_CHECKING
 
@@ -162,7 +172,8 @@ class LLMEngine:
 
     async def chat_stream(
         self, messages: list[dict], cancel_event: Optional[asyncio.Event] = None,
-        system_prompt: Optional[str] = None, _continuation_depth: int = 0
+        system_prompt: Optional[str] = None, _continuation_depth: int = 0,
+        _retry_count: int = 0
     ) -> AsyncGenerator[str, None]:
         """流式输出LLM响应 — 每个yield是一个纯文本delta片段
 
@@ -174,11 +185,17 @@ class LLMEngine:
         空段不续写→显式截断标记（AIHawk"截断必须显式标记"，不静默半截收尾）。
         已取消（cancel_event）不续写不标记。
 
+        HTTP重试（utils.llm_retry单一真源，kilocode retry.ts）：429/408/5xx可重试
+        （有头听头Retry-After三格式），瞬时传输错误在本attempt零输出时可重试
+        （已流出内容重试=双份回复，不重试走原失败契约），400/401等fail-fast。
+        接线前chat_stream零HTTP重试，瞬时限流直接"[LLM错误: …]"掐断真实回复。
+
         Args:
             messages: 对话历史（不含system提示词，会自动注入）
             cancel_event: 取消信号，设置后停止流式输出
             system_prompt: 自定义system提示词，None时使用默认
             _continuation_depth: 续写递归深度（内部参数，外部调用方勿传）
+            _retry_count: HTTP重试递归计数（内部参数，外部调用方勿传）
         """
         # 通过router解析模型（无router时返回固定配置）
         resolved_model, resolved_base_url, resolved_api_key = self._resolve_model(messages)
@@ -219,6 +236,30 @@ class LLMEngine:
                             async for _c in self.chat_stream(
                                 messages, cancel_event, system_prompt,
                                 _continuation_depth=_continuation_depth,
+                                _retry_count=_retry_count,
+                            ):
+                                yield _c
+                            return
+                        if (
+                            is_retryable_status(response.status_code)
+                            and _retry_count < MAX_ATTEMPTS - 1
+                        ):
+                            # 429/408/5xx可重试（utils.llm_retry单一真源，kilocode）：
+                            # 有头听头（Retry-After三格式），无头指数退避——接线前
+                            # chat_stream零HTTP重试，瞬时限流直接"[LLM错误: …]"掐断
+                            # 真实回复（soulmate_agent.py:1762主路径）
+                            _wait = backoff_ms(
+                                _retry_count + 1, getattr(response, "headers", None)
+                            ) / 1000.0
+                            logger.warning(
+                                f"[LLM] API {response.status_code}，{_wait:.1f}s后重试 "
+                                f"({_retry_count+1}/{MAX_ATTEMPTS})"
+                            )
+                            await asyncio.sleep(_wait)
+                            async for _c in self.chat_stream(
+                                messages, cancel_event, system_prompt,
+                                _continuation_depth=_continuation_depth,
+                                _retry_count=_retry_count + 1,
                             ):
                                 yield _c
                             return
@@ -302,9 +343,35 @@ class LLMEngine:
                     return
                 finally:
                     await response.aclose()
-        except httpx.ReadTimeout:
-            logger.warning("LLM stream read timeout")
-            yield "\n[LLM响应超时]"
+        except httpx.TransportError as e:
+            # 瞬时传输错误重试（utils.llm_retry单一真源，kilocode TRANSIENT判定）：
+            # 仅当本attempt尚无任何输出——已流出内容再重试=同一回复发两遍；
+            # 不重试/次数用尽保持原失败契约（ReadTimeout→"[LLM响应超时]"、其余→
+            # "[LLM错误: …]"），失败必须可见不静默吞
+            if (
+                not _segment_parts
+                and _retry_count < MAX_ATTEMPTS - 1
+                and is_transient_error(e)
+            ):
+                _wait = backoff_ms(_retry_count + 1) / 1000.0
+                logger.warning(
+                    f"[LLM] 传输错误{e.__class__.__name__}，{_wait:.1f}s后重试 "
+                    f"({_retry_count+1}/{MAX_ATTEMPTS})"
+                )
+                await asyncio.sleep(_wait)
+                async for _c in self.chat_stream(
+                    messages, cancel_event, system_prompt,
+                    _continuation_depth=_continuation_depth,
+                    _retry_count=_retry_count + 1,
+                ):
+                    yield _c
+                return
+            if isinstance(e, httpx.ReadTimeout):
+                logger.warning("LLM stream read timeout")
+                yield "\n[LLM响应超时]"
+            else:
+                logger.error(f"LLM stream error: {e}", exc_info=True)
+                yield f"\n[LLM错误: {e}]"
         except Exception as e:
             logger.error(f"LLM stream error: {e}", exc_info=True)
             yield f"\n[LLM错误: {e}]"
@@ -376,7 +443,7 @@ class LLMEngine:
         _segment_parts: list[str] = []
         _last_finish: str | None = None
 
-        for _retry in range(3):
+        for _retry in range(MAX_ATTEMPTS):
             try:
                 # 每次attempt重建client：httpx AsyncClient在async with退出时aclose，
                 # 关闭后不可复用（旧代码retry复用已关闭client，二次请求必然失败——
@@ -399,13 +466,24 @@ class LLMEngine:
                                 payload.pop("stream_options", None)
                                 logger.warning("[LLM] provider不支持stream_options，已回退重试（usage依赖provider默认行为）")
                                 continue  # 回到for _retry重试（已去掉不支持的字段）
-                            if response.status_code not in (400, 429, 500, 502, 503):
-                                # 凭证/请求级错误（401/403/404等）重试不会自愈：
-                                # fail-fast可见失败，不烧3次调用（外层except区分处理）
+                            if not is_retryable_status(response.status_code):
+                                # 凭证/请求级错误（400/401/403/404等）重试不会自愈：
+                                # fail-fast可见失败，不烧3次调用（外层except区分处理）。
+                                # 429/408/5xx可重试（utils.llm_retry单一真源，kilocode：
+                                # 5xx无条件重试"transient server failures"——旧硬编码
+                                # (400,429,500,502,503)把400当可重试却漏501/504等）
                                 raise LLMNonRetryableError(f"LLM API error {response.status_code}: {error_msg}")
-                            if _retry < 2:
-                                logger.warning(f"[LLM] API {response.status_code}, retry {_retry+1}/3: {error_msg[:100]}")
-                                await asyncio.sleep(2 ** _retry)
+                            if _retry < MAX_ATTEMPTS - 1:
+                                # 有头听头：Retry-After三格式（ms头/秒数/HTTP date），
+                                # 无头才指数退避2s×2^n封顶30s（旧固定2**_retry不听头）
+                                _wait = backoff_ms(
+                                    _retry + 1, getattr(response, "headers", None)
+                                ) / 1000.0
+                                logger.warning(
+                                    f"[LLM] API {response.status_code}，{_wait:.1f}s后重试 "
+                                    f"({_retry+1}/{MAX_ATTEMPTS}): {error_msg[:100]}"
+                                )
+                                await asyncio.sleep(_wait)
                                 # 修复：此前误用break——直接退出重试循环且零yield，
                                 # 消费方拿到空响应（"瞬时限流→静默空白"死路径）
                                 continue  # 回到for _retry重试
@@ -556,9 +634,29 @@ class LLMEngine:
                     finally:
                         await response.aclose()
                 break  # 成功，退出重试循环
-            except httpx.ReadTimeout:
-                logger.warning("LLM stream read timeout")
-                yield "\n[LLM响应超时]"
+            except httpx.TransportError as e:
+                # 瞬时传输错误重试（utils.llm_retry单一真源，kilocode TRANSIENT判定）：
+                # 仅当本attempt零输出（文本与tool_calls均未累积）——已流出/已累积再
+                # 重试=双份回复或tool_calls状态串attempt污染；否则保持原失败契约
+                if (
+                    not _segment_parts
+                    and not accumulated_tool_calls
+                    and _retry < MAX_ATTEMPTS - 1
+                    and is_transient_error(e)
+                ):
+                    _wait = backoff_ms(_retry + 1) / 1000.0
+                    logger.warning(
+                        f"[LLM] 传输错误{e.__class__.__name__}，{_wait:.1f}s后重试 "
+                        f"({_retry+1}/{MAX_ATTEMPTS})"
+                    )
+                    await asyncio.sleep(_wait)
+                    continue
+                if isinstance(e, httpx.ReadTimeout):
+                    logger.warning("LLM stream read timeout")
+                    yield "\n[LLM响应超时]"
+                else:
+                    logger.error(f"LLM stream error: {e}", exc_info=True)
+                    yield f"\n[LLM错误: {e}]"
                 return
             except LLMNonRetryableError as e:
                 # 401/403/404等：重试不会自愈，直接可见失败（fail-fast）
@@ -566,8 +664,8 @@ class LLMEngine:
                 yield f"\n[LLM错误: {e}]"
                 return
             except RuntimeError as e:
-                if "LLM API error" in str(e) and _retry < 2:
-                    logger.warning(f"[LLM] Retry {_retry+1}/3: {e}")
+                if "LLM API error" in str(e) and _retry < MAX_ATTEMPTS - 1:
+                    logger.warning(f"[LLM] Retry {_retry+1}/{MAX_ATTEMPTS}: {e}")
                     continue
                 logger.error(f"LLM stream error: {e}", exc_info=True)
                 yield f"\n[LLM错误: {e}]"
@@ -608,9 +706,44 @@ class LLMEngine:
                         "temperature": 0.7,
                         "max_tokens": get_max_output_tokens(),
                     }
-                    resp = await client.post("/chat/completions", json=payload)
-                    if resp.status_code != 200:
-                        raise RuntimeError(f"LLM API error {resp.status_code}: {resp.text[:200]}")
+                    # HTTP重试（策略单一真源utils.llm_retry，kilocode retry.ts）：
+                    # 429/408/5xx听Retry-After可重试、瞬时网络错误重试、400/401/402等
+                    # 请求/凭证级fail-fast——接线前chat()零HTTP重试，瞬时429/5xx直接
+                    # "[LLM错误: …]"整体失败（judge/计划/摘要/标题全走本方法）
+                    resp = None
+                    for _http_retry in range(MAX_ATTEMPTS):
+                        try:
+                            resp = await client.post("/chat/completions", json=payload)
+                        except httpx.TransportError as e:
+                            if _http_retry < MAX_ATTEMPTS - 1 and is_transient_error(e):
+                                _wait = backoff_ms(_http_retry + 1) / 1000.0
+                                logger.warning(
+                                    f"[LLM] 传输错误{e.__class__.__name__}，"
+                                    f"{_wait:.1f}s后重试 ({_http_retry+1}/{MAX_ATTEMPTS})"
+                                )
+                                await asyncio.sleep(_wait)
+                                continue
+                            raise
+                        if resp.status_code == 200:
+                            break
+                        if (
+                            not is_retryable_status(resp.status_code)
+                            or _http_retry >= MAX_ATTEMPTS - 1
+                        ):
+                            raise RuntimeError(
+                                f"LLM API error {resp.status_code}: {resp.text[:200]}"
+                            )
+                        # 有头听头：Retry-After三格式（ms头/秒数/HTTP date），无头才指数退避
+                        _wait = backoff_ms(
+                            _http_retry + 1, getattr(resp, "headers", None)
+                        ) / 1000.0
+                        logger.warning(
+                            f"[LLM] API {resp.status_code}，{_wait:.1f}s后重试 "
+                            f"({_http_retry+1}/{MAX_ATTEMPTS})"
+                        )
+                        await asyncio.sleep(_wait)
+                    if resp is None:  # 防御性收窄：循环break时resp必已赋值
+                        raise RuntimeError("LLM API error: 重试环退出但无响应")
                     data = resp.json()
                     # P1 provider usage回填：非流式响应的权威usage同样写入last_usage
                     _nusage = data.get("usage")
