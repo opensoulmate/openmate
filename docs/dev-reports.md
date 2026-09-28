@@ -3307,3 +3307,36 @@
 4. chat_stream/chat()续写递归与HTTP重试递归相互独立（4续写×3重试理论上限12发/逻辑回合，实际截断+限流同时发生的概率极低且各有日志可见）；如需联合封顶可在_llm_safety加总预算，暂不加复杂度。
 5. 上轮遗留观察项（relay消息级粒度、relay每WS轮询、唤醒触发行agent_message透出、前端视觉走查登录墙、overview() N+1、环境变量密钥外发误伤面、污点分析近似、model_gateway/gateway.py:135 provider凭据映射表、secret redaction UI i18n key）仍有效非本轮范围。
 6. cron环境约束实录：sibling并行会话共用工作树——commit显式git add白名单+`git diff`逐hunk核实无sibling混入（本轮llm_engine收到sibling修改warning但git diff核实10个hunk全为自己改动）；pytest用`~/opensoul/.venv/bin/python3 -m pytest`；全量426s后台跑`process wait`（180s clamp两次wait取回）；**demo断言的预期函数是async忘了await/asyncio.run套asyncio.run两连坑**（一次修掉：主函数改同步、各场景协程各自asyncio.run）。
+
+## [2026-09-29 09:30 CST] 网络离线三态kilocode SessionNetwork移植——断网park等恢复自动续跑（21:40轮遗留#2"网络恢复专项"销账）
+**目标**：SUMMARY §五 cortex「LLM重试策略（Retry-After三格式+5xx重试+**离线三态**）」第三件套缺口——接线前三条LLM传输路径遇断网类传输错误只有3次退避重试，网络长时间不可用时直接"[LLM错误: …]"掐断turn（真实回复主路径/judge/计划/摘要全中招），网络恢复后需用户手工重发；kilocode语义是park等待+自动续跑。
+**调研来源**：kilocode source `session/network.ts`（418行）逐点对照移植——三态（blocked/resumed/aborted）、3URL竞速探测（probe()=Promise.any，check()=HEAD+PROBE_MS 5000+status<500）、3s轮询（POLL_MS=3000）、10s宽限自动续跑（RESUME_MS=10000，restore→resume人工拒绝窗口）、MCP重连（reply()重连failed Server）；21:40轮dev-report遗留#2原文点名本专项。
+**改动文件**（openmate commit `3e567d05`，4文件+1101/-0，全部纯增量插入零全量重写）：
+- `acp-proxy/utils/network_state.py`（新393行）：离线三态单一真源
+- `acp-proxy/agent/llm_engine.py`（+16）：三路传输except分支接线
+- `acp-proxy/app.py`（+20）：/api/network/status端点+MCP恢复回调注册
+- `acp-proxy/tests/test_network_offline_park.py`（新672行，33测）
+**改动内容**：
+1. **utils/network_state.py**（kilocode network.ts逐点移植）：①错误链分类——`chain()`（__cause__/__context__/ExceptionGroup递归防环）+`error_code()`（code字段→socket.gaierror→OSError errno映射）+`disconnected()`（DISCONNECT_CODES 16码+kilocode msgs文案表+TimeoutError同判）+`network_message()`（逐码友好文案）；②`probe_online()` 3URL竞速（as_completed任一通即在线，PROBE_TIMEOUT_S=5）；③`maybe_park(exc, cancel_event)`三态主入口：非断连→not_offline不探测；断连但探测在线→**端点级故障不park**（适配#2）；断连+探测离线→blocked记录→3s轮询→恢复→**10s宽限**（kilocode RESUME_MS人工拒绝窗口，宽限内cancel→aborted）→resumed+恢复回调；轮询上限MAX_WAIT_S=30s（**有界park**，适配#3：服务端turn无人值守不能像kilocode无界等人拒绝）→aborted；④`reconnect_failed_mcp_servers()`（kilocode reply()的MCP重连，适配#4跨进程HTTP：GET mcp-client(:8094)/api/mcp/status→只重连status=="error"者（kilocode只重连failed对应语义，disconnected可能是人为断开不动）→POST /servers/{id}/connect，整体绝不抛出）；⑤测试seam防替身穿透：`_PROBE_CLIENT_CLS`/`_sleep`捕获import时引用——llm_engine存量测试把httpx.AsyncClient换成fake、monkeypatch asyncio.sleep记退避时长，若动态解析会被测试替身骗成离线污染`waits==[2.0]`断言。
+2. **三路接线**（"语义不变只加等待"）：`chat()`(:733)/`chat_stream()`(:354)/`chat_stream_with_tools()`(:649)的`except httpx.TransportError`分支顶部插`await network_state.maybe_park(...)`（前两者带cancel_event，chat()无）——park返回后原有重试记账/退避/失败契约一行不动：resumed/aborted都回落原重试环，aborted最终仍走"[LLM错误: …]"可见失败（mem0失败必须可见）。
+3. **app.py**：`/api/network/status`（stats{total_parks,resumed,aborted,pending,probe_urls,poll_s,max_wait_s,resume_grace_s}+waits全量wait记录）——"agent是不是在等网络恢复"可观测（直击用户可观测性诉求，不新建页面）；模块级`register_restore_callback(reconnect_failed_mcp_servers)`挂载MCP重连。
+4. **适配留痕**（docstring四处如实记录，非照抄）：①探测URL本地化（kilocode原kilo.ai/example.com/cloudflare在大陆实测example.com超时——保留3URL竞速机制，换baidu/miui generate_204/captive.apple，NETWORK_PROBE_URLS可覆盖）；②先探测再park（kilocode任何disconnected错误直接park，本实现探测在线=端点级故障走原退避，防单个API故障误判断网挂起turn）；③有界park30s（NETWORK_OFFLINE_MAX_WAIT可调）；④MCP重连跨进程HTTP。
+**接线位置**（grep证据，文件:行号）：
+- `agent/llm_engine.py:354`（chat_stream）、`:649`（with_tools）、`:733`（chat()）→`await network_state.maybe_park(...)`，三处均在`except httpx.TransportError as e:`分支内（`grep -c "except httpx.TransportError as e:" == 3`接线钉固化）
+- `app.py:430 register_restore_callback(reconnect_failed_mcp_servers)`、`app.py:435 @app.get("/api/network/status")`、`:443 stats()/list_waits()`消费
+- 真实运行时消费点（防护自此覆盖）：soulmate真实回复主路径chat_stream（soulmate_agent.py:1762）、judge/计划/摘要/标题chat()、工具循环with_tools
+**验证结果**：
+- 完整性✅：`git show --numstat 3e567d05`=4文件+1101/-0**纯增量插入零删除**（llm_engine 4 hunk/app.py 1 hunk均4行注释+1行代码形态，逐hunk核对无sibling混入；systemic_test_results.json/e2e_probe2.py显式排除未入库）；4文件`ast.parse`全过。
+- 集成✅：上述grep调用链完整（network_state定义→三路except分支内联消费→app.py端点+回调注册）；live curl实锤重启后新路由在线：`curl :8092/api/network/status`与`:8095/api/network/status`均返回`{"stats":{"total_parks":0,...,"poll_s":3.0,"max_wait_s":30.0,"resume_grace_s":10.0},"waits":[]}`（JSON结构完整非error）；:8092/health、:8095/health=200。
+- 测试✅：新`tests/test_network_offline_park.py` **33 passed**（①分类8：errno ECONNREFUSED/gaierror EAI_AGAIN/显式code/消息模式大小写/TimeoutError同判/非断连（含裸"timed out"ReadTimeout不误判——kilocode msgs表语义钉）/链遍历+ExceptionGroup+自引用防环/文案fallback；②竞速4：status<500语义（404=在线）/任一通即在线/全败离线三URL都试/3URL+5s常量钉；③三态8：非断连不探测/端点级故障不park/离线→恢复resumed（wait记录+恢复回调）/离线不恢复aborted（timeout留痕）/cancel/宽限期cancel/回调炸不阻塞后续/stats+list形状；④LLMEngine集成5：chat断网park→恢复→续跑成功（calls==2+回调触发）/aborted回落"[LLM错误:"可见失败（calls==3原记账不变）/chat_stream/with_tools各自park→resumed/端点级故障零park记录；⑤MCP重连3：只重连error态（URL逐字断言）/不可达绝不抛/部分失败逐条记账；⑥接线钉5：maybe_park==3且except TransportError==3/app.py端点+回调/3000-5000-10000常量逐值/原有llm_retry契约在场/移植适配留痕关键词）；相关存量（retry_policy 40/chat_output_protection/stream_continuation/llm_stream_usage/ws_chat_llm_config/llm_gateway_config/safety_mechanisms/plan_execution/task_judge_wiring）**143 passed**零回归；acp-proxy全量`tests/` **1235 passed 0 failed**（457.51s，=上轮1202基线+33新增）；`systemic_test.py` **29/29 passed**（S1-S6全绿）。
+- **live实锤**（/tmp/network_live_demo.py，真实network_state+真实httpx竞速探测+真实sleep节奏，6/6过）：①真实probe_online对大陆3URL竞速=True耗时0.29s；②断连类错误+探测在线→not_offline不park（端点级故障适配实证）；③非断连类错误不park不探测；④PROBE_URLS指黑洞端口→真实离线park开始→2轮真实轮询→中途URL换回可达（模拟网络恢复）→真实宽限→**resumed自动续跑**（wait记录blocked→resumed+restored时间戳+恢复回调[1]触发，耗时5.1s含2s演示宽限）；⑤MAX_WAIT=2s离线不恢复→**aborted**（error=timeout after 2s留痕，耗时2.0s）；⑥MCP重连真实调用mcp-client(:8094)返回`{'checked': 0, 'reconnected': 0, 'errors': []}`（当前无注册Server，跨进程HTTP通路实证）。控制台同步可见"[网络] 离线park开始/网络恢复/超时放弃"全生命周期日志。
+**服务重启**：`systemctl --user restart acp-proxy-a.service acp-proxy-b.service`→两服务active；:8092/health=200、:8095/health=200、:8092/:8095/api/network/status=200；重启后systemic_test 29/29（opensoul/前端零改动未重启，npm build不适用）。
+**commit**：openmate `3e567d05`。
+**遗留问题**：
+1. **⚠️环境问题仍在（非代码，需用户处理）**：LLM供应商余额不足（402）——离线park在真实流量下的收益待充值/换key后观察journal"[网络] 离线park开始/恢复续跑"出现频次。
+2. **断网长于30s的场景**：有界park超时→aborted→可见失败（turn需用户重发）。若需更长等待调`NETWORK_OFFLINE_MAX_WAIT`；kilocode无界park+人工拒绝按钮的完整交互（前端"等待网络恢复…[拒绝]"卡片）归入HITL专项（SUMMARY P0-9），本轮服务端只有状态API无交互卡。
+3. **park粒度是"一次调用"不是"一个turn"**：kilocode park的是整个turn（ask()挂Question等reply）；本轮park的是单次LLM调用（三条传输路径各自park），turn内多次LLM调用各自判定——单次调用park恢复后turn继续，语义等效但wait记录按调用粒度（一个turn断网可能产生多条wait记录）。turn级合并归入观察项。
+4. **已输出内容的调用不park**：chat_stream/with_tools已流出部分内容的传输错误保持原"不重试"契约（防双份回复），此时即使离线也直接可见失败不park——park只在可安全重试的零输出/非流式路径生效（与既有40测行为钉一致）。
+5. MCP重连依赖mcp-client(:8094)服务在线：不可达时跳过记errors（live实证⑥），且当前registry无注册Server（checked=0）——真实Server断网恢复重连效果待有远程MCP Server配置后验证。
+6. 上轮遗留观察项（LLMCallError三态统一后合并llm_gateway/dna_evolution传输、chat_stream续写×重试联合封顶、relay消息级粒度、唤醒触发行agent_message透出、前端视觉走查登录墙、overview() N+1、环境变量密钥外发误伤面、model_gateway/gateway.py:135凭据映射表、secret redaction UI i18n key）仍有效非本轮范围。
+7. cron环境约束实录：测试替身穿透坑——llm_engine存量测试monkeypatch `httpx.AsyncClient`/`asyncio.sleep`全局属性，新模块若运行时动态解析同名属性会被fake替身骗成"离线"且睡眠混入退避时长断言（`waits==[2.0]`挂）——解法=import时捕获类/函数引用（_PROBE_CLIENT_CLS/_sleep）seam；httpx.ConnectError裸文案（"all failed"/"refused"）不命中disconnected判定（kilocode msgs表无此形态，判定走errno/消息模式），测试构造断网错误要用表内文案或errno链。
