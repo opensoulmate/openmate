@@ -2,10 +2,13 @@
 import { copyToClipboard } from "@/lib/clipboard";
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { Copy, Check, Pencil } from 'lucide-react';
+import { Copy, Check, Pencil, Eye, EyeOff } from 'lucide-react';
 import { useState, useCallback, lazy, Suspense, useMemo, memo, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { rehypeSecretMask } from '@/lib/rehype-secret-mask';
+import { SecretAwareSpan } from '@/components/secret-pill';
+import { scanForSecrets, maskCodeInText } from '@/lib/secret-redaction';
 import { MermaidDiagram } from './mermaid-diagram';
 import { useTranslation } from 'react-i18next';
 import { useAppStore } from '@/stores/app-store';
@@ -24,6 +27,13 @@ const CodeBlock = memo(function CodeBlock({
   const [copied, setCopied] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editedCode, setEditedCode] = useState(code);
+  // ── P1 流式输出脱敏展示：围栏代码块遮蔽（散文/行走 rehypeSecretMask）──
+  const [showSecrets, setShowSecrets] = useState(false);
+  const hasSecrets = useMemo(() => scanForSecrets(code, 'high').length > 0, [code]);
+  const displayCode = useMemo(
+    () => (hasSecrets && !showSecrets ? maskCodeInText(code, 'high') : code),
+    [code, hasSecrets, showSecrets]
+  );
   const isMountedRef = useRef(true);
 
   useEffect(() => {
@@ -40,7 +50,8 @@ const CodeBlock = memo(function CodeBlock({
   const handleCopy = useCallback(() => {
     if (!isMountedRef.current) return;
     
-    copyToClipboard(isEditing ? editedCode : code);
+    // WYSIWYG：未揭示时复制遮蔽文本（剪贴板不落真密钥），揭示后复制原文
+    copyToClipboard(isEditing ? editedCode : displayCode);
     setCopied(true);
     
     const timer = setTimeout(() => {
@@ -50,7 +61,7 @@ const CodeBlock = memo(function CodeBlock({
     }, 2000);
     
     return () => clearTimeout(timer);
-  }, [code, editedCode, isEditing]);
+  }, [code, editedCode, isEditing, displayCode]);
 
   const handleApply = useCallback(() => {
     if (!isMountedRef.current) return;
@@ -78,9 +89,19 @@ const CodeBlock = memo(function CodeBlock({
       <div className="flex items-center justify-between px-3 py-1.5 bg-[var(--color-secondary)] text-xs text-muted-foreground">
         <span>{language || 'text'}</span>
         <div className="flex items-center gap-1">
+          {hasSecrets && (
+            <button
+              onClick={() => setShowSecrets(v => !v)}
+              className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity hover:text-foreground px-1.5 py-0.5 rounded hover:bg-white/5"
+              title={showSecrets ? '重新遮蔽敏感数据' : '显示敏感数据（默认已遮蔽）'}
+            >
+              {showSecrets ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+              <span>{showSecrets ? '脱敏' : '显示'}</span>
+            </button>
+          )}
           {!isEditing && (
             <button
-              onClick={() => setIsEditing(true)}
+              onClick={() => { setShowSecrets(true); setIsEditing(true); }}
               className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity hover:text-foreground px-1.5 py-0.5 rounded hover:bg-white/5"
             >
               <Pencil className="w-3 h-3" />
@@ -137,7 +158,7 @@ const CodeBlock = memo(function CodeBlock({
           style={oneDark}
           customStyle={syntaxHighlighterStyle}
         >
-          {code}
+          {displayCode}
         </SyntaxHighlighter>
       )}
     </div>
@@ -184,12 +205,15 @@ const MarkdownContent = memo(function MarkdownContent({ content, onCodeApply }: 
       }
       return <code className={className} {...props}>{children}</code>;
     },
+    // P1 流式输出脱敏展示：密钥段落→可揭示胶囊（其余span透传）
+    span: SecretAwareSpan,
   }), [onCodeApply, t]);
 
   return (
     <div className="markdown-content">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeSecretMask]}
         components={components}
       >
         {content}

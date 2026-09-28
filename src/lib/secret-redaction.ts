@@ -225,3 +225,50 @@ export function maskSecret(text: string): string {
   if (text.length <= 8) return '••••••';
   return text.slice(0, 4) + '••••' + text.slice(-4);
 }
+
+// ── P1 流式输出脱敏展示：正文遮蔽（Warp secret_redaction reveal UX）──
+// splitSecretSegments 是唯一分段真源：rehype 插件（散文/行内）与
+// CodeBlock（围栏代码）都消费它，遮蔽语义单一真源不漂移。
+
+/** A piece of display text: plain text, or one secret finding to mask. */
+export interface TextSegment {
+  text: string;
+  finding?: SecretFinding;
+}
+
+/**
+ * Split text into alternating plain/secret segments (findings already
+ * position-sorted & overlap-merged by scanForSecrets). Secrets become
+ * their own segments so callers can render masked pills in place.
+ */
+export function splitSecretSegments(
+  text: string,
+  minRisk: 'low' | 'medium' | 'high' | 'critical' = 'high'
+): TextSegment[] {
+  if (!text) return [];
+  const findings = scanForSecrets(text, minRisk);
+  if (findings.length === 0) return [{ text }];
+  const segments: TextSegment[] = [];
+  let cursor = 0;
+  for (const f of findings) {
+    if (f.start > cursor) segments.push({ text: text.slice(cursor, f.start) });
+    segments.push({ text: text.slice(f.start, f.end), finding: f });
+    cursor = f.end;
+  }
+  if (cursor < text.length) segments.push({ text: text.slice(cursor) });
+  return segments;
+}
+
+/**
+ * Mask every secret inside a code string (fenced-block display path).
+ * Each finding is replaced with its maskSecret() preview so line shape
+ * stays roughly intact; revealed display uses the original code.
+ */
+export function maskCodeInText(
+  code: string,
+  minRisk: 'low' | 'medium' | 'high' | 'critical' = 'high'
+): string {
+  return splitSecretSegments(code, minRisk)
+    .map((seg) => (seg.finding ? maskSecret(seg.text) : seg.text))
+    .join('');
+}
