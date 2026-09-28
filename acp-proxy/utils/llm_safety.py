@@ -9,7 +9,6 @@ LLM安全防护模块 — 通用工具函数
 
 import logging
 import re
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -115,84 +114,9 @@ def build_continuation_messages(
 
 
 # ── 安全LLM调用封装 ──────────────────────────────────
-
-async def safe_llm_call(
-    client: Any,
-    base_url: str,
-    headers: dict,
-    model: str,
-    messages: list[dict],
-    temperature: float = 0.7,
-    max_tokens: int = MAX_OUTPUT_TOKENS,
-    max_continuation: int = MAX_CONTINUATION,
-    strand_id: str = "",
-) -> str:
-    """安全的LLM调用，集成所有防护机制
-
-    防护层：
-    1. finish_reason=length检测 + 自动续写（Aider方案）
-    2. omission占位符检测 + 重新生成（Gemini CLI方案）
-    3. 输出字符数限制（Cline方案）
-    """
-    full_content = ""
-    current_messages = list(messages)
-
-    for attempt in range(max_continuation + 1):
-        try:
-            resp = await client.post(
-                f"{base_url}/chat/completions",
-                headers=headers,
-                json={
-                    "model": model,
-                    "messages": current_messages,
-                    "temperature": temperature,
-                    "max_tokens": max_tokens,
-                },
-            )
-
-            if resp.status_code != 200:
-                logger.error(f"[{strand_id}] LLM call failed: {resp.status_code} {resp.text[:200]}")
-                return full_content
-
-            data = resp.json()
-            choice = data.get("choices", [{}])[0]
-            content = choice.get("message", {}).get("content", "")
-            finish_reason = choice.get("finish_reason", "stop")
-
-            full_content += content
-
-            # 检查1: omission占位符
-            omission = check_omission(full_content)
-            if omission:
-                logger.warning(f"[{strand_id}] {omission}")
-                current_messages = build_continuation_messages(
-                    current_messages, full_content, error_hint=omission
-                )
-                full_content = ""  # 重置，让LLM重新完整输出
-                continue
-
-            # 检查2: finish_reason
-            if finish_reason == "length":
-                logger.warning(
-                    f"[{strand_id}] LLM output truncated (finish_reason=length), "
-                    f"attempt {attempt+1}/{max_continuation}"
-                )
-                current_messages = build_continuation_messages(current_messages, full_content)
-                continue
-
-            # 正常结束
-            break
-
-        except Exception as e:
-            logger.error(f"[{strand_id}] LLM call exception: {e}")
-            break
-
-    # 输出字符数限制
-    if len(full_content) > MAX_TOOL_OUTPUT_CHARS:
-        logger.warning(
-            f"[{strand_id}] Output truncated to {MAX_TOOL_OUTPUT_CHARS} chars "
-            f"(was {len(full_content)})"
-        )
-        full_content = full_content[:MAX_TOOL_OUTPUT_CHARS]
-
-    return full_content
+# 旧 safe_llm_call（本文件曾内联第三份续写/omission防护循环）已于 2026-09-29
+# 合并轮删除：①零生产调用点死路径（仅测试docstring提及）；②失败契约反模式
+# ——非200静默 return full_content / except break，正是本轮传输合并要消灭的
+# "静默半截"旧契约。带防护的完整调用请用
+# utils.llm_transport.complete_with_protection（重试/park/LLMCallError契约/续写
+# 防护单一真源），业务调用面走 utils.llm_gateway.llm_call。

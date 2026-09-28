@@ -14,6 +14,10 @@ utils.llm_retry策略单一真源，也没有离线park。
    重试/请求凭证级fail-fast，旧_retry_delay副本绝迹；
 ③ 传输错误路径接utils.network_state.maybe_park（断网park等恢复续跑）；
 ④ 会话面契约不动：agent.llm_engine 仍以"[LLM错误: …]"可见字符串呈现失败。
+
+（2026-09-29合并轮补记：②④的"传输本体"已随两并行传输合并移入
+utils/llm_transport 单一传输核心——dna/gateway改为委托complete_with_protection，
+行为断言①②③全部原样通过=合并语义零变化；接线钉④同步改为钉新拓扑。）
 """
 
 import asyncio
@@ -335,17 +339,22 @@ class TestWiringPins:
             l for l in self._src(rel).splitlines() if not l.strip().startswith("#")
         )
 
-    def test_dna_consumes_policy_symbols(self):
-        src = self._src("dna_evolution.py")
+    def test_transport_core_consumes_policy_symbols(self):
+        """策略消费点已随2026-09-29传输合并移入 utils/llm_transport 单一传输核心"""
+        src = self._src("utils/llm_transport.py")
         for sym in ("backoff_ms(", "is_retryable_status(", "is_transient_error(",
                     "maybe_park(", "MAX_ATTEMPTS"):
-            assert sym in src, f"dna_evolution缺少策略消费点 {sym}"
+            assert sym in src, f"llm_transport缺少策略消费点 {sym}"
 
-    def test_gateway_consumes_policy_symbols(self):
-        src = self._src("utils/llm_gateway.py")
-        for sym in ("backoff_ms(", "is_retryable_status(", "is_transient_error(",
-                    "maybe_park(", "MAX_ATTEMPTS"):
-            assert sym in src, f"llm_gateway缺少策略消费点 {sym}"
+    def test_callers_delegate_to_transport_core(self):
+        """dna/gateway必须委托complete_with_protection，不得再各持一条并行传输"""
+        for rel in ("dna_evolution.py", "utils/llm_gateway.py"):
+            src = self._src(rel)
+            assert "llm_transport.complete_with_protection(" in src, \
+                f"{rel}必须委托传输核心"
+            code = self._code(rel)
+            assert "for _http_retry" not in code, \
+                f"{rel}不得再内联HTTP重试环（合并前的两条并行传输已收口）"
 
     def test_old_retry_copy_gone(self):
         """旧_retry_delay副本绝迹（曾只认retry-after秒数一种格式）"""
@@ -354,17 +363,24 @@ class TestWiringPins:
         assert "self._RETRY_MAX" not in src
         assert "_RETRY_BASE_DELAY" not in src
 
-    def test_all_three_transports_import_single_source(self):
-        count = 0
-        for rel in ("dna_evolution.py", "utils/llm_gateway.py", "agent/llm_engine.py"):
-            if "from utils.llm_retry import" in self._src(rel):
-                count += 1
-        assert count == 3, "三条传输路径必须全部import utils.llm_retry单一真源"
+    def test_policy_single_source_imports(self):
+        """重试策略消费面：llm_engine（流式传输）与llm_transport（非流式核心）直连
+        utils.llm_retry；dna/gateway经llm_transport委托消费——三面不再有第二份策略实现"""
+        assert "from utils.llm_retry import" in self._src("agent/llm_engine.py")
+        assert "from utils.llm_retry import" in self._src("utils/llm_transport.py")
+        for rel in ("dna_evolution.py", "utils/llm_gateway.py"):
+            assert "from utils import llm_transport" in self._src(rel), \
+                f"{rel}必须import传输核心"
 
-    def test_gateway_no_silent_failure_return(self):
-        """gateway不再有'失败return full_content'——只剩成功return一次"""
-        src = self._code("utils/llm_gateway.py")
-        assert src.count("return full_content") == 1
+    def test_no_silent_failure_return(self):
+        """"失败return full_content"静默契约绝迹（llm_safety.safe_llm_call旧反模式已删）：
+        成功return全库只在传输核心与dna的成功出口各一处"""
+        assert self._code("utils/llm_transport.py").count("return full_content") == 1
+        assert self._code("dna_evolution.py").count("return full_content") == 1
+        assert "return full_content" not in self._code("utils/llm_safety.py"), \
+            "llm_safety残留静默返回半截旧契约（safe_llm_call）"
+        assert "return full_content" not in self._code("utils/llm_gateway.py")
+        assert "async def safe_llm_call" not in self._code("utils/llm_safety.py")
 
     def test_canonical_module_defines_exactly_one_class(self):
         src = self._src("utils/llm_errors.py")
@@ -373,7 +389,7 @@ class TestWiringPins:
 
     def test_park_call_shape_matches_llm_engine(self):
         """park调用形态与llm_engine同款（except httpx.TransportError分支内）"""
-        for rel in ("dna_evolution.py", "utils/llm_gateway.py", "agent/llm_engine.py"):
+        for rel in ("utils/llm_transport.py", "agent/llm_engine.py"):
             src = self._src(rel)
             assert "except httpx.TransportError" in src
             idx = src.find("except httpx.TransportError")

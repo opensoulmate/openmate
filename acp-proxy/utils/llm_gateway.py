@@ -40,15 +40,12 @@ from utils.llm_safety import (
 # 失败静默返回""/半截（return full_content），上游无法区分"LLM挂了"与"LLM说
 # 没有可改进项"。现统一（契约见utils/llm_errors.py）：失败=raise LLMCallError
 # （partial_content=半截输出）、HTTP 200空输出同判失败——"空串=失败"第三态废除；
-# 重试策略/离线park与agent.llm_engine、dna_evolution同源import，禁止再复制。
-from utils import network_state
+# 2026-09-29合并轮：httpx重试环+续写/omission防护循环（旧本文件与dna_evolution
+# 逐字重复的两条并行传输）已收口 utils.llm_transport 传输核心单一真源，本模块只留
+# 配置面+委托，禁止再手搓POST/重试环（修复一处漏一处的漂移面）。
+from utils import llm_transport
+from utils import network_state  # noqa: F401（保留=测试monkeypatch注入面）
 from utils.llm_errors import LLMCallError
-from utils.llm_retry import (
-    MAX_ATTEMPTS,
-    backoff_ms,
-    is_retryable_status,
-    is_transient_error,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -200,137 +197,35 @@ async def _call_with_protection(
     max_continuation: int,
     strand_id: str,
 ) -> str:
-    """带防护的LLM调用"""
-    full_content = ""
-    current_messages = list(messages)
-    
+    """带防护的LLM调用（传输+防护循环=utils.llm_transport单一真源，2026-09-29合并轮）
+
+    旧本函数内联~70行httpx重试环+续写/omission防护循环，与dna_evolution._call_llm
+    逐字重复（两条并行传输=漂移面）；现整段委托utils.llm_transport
+    .complete_with_protection，本函数只留配置面（headers/timeout/输出上限）。
+    """
     headers = {"Content-Type": "application/json"}
     if config.api_key:
         headers["Authorization"] = f"Bearer {config.api_key}"
-    
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(config.timeout)) as client:
-            for attempt in range(max_continuation + 1):
-                try:
-                    # HTTP重试（策略单一真源utils.llm_retry，kilocode retry.ts）：
-                    # 429/408/5xx听Retry-After三格式可重试、瞬时传输错误重试、
-                    # 400/401/402等请求/凭证级fail-fast——接线前本传输零HTTP重试
-                    resp = None
-                    for _http_retry in range(MAX_ATTEMPTS):
-                        try:
-                            resp = await client.post(
-                                f"{config.base_url}/chat/completions",
-                                headers=headers,
-                                json={
-                                    "model": config.model,
-                                    "messages": current_messages,
-                                    "temperature": temperature,
-                                    "max_tokens": max_tokens,
-                                },
-                            )
-                        except httpx.TransportError as e:
-                            # 网络离线三态（utils.network_state，kilocode SessionNetwork）：
-                            # 全局断连→park等恢复自动续跑；非离线/恢复后走下方重试记账
-                            await network_state.maybe_park(e)
-                            if _http_retry < MAX_ATTEMPTS - 1 and is_transient_error(e):
-                                _wait = backoff_ms(_http_retry + 1) / 1000.0
-                                logger.warning(
-                                    f"[{strand_id}] 传输错误{e.__class__.__name__}，"
-                                    f"{_wait:.1f}s后重试 ({_http_retry+1}/{MAX_ATTEMPTS})"
-                                )
-                                await asyncio.sleep(_wait)
-                                continue
-                            raise
-                        if resp.status_code == 200 or not is_retryable_status(resp.status_code):
-                            break
-                        if _http_retry >= MAX_ATTEMPTS - 1:
-                            break
-                        # 有头听头：Retry-After三格式（ms头/秒数/HTTP date），无头才指数退避
-                        _wait = backoff_ms(
-                            _http_retry + 1, getattr(resp, "headers", None)
-                        ) / 1000.0
-                        logger.warning(
-                            f"[{strand_id}] LLM API {resp.status_code}，{_wait:.1f}s后重试 "
-                            f"({_http_retry+1}/{MAX_ATTEMPTS})"
-                        )
-                        await asyncio.sleep(_wait)
-
-                    if resp is None or resp.status_code != 200:
-                        status = resp.status_code if resp else "no-response"
-                        body = resp.text[:200] if resp else ""
-                        logger.error(
-                            f"[{strand_id}] LLM call failed: {status} {body}"
-                        )
-                        # 失败必须可见（mem0 §1.1）：raise而非静默返半截——
-                        # 已生成部分挂partial_content不丢，调用方可取
-                        err = LLMCallError(f"LLM HTTP {status}: {body}")
-                        err.partial_content = full_content
-                        raise err
-                    
-                    data = resp.json()
-                    choice = data.get("choices", [{}])[0]
-                    content = choice.get("message", {}).get("content", "")
-                    finish_reason = choice.get("finish_reason", "stop")
-                    
-                    full_content += content
-                    
-                    # 检查1: omission占位符
-                    omission = _check_omission(full_content)
-                    if omission:
-                        logger.warning(f"[{strand_id}] {omission}")
-                        # 重发文案单一真源=llm_safety.build_continuation_messages
-                        current_messages = build_continuation_messages(
-                            current_messages, full_content, error_hint=omission
-                        )
-                        full_content = ""  # 重置，让LLM重新完整输出
-                        continue
-                    
-                    # 检查2: finish_reason
-                    if finish_reason == "length":
-                        logger.warning(
-                            f"[{strand_id}] LLM output truncated (finish_reason=length), "
-                            f"attempt {attempt+1}/{max_continuation}"
-                        )
-                        # 续写文案单一真源=llm_safety.build_continuation_messages
-                        current_messages = build_continuation_messages(
-                            current_messages, full_content
-                        )
-                        continue
-                    
-                    # 正常结束
-                    break
-                    
-                except LLMCallError:
-                    raise
-                except Exception as e:
-                    # 失败必须可见：旧实现log后break静默返半截/空串——改为带
-                    # partial_content的LLMCallError（与dna_evolution同契约）
-                    logger.error(f"[{strand_id}] LLM call exception: {e}")
-                    err = LLMCallError(f"LLM调用异常: {e}")
-                    err.partial_content = full_content
-                    raise err from e
-    
+            return await llm_transport.complete_with_protection(
+                client,
+                base_url=config.base_url,
+                headers=headers,
+                model=config.model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                rounds=max_continuation + 1,  # 既有语义：max_continuation=续写次数
+                strand_id=strand_id,
+                output_cap=MAX_TOOL_OUTPUT_CHARS,
+            )
     except LLMCallError:
         raise
     except Exception as e:
+        # 失败必须可见（mem0 §1.1）：AsyncClient创建/意外异常→LLMCallError（与dna同契约）
         logger.error(f"[{strand_id}] LLM client exception: {e}")
-        err = LLMCallError(f"LLM调用异常: {e}")
-        err.partial_content = full_content
-        raise err from e
-    
-    if not full_content.strip():
-        # 200但空输出：与dna_evolution同判失败（"空串=失败"第三态废除，契约统一）
-        raise LLMCallError("LLM返回空内容（HTTP 200但无输出）")
-    
-    # 输出字符数限制
-    if len(full_content) > MAX_TOOL_OUTPUT_CHARS:
-        logger.warning(
-            f"[{strand_id}] Output truncated to {MAX_TOOL_OUTPUT_CHARS} chars "
-            f"(was {len(full_content)})"
-        )
-        full_content = full_content[:MAX_TOOL_OUTPUT_CHARS]
-    
-    return full_content
+        raise LLMCallError(f"LLM调用异常: {e}") from e
 
 
 # ── 便捷函数 ──────────────────────────────────────────
