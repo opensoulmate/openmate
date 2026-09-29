@@ -139,3 +139,56 @@ def is_transient_error(exc: BaseException) -> bool:
         return True
     msg = str(exc).lower()
     return any(m in msg for m in TRANSIENT_MESSAGES)
+
+
+# ── 重试决策合并（三路重试环单一真源，2026-09-29） ──────────────────
+# 接线前chat()/chat_stream()/chat_stream_with_tools()三路各自内联组合
+# 「可重试判定 ∧ 剩余次数 → backoff_ms → sleep」同一段策略（三处复制粘贴，
+# 漂移即行为分叉）。本组plan_*把"失败后要不要重试、等多久"这一决策收口为
+# 纯函数单点——三路只剩各自的流式解析差异。此单点同时是模型降级有序链
+# （utils.model_fallback）未来接入流式的挂载点：switch_now（429有备胎立即切）
+# 只需在此决策里加一条分支，不必再改三处。
+# 纯函数无副作用、无I/O，仅组合上方已移植的kilocode原语（is_retryable_status
+# /is_transient_error/backoff_ms/MAX_ATTEMPTS），行为面与旧内联逐字等价。
+
+
+def plan_status_retry(status: int, attempt: int, headers=None) -> float | None:
+    """HTTP状态失败后的重试决策：返回等待秒数（应重试）或None（应放弃）。
+
+    组合三要素（kilocode retry.ts语义）：is_retryable_status（429/408/5xx可重试，
+    400/401/402/403/404请求/凭证级fail-fast）∧ attempt未耗尽 → backoff_ms
+    （有头听头Retry-After三格式，无头指数退避封顶30s）。
+
+    Args:
+        status: HTTP状态码
+        attempt: 0基，本次是第attempt次尝试（attempt=0=首发，失败后算第1次重试决策）
+        headers: 响应头（可选，供Retry-After解析；None走指数退避）
+
+    Returns:
+        应等待的秒数（>0，调用方sleep后重试）或None（不可重试/次数耗尽，调用方失败）。
+    """
+    if attempt < MAX_ATTEMPTS - 1 and is_retryable_status(status):
+        return backoff_ms(attempt + 1, headers) / 1000.0
+    return None
+
+
+def plan_error_retry(
+    exc: BaseException, attempt: int, has_output: bool = False
+) -> float | None:
+    """传输失败后的重试决策：返回等待秒数（应重试）或None（应放弃）。
+
+    组合：is_transient_error（httpx.TransportError家族/TRANSIENT_MESSAGES瞬时可自愈）
+    ∧ attempt未耗尽 ∧ 本attempt零输出 → backoff_ms（无头指数退避封顶30s）。
+
+    Args:
+        exc: 捕获到的传输异常
+        attempt: 0基，本次是第attempt次尝试
+        has_output: 本attempt是否已流出文本/已累积tool_calls。True则永不重试
+            （已流出内容再重试=同一回复发两遍/tool_calls状态串attempt污染）。
+
+    Returns:
+        应等待的秒数或None（不重试/次数耗尽/已有输出，调用方走原失败契约）。
+    """
+    if not has_output and attempt < MAX_ATTEMPTS - 1 and is_transient_error(exc):
+        return backoff_ms(attempt + 1) / 1000.0
+    return None

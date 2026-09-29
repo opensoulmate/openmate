@@ -41,6 +41,8 @@ from utils.llm_retry import (
     is_retryable_status,
     is_transient_error,
     parse_retry_after_ms,
+    plan_error_retry,
+    plan_status_retry,
 )
 
 HERE = Path(__file__).parent.parent
@@ -550,3 +552,68 @@ class TestWiring:
         assert llm_retry.RETRY_MAX_DELAY_NO_HEADERS_MS == 30_000
         assert llm_retry.RETRY_MAX_DELAY_MS == 2_147_483_647
         assert llm_retry.MAX_ATTEMPTS == 3
+
+
+# ════════════════════════════════════════════════════════════════
+# 6. 重试决策合并（2026-09-29）：plan_status_retry/plan_error_retry单一真源
+#    ——三路重试环（chat/chat_stream/chat_stream_with_tools）此前三处内联组合
+#    「可重试∧次数→backoff→sleep」，现收口到utils.llm_retry纯函数单点，
+#    行为面与旧内联逐字等价（下方等价性测试逐点对照）。
+# ════════════════════════════════════════════════════════════════
+
+
+class TestPlanRetryDecision:
+    """plan_status_retry/plan_error_retry：三路重试决策合并单一真源的单元契约"""
+
+    def test_status_retry_429_listens_header(self):
+        # 可重试+未耗尽+有头→返回头里的等待秒数（等价旧 backoff_ms(a+1,头)/1000）
+        assert plan_status_retry(429, 0, {"retry-after-ms": "500"}) == 0.5
+
+    def test_status_retry_5xx_exponential_no_header(self):
+        # 可重试+未耗尽+无头→指数退避2s×2^0=2s（等价旧 backoff_ms(a+1)/1000）
+        assert plan_status_retry(500, 0, None) == 2.0
+        assert plan_status_retry(503, 1, None) == 4.0
+
+    def test_status_retry_exhausted_returns_none(self):
+        # attempt=MAX_ATTEMPTS-1=2（第3次尝试）耗尽→None（调用方走失败契约）
+        assert plan_status_retry(429, MAX_ATTEMPTS - 1, {"retry-after-ms": "1"}) is None
+
+    def test_status_retry_non_retryable_returns_none(self):
+        # 401/402/403/404请求/凭证级→None（fail-fast，等价旧 is_retryable_status短路）
+        for s in (400, 401, 402, 403, 404):
+            assert plan_status_retry(s, 0, None) is None
+
+    def test_error_retry_transient_zero_output(self):
+        # 瞬时传输错误+零输出+未耗尽→指数退避2s（等价旧 is_transient∧not output→backoff）
+        assert plan_error_retry(httpx.ConnectError("x"), 0) == 2.0
+
+    def test_error_retry_has_output_never_retries(self):
+        # 已流出内容（has_output=True）→None 永不重试（双份回复防线，与旧内联一致）
+        assert plan_error_retry(httpx.ConnectError("x"), 0, has_output=True) is None
+
+    def test_error_retry_non_transient_returns_none(self):
+        # 非瞬时错误（重试不会自愈）→None（等价旧 is_transient_error短路）
+        assert plan_error_retry(ValueError("boom"), 0) is None
+
+    def test_error_retry_exhausted_returns_none(self):
+        assert plan_error_retry(httpx.ReadTimeout("t"), MAX_ATTEMPTS - 1) is None
+
+
+class TestRetryDecisionMergeWiring:
+    """接线钉：三路重试环的决策确已收口到plan_*单一真源（防再分叉回各自为政）"""
+
+    def test_three_paths_consume_plan_status(self):
+        src = _src("agent/llm_engine.py")
+        # 三处状态失败决策（chat_stream/with_tools/chat）全部调用plan_status_retry
+        assert src.count("plan_status_retry(") == 3
+
+    def test_three_paths_consume_plan_error(self):
+        src = _src("agent/llm_engine.py")
+        # 三处传输失败决策（chat_stream/with_tools/chat）全部调用plan_error_retry
+        assert src.count("plan_error_retry(") == 3
+
+    def test_inline_decision_composition_gone(self):
+        src = _src("agent/llm_engine.py")
+        # 旧手搓决策绝迹：engine不再内联组合「∧is_transient_error(...)」或手算backoff
+        assert "and is_transient_error(" not in src
+        assert "backoff_ms(" not in src

@@ -28,6 +28,8 @@ from utils.llm_retry import (
     backoff_ms,
     is_retryable_status,
     is_transient_error,
+    plan_error_retry,
+    plan_status_retry,
 )
 # 网络离线三态=utils.network_state（网络恢复专项，kilocode SessionNetwork移植）：
 # 传输错误先过离线判定——全局断网则park等待恢复（3URL竞速探测+3s轮询+10s宽限
@@ -244,17 +246,18 @@ class LLMEngine:
                             ):
                                 yield _c
                             return
-                        if (
-                            is_retryable_status(response.status_code)
-                            and _retry_count < MAX_ATTEMPTS - 1
-                        ):
+                        # 重试决策合并单一真源=plan_status_retry（2026-09-29）：三路
+                        # 重试环此前三处内联组合「可重试∧次数→backoff→sleep」，现收口
+                        # utils.llm_retry单点（switch_now降级链未来挂载点）；None=不重试
+                        _wait = plan_status_retry(
+                            response.status_code, _retry_count,
+                            getattr(response, "headers", None),
+                        )
+                        if _wait is not None:
                             # 429/408/5xx可重试（utils.llm_retry单一真源，kilocode）：
                             # 有头听头（Retry-After三格式），无头指数退避——接线前
                             # chat_stream零HTTP重试，瞬时限流直接"[LLM错误: …]"掐断
                             # 真实回复（soulmate_agent.py:1762主路径）
-                            _wait = backoff_ms(
-                                _retry_count + 1, getattr(response, "headers", None)
-                            ) / 1000.0
                             logger.warning(
                                 f"[LLM] API {response.status_code}，{_wait:.1f}s后重试 "
                                 f"({_retry_count+1}/{MAX_ATTEMPTS})"
@@ -352,16 +355,12 @@ class LLMEngine:
             # 全局断连→park等恢复（3s轮询探测+10s宽限自动续跑，有界）；恢复/非离线
             # 走下方原有重试记账，aborted也回落原失败契约——原有语义不变只加等待
             await network_state.maybe_park(e, cancel_event)
-            # 瞬时传输错误重试（utils.llm_retry单一真源，kilocode TRANSIENT判定）：
-            # 仅当本attempt尚无任何输出——已流出内容再重试=同一回复发两遍；
-            # 不重试/次数用尽保持原失败契约（ReadTimeout→"[LLM响应超时]"、其余→
-            # "[LLM错误: …]"），失败必须可见不静默吞
-            if (
-                not _segment_parts
-                and _retry_count < MAX_ATTEMPTS - 1
-                and is_transient_error(e)
-            ):
-                _wait = backoff_ms(_retry_count + 1) / 1000.0
+            # 瞬时传输错误重试决策合并单一真源=plan_error_retry（2026-09-29）：
+            # 仅当本attempt尚无任何输出（has_output=_segment_parts非空）——已流出
+            # 内容再重试=同一回复发两遍；None=不重试/次数用尽保持原失败契约
+            # （ReadTimeout→"[LLM响应超时]"、其余→"[LLM错误: …]"），失败必须可见
+            _wait = plan_error_retry(e, _retry_count, has_output=bool(_segment_parts))
+            if _wait is not None:
                 logger.warning(
                     f"[LLM] 传输错误{e.__class__.__name__}，{_wait:.1f}s后重试 "
                     f"({_retry_count+1}/{MAX_ATTEMPTS})"
@@ -481,12 +480,15 @@ class LLMEngine:
                                 # 5xx无条件重试"transient server failures"——旧硬编码
                                 # (400,429,500,502,503)把400当可重试却漏501/504等）
                                 raise LLMNonRetryableError(f"LLM API error {response.status_code}: {error_msg}")
-                            if _retry < MAX_ATTEMPTS - 1:
+                            # 重试决策合并单一真源=plan_status_retry（2026-09-29）：
+                            # 可重试状态下算"等多久后重试"，None=次数耗尽走失败契约
+                            _wait = plan_status_retry(
+                                response.status_code, _retry,
+                                getattr(response, "headers", None),
+                            )
+                            if _wait is not None:
                                 # 有头听头：Retry-After三格式（ms头/秒数/HTTP date），
                                 # 无头才指数退避2s×2^n封顶30s（旧固定2**_retry不听头）
-                                _wait = backoff_ms(
-                                    _retry + 1, getattr(response, "headers", None)
-                                ) / 1000.0
                                 logger.warning(
                                     f"[LLM] API {response.status_code}，{_wait:.1f}s后重试 "
                                     f"({_retry+1}/{MAX_ATTEMPTS}): {error_msg[:100]}"
@@ -647,16 +649,14 @@ class LLMEngine:
                 # 全局断连→park等恢复（3s轮询探测+10s宽限自动续跑，有界）；恢复/
                 # 非离线走下方原有重试记账，aborted回落原失败契约——语义不变只加等待
                 await network_state.maybe_park(e, cancel_event)
-                # 瞬时传输错误重试（utils.llm_retry单一真源，kilocode TRANSIENT判定）：
-                # 仅当本attempt零输出（文本与tool_calls均未累积）——已流出/已累积再
-                # 重试=双份回复或tool_calls状态串attempt污染；否则保持原失败契约
-                if (
-                    not _segment_parts
-                    and not accumulated_tool_calls
-                    and _retry < MAX_ATTEMPTS - 1
-                    and is_transient_error(e)
-                ):
-                    _wait = backoff_ms(_retry + 1) / 1000.0
+                # 瞬时传输错误重试决策合并单一真源=plan_error_retry（2026-09-29）：
+                # 仅当本attempt零输出（文本与tool_calls均未累积，has_output）——已流出/
+                # 已累积再重试=双份回复或tool_calls状态串attempt污染；None=保持原失败契约
+                _wait = plan_error_retry(
+                    e, _retry,
+                    has_output=bool(_segment_parts) or bool(accumulated_tool_calls),
+                )
+                if _wait is not None:
                     logger.warning(
                         f"[LLM] 传输错误{e.__class__.__name__}，{_wait:.1f}s后重试 "
                         f"({_retry+1}/{MAX_ATTEMPTS})"
@@ -731,8 +731,10 @@ class LLMEngine:
                             # 全局断连→park等恢复（3s竞速探测+10s宽限自动续跑，有界）；
                             # 恢复/非离线走下方原有重试记账（chat()无cancel_event）
                             await network_state.maybe_park(e)
-                            if _http_retry < MAX_ATTEMPTS - 1 and is_transient_error(e):
-                                _wait = backoff_ms(_http_retry + 1) / 1000.0
+                            # 瞬时传输错误重试决策合并单一真源=plan_error_retry
+                            # （2026-09-29）：chat()非流式无中途输出，has_output恒False
+                            _wait = plan_error_retry(e, _http_retry)
+                            if _wait is not None:
                                 logger.warning(
                                     f"[LLM] 传输错误{e.__class__.__name__}，"
                                     f"{_wait:.1f}s后重试 ({_http_retry+1}/{MAX_ATTEMPTS})"
@@ -742,17 +744,17 @@ class LLMEngine:
                             raise
                         if resp.status_code == 200:
                             break
-                        if (
-                            not is_retryable_status(resp.status_code)
-                            or _http_retry >= MAX_ATTEMPTS - 1
-                        ):
+                        # 重试决策合并单一真源=plan_status_retry（2026-09-29）：可重试∧
+                        # 未耗尽→等多久后重试；None=不重试/次数耗尽走失败契约
+                        _wait = plan_status_retry(
+                            resp.status_code, _http_retry,
+                            getattr(resp, "headers", None),
+                        )
+                        if _wait is None:
                             raise RuntimeError(
                                 f"LLM API error {resp.status_code}: {resp.text[:200]}"
                             )
                         # 有头听头：Retry-After三格式（ms头/秒数/HTTP date），无头才指数退避
-                        _wait = backoff_ms(
-                            _http_retry + 1, getattr(resp, "headers", None)
-                        ) / 1000.0
                         logger.warning(
                             f"[LLM] API {resp.status_code}，{_wait:.1f}s后重试 "
                             f"({_http_retry+1}/{MAX_ATTEMPTS})"
