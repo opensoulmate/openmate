@@ -94,6 +94,11 @@ class FallbackChain:
     # sticky（CowAgent use_fallback："the run stays on whichever link answered"）：
     # 切换后本run停在应答的link上，不逐步重探持续故障；reset回链头
     _current: FallbackLink | None = None
+    # 失败记账（CowAgent语义3）：每link失败一条"{label}: {summary}"，链耗尽报错
+    # 列出**所有**试过的模型（fail()消费）——只报最后一个="那个模型坏了"误导
+    spent: list[str] = field(default_factory=list)
+    # primary可观测标签（load_fallback_chain按primary_model填；key绝不进标签）
+    primary_label: str = ""
 
     @property
     def depth(self) -> int:
@@ -135,6 +140,58 @@ class FallbackChain:
         """回到链头（下个turn从primary重新走链——CowAgent reset_fallback）"""
         self._depth = 0
         self._current = None
+
+    def current_label(self) -> str:
+        """当前link可观测标签（未切换过=primary_label）"""
+        return self._current.label() if self._current else (self.primary_label or "primary")
+
+    def note_failure(self, summary: str) -> None:
+        """记账一次link失败（CowAgent语义3的spent，key绝不进标签）"""
+        self.spent.append(f"{self.current_label()}: {summary}")
+
+    def try_advance(
+        self,
+        summary: str,
+        *,
+        retry_planned: bool,
+        status: int | None = None,
+        has_output: bool = False,
+    ) -> bool:
+        """失败后是否立即切换到链上下一个link（llm_engine三路会话面的切换决策单点）。
+
+        CowAgent语义逐条：
+        - **429限流+链上有备胎=switch_now立即切换**（语义4"限流有备胎立即切换、
+          没备胎干等"）——即使同link重试预算还在：备胎是不同provider自带配额，
+          等Retry-After=浪费能立即回答的备胎
+        - 其余失败：同link重试已规划→先等重试（瞬时故障重试有望自愈，与
+          llm_transport单link重试环同语义）；重试已放弃→换link再试（含400/401/
+          402等不可重试状态——CowAgent _on_fallback任何link失败都换，llm_transport
+          "402不可重试也换link"同款）
+        - **has_output=True永不切换**：已流出/已累积内容再重发=双份回复/tool_calls
+          状态串attempt污染（utils.llm_retry同款守卫）
+        - 链不可用（空链opt-in禁用/环绕预算耗尽）恒False=行为与无链逐字一致
+
+        切换成功=True（spent记账+advance+sticky，调用方重发到chain.current）；
+        返回False=不切换且**不记账**（调用方继续走原重试/失败契约，最终放弃时用
+        fail()记账——一次失败只记一条）。
+        """
+        if not self.available() or has_output:
+            return False
+        switch_now = status is not None and int(status) == 429
+        if not (switch_now or not retry_planned):
+            return False
+        self.note_failure(summary)
+        self.advance()
+        return True
+
+    def fail(self, summary: str, default: str) -> str:
+        """链上最终失败：记账并返回报错文案（CowAgent语义3）。
+
+        单link失败=default（原错误契约逐字不变，无链行为零变化）；多个link试过=
+        chain_failure_message列出**所有**试过的模型与各自错误。
+        """
+        self.note_failure(summary)
+        return chain_failure_message(self.spent) if len(self.spent) > 1 else default
 
 
 def chain_failure_message(spent: list[str]) -> str:
@@ -265,4 +322,6 @@ def load_fallback_chain(
     )
     if raw_items and not links:
         logger.warning("[model-fallback] LLM_FALLBACK_CHAIN 配置了%d条但规范化后为空（全部被丢弃）", len(raw_items))
-    return FallbackChain(links=links)
+    return FallbackChain(
+        links=links, primary_label=(primary_model or "").strip() or "primary"
+    )

@@ -31,6 +31,12 @@ from utils.llm_retry import (
     plan_error_retry,
     plan_status_retry,
 )
+# 模型降级有序链=utils.model_fallback（CowAgent chat_fallback移植，2026-09-30
+# 三路会话面接线）：primary失败→备胎link——429+有备胎立即切（switch_now不干等）、
+# 切换进来的link只给1发（link_retries=0）、走完环绕第二遍、sticky停在应答link、
+# 链耗尽报错列出所有试过的模型。opt-in：LLM_FALLBACK_CHAIN未配置=空链=行为与
+# 接线前逐字一致
+from utils.model_fallback import FallbackChain, FallbackLink, load_fallback_chain
 # 网络离线三态=utils.network_state（网络恢复专项，kilocode SessionNetwork移植）：
 # 传输错误先过离线判定——全局断网则park等待恢复（3URL竞速探测+3s轮询+10s宽限
 # 自动续跑，有界park），恢复后继续原有重试；端点级故障/非断网走原有退避不变
@@ -176,10 +182,25 @@ class LLMEngine:
             logger.warning("ModelRouter选择失败，回退到固定配置: %s", e)
             return self.model, self.base_url, self.api_key
 
+    @staticmethod
+    def _apply_link(client: httpx.AsyncClient, payload: dict, link: Optional[FallbackLink]) -> None:
+        """切换降级链link：就地改写client端点/鉴权+payload模型名（CowAgent use_fallback）。
+
+        client.base_url/headers为httpx公开可写属性（0.28.1实测setter可用）；鉴权
+        **整体替换**防primary的key泄漏给备胎provider。chat()的async with包在外层，
+        不重建client只改端点。
+        """
+        if link is None:
+            # try_advance成功后chain.current必非None（编程不变量）——失败必须可见
+            raise RuntimeError("model_fallback: try_advance成功后chain.current为None（内部不一致）")
+        client.base_url = link.base_url
+        client.headers = link.headers()
+        payload["model"] = link.model
+
     async def chat_stream(
         self, messages: list[dict], cancel_event: Optional[asyncio.Event] = None,
         system_prompt: Optional[str] = None, _continuation_depth: int = 0,
-        _retry_count: int = 0
+        _retry_count: int = 0, _chain: Optional[FallbackChain] = None
     ) -> AsyncGenerator[str, None]:
         """流式输出LLM响应 — 每个yield是一个纯文本delta片段
 
@@ -205,6 +226,18 @@ class LLMEngine:
         """
         # 通过router解析模型（无router时返回固定配置）
         resolved_model, resolved_base_url, resolved_api_key = self._resolve_model(messages)
+
+        # 模型降级有序链（CowAgent chat_fallback，utils.model_fallback，2026-09-30
+        # 接线）：opt-in（LLM_FALLBACK_CHAIN未设=空链=行为不变）；sticky——链切换过
+        # 则本run停在应答link（chain.current），重试/续写递归携带同一链不弹回primary
+        if _chain is None:
+            chain = load_fallback_chain(primary_model=resolved_model)
+        else:
+            chain = _chain
+        if chain.current is not None:
+            resolved_model = chain.current.model
+            resolved_base_url = chain.current.base_url
+            resolved_api_key = chain.current.api_key
 
         # 使用解析后的配置创建客户端
         client = httpx.AsyncClient(
@@ -243,16 +276,34 @@ class LLMEngine:
                                 messages, cancel_event, system_prompt,
                                 _continuation_depth=_continuation_depth,
                                 _retry_count=_retry_count,
+                                _chain=chain,
                             ):
                                 yield _c
                             return
                         # 重试决策合并单一真源=plan_status_retry（2026-09-29）：三路
                         # 重试环此前三处内联组合「可重试∧次数→backoff→sleep」，现收口
-                        # utils.llm_retry单点（switch_now降级链未来挂载点）；None=不重试
+                        # utils.llm_retry单点；None=不重试
                         _wait = plan_status_retry(
                             response.status_code, _retry_count,
                             getattr(response, "headers", None),
                         )
+                        # 降级链切换决策单点=chain.try_advance（CowAgent，2026-09-30）：
+                        # 429+有备胎立即切（switch_now不干等Retry-After）/重试已放弃换
+                        # link再试；切换进来的link只给1发（_retry_count=MAX_ATTEMPTS-1，
+                        # plan_*预算见底=首败即换，CowAgent link_retries=0）
+                        _summary = f"LLM HTTP {response.status_code}: {_err}"
+                        if chain.try_advance(
+                            _summary, retry_planned=(_wait is not None),
+                            status=response.status_code,
+                        ):
+                            async for _c in self.chat_stream(
+                                messages, cancel_event, system_prompt,
+                                _continuation_depth=_continuation_depth,
+                                _retry_count=MAX_ATTEMPTS - 1,
+                                _chain=chain,
+                            ):
+                                yield _c
+                            return
                         if _wait is not None:
                             # 429/408/5xx可重试（utils.llm_retry单一真源，kilocode）：
                             # 有头听头（Retry-After三格式），无头指数退避——接线前
@@ -267,10 +318,13 @@ class LLMEngine:
                                 messages, cancel_event, system_prompt,
                                 _continuation_depth=_continuation_depth,
                                 _retry_count=_retry_count + 1,
+                                _chain=chain,
                             ):
                                 yield _c
                             return
-                        raise RuntimeError(f"LLM API error {response.status_code}: {_err}")
+                        raise RuntimeError(
+                            chain.fail(_summary, f"LLM API error {response.status_code}: {_err}")
+                        )
                     buffer = ""
                     latest_usage = None
                     stream_finished = False
@@ -342,6 +396,7 @@ class LLMEngine:
                                 build_continuation_messages(messages, _segment_text),
                                 cancel_event, system_prompt,
                                 _continuation_depth=_continuation_depth + 1,
+                                _chain=chain,
                             ):
                                 yield _c
                         else:
@@ -357,9 +412,24 @@ class LLMEngine:
             await network_state.maybe_park(e, cancel_event)
             # 瞬时传输错误重试决策合并单一真源=plan_error_retry（2026-09-29）：
             # 仅当本attempt尚无任何输出（has_output=_segment_parts非空）——已流出
-            # 内容再重试=同一回复发两遍；None=不重试/次数用尽保持原失败契约
+            # 内容再重试=同一回复发两遍；None=不重试/次数耗尽保持原失败契约
             # （ReadTimeout→"[LLM响应超时]"、其余→"[LLM错误: …]"），失败必须可见
             _wait = plan_error_retry(e, _retry_count, has_output=bool(_segment_parts))
+            # 降级链切换决策单点（CowAgent，2026-09-30）：瞬时错误先同link重试，
+            # 重试已放弃才换link；has_output=True永不切换（防双份回复）
+            _summary = f"{e.__class__.__name__}: {e}"
+            if chain.try_advance(
+                _summary, retry_planned=(_wait is not None),
+                has_output=bool(_segment_parts),
+            ):
+                async for _c in self.chat_stream(
+                    messages, cancel_event, system_prompt,
+                    _continuation_depth=_continuation_depth,
+                    _retry_count=MAX_ATTEMPTS - 1,
+                    _chain=chain,
+                ):
+                    yield _c
+                return
             if _wait is not None:
                 logger.warning(
                     f"[LLM] 传输错误{e.__class__.__name__}，{_wait:.1f}s后重试 "
@@ -370,10 +440,17 @@ class LLMEngine:
                     messages, cancel_event, system_prompt,
                     _continuation_depth=_continuation_depth,
                     _retry_count=_retry_count + 1,
+                    _chain=chain,
                 ):
                     yield _c
                 return
-            if isinstance(e, httpx.ReadTimeout):
+            # 最终失败：单link=原契约逐字不变（"[LLM响应超时]"/"[LLM错误: …]"）；
+            # 多link试过=chain.fail列出全部（CowAgent语义3），失败必须可见
+            _fail_msg = chain.fail(_summary, str(e))
+            if len(chain.spent) > 1:
+                logger.error(f"LLM stream error (降级链耗尽): {_fail_msg}", exc_info=True)
+                yield f"\n[LLM错误: {_fail_msg}]"
+            elif isinstance(e, httpx.ReadTimeout):
                 logger.warning("LLM stream read timeout")
                 yield "\n[LLM响应超时]"
             else:
@@ -390,6 +467,8 @@ class LLMEngine:
         cancel_event: Optional[asyncio.Event] = None,
         system_prompt: Optional[str] = None,
         _continuation_depth: int = 0,
+        _chain: Optional[FallbackChain] = None,
+        _retry_count: int = 0,
     ) -> AsyncGenerator[str | dict, None]:
         """流式输出LLM响应 — 支持function calling工具调用
 
@@ -419,6 +498,18 @@ class LLMEngine:
         """
         # 通过router解析模型（无router时返回固定配置）
         resolved_model, resolved_base_url, resolved_api_key = self._resolve_model(messages)
+
+        # 模型降级有序链（CowAgent chat_fallback，utils.model_fallback，2026-09-30
+        # 接线）：opt-in（LLM_FALLBACK_CHAIN未设=空链=行为不变）；sticky——链切换过
+        # 则本run停在应答link（chain.current），重试/续写递归携带同一链不弹回primary
+        if _chain is None:
+            chain = load_fallback_chain(primary_model=resolved_model)
+        else:
+            chain = _chain
+        if chain.current is not None:
+            resolved_model = chain.current.model
+            resolved_base_url = chain.current.base_url
+            resolved_api_key = chain.current.api_key
 
         # 使用解析后的配置创建客户端
         client = httpx.AsyncClient(
@@ -478,14 +569,45 @@ class LLMEngine:
                                 # fail-fast可见失败，不烧3次调用（外层except区分处理）。
                                 # 429/408/5xx可重试（utils.llm_retry单一真源，kilocode：
                                 # 5xx无条件重试"transient server failures"——旧硬编码
-                                # (400,429,500,502,503)把400当可重试却漏501/504等）
-                                raise LLMNonRetryableError(f"LLM API error {response.status_code}: {error_msg}")
+                                # (400,429,500,502,503)把400当可重试却漏501/504等）。
+                                # 降级链（CowAgent，2026-09-30）：不可重试状态也换link
+                                # （任何link失败都换，llm_transport"402不可重试也换link"
+                                # 同款），链上没备胎才fail-fast
+                                _summary = f"LLM HTTP {response.status_code}: {error_msg}"
+                                if chain.try_advance(_summary, retry_planned=False, status=response.status_code):
+                                    async for _c in self.chat_stream_with_tools(
+                                        messages, tools, cancel_event, system_prompt,
+                                        _continuation_depth=_continuation_depth,
+                                        _chain=chain, _retry_count=MAX_ATTEMPTS - 1,
+                                    ):
+                                        yield _c
+                                    return
+                                raise LLMNonRetryableError(
+                                    chain.fail(_summary, f"LLM API error {response.status_code}: {error_msg}")
+                                )
                             # 重试决策合并单一真源=plan_status_retry（2026-09-29）：
-                            # 可重试状态下算"等多久后重试"，None=次数耗尽走失败契约
+                            # 可重试状态下算"等多久后重试"，None=次数耗尽走失败契约。
+                            # attempt=_retry_count+_retry：降级链切换进来的link只给1发
+                            # （CowAgent link_retries=0，切换递归传_retry_count=
+                            # MAX_ATTEMPTS-1=预算见底，首败即换不重试）
                             _wait = plan_status_retry(
-                                response.status_code, _retry,
+                                response.status_code, _retry_count + _retry,
                                 getattr(response, "headers", None),
                             )
+                            # 降级链切换决策单点（CowAgent，2026-09-30）：429+有备胎
+                            # 立即切（switch_now不干等）/重试已放弃换link
+                            _summary = f"LLM HTTP {response.status_code}: {error_msg}"
+                            if chain.try_advance(
+                                _summary, retry_planned=(_wait is not None),
+                                status=response.status_code,
+                            ):
+                                async for _c in self.chat_stream_with_tools(
+                                    messages, tools, cancel_event, system_prompt,
+                                    _continuation_depth=_continuation_depth,
+                                    _chain=chain, _retry_count=MAX_ATTEMPTS - 1,
+                                ):
+                                    yield _c
+                                return
                             if _wait is not None:
                                 # 有头听头：Retry-After三格式（ms头/秒数/HTTP date），
                                 # 无头才指数退避2s×2^n封顶30s（旧固定2**_retry不听头）
@@ -497,7 +619,9 @@ class LLMEngine:
                                 # 修复：此前误用break——直接退出重试循环且零yield，
                                 # 消费方拿到空响应（"瞬时限流→静默空白"死路径）
                                 continue  # 回到for _retry重试
-                            raise RuntimeError(f"LLM API error {response.status_code}: {error_msg}")
+                            raise RuntimeError(
+                                chain.fail(_summary, f"LLM API error {response.status_code}: {error_msg}")
+                            )
                         buffer = ""
                         _stream_finished = False
                         _final_tc_payload = None
@@ -626,6 +750,7 @@ class LLMEngine:
                                     build_continuation_messages(messages, _seg),
                                     tools, cancel_event, system_prompt,
                                     _continuation_depth=_continuation_depth + 1,
+                                    _chain=chain,
                                 ):
                                     yield _c
                                 return
@@ -651,11 +776,26 @@ class LLMEngine:
                 await network_state.maybe_park(e, cancel_event)
                 # 瞬时传输错误重试决策合并单一真源=plan_error_retry（2026-09-29）：
                 # 仅当本attempt零输出（文本与tool_calls均未累积，has_output）——已流出/
-                # 已累积再重试=双份回复或tool_calls状态串attempt污染；None=保持原失败契约
+                # 已累积再重试=双份回复或tool_calls状态串attempt污染；None=保持原失败契约。
+                # attempt=_retry_count+_retry：切换进来的link只给1发（CowAgent）
+                _has_out = bool(_segment_parts) or bool(accumulated_tool_calls)
                 _wait = plan_error_retry(
-                    e, _retry,
-                    has_output=bool(_segment_parts) or bool(accumulated_tool_calls),
+                    e, _retry_count + _retry,
+                    has_output=_has_out,
                 )
+                # 降级链切换决策单点（CowAgent，2026-09-30）：瞬时错误先同link重试，
+                # 重试已放弃才换link；has_output=True永不切换（防双份回复/状态污染）
+                _summary = f"{e.__class__.__name__}: {e}"
+                if chain.try_advance(
+                    _summary, retry_planned=(_wait is not None), has_output=_has_out,
+                ):
+                    async for _c in self.chat_stream_with_tools(
+                        messages, tools, cancel_event, system_prompt,
+                        _continuation_depth=_continuation_depth,
+                        _chain=chain, _retry_count=MAX_ATTEMPTS - 1,
+                    ):
+                        yield _c
+                    return
                 if _wait is not None:
                     logger.warning(
                         f"[LLM] 传输错误{e.__class__.__name__}，{_wait:.1f}s后重试 "
@@ -663,7 +803,12 @@ class LLMEngine:
                     )
                     await asyncio.sleep(_wait)
                     continue
-                if isinstance(e, httpx.ReadTimeout):
+                # 最终失败：单link=原契约逐字不变；多link试过=列出全部（CowAgent语义3）
+                _fail_msg = chain.fail(_summary, str(e))
+                if len(chain.spent) > 1:
+                    logger.error(f"LLM stream error (降级链耗尽): {_fail_msg}", exc_info=True)
+                    yield f"\n[LLM错误: {_fail_msg}]"
+                elif isinstance(e, httpx.ReadTimeout):
                     logger.warning("LLM stream read timeout")
                     yield "\n[LLM响应超时]"
                 else:
@@ -676,9 +821,11 @@ class LLMEngine:
                 yield f"\n[LLM错误: {e}]"
                 return
             except RuntimeError as e:
-                if "LLM API error" in str(e) and _retry < MAX_ATTEMPTS - 1:
-                    logger.warning(f"[LLM] Retry {_retry+1}/{MAX_ATTEMPTS}: {e}")
-                    continue
+                # 旧"LLM API error"catch-retry二次重试分支已删（2026-09-30，前轮遗留
+                # 评估销账）：实际dead path——RuntimeError只在plan_*放弃时raise，此时
+                # _retry已到预算末尾，_retry<MAX_ATTEMPTS-1恒False；且降级链bias下若
+                # 误触发会对已失败link反复重发，绕过"切换进来的link只给1发"。失败可见
+                # 契约=下方log+yield（mem0：失败必须可见，不静默吞不盲目重发）
                 logger.error(f"LLM stream error: {e}", exc_info=True)
                 yield f"\n[LLM错误: {e}]"
                 return
@@ -701,6 +848,11 @@ class LLMEngine:
         # 通过router解析模型（无router时返回固定配置）
         resolved_model, resolved_base_url, resolved_api_key = self._resolve_model(messages)
 
+        # 模型降级有序链（CowAgent chat_fallback，utils.model_fallback，2026-09-30
+        # 接线）：opt-in（LLM_FALLBACK_CHAIN未设=空链=行为不变）；续写轮共享同一链
+        # =sticky（切到备胎后续写轮停在应答link，不弹回primary）
+        chain = load_fallback_chain(primary_model=resolved_model)
+
         client = httpx.AsyncClient(
             base_url=resolved_base_url,
             headers={"Authorization": f"Bearer {resolved_api_key}"} if resolved_api_key else {},
@@ -712,7 +864,8 @@ class LLMEngine:
             async with client:
                 for attempt in range(MAX_CONTINUATION + 1):
                     payload = {
-                        "model": resolved_model,
+                        # sticky（CowAgent use_fallback）：链切换过的续写轮停在应答link
+                        "model": chain.current.model if chain.current is not None else resolved_model,
                         "messages": self._build_messages(current_history),
                         "stream": False,
                         "temperature": 0.7,
@@ -723,43 +876,75 @@ class LLMEngine:
                     # 请求/凭证级fail-fast——接线前chat()零HTTP重试，瞬时429/5xx直接
                     # "[LLM错误: …]"整体失败（judge/计划/摘要/标题全走本方法）
                     resp = None
-                    for _http_retry in range(MAX_ATTEMPTS):
-                        try:
-                            resp = await client.post("/chat/completions", json=payload)
-                        except httpx.TransportError as e:
-                            # 网络离线三态（utils.network_state，kilocode SessionNetwork）：
-                            # 全局断连→park等恢复（3s竞速探测+10s宽限自动续跑，有界）；
-                            # 恢复/非离线走下方原有重试记账（chat()无cancel_event）
-                            await network_state.maybe_park(e)
-                            # 瞬时传输错误重试决策合并单一真源=plan_error_retry
-                            # （2026-09-29）：chat()非流式无中途输出，has_output恒False
-                            _wait = plan_error_retry(e, _http_retry)
-                            if _wait is not None:
-                                logger.warning(
-                                    f"[LLM] 传输错误{e.__class__.__name__}，"
-                                    f"{_wait:.1f}s后重试 ({_http_retry+1}/{MAX_ATTEMPTS})"
+                    # 降级链walk（CowAgent，2026-09-30）：内层for=单link重试环，
+                    # 失败且链上有备胎→try_advance换link重发（切换进来的link只给1发，
+                    # plan_*按attempt偏移消费同一预算语义）；无链时try_advance恒False
+                    # =while只走一遍、行为与接线前逐字一致
+                    _is_start_link = True
+                    while True:
+                        _link_ok = False
+                        for _http_retry in range(MAX_ATTEMPTS):
+                            try:
+                                resp = await client.post("/chat/completions", json=payload)
+                            except httpx.TransportError as e:
+                                # 网络离线三态（utils.network_state，kilocode SessionNetwork）：
+                                # 全局断连→park等恢复（3s竞速探测+10s宽限自动续跑，有界）；
+                                # 恢复/非离线走下方原有重试记账（chat()无cancel_event）
+                                await network_state.maybe_park(e)
+                                # 瞬时传输错误重试决策合并单一真源=plan_error_retry
+                                # （2026-09-29）：chat()非流式无中途输出，has_output恒False
+                                _wait = plan_error_retry(
+                                    e, _http_retry if _is_start_link else MAX_ATTEMPTS - 1
                                 )
-                                await asyncio.sleep(_wait)
-                                continue
-                            raise
-                        if resp.status_code == 200:
-                            break
-                        # 重试决策合并单一真源=plan_status_retry（2026-09-29）：可重试∧
-                        # 未耗尽→等多久后重试；None=不重试/次数耗尽走失败契约
-                        _wait = plan_status_retry(
-                            resp.status_code, _http_retry,
-                            getattr(resp, "headers", None),
-                        )
-                        if _wait is None:
-                            raise RuntimeError(
-                                f"LLM API error {resp.status_code}: {resp.text[:200]}"
+                                if chain.try_advance(
+                                    f"{e.__class__.__name__}: {e}",
+                                    retry_planned=(_wait is not None),
+                                ):
+                                    self._apply_link(client, payload, chain.current)
+                                    break  # 换link重发（外层while）
+                                if _wait is not None:
+                                    logger.warning(
+                                        f"[LLM] 传输错误{e.__class__.__name__}，"
+                                        f"{_wait:.1f}s后重试 ({_http_retry+1}/{MAX_ATTEMPTS})"
+                                    )
+                                    await asyncio.sleep(_wait)
+                                    continue
+                                raise RuntimeError(
+                                    chain.fail(f"{e.__class__.__name__}: {e}", str(e))
+                                ) from e
+                            if resp.status_code == 200:
+                                _link_ok = True
+                                break
+                            # 重试决策合并单一真源=plan_status_retry（2026-09-29）：可重试∧
+                            # 未耗尽→等多久后重试；None=不重试/次数耗尽走失败契约
+                            _wait = plan_status_retry(
+                                resp.status_code,
+                                _http_retry if _is_start_link else MAX_ATTEMPTS - 1,
+                                getattr(resp, "headers", None),
                             )
-                        # 有头听头：Retry-After三格式（ms头/秒数/HTTP date），无头才指数退避
-                        logger.warning(
-                            f"[LLM] API {resp.status_code}，{_wait:.1f}s后重试 "
-                            f"({_http_retry+1}/{MAX_ATTEMPTS})"
-                        )
-                        await asyncio.sleep(_wait)
+                            _summary = f"LLM HTTP {resp.status_code}: {resp.text[:200]}"
+                            if chain.try_advance(
+                                _summary, retry_planned=(_wait is not None),
+                                status=resp.status_code,
+                            ):
+                                self._apply_link(client, payload, chain.current)
+                                break  # 换link重发（外层while）
+                            if _wait is None:
+                                raise RuntimeError(
+                                    chain.fail(
+                                        _summary,
+                                        f"LLM API error {resp.status_code}: {resp.text[:200]}",
+                                    )
+                                )
+                            # 有头听头：Retry-After三格式（ms头/秒数/HTTP date），无头才指数退避
+                            logger.warning(
+                                f"[LLM] API {resp.status_code}，{_wait:.1f}s后重试 "
+                                f"({_http_retry+1}/{MAX_ATTEMPTS})"
+                            )
+                            await asyncio.sleep(_wait)
+                        if _link_ok:
+                            break
+                        _is_start_link = False
                     if resp is None:  # 防御性收窄：循环break时resp必已赋值
                         raise RuntimeError("LLM API error: 重试环退出但无响应")
                     data = resp.json()
