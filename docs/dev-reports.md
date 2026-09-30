@@ -3534,3 +3534,35 @@
 4. 其余遗留观察项照旧非本轮范围：chat_stream续写×重试联合封顶、turn级park合并、MCP重连真实Server验证、relay消息级粒度、唤醒触发行agent_message透出、前端视觉走查登录墙、secret redaction UI i18n key、HITL网络等待交互卡、llm_call无生产调用方。
 5. ⚠️环境问题仍在（非代码，需用户处理）：LLM供应商余额不足（402 insufficient_balance，journal streak=79）。
 6. cron环境约束实录：`terminal` foreground 420s硬上限，全量pytest(463s)必须background+poll分段取结果；`execute_code`在cron BLOCKED→live demo用write_file落/tmp+terminal执行；patch工具old_string/new_string参数易反（本轮首次chat_stream块误把新代码当old_string传→工具报"already contains"no_change，重传正确顺序成功）——**patch的old_string=要找的现有文本、new_string=替换后文本，反了会no-op**；sibling并行会话共用工作树再现（systemic_test_results.json被systemic_test写入、settings/locales被sibling改）——commit显式git add白名单3文件。
+
+## [2026-10-01 07:19 CST] 模型降级有序链接入三路会话面——429有备胎立即切不干等+备胎1发+sticky（SUMMARY §五 cortex缺口P0续，连续3轮遗留#1销账）
+**目标**：连续3轮dev-report遗留#1"降级链接入流式"——62bde6c1把CowAgent chat_fallback链能力接进非流式核心（utils/llm_transport）后，llm_engine三路会话面（chat_stream真实回复主路径/chat_stream_with_tools工具调用面/chat非流式judge/计划/摘要面）的429/5xx仍只能同端点干等（Retry-After:30就真睡30s、无备胎可切）。本轮把链walk接进三路，同时销账遗留#2（with_tools except RuntimeError catch-retry死分支）。
+**调研来源**：CowAgent（zhayujie/CowAgent）chat_fallback六条语义（62bde6c1轮已逐行对照源码，本轮同语义扩消费面）：①429限流+有备胎立即切换不干等（switch_now）②切换进来的link只给1发（_on_fallback link_retries=0，"链存在的意义是换provider，不是等这个provider"）③链耗尽报错列出**所有**试过的模型④走完环绕第二遍（MAX_PASSES=2）⑤sticky停在应答link（use_fallback）⑥不可重试状态也换link（llm_transport"402不可重试也换link"同款）。切换决策单点=模型fallback.try_advance——前轮e7cbbc3c把重试决策收口plan_*时预留的"switch_now挂载点"按其设计接线（"只需在此决策里加一条分支，不必再改三处"）。
+**改动文件**（openmate commit `43c21aba`，3文件+820/-54）：
+- `acp-proxy/utils/model_fallback.py`（+60/-1）：FallbackChain新增spent记账+try_advance/fail/note_failure/current_label
+- `acp-proxy/agent/llm_engine.py`（+238/-53）：三路7个失败决策点接chain.try_advance+chain.fail；切换递归_budget=1发；sticky链线程；chat()链walk+_apply_link
+- `acp-proxy/tests/test_llm_engine_fallback.py`（新726行，33测）
+**改动内容**：
+1. **utils/model_fallback.py切换决策单点**：`try_advance(summary, *, retry_planned, status, has_output)`——429+链可用=switch_now立即切（即使同link重试预算还在）；其余失败=同link重试已规划先等（瞬时故障重试有望自愈）、重试已放弃才换link（含400/401/402不可重试状态）；has_output=True永不切换（已流出/已累积再重发=双份回复/tool_calls状态污染）；空链/环绕预算耗尽恒False=无链行为逐字不变。切换成功=spent记账+advance+sticky返回True；False不记账（最终放弃时`fail(summary, default)`记账——单link失败返回default原契约逐字不变，多link返回chain_failure_message列全部）。
+2. **llm_engine三路×7决策点**：chat_stream状态/传输2点、with_tools不可重试/状态/传输3点、chat状态/传输2点全部过try_advance单点；**切换进来的link只给1发**（CowAgent link_retries=0）——chat_stream/with_tools切换递归传`_retry_count=MAX_ATTEMPTS-1`（plan_*预算见底=首败即换不重试不干等），chat()的plan_* attempt参数按`_is_start_link`偏移同语义。**sticky**：链对象经`_chain`参数线程过全部10处递归（重试/续写/stream_options回退），切换后续写轮停在应答link不弹回primary、起始link保持全重试预算（llm_transport同款）。**chat()链walk**：`while True`包`for _http_retry in range(MAX_ATTEMPTS)`（单link重试环结构原样保留），切换经`_apply_link`就地改写client.base_url/headers+payload模型（httpx 0.28.1 setter实测可用；鉴权**整体替换**防primary的key泄漏给备胎provider）。
+3. **遗留#2销账**：with_tools `except RuntimeError`的"LLM API error"catch-retry分支删除——dead path（RuntimeError只在plan_*放弃时raise，_retry<MAX-1恒False）且链bias下若误触发会对已失败link反复重发绕过1发约束；失败可见契约=log+yield（mem0 §1.1）。
+4. **opt-in零变化**：LLM_FALLBACK_CHAIN未配置=空链=try_advance恒False——265项关联既有测试原样通过=无链行为逐字不变的直接证据。
+**接线位置**（grep证据，文件:行号）：
+- 核心定义：`utils/model_fallback.py:152 try_advance`、`:187 fail`、`:148 note_failure`、`:144 current_label`
+- 消费点（7决策点+7记账点）：`agent/llm_engine.py:295/421`（chat_stream状态/传输）、`:577/600/789`（with_tools不可重试/状态/传输）、`:899/926`（chat状态/传输）；chain.fail：`:326/449/586/623/807/913/934`
+- 链构建：`llm_engine.py` `load_fallback_chain(primary_model=resolved_model)`×3（三路入口）
+- 真实运行时路径：`agent/soulmate_agent.py:1762 chat_stream_with_tools`（真实回复主路径）、`:778/:801/:898/:3948 chat`（judge注入门/计划/摘要/标题）、`agent/acp_server.py:116 LLMEngine()`、`discussion_engine.py:500 chat_stream`——四条真实LLM流量面零改动获得降级能力
+**验证结果**：
+- 完整性✅：`git diff --numstat`=llm_engine +238/-53、model_fallback +60/-1、新test 726行，逐hunk核实全为本轮改动（sibling并行会话的settings-client.tsx/locales/*.json/systemic_test_results.json/e2e_probe2.py/.mmb-render显式git add白名单3文件排除）；2源文件ast.parse全过。
+- 集成✅：上述grep 7决策点+7记账点齐全（定义→三路消费→soulmate/acp_server/discussion真实流量面）；既有接线钉`plan_status_retry(==3`/`plan_error_retry(==3`/`for _http_retry in range(MAX_ATTEMPTS)`/`for _retry in range(MAX_ATTEMPTS)`/`_retry_count=_retry_count + 1`全部原样保持；重启后:8092/health=200、:8095/health=200、:8092/api/network/status=200。
+- 测试✅：新`tests/test_llm_engine_fallback.py` **33 passed**（①链决策11：switch_now 429即刻切/5xx先等重试/重试放弃才换/402也换/has_output永不切/空链恒False/环绕4切+耗尽/fail单link原契约/fail多link列全部/current_label/primary_label装载；②chat_stream 6：429零等待切+鉴权整体替换/500×3退避后切/无链逐字契约（"[LLM错误: LLM API error 429: rl]"精确断言）/链耗尽7发列5模型/sticky续写停备胎/流中掐线has_output守卫零切换；③with_tools 4：429切后tool_calls正确/401不可重试也换link链耗尽列全部/切换link单发零退避/无链契约；④chat 5：429切+usage回填/无链契约/链耗尽列全部/sticky续写轮/传输错误放弃后切；⑤接线钉7）；关联回归`test_llm_retry_policy+test_llm_error_contract+test_model_fallback+test_stream_continuation+test_llm_stream_usage_emission+test_network_offline_park+test_chat_output_protection+test_token_usage_backfill_acp+test_llm_transport_core+test_sandbox_policy` **265 passed**零回归（无链行为逐字不变）；acp-proxy全量`tests/` **1353 passed 0 failed**（476.89s，=上轮1320基线+33新测）；`systemic_test.py` **29/29 passed**（S1-S6全绿）。
+- **live实锤**（/tmp/fallback_stream_live_demo.py，真实httpx+两个本地HTTP stub provider+真实sleep计时+真实load_fallback_chain配置路径（model_router.resolve_provider_config），走三路真实调用面，**19/19过**）：①chat_stream 429(Retry-After-MS:3000)+备胎200 SSE→**0.07s**零等待切换、"HELLO"正确、primary 1发+备胎1发、备胎带自己凭据(sk-b)与模型(backup-a)；②无链对照同款429×3→**6.05s**真实干等+原契约"\n[LLM错误: LLM API error 429: rate limited]"逐字不变；③500×3→**6.07s**真实退避(2+4s)后切备胎成功（3+1发）；④primary+2备胎全500→**7发**（3+1+1+1+1）+报错"主模型与全部兜底模型均调用失败（5个模型全部试过）: m-primary: … | stub/backup-a: … | stub2/backup-b: …"列全部；⑤with_tools 429切→备胎tool_calls(name=exec,args完整)正确；⑥chat() 429切→备胎"OK"+usage(total_tokens=10)回填+payload模型切换；⑦sticky：429切备胎后length续写轮停备胎（primary 1发/备胎2发，"PART1-PART2"）；⑧has_output守卫：primary流中掐线（Content-Length谎报+断连=RemoteProtocolError）→已流出"HALF"保留+可见失败+**备胎0发**（无双份回复）。
+**服务重启**：`systemctl --user restart acp-proxy-a.service acp-proxy-b.service`→两服务active；:8092/health=200、:8095/health=200、:8092/api/network/status=200；重启后`systemic_test.py` 29/29（opensoul/前端零改动未重启，npm build不适用）。
+**commit**：openmate `43c21aba`。
+**遗留问题**：
+1. **降级链只在配置了LLM_FALLBACK_CHAIN时生效**（CowAgent opt-in，本轮不擅自配生产链）：当前环境只有mimo一条有效凭据，真实备胎需用户补充provider凭据后在.acp-proxy/.env配置（env.example 62bde6c1轮已给格式）；ollama免key本地备胎开箱即用。真实收益待配置后观察。
+2. **streaming侧丢一个"不完整响应"细节**：chat_stream/with_tools的续写×重试联合封顶（4续写×3重试理论12发/逻辑回合）继续挂账；本轮链walk worst-case=3+4×1=7发/回合（比理论12发更省）。
+3. **llm_call仍无生产调用方**（连续多轮遗留）：llm_gateway.llm_call契约/防护/链能力就位，待真实业务调用接入。
+4. 其余遗留观察项照旧非本轮范围：turn级park合并、MCP重连真实Server验证、relay消息级粒度、唤醒触发行agent_message透出、前端视觉走查登录墙、model_gateway/gateway.py:135凭据映射表、secret redaction UI i18n key、HITL网络等待交互卡。
+5. ⚠️环境问题仍在（非代码，需用户处理）：LLM供应商余额不足（402 insufficient_balance）。
+6. cron环境约束实录：`execute_code`在cron BLOCKED→live demo用write_file落/tmp+terminal执行；write_file超长手打文本有静默丢字符现象（demo断言串"stub2/backup-b"落盘成"stub/backup-b"致19过17，代码文件经测试断言全数验证无此问题但**长文本写盘后必须过测试/断言**，勿信肉眼）；新旧对比/断言串务必用python字面量比对定位差异（U+码逐字打印），勿靠控制台目测（全角/半角、字形相近字符目测不可分辨）；systemic_test前台超600s→background+process wait分段取结果。
