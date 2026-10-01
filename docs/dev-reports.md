@@ -3631,3 +3631,36 @@
 4. 其余遗留观察项照旧非本轮范围：降级链opt-in待用户配provider凭据、llm_call无生产调用方、turn级park合并、MCP重连真实Server验证、relay消息级粒度、唤醒触发行agent_message透出、model_gateway/gateway.py:135凭据映射表、HITL网络等待交互卡、环境变量密钥外发误伤面。
 5. ⚠️环境问题仍在（非代码，需用户处理）：LLM供应商余额不足（402 insufficient_balance）。
 6. cron环境约束实录：**patch工具fuzzy匹配对单行hunk反复失手**——上下文提示行被当context、替换内容被追加到文件EOF（本轮3次：inline.tip/markdown title/图标3连），必须带≥3行上下文重做+`git diff`逐hunk核对（本轮当场发现修复，教训与上轮"缩进改错"同族）；sibling并行会话共用工作树再现（locales×3被改+45行）——locale选择性暂存法：pre快照→HEAD基底打"pre→post"补丁→换入`git add`→换回post→`git diff --cached`过滤核对；render测试新文件write_file直落，长文本经测试断言验证（53断言串全过）。
+
+## [2026-10-01 14:46 CST] turn级park合并——kilocode "park整个turn"语义，一个逻辑回合最多一次park等待（09-29 09:30轮遗留"park粒度是调用不是turn"销账）
+**目标**：网络离线park的粒度从"单次LLM调用"合并到"整个turn"。09-29移植轮明确挂账："本轮park的是单次LLM调用（三条传输路径各自park），turn内多次LLM调用各自判定——一个turn断网可能产生多条wait记录，turn级合并归入观察项"。真实痛点：一个用户回合的plan/judge/回复/摘要多条LLM调用，断网时各自park——最坏N×MAX_WAIT_S(30s)叠加干等+N条wait记录，用户迟迟看不到可见失败。
+**调研来源**：kilocode SessionNetwork（session/network.ts）原文语义——park的单位是整个turn（ask()一次挂起turn等reply），本项目network_state.py移植时按调用粒度降级实现（当时如实记录），本轮按原文语义补全；合并策略沿用上轮`_chain`/`_budget`的"状态随调用链线程传递"范式，但用contextvars免改llm_engine/llm_transport任何签名（消费面零改动）。
+**改动文件**（openmate commit `d7d0f126`，3文件 +598/-1）：
+- `acp-proxy/utils/network_state.py`（+115/-1）：TurnParkState+contextvar、begin_turn/end_turn、_ParkSession/_active_park、maybe_park三条合并语义、_run_park抽出（原watch/restore/resume循环逐字保留）
+- `acp-proxy/agent/soulmate_agent.py`（+12/-0）：import network_state + TurnLifecycleBus turn.open/close订阅begin_turn/end_turn
+- `acp-proxy/tests/test_turn_park_merge.py`（新472行，22测）
+**改动内容**：
+1. **turn预算（fail-fast）**：`TurnParkState(turn_id, aborted)`经`contextvars.ContextVar`挂在调用上下文——`begin_turn(turn_id)`在turn.open时建立预算、`end_turn()`在turn.close清除。本回合已有park**放弃**（aborted/cancelled/超时三种出口全记）后，同turn后续调用遇离线直接fail-fast返回ABORTED（`stats["turn_fail_fast"]`记账+log可见），不再叠加等待——旧最坏N×30s干等收敛为**每turn最多一次park**。RESUMED不占预算：恢复续跑后再次遇新断网允许再park（新outage新park，与kilocode"reply后再次错误再ask()"同语义，测试钉住）。
+2. **attach合并（并发共享会话）**：`_ParkSession(wait, outcome, done)`模块级`_active_park`——同turn并发调用attach进进行中的park会话（`await session.done.wait()`共享同一结局），turn整体挂起=一条wait记录+`merged_calls`记合并数；会话结束finally必清（done.set()防悬挂）。
+3. **观测**：`NetworkWait`新增`turn_id`/`merged_calls`字段随`list_waits()`透出；`stats()`新增`turn_fail_fast`计数——既有`/api/network/status`端点自动带出（零改动观测面）。
+4. **语义不变面**：`maybe_park`返回三态契约逐字不变（NOT_OFFLINE/RESUMED/ABORTED），llm_engine三处+llm_transport一处消费点**零改动**；无turn上下文调用（title生成/摘要压缩/discussion等未接线面）保持旧行为=按调用park（回归钉钉住）。
+5. **接线**：soulmate构造器向既有`TurnLifecycleBus`订阅`EVENT_TURN_OPEN→begin_turn(record.turn_id)`/`EVENT_TURN_CLOSE→end_turn()`——`open_turn`（soulmate_agent.py:3078 _prompt_inner真实回合入口）同步触发订阅器，contextvar对本task后续await链/子task继承（真实LLM调用形态），`aclose_turn`三收尾路径（3882正常/2908错误/3279缓存命中）全触发清场。
+**接线位置**（grep证据，文件:行号）：
+- 核心定义：`utils/network_state.py:353 class TurnParkState`、`:364 def begin_turn`、`:369 def end_turn`、`:375 class _ParkSession`、`:453 async def _run_park`、`:228 "turn_fail_fast"`
+- 合并语义消费点：`utils/network_state.py:413`（fail-fast记账）、`:423-430`（attach共享）、`:433-438`（wait记录带turn_id）
+- turn接线：`agent/soulmate_agent.py:305 network_state.begin_turn(record.turn_id)`、`:309 network_state.end_turn()` ← `:3078 open_turn(`/`:3882/:2908/:3279 aclose_turn(`（_prompt_inner真实回合边界）
+- LLM流量面（零改动自动获得合并）：`agent/llm_engine.py:434/:814/:945 network_state.maybe_park`（chat/chat_stream/with_tools三路）、`utils/llm_transport.py:109`（非流式核心）→ `agent/soulmate_agent.py:1762/778/801/898/3948`真实调用面
+**验证结果**：
+- 完整性✅：`git diff --cached --numstat`=3文件+598/-1（network_state +115/-1、soulmate_agent +12、新test 472行），逐hunk核对全为本轮改动（sibling并行会话的settings-client.tsx/locales×3/systemic_test_results.json显式git add白名单排除）；2源文件ast.parse全过；既有行为钉逐项复核：maybe_park三路消费点`==3`+llm_transport`>=1`、`except httpx.TransportError as e:==3`全原值。
+- 集成✅：上述grep链完整（定义→soulmate turn.open/close订阅→open_turn(_prompt_inner:3078)真实回合边界触发→llm_engine/llm_transport四个maybe_park消费点→/api/network/status观测面）；live实锤重启后`curl :8092/api/network/status`返回`"turn_fail_fast":0`新键在场（JSON完整非error）、:8092/health=200、:8095/health=200。
+- 测试✅：新`tests/test_turn_park_merge.py` **22 passed**（①turn上下文4：begin/end设置清除/新turn重置预算/contextvar跨await+子task继承/**TurnLifecycleBus真实open→await链可见→close清除**（soulmate接线机制等价验证）；②fail-fast 7：park放弃后同turn 2次fail-fast零睡眠（sleeps计数零新增=不干等直接证据）/未park不误伤/RESUMED不占预算新outage再park（2记录诚实粒度）/跨turn隔离不误伤新turn/cancel也spent/非断连+端点级故障绕过预算；③attach 3：并发两调用一条记录merged_calls=1/共享aborted结局aborted只记1次/会话结束后不attach；④旧行为回归钉2：无turn上下文按调用park逐字不变/wait记录turn_id字段；⑤LLMEngine集成2：一个turn内3条chat()断网=**1条wait记录+turn_fail_fast≥2**+失败"[LLM错误:"契约不变/无turn上下文旧多记录行为；⑥接线钉3+观测shape 1）；关联回归`test_network_offline_park+test_llm_engine_fallback+test_turn_send_budget+test_llm_retry_policy+test_llm_error_contract+test_llm_transport_core+test_stream_continuation+test_chat_output_protection` **217 passed**零回归（含park三态33测旧契约逐字不变）；acp-proxy全量`tests/` **1397 passed 0 failed**（527.36s，=本轮改动前实测基线1375+22新测）；`systemic_test.py` **29/29 passed**（S1-S6全绿）。
+- **live实锤**（/tmp/turn_park_live_demo.py，真实network_state代码路径+真实asyncio计时，probe桩模拟断网，**12/12过**）：①一个turn 3条调用断网→首条park真实等**2.00s**（MAX_WAIT=2s演示值）超时放弃、第2/3条**0.000s** fail-fast、总等待2.00s（旧=3×2s叠加）、**1条wait记录**（turn_id=demo-turn-1）、turn_fail_fast=2；②新turn新预算照常park 2.00s（不被上turn误伤）；③并发两调用attach共享→1条记录merged_calls=1、总等待2.00s；④无turn上下文两次调用=2条记录（旧行为逐字不变）；日志全程可见"[网络] 本回合已等待过网络…合并park不再重复等待"。
+**服务重启**：`systemctl --user restart acp-proxy-a.service acp-proxy-b.service`→两服务active；:8092/health=200、:8095/health=200、:8092/api/network/status=200含新键turn_fail_fast（opensoul/前端零改动未重启，npm build不适用）。
+**commit**：openmate `d7d0f126`。
+**遗留问题**：
+1. **engine.py/discussion_engine两个turn面未接begin_turn**：`AgentEngine.run_task`全库无生产调用方（grep实证仅定义无实例化）暂不接；discussion_engine的AI群讨论turn无TurnLifecycleBus——群讨论回合内多条LLM调用断网仍按调用park（旧行为）。**下轮候选**：discussion_engine讨论turn接入begin_turn/end_turn（或给它也装turn生命周期）。
+2. **RESUMED后同turn再park=一个turn可2条wait记录**（flappy网络场景，测试钉住为有意语义）：与kilocode"reply后再ask()"一致，但严格"一turn一记录"观感可再收（合并为同turn多episode单记录），待真实流量观察是否常见。
+3. attach跨turn共享未启用（只同turn/无turn上下文attach）：并发跨turn场景（multi_agent子agent独立turn）各自park，量级罕见。
+4. 其余遗留观察项照旧非本轮范围：降级链opt-in待用户配provider凭据（多轮）、llm_call无生产调用方、MCP重连真实Server验证、relay消息级粒度、唤醒触发行agent_message透出、前端视觉走查登录墙、model_gateway/gateway.py:135凭据映射表、HITL网络等待交互卡、环境变量密钥外发误伤面。
+5. ⚠️环境问题仍在（非代码，需用户处理）：LLM供应商余额不足（402 insufficient_balance）。
+6. cron环境约束实录：全量pytest(527s)与systemic_test均background+process wait分段取结果（wait窗口钳180s连续poll）；sibling并行会话共用工作树（settings-client.tsx/locales×3/systemic_test_results.json被改）——commit走显式git add白名单3文件；/tmp demo长文本write_file直落+demo自带12断言全过=字面串无丢字实证。gene skill上报本轮成功（skill_id=skill_5a6f799a385c，success_rate初始0.0属新建正常）。
