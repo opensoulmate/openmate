@@ -13,6 +13,8 @@ import {
   Copy, Terminal, MessageSquare, Bot, Wrench, ArrowLeft,
 } from "lucide-react"
 import { PageLayout } from '@/components/page-layout';
+import { SpanTreeView } from "./span-tree-view"
+import { formatDuration, formatTokens, type SpanNode } from "./span-tree"
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -97,18 +99,6 @@ function getEventColor(type: string): string {
 
 function getEventIcon(type: string): React.ElementType {
   return EVENT_ICONS[type] || Activity
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)}ms`
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
-  return `${Math.round(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`
-}
-
-function formatTokens(n: number): string {
-  if (n < 1000) return String(n)
-  if (n < 1000000) return `${(n / 1000).toFixed(1)}k`
-  return `${(n / 1000000).toFixed(1)}M`
 }
 
 function timeAgo(ts: string): string {
@@ -570,6 +560,12 @@ export function TrajectoryClient() {
   // Fork state
   const [forking, setForking] = useState(false)
 
+  // Span树状态（2026-10-02 P1，Warp orchestration树首落地）：
+  // treeMode默认开=观察面优先（"我都不知道他们在干嘛"），列表一键可回；
+  // traceRoots=GET /sessions/{id}/trace嵌套树（数据单一真源=opensoul get_trace_tree）
+  const [treeMode, setTreeMode] = useState(true)
+  const [traceRoots, setTraceRoots] = useState<SpanNode[] | null>(null)
+
   const replayTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // ── Data Fetching ──────────────────────────────────────────
@@ -628,6 +624,18 @@ export function TrajectoryClient() {
     } catch {}
   }, [apiBase])
 
+  // span树数据：GET /sessions/{id}/trace（opensoul get_trace_tree嵌套+rollup，
+  // 环防护/悬空父提升root都在服务端——前端不重复建树防双实现漂移）
+  const fetchTrace = useCallback(async (sessionId: string) => {
+    try {
+      const r = await fetch(`${apiBase}/api/trajectory/sessions/${sessionId}/trace`)
+      if (r.ok) {
+        const d = await r.json()
+        setTraceRoots(d.roots || [])
+      }
+    } catch {}
+  }, [apiBase])
+
   useEffect(() => {
     fetchStats()
     fetchSessions()
@@ -673,8 +681,10 @@ export function TrajectoryClient() {
     setReplayMode(false)
     setReplayPlaying(false)
     setReplayIdx(0)
+    setTraceRoots(null)  // 清上一棵树（防切换会话闪现旧树）
     fetchEvents(id)
-  }, [fetchEvents])
+    fetchTrace(id)
+  }, [fetchEvents, fetchTrace])
 
   // ── Fork ───────────────────────────────────────────────────
 
@@ -1054,6 +1064,20 @@ export function TrajectoryClient() {
                 >
                   <GitBranch size={12} /> {forking ? t("trajectory.forking") : t("trajectory.fork")}
                 </button>
+                {/* span树/列表切换（Warp orchestration树，2026-10-02 P1）——
+                    切树关回放（两种检视模式互斥，回放吃扁平事件序） */}
+                <button
+                  onClick={() => { setReplayMode(false); setReplayPlaying(false); setTreeMode(!treeMode) }}
+                  style={{
+                    padding: "5px 12px", borderRadius: 6, fontSize: 12,
+                    border: `1px solid ${treeMode ? "hsl(var(--primary))" : "hsl(var(--border))"}`,
+                    background: treeMode ? "hsl(var(--primary) / 0.1)" : "transparent",
+                    color: treeMode ? "hsl(var(--primary))" : "hsl(var(--muted-foreground))",
+                    cursor: "pointer", display: "flex", alignItems: "center", gap: 4,
+                  }}
+                >
+                  <Layers size={12} /> {treeMode ? t("trajectory.listView") : t("trajectory.treeView")}
+                </button>
                 <div style={{
                   marginLeft: "auto", fontSize: 12, color: "hsl(var(--muted-foreground))",
                   display: "flex", alignItems: "center", gap: 8,
@@ -1099,8 +1123,16 @@ export function TrajectoryClient() {
               </div>
             )}
 
-            {/* Events */}
-            {displayEvents.length === 0 ? (
+            {/* Events — span树优先（treeMode且trace数据在场且非回放/搜索），
+                否则原有扁平事件列表逐字不变 */}
+            {view === "detail" && treeMode && !replayMode && traceRoots && traceRoots.length > 0 ? (
+              <SpanTreeView
+                key={selectedSession}
+                roots={traceRoots}
+                getEventColor={getEventColor}
+                getEventIcon={getEventIcon}
+              />
+            ) : displayEvents.length === 0 ? (
               <div style={{
                 textAlign: "center", padding: 40, color: "hsl(var(--muted-foreground))",
               }}>

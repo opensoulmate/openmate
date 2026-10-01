@@ -3400,7 +3400,11 @@
     "loadingAnalytics": "加载分析数据...",
     "tok": "token",
     "justNow": "刚刚",
-    "tool": "工具"
+    "tool": "工具",
+    "allSpans": "全部 Span",
+    "treeView": "Span树",
+    "listView": "列表",
+    "treeHint": "点击行下钻聚焦子树，点击面包屑返回上层"
   },
   "diagnostics": {
     "title": "系统诊断",

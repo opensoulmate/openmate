@@ -3398,7 +3398,11 @@
     "loadingAnalytics": "分析データを読み込み中...",
     "tok": "トークン",
     "justNow": "たった今",
-    "tool": "ツール"
+    "tool": "ツール",
+    "allSpans": "すべてのSpan",
+    "treeView": "Spanツリー",
+    "listView": "リスト",
+    "treeHint": "行をクリックしてサブツリーにドリルダウン、パンくずで上層に戻る"
   },
   "diagnostics": {
     "title": "システム診断",

@@ -3395,7 +3395,11 @@
     "loadingAnalytics": "Loading analytics...",
     "tok": "tok",
     "justNow": "just now",
-    "tool": "Tool"
+    "tool": "Tool",
+    "allSpans": "All spans",
+    "treeView": "Span tree",
+    "listView": "List",
+    "treeHint": "Click a row to drill into its subtree; click a breadcrumb to go back"
   },
   "diagnostics": {
     "title": "System Diagnostics",
