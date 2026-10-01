@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from uuid import uuid4
 
 from agent.llm_engine import LLMEngine
+from utils import network_state  # turn级park合并：讨论turn接入park预算
 
 logger = logging.getLogger("acp-proxy.discussion-engine")
 
@@ -197,6 +198,12 @@ class DiscussionOrchestrator:
             start_time=time.time(),
         )
         self._active_discussions[task.task_id] = state
+
+        # ── turn级park合并（kilocode "park整个turn"）：一个讨论任务=一次ask→
+        # 最终reply的完整turn。turn预算随contextvar传递到每条LLM调用
+        # （run→_get_agent_response→wait_for子task→chat_stream→maybe_park）：
+        # 断网时整个讨论最多park一次，不叠加N×MAX_WAIT_S干等。
+        network_state.begin_turn(f"discussion:{task.task_id}")
 
         try:
             # 广播讨论开始通知
@@ -382,7 +389,8 @@ class DiscussionOrchestrator:
                 },
             })
         finally:
-            # 清理状态
+            # 清理状态（turn上下文必清：讨论task结束=turn结束，无上下文=旧行为）
+            network_state.end_turn()
             state.is_running = False
             self._active_discussions.pop(task.task_id, None)
             logger.info(f"[完成] 讨论 {task.task_id} 已结束")

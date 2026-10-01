@@ -346,8 +346,9 @@ async def _run_restore_callbacks() -> None:
 #    ABORTED——turn已等待过一次，再叠加等待只会把可见失败拖长N倍；
 # 3. park恢复续跑（RESUMED）后再次遇新断网允许再park（新outage新park，
 #    RESUMED不占turn预算）——与kilocode "reply后再次错误再ask()"同语义。
-# 无turn上下文的调用（title生成/摘要压缩/discussion）保持旧行为=按调用park。
-# 接线：soulmate TurnLifecycleBus turn.open→begin_turn / turn.close→end_turn。
+# 无turn上下文的调用（title生成/摘要压缩）保持旧行为=按调用park。
+# 接线：soulmate TurnLifecycleBus turn.open→begin_turn / turn.close→end_turn；
+#       discussion_engine讨论task=一个turn（run()入口begin_turn/finally end_turn）。
 
 @dataclass
 class TurnParkState:
