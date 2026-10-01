@@ -3,7 +3,7 @@ import MarkdownContent from "@/components/markdown-content";
 import { SecretScanBadge } from "@/components/secret-scan-badge";
 import { MemoryMarkerBadge, type MemoryMarker } from "@/components/memory-marker-badge";
 import { MultiFileDiff, type FileChange } from "@/components/multi-file-diff";
-import { TaskChoiceMenu, type ChoiceOption } from "@/components/task-choice-menu";
+import { TaskChoiceMenu, type ChoiceOption, type ChoiceQuestion } from "@/components/task-choice-menu";
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useAppStore } from '@/stores/app-store';
 import { Send, Bot, User, Loader2, Paperclip, X, Wifi, WifiOff, FileText, Image as ImageIcon, Info, ChevronDown, ChevronLeft, ChevronRight, Plus, Bookmark, RotateCcw, Zap, Brain, PanelLeft, Copy, ThumbsUp, ThumbsDown, Share2, RefreshCw, MoreHorizontal, Volume2, MessageSquare, FolderOpen, Video, Music, Link2, CalendarDays, LocateFixed } from "lucide-react";
@@ -43,7 +43,7 @@ const getAcpProxyUrl = () => {
 };
 const getAcpWsUrl = () => getAcpProxyUrl().replace('http', 'ws');
 
-interface MessagePart { type: string; text?: string; data?: string; name?: string; mime_type?: string; url?: string; choices?: ChoiceOption[]; }
+interface MessagePart { type: string; text?: string; data?: string; name?: string; mime_type?: string; url?: string; choices?: ChoiceOption[]; questions?: ChoiceQuestion[]; }
 interface TokenUsage { input: number; output: number; }
 
 /** 思考过程块 —— 用于存储 Agent 推理链/内心独白的流式文本 */
@@ -367,12 +367,12 @@ function useAcpWebSocket(params: {
     // 检测 choice 类型的结构化消息
     try {
       const parsed = JSON.parse(text);
-      if (parsed.type === 'choice' && parsed.choices) {
+      if (parsed.type === 'choice' && (parsed.choices || parsed.questions)) {
         updateSessionMessages(targetSessionId, prev => {
           return [...prev, {
             id: Date.now().toString(),
             role: 'agent',
-            parts: [{ type: 'choice', text: parsed.text, choices: parsed.choices }],
+            parts: [{ type: 'choice', text: parsed.text, choices: parsed.choices, questions: parsed.questions }],
             timestamp: new Date(),
           }];
         });
@@ -2502,15 +2502,21 @@ export function ChatClient() {
                     }} />}
                     {p.type === 'text' && msg.role === 'agent' && <SecretScanBadge text={p.text || ''} minRisk="high" />}
                     {p.type === 'image' && p.data && <img src={`data:${p.mime_type || 'image/png'};base64,${p.data}`} alt={p.name || 'image'} className="max-w-xs w-auto max-h-64 rounded-lg mt-1 object-contain" />}
-                    {p.type === 'choice' && p.choices && (
+                    {p.type === 'choice' && (p.choices || p.questions) && (
                       <TaskChoiceMenu
                         question={p.text || "请选择："}
-                        options={p.choices}
+                        options={p.choices || []}
+                        questions={p.questions}
                         onSelect={(id, label) => {
                           const send = (window as any).__openmate_send__;
                           if (send) send(label);
                         }}
                         onCustomSubmit={(text) => {
+                          const send = (window as any).__openmate_send__;
+                          if (send) send(text);
+                        }}
+                        onSubmitAnswers={(text) => {
+                          // P1多问题/多选：一次提交全部作答（格式=每行『问题：选项』）
                           const send = (window as any).__openmate_send__;
                           if (send) send(text);
                         }}

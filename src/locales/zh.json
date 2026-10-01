@@ -5435,6 +5435,13 @@
     "revealSecretsTip": "显示敏感数据（默认已遮蔽）",
     "maskSecretsTip": "重新遮蔽敏感数据"
   },
+  "askUser": {
+    "multiHint": "多个问题请一次作答后提交",
+    "multiTag": "可多选",
+    "submit": "提交全部作答",
+    "submitted": "已提交作答",
+    "customPlaceholder": "或输入自定义内容..."
+  },
   "networkWait": {
     "title": "等待网络恢复",
     "waiting": "网络中断，正在等待恢复…",

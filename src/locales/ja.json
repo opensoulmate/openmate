@@ -5323,6 +5323,13 @@
     "revealSecretsTip": "機密データを表示（デフォルトでマスク）",
     "maskSecretsTip": "機密データを再マスク"
   },
+  "askUser": {
+    "multiHint": "すべての質問に答えてから一括送信してください",
+    "multiTag": "複数選択可",
+    "submit": "回答を送信",
+    "submitted": "回答を送信しました",
+    "customPlaceholder": "またはカスタム入力..."
+  },
   "networkWait": {
     "title": "ネットワーク復旧待ち",
     "waiting": "ネットワークが切断されました。復旧を待機中…",

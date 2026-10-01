@@ -5427,6 +5427,13 @@
     "revealSecretsTip": "Show sensitive data (masked by default)",
     "maskSecretsTip": "Re-mask sensitive data"
   },
+  "askUser": {
+    "multiHint": "Answer all questions, then submit once",
+    "multiTag": "Multi-select",
+    "submit": "Submit answers",
+    "submitted": "Answers submitted",
+    "customPlaceholder": "Or type a custom answer..."
+  },
   "networkWait": {
     "title": "Waiting for network",
     "waiting": "Network disconnected, waiting to resume…",

@@ -1593,18 +1593,18 @@ You can send files to the user natively: to deliver a file, write a brief confir
         evolution_tools = []
         has_evolution = self._evolution_engine is not None or hasattr(self, '_evolution_api_url')
 
-        # clarify 工具 — 弹出选择菜单让用户确认方向
+        # clarify 工具 — 弹出交互式提问卡让用户确认方向（P1多问题/多选：Warp AskUserQuestion）
         clarify_tool = {
             "type": "function",
             "function": {
                 "name": "clarify",
-                "description": "当任务复杂、有多种可能的理解方式时，弹出选择菜单让用户确认方向。用户选择后你会收到选择结果作为下一条消息。",
+                "description": "当任务复杂、有多种可能的理解方式时，弹出交互式提问卡让用户确认。两种形态：①单问题=question+options；②多问题/多选=questions（1-5问一次作答，multi=true可多选，allow_custom=true允许用户自定义作答）。用户作答后你会收到作答文本作为工具结果（多问格式：每行『问题：选项A、选项B』）。",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "question": {
                             "type": "string",
-                            "description": "要问用户的问题",
+                            "description": "要问用户的问题（多问题形态时作为提问卡标题，可留空）",
                         },
                         "options": {
                             "type": "array",
@@ -1617,10 +1617,37 @@ You can send files to the user natively: to deliver a file, write a brief confir
                                 },
                                 "required": ["id", "label"],
                             },
-                            "description": "2-8个选项",
+                            "description": "2-8个选项（单问题形态）",
+                        },
+                        "questions": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {"type": "string"},
+                                    "question": {"type": "string"},
+                                    "options": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": {"type": "string"},
+                                                "label": {"type": "string"},
+                                                "description": {"type": "string"},
+                                            },
+                                            "required": ["id", "label"],
+                                        },
+                                        "description": "2-8个选项",
+                                    },
+                                    "multi": {"type": "boolean", "description": "true=可多选（复选框），默认false单选"},
+                                    "allow_custom": {"type": "boolean", "description": "true=允许用户自定义作答，默认false"},
+                                },
+                                "required": ["question", "options"],
+                            },
+                            "description": "多问题形态：1-5个问题在一张卡上一次作答",
                         },
                     },
-                    "required": ["question", "options"],
+                    "required": ["question"],
                 },
             },
         }
@@ -2247,32 +2274,9 @@ You can send files to the user natively: to deliver a file, write a brief confir
                                 result = f"读取图片失败: {e}"
 
                         elif func_name == "clarify":
-                            try:
-                                question = func_args.get("question", "")
-                                options = func_args.get("options", [])
-                                # 通过 session_update 推送 choice 类型消息给前端
-                                if self._client is not None:
-                                    choice_payload = {
-                                        "type": "choice",
-                                        "text": question,
-                                        "choices": [{"id": o.get("id", ""), "label": o.get("label", ""), "description": o.get("description", "")} for o in options]
-                                    }
-                                    await self._client.session_update(
-                                        session_id=session_id,
-                                        update=acp.update_agent_message_text(json.dumps(choice_payload)),
-                                    )
-                                result = f"已向用户展示选择菜单: {question} (共{len(options)}个选项，等待用户选择)"
-                                # 等待用户选择（最多60秒）
-                                future = asyncio.get_event_loop().create_future()
-                                self._pending_choices[session_id] = future
-                                try:
-                                    result = await asyncio.wait_for(future, timeout=60)
-                                except asyncio.TimeoutError:
-                                    result = "用户未在60秒内选择，请继续"
-                                finally:
-                                    self._pending_choices.pop(session_id, None)
-                            except Exception as e:
-                                result = f"clarify失败: {e}"
+                            # P1交互式提问卡（多问题/多选）：handler收口为_handle_clarify方法
+                            # （可单测），单问题/多问题两形态共用同一pending_choices回流通道
+                            result = await self._handle_clarify(session_id, func_args)
 
                         elif func_name == "todo":
                             # 简单的内存任务列表
@@ -3892,6 +3896,94 @@ You can send files to the user natively: to deliver a file, write a brief confir
         self._turn_read_view.clear(session_id)
 
         return PromptResponse(stop_reason="end_turn")
+
+    # ── clarify 交互式提问卡（P1多问题/多选：Warp AskUserQuestion + Dify表单形态）──
+    # 单问题形态 payload={"type":"choice","text":question,"choices":[…]}（旧契约逐字不变）；
+    # 多问题形态 payload={"type":"choice","text":title,"questions":[{id,question,options,multi,allow_custom}]}，
+    # 前端 TaskChoiceMenu 渲染多问表单（multi=复选框/单选钮），一次提交全部作答，
+    # 作答文本格式=每行「问题：选项A、选项B」（可含（自定义）前缀段），经同一
+    # pending_choices 闸门回流（resolve_choice），LLM 拿到的工具结果即作答文本。
+    CLARIFY_WAIT_TIMEOUT_S = 60.0  # 等待用户作答上限（测试可覆写）
+
+    def _build_clarify_payload(self, func_args: dict) -> tuple[dict | None, str]:
+        """校验clarify参数并构建提问卡payload。
+
+        返回 (payload, error)：error非空=参数错误（调用方必须把error作为工具结果
+        可见返回，不许静默吞）。questions非空走多问题形态（1-5问、每问2-8有效选项），
+        否则走单问题旧形态（契约逐字不变，不加新校验防回归）。
+        """
+        questions = func_args.get("questions") or []
+        question = str(func_args.get("question", "") or "")
+        options = func_args.get("options", [])
+
+        def _clean_opts(opts) -> list[dict]:
+            out = []
+            for o in opts:
+                if not isinstance(o, dict):
+                    return []
+                out.append({"id": o.get("id", ""), "label": o.get("label", ""), "description": o.get("description", "")})
+            return out
+
+        if questions:
+            if not isinstance(questions, list) or not (1 <= len(questions) <= 5):
+                return None, "clarify参数错误：questions 需为1-5个问题"
+            q_items = []
+            for i, q in enumerate(questions):
+                if not isinstance(q, dict):
+                    return None, f"clarify参数错误：questions[{i}] 不是对象"
+                q_text = str(q.get("question", "") or "").strip()
+                q_opts = [o for o in _clean_opts(q.get("options") or [])
+                          if str(o.get("id", "")).strip() and str(o.get("label", "")).strip()]
+                if not q_text:
+                    return None, f"clarify参数错误：questions[{i}].question 必填"
+                if not (2 <= len(q_opts) <= 8):
+                    return None, f"clarify参数错误：questions[{i}].options 需2-8个有效选项（id+label必填）"
+                q_items.append({
+                    "id": str(q.get("id") or f"q{i + 1}"),
+                    "question": q_text,
+                    "options": q_opts,
+                    "multi": bool(q.get("multi", False)),
+                    "allow_custom": bool(q.get("allow_custom", False)),
+                })
+            title = question.strip() or "请回答以下问题："
+            return {"type": "choice", "text": title, "questions": q_items}, ""
+        # 单问题旧形态：逐字保留旧payload构建（空question/空choices也可展示，不新增校验）
+        return {
+            "type": "choice",
+            "text": question,
+            "choices": _clean_opts(options),
+        }, ""
+
+    async def _handle_clarify(self, session_id: str, func_args: dict) -> str:
+        """clarify工具执行面：推提问卡给前端 + 等待用户作答（pending_choices回流）。"""
+        try:
+            payload, err = self._build_clarify_payload(func_args)
+            if err or payload is None:
+                return err or "clarify参数错误"
+            # 通过 session_update 推送 choice 类型消息给前端
+            if self._client is not None:
+                await self._client.session_update(
+                    session_id=session_id,
+                    update=acp.update_agent_message_text(json.dumps(payload)),
+                )
+            if "questions" in payload:
+                result = (f"已向用户展示提问卡: {payload['text']} "
+                          f"(共{len(payload['questions'])}个问题，等待用户作答)")
+            else:
+                options = payload.get("choices", [])
+                result = f"已向用户展示选择菜单: {payload['text']} (共{len(options)}个选项，等待用户选择)"
+            # 等待用户作答（上限 CLARIFY_WAIT_TIMEOUT_S）
+            future = asyncio.get_event_loop().create_future()
+            self._pending_choices[session_id] = future
+            try:
+                result = await asyncio.wait_for(future, timeout=self.CLARIFY_WAIT_TIMEOUT_S)
+            except asyncio.TimeoutError:
+                result = f"用户未在{int(self.CLARIFY_WAIT_TIMEOUT_S)}秒内选择，请继续"
+            finally:
+                self._pending_choices.pop(session_id, None)
+            return result
+        except Exception as e:
+            return f"clarify失败: {e}"
 
     def resolve_choice(self, session_id: str, choice_result: str) -> bool:
         """用户选择后调用，唤醒等待中的clarify工具
