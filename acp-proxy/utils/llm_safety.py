@@ -17,6 +17,39 @@ logger = logging.getLogger(__name__)
 MAX_CONTINUATION = 3  # 最大续写次数
 MAX_OUTPUT_TOKENS = 4096  # 单次输出token上限
 MAX_TOOL_OUTPUT_CHARS = 8000  # 工具输出字符上限
+MAX_TURN_SENDS = 8  # 逻辑回合HTTP发送硬顶（续写×重试联合封顶）
+
+
+class TurnSendBudget:
+    """逻辑回合HTTP发送预算 — 续写×重试联合封顶（单一真源）
+
+    问题（2026-10-01销账多轮挂账项）：续写（最多MAX_CONTINUATION+1段）与HTTP重试
+    （每段MAX_ATTEMPTS发）此前各自独立计数、互不知情——4段×3发=理论12发/逻辑回合
+    无联合上界，极端截断+限流一轮可狂发十余个HTTP请求（latency与配额双杀）。
+
+    语义：每次真实HTTP发送前扣1（spend()），余额不足返回False=调用方不得再发送，
+    显式失败/显式截断标记（AIHawk"截断必须显式标记"），不静默不多发。预算对象随
+    递归线程传递（与_chain同款）：一次chat_stream*/chat()调用=一个逻辑回合=一个
+    预算实例，重试/续写/降级链切换共享同一额度。
+
+    参照：kilocode Truncate服务双限（行数/字节）封顶语义 + AIHawk SHOWN/SENT
+    双预算（截断必须显式标记）。
+    """
+
+    def __init__(self, limit: int = MAX_TURN_SENDS):
+        self.limit = limit
+        self.spent = 0
+
+    def spend(self) -> bool:
+        """扣1发；余额不足返回False且不扣减（调用方不得再发HTTP请求）"""
+        if self.spent >= self.limit:
+            return False
+        self.spent += 1
+        return True
+
+    @property
+    def remaining(self) -> int:
+        return self.limit - self.spent
 
 
 # ── Omission占位符检测（Gemini CLI方案）────────────────

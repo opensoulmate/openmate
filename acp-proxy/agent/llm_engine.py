@@ -15,6 +15,7 @@ from utils.llm_config import describe, resolve_agent_llm_config
 # 裸奔（finish_reason=length静默截断、omission占位符照单全收）
 from utils.llm_safety import (
     MAX_CONTINUATION,
+    TurnSendBudget,
     build_continuation_messages,
     check_finish_reason,
     check_omission,
@@ -200,7 +201,8 @@ class LLMEngine:
     async def chat_stream(
         self, messages: list[dict], cancel_event: Optional[asyncio.Event] = None,
         system_prompt: Optional[str] = None, _continuation_depth: int = 0,
-        _retry_count: int = 0, _chain: Optional[FallbackChain] = None
+        _retry_count: int = 0, _chain: Optional[FallbackChain] = None,
+        _budget: Optional[TurnSendBudget] = None,
     ) -> AsyncGenerator[str, None]:
         """流式输出LLM响应 — 每个yield是一个纯文本delta片段
 
@@ -217,12 +219,18 @@ class LLMEngine:
         （已流出内容重试=双份回复，不重试走原失败契约），400/401等fail-fast。
         接线前chat_stream零HTTP重试，瞬时限流直接"[LLM错误: …]"掐断真实回复。
 
+        续写×重试联合封顶（utils.llm_safety.TurnSendBudget单一真源，2026-10-01）：
+        续写（最多MAX_CONTINUATION+1段）与HTTP重试（每段MAX_ATTEMPTS发）共享同一
+        逻辑回合发送预算（MAX_TURN_SENDS发硬顶），余额用尽=显式失败/显式截断标记，
+        不静默不多发（此前理论12发/回合无联合上界）。
+
         Args:
             messages: 对话历史（不含system提示词，会自动注入）
             cancel_event: 取消信号，设置后停止流式输出
             system_prompt: 自定义system提示词，None时使用默认
             _continuation_depth: 续写递归深度（内部参数，外部调用方勿传）
             _retry_count: HTTP重试递归计数（内部参数，外部调用方勿传）
+            _budget: 逻辑回合发送预算（内部参数，外部调用方勿传）
         """
         # 通过router解析模型（无router时返回固定配置）
         resolved_model, resolved_base_url, resolved_api_key = self._resolve_model(messages)
@@ -238,6 +246,10 @@ class LLMEngine:
             resolved_model = chain.current.model
             resolved_base_url = chain.current.base_url
             resolved_api_key = chain.current.api_key
+
+        # 续写×重试联合发送预算（utils.llm_safety.TurnSendBudget单一真源）：
+        # 随重试/续写/降级链切换递归线程传递，一次调用=一个逻辑回合=一个预算
+        budget = _budget if _budget is not None else TurnSendBudget()
 
         # 使用解析后的配置创建客户端
         client = httpx.AsyncClient(
@@ -261,6 +273,10 @@ class LLMEngine:
         _last_finish: str | None = None
         try:
             async with client:
+                if not budget.spend():
+                    logger.warning("[LLM] 续写×重试联合发送预算已用尽，不再发送")
+                    yield "\n[LLM错误: 本回合HTTP发送预算已用尽（续写×重试联合封顶）]"
+                    return
                 req = client.build_request("POST", "/chat/completions", json=payload)
                 response = await client.send(req, stream=True)
                 try:
@@ -276,7 +292,7 @@ class LLMEngine:
                                 messages, cancel_event, system_prompt,
                                 _continuation_depth=_continuation_depth,
                                 _retry_count=_retry_count,
-                                _chain=chain,
+                                _chain=chain, _budget=budget,
                             ):
                                 yield _c
                             return
@@ -292,7 +308,7 @@ class LLMEngine:
                         # link再试；切换进来的link只给1发（_retry_count=MAX_ATTEMPTS-1，
                         # plan_*预算见底=首败即换，CowAgent link_retries=0）
                         _summary = f"LLM HTTP {response.status_code}: {_err}"
-                        if chain.try_advance(
+                        if budget.remaining > 0 and chain.try_advance(
                             _summary, retry_planned=(_wait is not None),
                             status=response.status_code,
                         ):
@@ -300,11 +316,11 @@ class LLMEngine:
                                 messages, cancel_event, system_prompt,
                                 _continuation_depth=_continuation_depth,
                                 _retry_count=MAX_ATTEMPTS - 1,
-                                _chain=chain,
+                                _chain=chain, _budget=budget,
                             ):
                                 yield _c
                             return
-                        if _wait is not None:
+                        if _wait is not None and budget.remaining > 0:
                             # 429/408/5xx可重试（utils.llm_retry单一真源，kilocode）：
                             # 有头听头（Retry-After三格式），无头指数退避——接线前
                             # chat_stream零HTTP重试，瞬时限流直接"[LLM错误: …]"掐断
@@ -318,7 +334,7 @@ class LLMEngine:
                                 messages, cancel_event, system_prompt,
                                 _continuation_depth=_continuation_depth,
                                 _retry_count=_retry_count + 1,
-                                _chain=chain,
+                                _chain=chain, _budget=budget,
                             ):
                                 yield _c
                             return
@@ -387,7 +403,8 @@ class LLMEngine:
                     self.last_usage = latest_usage
                     _segment_text = "".join(_segment_parts)
                     if _last_finish == "length" and not (cancel_event and cancel_event.is_set()):
-                        if _segment_text.strip() and _continuation_depth < MAX_CONTINUATION:
+                        if (_segment_text.strip() and _continuation_depth < MAX_CONTINUATION
+                                and budget.remaining > 0):
                             logger.warning(
                                 f"[LLM] 流式finish_reason=length截断，自动续写 "
                                 f"(attempt {_continuation_depth+1}/{MAX_CONTINUATION})"
@@ -396,9 +413,14 @@ class LLMEngine:
                                 build_continuation_messages(messages, _segment_text),
                                 cancel_event, system_prompt,
                                 _continuation_depth=_continuation_depth + 1,
-                                _chain=chain,
+                                _chain=chain, _budget=budget,
                             ):
                                 yield _c
+                        elif _segment_text.strip() and _continuation_depth < MAX_CONTINUATION:
+                            # 续写×重试联合发送预算用尽（utils.llm_safety.TurnSendBudget）：
+                            # 显式截断标记，不静默半截收尾（AIHawk"截断必须显式标记"）
+                            logger.warning("[LLM] 续写×重试联合发送预算已用尽，输出可能仍不完整")
+                            yield "\n\n[输出因max_tokens截断，本回合发送预算已用尽]"
                         else:
                             logger.warning("[LLM] 流式续写次数用尽/空段，输出可能仍不完整")
                             yield "\n\n[输出因max_tokens截断，续写次数已用尽]"
@@ -418,7 +440,7 @@ class LLMEngine:
             # 降级链切换决策单点（CowAgent，2026-09-30）：瞬时错误先同link重试，
             # 重试已放弃才换link；has_output=True永不切换（防双份回复）
             _summary = f"{e.__class__.__name__}: {e}"
-            if chain.try_advance(
+            if budget.remaining > 0 and chain.try_advance(
                 _summary, retry_planned=(_wait is not None),
                 has_output=bool(_segment_parts),
             ):
@@ -426,11 +448,11 @@ class LLMEngine:
                     messages, cancel_event, system_prompt,
                     _continuation_depth=_continuation_depth,
                     _retry_count=MAX_ATTEMPTS - 1,
-                    _chain=chain,
+                    _chain=chain, _budget=budget,
                 ):
                     yield _c
                 return
-            if _wait is not None:
+            if _wait is not None and budget.remaining > 0:
                 logger.warning(
                     f"[LLM] 传输错误{e.__class__.__name__}，{_wait:.1f}s后重试 "
                     f"({_retry_count+1}/{MAX_ATTEMPTS})"
@@ -440,7 +462,7 @@ class LLMEngine:
                     messages, cancel_event, system_prompt,
                     _continuation_depth=_continuation_depth,
                     _retry_count=_retry_count + 1,
-                    _chain=chain,
+                    _chain=chain, _budget=budget,
                 ):
                     yield _c
                 return
@@ -469,6 +491,7 @@ class LLMEngine:
         _continuation_depth: int = 0,
         _chain: Optional[FallbackChain] = None,
         _retry_count: int = 0,
+        _budget: Optional[TurnSendBudget] = None,
     ) -> AsyncGenerator[str | dict, None]:
         """流式输出LLM响应 — 支持function calling工具调用
 
@@ -511,6 +534,10 @@ class LLMEngine:
             resolved_base_url = chain.current.base_url
             resolved_api_key = chain.current.api_key
 
+        # 续写×重试联合发送预算（utils.llm_safety.TurnSendBudget单一真源）：
+        # 随重试/续写/降级链切换递归线程传递，一次调用=一个逻辑回合=一个预算
+        budget = _budget if _budget is not None else TurnSendBudget()
+
         # 使用解析后的配置创建客户端
         client = httpx.AsyncClient(
             base_url=resolved_base_url,
@@ -552,6 +579,10 @@ class LLMEngine:
                     timeout=httpx.Timeout(connect=10, read=120, write=10, pool=10),
                 )
                 async with client:
+                    if not budget.spend():
+                        logger.warning("[LLM] 续写×重试联合发送预算已用尽，不再发送")
+                        yield "\n[LLM错误: 本回合HTTP发送预算已用尽（续写×重试联合封顶）]"
+                        return
                     req = client.build_request("POST", "/chat/completions", json=payload)
                     response = await client.send(req, stream=True)
                     try:
@@ -574,11 +605,11 @@ class LLMEngine:
                                 # （任何link失败都换，llm_transport"402不可重试也换link"
                                 # 同款），链上没备胎才fail-fast
                                 _summary = f"LLM HTTP {response.status_code}: {error_msg}"
-                                if chain.try_advance(_summary, retry_planned=False, status=response.status_code):
+                                if budget.remaining > 0 and chain.try_advance(_summary, retry_planned=False, status=response.status_code):
                                     async for _c in self.chat_stream_with_tools(
                                         messages, tools, cancel_event, system_prompt,
                                         _continuation_depth=_continuation_depth,
-                                        _chain=chain, _retry_count=MAX_ATTEMPTS - 1,
+                                        _chain=chain, _budget=budget, _retry_count=MAX_ATTEMPTS - 1,
                                     ):
                                         yield _c
                                     return
@@ -597,18 +628,18 @@ class LLMEngine:
                             # 降级链切换决策单点（CowAgent，2026-09-30）：429+有备胎
                             # 立即切（switch_now不干等）/重试已放弃换link
                             _summary = f"LLM HTTP {response.status_code}: {error_msg}"
-                            if chain.try_advance(
+                            if budget.remaining > 0 and chain.try_advance(
                                 _summary, retry_planned=(_wait is not None),
                                 status=response.status_code,
                             ):
                                 async for _c in self.chat_stream_with_tools(
                                     messages, tools, cancel_event, system_prompt,
                                     _continuation_depth=_continuation_depth,
-                                    _chain=chain, _retry_count=MAX_ATTEMPTS - 1,
+                                    _chain=chain, _budget=budget, _retry_count=MAX_ATTEMPTS - 1,
                                 ):
                                     yield _c
                                 return
-                            if _wait is not None:
+                            if _wait is not None and budget.remaining > 0:
                                 # 有头听头：Retry-After三格式（ms头/秒数/HTTP date），
                                 # 无头才指数退避2s×2^n封顶30s（旧固定2**_retry不听头）
                                 logger.warning(
@@ -741,7 +772,8 @@ class LLMEngine:
                                 and _last_finish == "length"
                                 and not (cancel_event and cancel_event.is_set())):
                             _seg = "".join(_segment_parts)
-                            if _seg.strip() and _continuation_depth < MAX_CONTINUATION:
+                            if (_seg.strip() and _continuation_depth < MAX_CONTINUATION
+                                    and budget.remaining > 0):
                                 logger.warning(
                                     f"[LLM] 流式finish_reason=length纯文本截断，自动续写 "
                                     f"(attempt {_continuation_depth+1}/{MAX_CONTINUATION})"
@@ -750,12 +782,18 @@ class LLMEngine:
                                     build_continuation_messages(messages, _seg),
                                     tools, cancel_event, system_prompt,
                                     _continuation_depth=_continuation_depth + 1,
-                                    _chain=chain,
+                                    _chain=chain, _budget=budget,
                                 ):
                                     yield _c
                                 return
-                            logger.warning("[LLM] 流式续写次数用尽/空段，输出可能仍不完整")
-                            yield "\n\n[输出因max_tokens截断，续写次数已用尽]"
+                            if _seg.strip() and _continuation_depth < MAX_CONTINUATION:
+                                # 续写×重试联合发送预算用尽（utils.llm_safety.TurnSendBudget）：
+                                # 显式截断标记，不静默半截收尾（AIHawk"截断必须显式标记"）
+                                logger.warning("[LLM] 续写×重试联合发送预算已用尽，输出可能仍不完整")
+                                yield "\n\n[输出因max_tokens截断，本回合发送预算已用尽]"
+                            else:
+                                logger.warning("[LLM] 流式续写次数用尽/空段，输出可能仍不完整")
+                                yield "\n\n[输出因max_tokens截断，续写次数已用尽]"
                         if latest_usage:
                             yield {"usage": latest_usage}
                         if _final_tc_payload is not None:
@@ -786,17 +824,17 @@ class LLMEngine:
                 # 降级链切换决策单点（CowAgent，2026-09-30）：瞬时错误先同link重试，
                 # 重试已放弃才换link；has_output=True永不切换（防双份回复/状态污染）
                 _summary = f"{e.__class__.__name__}: {e}"
-                if chain.try_advance(
+                if budget.remaining > 0 and chain.try_advance(
                     _summary, retry_planned=(_wait is not None), has_output=_has_out,
                 ):
                     async for _c in self.chat_stream_with_tools(
                         messages, tools, cancel_event, system_prompt,
                         _continuation_depth=_continuation_depth,
-                        _chain=chain, _retry_count=MAX_ATTEMPTS - 1,
+                        _chain=chain, _budget=budget, _retry_count=MAX_ATTEMPTS - 1,
                     ):
                         yield _c
                     return
-                if _wait is not None:
+                if _wait is not None and budget.remaining > 0:
                     logger.warning(
                         f"[LLM] 传输错误{e.__class__.__name__}，{_wait:.1f}s后重试 "
                         f"({_retry+1}/{MAX_ATTEMPTS})"
@@ -833,7 +871,9 @@ class LLMEngine:
                 logger.error(f"LLM stream error: {e}", exc_info=True)
                 yield f"\n[LLM错误: {e}]"
 
-    async def chat(self, messages: list[dict]) -> str:
+    async def chat(
+        self, messages: list[dict], _budget: Optional[TurnSendBudget] = None,
+    ) -> str:
         """非流式完整输出 — 等待完整响应后返回（带输出防护）
 
         如果启用了ModelRouter，会根据prompt动态选择最优模型。
@@ -843,6 +883,9 @@ class LLMEngine:
         1. finish_reason=length自动续写（Aider方案，最多MAX_CONTINUATION次，
            各段拼接返回——此前静默截断，judge JSON/计划/摘要半截即废）
         2. omission占位符检测+整体重新生成（Gemini CLI方案）
+        续写×重试联合封顶（utils.llm_safety.TurnSendBudget单一真源，2026-10-01）：
+        续写/重发轮与HTTP重试共享同一逻辑回合发送预算（MAX_TURN_SENDS发硬顶），
+        余额用尽=返回已累积输出（log显式警告）或可见失败，不静默不多发。
         失败契约不变：传输/HTTP错误返回"[LLM错误: …]"（失败必须可见，不吞）。
         """
         # 通过router解析模型（无router时返回固定配置）
@@ -852,6 +895,10 @@ class LLMEngine:
         # 接线）：opt-in（LLM_FALLBACK_CHAIN未设=空链=行为不变）；续写轮共享同一链
         # =sticky（切到备胎后续写轮停在应答link，不弹回primary）
         chain = load_fallback_chain(primary_model=resolved_model)
+
+        # 续写×重试联合发送预算（utils.llm_safety.TurnSendBudget单一真源）：
+        # chat()不递归，续写/重发轮+HTTP重试+降级链walk共享本预算
+        budget = _budget if _budget is not None else TurnSendBudget()
 
         client = httpx.AsyncClient(
             base_url=resolved_base_url,
@@ -885,6 +932,11 @@ class LLMEngine:
                         _link_ok = False
                         for _http_retry in range(MAX_ATTEMPTS):
                             try:
+                                if not budget.spend():
+                                    logger.warning("[LLM] 续写×重试联合发送预算已用尽，不再发送")
+                                    raise RuntimeError(
+                                        "本回合HTTP发送预算已用尽（续写×重试联合封顶）"
+                                    )
                                 resp = await client.post("/chat/completions", json=payload)
                             except httpx.TransportError as e:
                                 # 网络离线三态（utils.network_state，kilocode SessionNetwork）：
@@ -896,13 +948,13 @@ class LLMEngine:
                                 _wait = plan_error_retry(
                                     e, _http_retry if _is_start_link else MAX_ATTEMPTS - 1
                                 )
-                                if chain.try_advance(
+                                if budget.remaining > 0 and chain.try_advance(
                                     f"{e.__class__.__name__}: {e}",
                                     retry_planned=(_wait is not None),
                                 ):
                                     self._apply_link(client, payload, chain.current)
                                     break  # 换link重发（外层while）
-                                if _wait is not None:
+                                if _wait is not None and budget.remaining > 0:
                                     logger.warning(
                                         f"[LLM] 传输错误{e.__class__.__name__}，"
                                         f"{_wait:.1f}s后重试 ({_http_retry+1}/{MAX_ATTEMPTS})"
@@ -923,13 +975,13 @@ class LLMEngine:
                                 getattr(resp, "headers", None),
                             )
                             _summary = f"LLM HTTP {resp.status_code}: {resp.text[:200]}"
-                            if chain.try_advance(
+                            if budget.remaining > 0 and chain.try_advance(
                                 _summary, retry_planned=(_wait is not None),
                                 status=resp.status_code,
                             ):
                                 self._apply_link(client, payload, chain.current)
                                 break  # 换link重发（外层while）
-                            if _wait is None:
+                            if _wait is None or budget.remaining <= 0:
                                 raise RuntimeError(
                                     chain.fail(
                                         _summary,
@@ -959,6 +1011,10 @@ class LLMEngine:
                     # 防护1：omission占位符→整体重新生成（Gemini CLI方案）
                     omission = check_omission(full_content)
                     if omission:
+                        if budget.remaining <= 0:
+                            # 续写×重试联合发送预算用尽：保留已累积输出（log显式警告）
+                            logger.warning("[LLM] omission重发×续写联合发送预算已用尽，返回已累积输出（可能仍不完整）")
+                            break
                         logger.warning(
                             f"[LLM] {omission}，整体重新生成 "
                             f"(attempt {attempt+1}/{MAX_CONTINUATION+1})"
@@ -971,6 +1027,10 @@ class LLMEngine:
 
                     # 防护2：finish_reason=length→续写（Aider方案）
                     if check_finish_reason(choice) == "length":
+                        if budget.remaining <= 0:
+                            # 续写×重试联合发送预算用尽：保留已累积输出（log显式警告）
+                            logger.warning("[LLM] 续写×重试联合发送预算已用尽，返回已累积输出（可能仍不完整）")
+                            break
                         logger.warning(
                             f"[LLM] finish_reason=length截断，自动续写 "
                             f"(attempt {attempt+1}/{MAX_CONTINUATION+1})"
