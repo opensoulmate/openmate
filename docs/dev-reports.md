@@ -3664,3 +3664,34 @@
 4. 其余遗留观察项照旧非本轮范围：降级链opt-in待用户配provider凭据（多轮）、llm_call无生产调用方、MCP重连真实Server验证、relay消息级粒度、唤醒触发行agent_message透出、前端视觉走查登录墙、model_gateway/gateway.py:135凭据映射表、HITL网络等待交互卡、环境变量密钥外发误伤面。
 5. ⚠️环境问题仍在（非代码，需用户处理）：LLM供应商余额不足（402 insufficient_balance）。
 6. cron环境约束实录：全量pytest(527s)与systemic_test均background+process wait分段取结果（wait窗口钳180s连续poll）；sibling并行会话共用工作树（settings-client.tsx/locales×3/systemic_test_results.json被改）——commit走显式git add白名单3文件；/tmp demo长文本write_file直落+demo自带12断言全过=字面串无丢字实证。gene skill上报本轮成功（skill_id=skill_5a6f799a385c，success_rate初始0.0属新建正常）。
+
+## [2026-10-01 16:20 CST] discussion_engine讨论turn接入turn级park预算——一个讨论任务=一个turn（上轮遗留#1销账）
+**目标**：销账turn级park合并轮（14:46）遗留#1：`discussion_engine`的AI群讨论turn无TurnLifecycleBus/park预算——群讨论多轮×多Agent的LLM调用断网时仍按调用各自park，最坏 total_rounds×agents×MAX_WAIT_S 叠加干等（3轮×3Agent=9×30s≈4.5分钟）+9条wait记录，且讨论是后台任务用户迟迟看不到可见失败。
+**调研来源**：kilocode SessionNetwork "park整个turn"原文语义（ask()一次挂起turn等reply）——上轮已移植到soulmate TurnLifecycleBus但讨论面遗漏；turn预算contextvar传递范式沿用上轮`TurnParkState`（消费面零改动）；"一个讨论任务=一次ask（goal）→最终reply（discussion_end）"逐字对应kilocode一个turn。granularity决策：whole-task而非per-round——fail-fast检查在probe_online之后（network_state.py:410-418），预算只在"仍离线"时短路等待、网络恢复后调用照常，故whole-task严格减少干等且无恢复误伤。
+**改动文件**（openmate commit `4939a6bf`，3文件 +383/-3）：
+- `acp-proxy/discussion_engine.py`（+9/-1）：import network_state + run()入口`begin_turn(f"discussion:{task.task_id}")` + finally`end_turn()`
+- `acp-proxy/utils/network_state.py`（+3/-2）：接线注释更新（discussion不再列为"无turn上下文"面）
+- `acp-proxy/tests/test_discussion_turn_park.py`（新371行，10测）
+**改动内容**：
+1. **接线**：`run()`在`_active_discussions`登记后建立turn预算，turn_id=`discussion:{task_id}`；`finally`必清（含persist_fn抛异常/取消/超时全出口）——turn上下文不泄漏到ws_group调用方。
+2. **语义**：断网时整个讨论最多park一次（1条wait记录带turn_id），其余调用fail-fast零叠加；RESUMED不占预算（新outage新park，kilocode"reply后再ask()"同款）；probe在线优先于fail-fast=网络恢复后剩余轮次照常跑（测试钉住）。
+3. **零改动消费面**：`agent/llm_engine.py:434/:814/:945`+`utils/llm_transport.py:109`四个maybe_park消费点自动获得合并（contextvar穿过run→_get_agent_response→asyncio.wait_for子task→chat_stream真实链）。
+**接线位置**（grep证据，文件:行号）：
+- `acp-proxy/discussion_engine.py:206 network_state.begin_turn(f"discussion:{task.task_id}")` ← `run()`（ws_group.py:489 `asyncio.create_task(_discussion_orchestrator.run(...))`生产路径）、`:393 network_state.end_turn()`（finally）
+- 下游消费（零改动自动获得）：`agent/llm_engine.py:434/:814/:945 network_state.maybe_park`、`utils/llm_transport.py:109`
+- `agent/soulmate_agent.py:305/:309`（既有soulmate接线原值保持）
+- 运行时import实证：`python3 -c "import discussion_engine"`→`discussion_engine.network_state is utils.network_state`=True（Pyright对`from utils import network_state`报unknown symbol是误报，与soulmate_agent.py:71同形态，运行时全过）
+**验证结果**：
+- 完整性✅：`git show --numstat 4939a6bf`=3文件+383/-3（discussion_engine +9/-1、network_state +3/-2、test +371）逐hunk核对全为本轮改动（sibling并行会话的settings-client.tsx/locales×3/systemic_test_results.json/e2e_probe2.py/.mmb-render/.ssr-i18n显式git add白名单排除）；2源文件+test ast.parse全过。
+- 集成✅：上述grep链完整（定义→ws_group.py:489 create_task生产路径→run()真实回合边界→llm_engine/llm_transport四个maybe_park消费点）；重启后:8092/health=200、:8095/health=200、:8092/api/network/status JSON含stats结构正常。
+- 测试✅：新`tests/test_discussion_turn_park.py` **10 passed**（①turn接线4：run内LLM调用全见`discussion:{task_id}`上下文且run结束清零/persist异常路径finally仍清+discussion_error可见/asyncio.wait_for子task contextvar继承/源码接线钉4条含ws_group生产路径+network_state注释防漂移；②park预算4：3Agent×2轮6条断网=1条wait记录+turn_fail_fast=5+fake sleep≤25（单park上限）=零叠加+6条agent_skip全可见+discussion正常收尾/RESUMED不占预算新outage再park（2条记录诚实粒度）/预算用尽但网络恢复→NOT_OFFLINE照常出消息（fail-fast只在仍离线短路）/跨讨论预算独立（tid-A/tid-B各park一次互不误伤）；③回归2：在线讨论零park零变化（4消息/4轮事件/持久化逐字契约）/无turn上下文调用2条wait记录旧行为逐字不变）；关联回归`test_turn_park_merge+test_network_offline_park+test_turn_lifecycle+test_stream_continuation+test_agent_llm_config` **126 passed**零回归；acp-proxy全量`tests/` **1407 passed 0 failed**（477.93s，=上轮1397基线+10新测）；`systemic_test.py` **29/29 passed**（S1-S6全绿）。
+- **live实锤**（/tmp/discussion_park_live_demo.py，真实network_state代码路径+真实asyncio计时，MAX_WAIT=2s演示值，probe恒离线，**12/12断言过**）：3Agent×2轮6条断网调用→首条真实等**2.00s** park超时放弃、其余5条**0.00s** fail-fast、总耗时**2.01s**（旧=6×2s=12s叠加）、wait记录1条（turn_id=demo-1）、turn_fail_fast=5、agent_skip=6全可见、run结束turn上下文清零；日志全程可见"[网络] 本回合已等待过网络（discussion:demo-1），合并park不再重复等待"。
+**服务重启**：`systemctl --user restart acp-proxy-a.service acp-proxy-b.service`→两服务active；:8092/health=200、:8095/health=200、:8092/api/network/status=200（opensoul/前端零改动未重启，npm build不适用）。
+**commit**：openmate `4939a6bf`。
+**遗留问题**：
+1. **engine.py AgentEngine.run_task仍未接begin_turn**：全库无生产调用方（grep实证仅定义无实例化），暂不接；若未来接入run_task需同步begin_turn/end_turn。**下轮候选（低优先）**。
+2. **turn粒度选择=whole-task而非per-round**：一个讨论任务=一个park预算。flappy网络下park放弃后、讨论结束前的再次独立断网会fail-fast不再等待（probe在线时照常）——比per-round更激进的防干等；若真实使用中见到"网络恢复了但讨论还是跳过"误伤（理论上只发生在"仍离线"场景），可降级为per-round预算（run()循环内begin/end，一行改动）。待真实流量观察。
+3. **attach跨turn共享语义照旧**（`_active_park`全局会话：两个并发讨论同时断网会attach合并进一条wait记录）——上轮遗留#3未变，量级罕见。
+4. 其余遗留观察项照旧非本轮范围：降级链opt-in待用户配provider凭据（多轮）、llm_call无生产调用方、MCP重连真实Server验证、relay消息级粒度、唤醒触发行agent_message透出、前端视觉走查登录墙、model_gateway/gateway.py:135凭据映射表、HITL网络等待交互卡、环境变量密钥外发误伤面。
+5. ⚠️环境问题仍在（非代码，需用户处理）：LLM供应商余额不足（402 insufficient_balance）。
+6. cron环境约束实录：Pyright对`from utils import network_state`报unknown import symbol是误报（同形态soulmate_agent.py:71运行时正常），以`python3 -c "import ..."`运行时实证为准；测试里probe顺序桩对"调用次数敏感"的场景不稳（park轮询次数依赖MAX_WAIT/POLL比值）——改用可切换flag桩（test_fail_fast_only_when_still_offline）；全量pytest(478s) background+process wait分段取结果；sibling并行会话共用工作树照旧git add白名单3文件。gene skill上报本轮成功（skill_id=skill_1516453e2e6c）。
