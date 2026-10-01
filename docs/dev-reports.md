@@ -3598,3 +3598,36 @@
 4. 其余遗留观察项照旧非本轮范围：降级链opt-in待用户配provider凭据（遗留#1多轮）、llm_call无生产调用方、turn级park合并、MCP重连真实Server验证、relay消息级粒度、唤醒触发行agent_message透出、前端视觉走查登录墙、model_gateway/gateway.py:135凭据映射表、secret redaction UI i18n key、HITL网络等待交互卡。
 5. ⚠️环境问题仍在（非代码，需用户处理）：LLM供应商余额不足（402 insufficient_balance）。
 6. cron环境约束实录：复杂sed/命令替换组合terminal被hardline BLOCKED（改用search_files/read_file取目标文本）；patch工具old_string/new_string模糊匹配曾把`return`缩进改错（20→24空格，改变语义）——**patch后必须git diff逐hunk核对缩进/语义，diff里意外出现的非预期行立即修复**（本轮当场发现并还原）；write_file长文本照旧须靠测试断言验证字面串（22测全过=断言串无丢字）；全量pytest(489s)与systemic_test均background+process wait（wait窗口被钳180s，连续poll）。
+
+## [2026-10-01 12:12 CST] 脱敏UI i18n收口（连续多轮挂账"secret redaction UI i18n key"销账）+ SecretScanBadge lucide图标调用崩溃P0当场修复
+**目标**：两件事——①销账自09-28 17:50轮起连续挂账的"secret redaction UI i18n key"：SecretScanBadge/SecretPill/InlineSecretHighlight/CodeBlock遮蔽按钮的UI文案全部硬编码中文，en/ja界面下中文乱入（该轮遗留#5点名"后续加`markdown.revealSecrets`等key属i18n收口"，此后每轮遗留观察项均挂账）；②本轮新增真实渲染测试当场抓出**P0崩溃bug**：secret-scan-badge.tsx把lucide图标当函数调用（`riskIcon({className})`等5处），lucide-react图标是forwardRef对象（node实测`typeof=object`、调用抛"not a function"）——**检测到敏感数据渲染徽章那一刻React渲染即崩**（恰是安全功能触发时刻，password_leak正则"password: xxx"即触发）。此前潜伏原因：36断言render测试只渲染过SecretPill（JSX形态）从未渲染SecretScanBadge、next build类型检查不拦"对象当函数调用"形态。
+**调研来源**：Warp secret_redaction reveal UX（既有实现的i18n收口半边）+ react-i18next既有惯例（markdown-content.tsx `t('markdown.edit')`先例，本轮同款命名）+ defaultValue兜底策略经探针实证（/tmp/i18n-probe.cjs：i18n未初始化时`t(key,{defaultValue})`返回defaultValue、初始化后命中翻译+缺key回落defaultValue）——保证无i18n环境下行为逐字不变。测试harness沿用前轮render-test-memory-marker.cjs的tsc transpileModule+react-dom/server真实渲染范式。
+**改动文件**（openmate commit `e5a2dd93`，7文件 +398/-26）：
+- `src/locales/zh.json` / `en.json` / `ja.json`（各+55）：`markdown` +4 key + 新`secretRedaction`段（badge 6/pill 4/inline 3/risk 4/patterns 20）
+- `src/components/secret-scan-badge.tsx`（+46/-21）：useTranslation接线 + 5处lucide调用形态→JSX（P0修复）
+- `src/components/secret-pill.tsx`（+23/-6）：useTranslation接线
+- `src/components/markdown-content.tsx`（+12/-3）：CodeBlock遮蔽按钮4硬编码→t()
+- `render-test-secret-i18n.cjs`（新178行，53断言）
+**改动内容**：
+1. **i18n key面**：`secretRedaction.badge.{count,title,header,show,hide,note}`、`.pill.{showTip,hideTip,ariaShow,ariaHide}`、`.inline.{tip,revealAction,hideAction}`、`.risk.{critical,high,medium,low}`、`.patterns.{20个type}`（PII 6类+password/url 2类zh/en/ja真翻译，产品名12类三语言同值）；`markdown.{revealSecrets,maskSecrets,revealSecretsTip,maskSecretsTip}`。三语言key集逐一等值（测试断言）。
+2. **组件消费**：全部t()带`defaultValue`=原中文串（i18n未初始化/缺key时逐字回落旧行为——旧36断言测试**零改动全过**即为直接证据）；pattern标签按`SecretFinding.type`取key（defaultValue=f.label）、risk按risk取key（defaultValue=riskToLabel）。
+3. **P0修复**：`riskIcon({className})`/`ChevronUp(...)`/`ChevronDown(...)`/`ShieldCheck(...)`/`EyeOff(...)`/`Eye(...)`函数调用形态→`<RiskIcon/>`等JSX元素形态（forwardRef对象=合法JSX元素类型、不可调用）。全库grep确认坏形态仅此一文件（right-panel.tsx:467 TabIcon是合法函数定义非调用）。
+**接线位置**（grep证据，文件:行号）：
+- 真实消息渲染路径：`chat-client.tsx:2502` `<SecretScanBadge text={p.text} minRisk="high">`（agent消息text part）→ `secret-scan-badge.tsx:62/65/75/95/105`（badge.*消费）、`:150-155`（inline.tip）、`:32-33`（risk/patterns）
+- 散文/胶囊路径：`markdown-content.tsx:215` `span: SecretAwareSpan` + `:9-10` rehypeSecretMask/SecretAwareSpan import → `secret-pill.tsx:29-30/36/49/60/78`（pill.*/risk/patterns消费）
+- CodeBlock按钮：`markdown-content.tsx:97-98/103-104`（markdown.maskSecretsTip/revealSecretsTip/maskSecrets/revealSecrets）
+- 语言资源装载：`src/lib/i18n.ts:14-16` 三语言translation（zh/en/ja.json）——secretRedaction段经此进运行时
+**验证结果**：
+- 完整性✅：`git show --numstat e5a2dd93`=7文件+398/-26；locale经"HEAD+仅我的hunk"选择性暂存核对（sibling并行会话settings-client.tsx+locales 45行×3留工作树未入库，暂存区locale diff过滤后仅剩结构括号=纯本轮改动）。
+- 集成✅：上述grep调用链完整（三组件t()消费→i18n资源装载→chat-client/markdown-content真实渲染路径）；served build实锤：`.next/static/chunks/1x1pl3o__09i4.js`含`secretRedaction.badge.title`+`secretRedaction.pill.ariaShow`且`riskIcon({ className`**零命中**，`2hsf0u_t_khxm.js`含三语言文案（"Show sensitive data"/"显示敏感数据"/"機密データを表示"各2），两chunk `curl :3000/_next/static/chunks/…`=200。
+- 测试✅：新`render-test-secret-i18n.cjs` **53/53 PASS**（tsc transpileModule+react-dom/server真实渲染+真实i18next：①key集一致×2段 ②markdown 4key×3语言 ③20 pattern类型从lib源码提取×3语言全覆盖 ④zh渲染保留旧行为+**原文绝不入HTML** ⑤en渲染翻译生效+**零CJK字面量** ⑥ja渲染翻译生效 ⑦SecretScanBadge三语言计数插值（"1 项敏感数据"/"1 sensitive items"/"機密データ 1 件"） ⑧接线钉22条含**图标调用形态回归钉**）；旧`render-test-secret-redaction.cjs` **36/36 PASS零改动**（defaultValue兜底=无i18n行为逐字不变的直接证据）；`npm run build` exit 0（TypeScript 27.2s+96页生成）。
+- **live实锤**：新测试渲染SecretScanBadge时当场抛`TypeError: riskIcon is not a function`——P0 bug由本轮测试真实抓出并修复（修复后53全过）；node实测`require('lucide-react').Shield`=`Symbol(react.forward_ref)`对象、调用抛错。
+**服务重启**：`systemctl --user restart openmate-web.service`→active；`GET :3000/`=200、`GET :3000/chat`=200；served chunk 200+内容grep实锤新build在线。acp-proxy/opensoul零改动未重启。
+**commit**：openmate `e5a2dd93`。
+**遗留问题**：
+1. ⚠️前端视觉走查仍受登录墙（cron无凭证不登录，前例同）——三语言实际页面观感待用户切语言看一眼（en界面下脱敏徽章/胶囊/代码块按钮应为英文）。测试已覆盖渲染HTML字面量，视觉布局未人工过目。
+2. defaultValue兜底=zh文案在组件源码与zh.json各存一份（fail-safe设计），存在漂移可能——未做"defaultValue==zh.json同值"逐key断言（插值模板串比对复杂）；漂移只影响i18n失效兜底场景。
+3. SecretScanBadge展开面板（发现项列表）无法经静态渲染触达（useState初始collapsed）——面板内文案走同一批key（key一致性+pill同key渲染断言覆盖），点击展开交互仍待真实DOM验证。
+4. 其余遗留观察项照旧非本轮范围：降级链opt-in待用户配provider凭据、llm_call无生产调用方、turn级park合并、MCP重连真实Server验证、relay消息级粒度、唤醒触发行agent_message透出、model_gateway/gateway.py:135凭据映射表、HITL网络等待交互卡、环境变量密钥外发误伤面。
+5. ⚠️环境问题仍在（非代码，需用户处理）：LLM供应商余额不足（402 insufficient_balance）。
+6. cron环境约束实录：**patch工具fuzzy匹配对单行hunk反复失手**——上下文提示行被当context、替换内容被追加到文件EOF（本轮3次：inline.tip/markdown title/图标3连），必须带≥3行上下文重做+`git diff`逐hunk核对（本轮当场发现修复，教训与上轮"缩进改错"同族）；sibling并行会话共用工作树再现（locales×3被改+45行）——locale选择性暂存法：pre快照→HEAD基底打"pre→post"补丁→换入`git add`→换回post→`git diff --cached`过滤核对；render测试新文件write_file直落，长文本经测试断言验证（53断言串全过）。
