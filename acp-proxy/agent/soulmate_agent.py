@@ -92,6 +92,7 @@ from agent.reflection_engine import ReflectionEngine
 from agent.memory_consolidator import MemoryConsolidator
 from agent.skill_learner import SkillLearner
 from agent.observability import ObservabilityManager, SpanType, SpanStatus
+from agent.trajectory_recorder import TrajectoryRecorder, llm_outcome_status
 from agent.context_analyzer import ContextAnalyzer, ContextComponent
 from agent.session_fsm import SessionStateMachine, SessionState, SessionEvent
 from agent.parallel_executor import ParallelToolExecutor
@@ -231,6 +232,9 @@ class SoulMateAgent:
         self._skill_learner = SkillLearner()
         # 可观测性管理器
         self._observability = ObservabilityManager()
+        # trajectory span写入器（langfuse三层模型的生产写入端：真实回合→
+        # 嵌套span落opensoul trajectory——09-17轮建的观察面此前零真实写入方）
+        self._traj_recorder = TrajectoryRecorder()
         # 上下文分析器
         self._context_analyzer = ContextAnalyzer()
         # 会话状态机
@@ -3077,6 +3081,12 @@ You can send files to the user natively: to deliver a file, write a brief confir
         if not user_text.strip():
             return PromptResponse(stop_reason="end_turn")
 
+        # ── trajectory span接线（langfuse Trace层）：回合根span ──
+        # user_input(root) → llm_call → tool_call×N嵌套树的根；落opensoul
+        # :8090 /api/trajectory（09-17轮建的观察面首个真实写入方）。失败返回
+        # ''后所有record/end按空id跳过——观察面故障绝不破坏会话流。
+        traj_root_id = await self._traj_recorder.start_turn(session_id, user_text)
+
         # ── kilocode #7 TurnOpen：turn生命周期开始（订阅器驱动观测+记忆采集）──
         self._turn_close_reason.pop(session_id, None)
         self._turn_lifecycle.open_turn(
@@ -3284,6 +3294,8 @@ You can send files to the user natively: to deliver a file, write a brief confir
                     session_id, turn_lifecycle.CLOSE_COMPLETED, cached=True
                 )
                 self._turn_read_view.clear(session_id)
+                # trajectory span收口：缓存命中回合无LLM段，root直接end
+                await self._traj_recorder.end_turn(session_id, traj_root_id, status="ok")
                 return PromptResponse(stop_reason="end_turn")
 
             # 2. 上下文压缩：消息过多时压缩历史
@@ -3525,9 +3537,18 @@ You can send files to the user natively: to deliver a file, write a brief confir
 
                 step.status = StepStatus.RUNNING
                 try:
-                    step_result, _ = await self._run_llm_with_tools(step_messages, session_id, matched_skills=matched_skills)
+                    _traj_t0 = time.time()
+                    step_result, _step_tools = await self._run_llm_with_tools(step_messages, session_id, matched_skills=matched_skills)
                     step.result = step_result
                     step.completed_at = time.time()
+                    # trajectory span：plan步骤LLM段+工具调用（child of turn root）
+                    await self._traj_recorder.record_llm_call(
+                        session_id, traj_root_id,
+                        content=f"plan_step: {step.description[:120]}",
+                        duration_ms=(time.time() - _traj_t0) * 1000,
+                        status=llm_outcome_status(step_result),
+                        tools=_step_tools,
+                    )
                 except Exception as e:
                     step.result = f"执行异常: {e}"
                     step.error = str(e)
@@ -3562,9 +3583,18 @@ You can send files to the user natively: to deliver a file, write a brief confir
                         "content": "⚠️ 上次执行失败了。注意：不要创建新文件、不要写代码脚本。直接用已有数据以文本形式输出结果。",
                     })
                     try:
-                        retry_result, _ = await self._run_llm_with_tools(step_messages, session_id, matched_skills=matched_skills)
+                        _traj_t0 = time.time()
+                        retry_result, _retry_tools = await self._run_llm_with_tools(step_messages, session_id, matched_skills=matched_skills)
                         step.result = retry_result
                         step.completed_at = time.time()
+                        # trajectory span：重试LLM段+工具调用（同root下可区分重试）
+                        await self._traj_recorder.record_llm_call(
+                            session_id, traj_root_id,
+                            content=f"plan_step_retry: {step.description[:120]}",
+                            duration_ms=(time.time() - _traj_t0) * 1000,
+                            status=llm_outcome_status(retry_result),
+                            tools=_retry_tools,
+                        )
                     except Exception as e2:
                         step.result = f"重试执行异常: {e2}"
                         step.error = str(e2)
@@ -3652,6 +3682,15 @@ You can send files to the user natively: to deliver a file, write a brief confir
                     model="mimo", session_id=session_id,
                     input_tokens=prompt_tokens, output_tokens=completion_tokens,
                 )
+                # trajectory span：本回合LLM段+工具调用（child of turn root）
+                await self._traj_recorder.record_llm_call(
+                    session_id, traj_root_id,
+                    content=f"llm_rounds tools={len(tool_calls_log)}",
+                    duration_ms=llm_duration * 1000,
+                    token_usage=prompt_tokens + completion_tokens,
+                    status=llm_outcome_status(full_response),
+                    tools=tool_calls_log,
+                )
                 # 事件总线发布
                 asyncio.ensure_future(self._event_bus.emit("llm.completed", {
                     "session_id": session_id, "duration_s": llm_duration,
@@ -3659,6 +3698,10 @@ You can send files to the user natively: to deliver a file, write a brief confir
                 }))
             except Exception as e:
                 logger.error(f"LLM error: {e}", exc_info=True)
+                # trajectory span：LLM失败必须可见（mem0 §1.1不静默吞）——
+                # error状态的llm_call段照样落树，"跑了但错了"可查
+                await self._traj_recorder.record_llm_call(
+                    session_id, traj_root_id, content="llm_call failed", status="error")
                 # P0-4: 异常路径也要结束活动观测，否则peek永远显示running（假活性）
                 err_act = self._activity(session_id)
                 err_act.mark_idle()
@@ -3877,6 +3920,11 @@ You can send files to the user natively: to deliver a file, write a brief confir
                 self._observability.finish_span(run_span.span_id, SpanStatus.SUCCESS)
         except Exception:
             pass
+
+        # ── trajectory span收口：回合根end_event（end_at盖章，store单一时钟
+        # 推导duration；session token累计由store侧回填）──
+        await self._traj_recorder.end_turn(
+            session_id, traj_root_id, status=llm_outcome_status(full_response))
 
         # ── kilocode #7 TurnClose：事件驱动记忆采集（订阅器隔离，失败不破坏会话流）──
         # close_reason语义：steer中断/取消等非正常收尾标记在此收尾；

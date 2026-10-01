@@ -154,6 +154,20 @@ def build_env(tmp_path, monkeypatch, steps, llm_scripts, llm_call_responses,
         update_activity=lambda *a, **k: None,
     )
     agent._observability = MagicMock()
+    # trajectory span写入器（build_env绕过__init__手工搭agent，需补新组件；
+    # no-op空root=与"start_turn失败→record/end跳过"同语义，plan执行链测试
+    # 不依赖trajectory落库，此处保持确定性零网络）
+    class _NoopTraj:
+        async def start_turn(self, *a, **k):
+            return ""
+
+        async def record_llm_call(self, *a, **k):
+            return ""
+
+        async def end_turn(self, *a, **k):
+            return None
+
+    agent._traj_recorder = _NoopTraj()  # type: ignore[assignment]  # 测试替身
     agent._checkpoint_mgr = SimpleNamespace(create_checkpoint=lambda **k: None)
 
     # 真实任务规划链：TaskPlanner（replan走LLM脚本）+ TaskStore(tmp sqlite)
