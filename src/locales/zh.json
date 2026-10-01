@@ -5429,7 +5429,60 @@
     "copy": "复制",
     "loading": "加载编辑器...",
     "cancel": "取消",
-    "apply": "应用修改"
+    "apply": "应用修改",
+    "revealSecrets": "显示",
+    "maskSecrets": "脱敏",
+    "revealSecretsTip": "显示敏感数据（默认已遮蔽）",
+    "maskSecretsTip": "重新遮蔽敏感数据"
+  },
+  "secretRedaction": {
+    "badge": {
+      "count": "{{n}} 项敏感数据",
+      "title": "检测到 {{n}} 项敏感数据 — 点击查看详情",
+      "header": "安全扫描 — 敏感数据检测",
+      "show": "显示原文",
+      "hide": "隐藏",
+      "note": "扫描在本地浏览器执行，数据不外发。参考 Warp secret_redaction。"
+    },
+    "pill": {
+      "showTip": "{{label}}（{{risk}}）— 点击显示原文",
+      "hideTip": "{{label}}（{{risk}}）— 点击隐藏",
+      "ariaShow": "显示敏感数据",
+      "ariaHide": "隐藏敏感数据"
+    },
+    "inline": {
+      "tip": "{{label}} ({{risk}}) — 点击{{action}}",
+      "revealAction": "揭示",
+      "hideAction": "隐藏"
+    },
+    "risk": {
+      "critical": "严重",
+      "high": "高危",
+      "medium": "中等",
+      "low": "低风险"
+    },
+    "patterns": {
+      "phone_cn": "手机号",
+      "id_card_cn": "身份证号",
+      "email": "邮箱地址",
+      "bank_card": "银行卡号",
+      "password_leak": "密码/密钥泄露",
+      "url_with_auth": "带凭证URL",
+      "google_api_key": "Google API Key",
+      "aws_access_id": "AWS Access ID",
+      "slack_app_token": "Slack App Token",
+      "github_classic_pat": "GitHub PAT",
+      "github_fine_grained_pat": "GitHub Fine-Grained PAT",
+      "github_oauth_token": "GitHub OAuth Token",
+      "github_user_to_server_token": "GitHub User-to-Server Token",
+      "github_server_to_server_token": "GitHub Server Token",
+      "stripe_key": "Stripe Key",
+      "jwt": "JWT Token",
+      "openai_api_key": "OpenAI API Key",
+      "anthropic_api_key": "Anthropic API Key",
+      "generic_sk_api_key": "sk- API Key",
+      "fireworks_api_key": "Fireworks API Key"
+    }
   },
   "agent": {
     "selectAgent": "选择 Agent",

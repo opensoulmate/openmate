@@ -93,10 +93,16 @@ const CodeBlock = memo(function CodeBlock({
             <button
               onClick={() => setShowSecrets(v => !v)}
               className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity hover:text-foreground px-1.5 py-0.5 rounded hover:bg-white/5"
-              title={showSecrets ? '重新遮蔽敏感数据' : '显示敏感数据（默认已遮蔽）'}
+              title={showSecrets
+                ? t('markdown.maskSecretsTip', { defaultValue: '重新遮蔽敏感数据' })
+                : t('markdown.revealSecretsTip', { defaultValue: '显示敏感数据（默认已遮蔽）' })}
             >
               {showSecrets ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-              <span>{showSecrets ? '脱敏' : '显示'}</span>
+              <span>
+                {showSecrets
+                  ? t('markdown.maskSecrets', { defaultValue: '脱敏' })
+                  : t('markdown.revealSecrets', { defaultValue: '显示' })}
+              </span>
             </button>
           )}
           {!isEditing && (

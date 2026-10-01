@@ -13,6 +13,7 @@
 
 import { useState } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import {
   maskSecret,
   riskToBadgeClasses,
@@ -23,12 +24,20 @@ import {
 export function SecretPill({ meta }: { meta: SecretFinding }) {
   const [revealed, setRevealed] = useState(false);
   const riskChip = riskToBadgeClasses(meta.risk);
+  const { t } = useTranslation();
+  // i18n key 缺失/未初始化时回落中文原文（defaultValue=zh.json 同值兜底）
+  const riskLabel = t(`secretRedaction.risk.${meta.risk}`, { defaultValue: riskToLabel(meta.risk) });
+  const label = t(`secretRedaction.patterns.${meta.type}`, { defaultValue: meta.label });
 
   if (revealed) {
     return (
       <span
         className="inline-flex items-center gap-1 rounded-md border border-dashed border-red-400/50 bg-red-500/10 px-1.5 py-px align-baseline"
-        title={`${meta.label}（${riskToLabel(meta.risk)}）— 点击隐藏`}
+        title={t('secretRedaction.pill.hideTip', {
+          label,
+          risk: riskLabel,
+          defaultValue: `${meta.label}（${riskToLabel(meta.risk)}）— 点击隐藏`,
+        })}
       >
         <code className="font-mono text-[11px] text-red-600 dark:text-red-400 break-all">
           {meta.matched}
@@ -37,7 +46,7 @@ export function SecretPill({ meta }: { meta: SecretFinding }) {
           type="button"
           onClick={() => setRevealed(false)}
           className="shrink-0 rounded p-0.5 text-red-500/80 transition-colors hover:bg-red-500/15 hover:text-red-600"
-          aria-label="隐藏敏感数据"
+          aria-label={t('secretRedaction.pill.ariaHide', { defaultValue: '隐藏敏感数据' })}
         >
           <EyeOff className="h-3 w-3" />
         </button>
@@ -48,7 +57,11 @@ export function SecretPill({ meta }: { meta: SecretFinding }) {
   return (
     <span
       className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-muted/60 px-1.5 py-px align-baseline"
-      title={`${meta.label}（${riskToLabel(meta.risk)}）— 点击显示原文`}
+      title={t('secretRedaction.pill.showTip', {
+        label,
+        risk: riskLabel,
+        defaultValue: `${meta.label}（${riskToLabel(meta.risk)}）— 点击显示原文`,
+      })}
     >
       <code className="font-mono text-[11px] text-muted-foreground break-all select-none">
         {maskSecret(meta.matched)}
@@ -56,13 +69,13 @@ export function SecretPill({ meta }: { meta: SecretFinding }) {
       <span
         className={`inline-flex shrink-0 items-center rounded border px-1 py-px text-[10px] font-medium ${riskChip}`}
       >
-        {meta.label}
+        {label}
       </span>
       <button
         type="button"
         onClick={() => setRevealed(true)}
         className="shrink-0 rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-foreground/10 hover:text-foreground"
-        aria-label="显示敏感数据"
+        aria-label={t('secretRedaction.pill.ariaShow', { defaultValue: '显示敏感数据' })}
       >
         <Eye className="h-3 w-3" />
       </button>

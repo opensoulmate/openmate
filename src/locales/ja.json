@@ -5317,7 +5317,60 @@
     "copy": "コピー",
     "loading": "エディタ読み込み中...",
     "cancel": "キャンセル",
-    "apply": "適用"
+    "apply": "適用",
+    "revealSecrets": "表示",
+    "maskSecrets": "マスク",
+    "revealSecretsTip": "機密データを表示（デフォルトでマスク）",
+    "maskSecretsTip": "機密データを再マスク"
+  },
+  "secretRedaction": {
+    "badge": {
+      "count": "機密データ {{n}} 件",
+      "title": "{{n}} 件の機密データを検出 — クリックで詳細",
+      "header": "セキュリティスキャン — 機密データ検出",
+      "show": "原文を表示",
+      "hide": "隠す",
+      "note": "スキャンはローカルブラウザ内で実行され、データは外部送信されません（Warp secret_redaction 参照）。"
+    },
+    "pill": {
+      "showTip": "{{label}}（{{risk}}）— クリックで表示",
+      "hideTip": "{{label}}（{{risk}}）— クリックで隠す",
+      "ariaShow": "機密データを表示",
+      "ariaHide": "機密データを隠す"
+    },
+    "inline": {
+      "tip": "{{label}} ({{risk}}) — クリックで{{action}}",
+      "revealAction": "表示",
+      "hideAction": "隠す"
+    },
+    "risk": {
+      "critical": "重大",
+      "high": "高",
+      "medium": "中",
+      "low": "低"
+    },
+    "patterns": {
+      "phone_cn": "電話番号",
+      "id_card_cn": "身分証番号",
+      "email": "メールアドレス",
+      "bank_card": "銀行カード番号",
+      "password_leak": "パスワード・シークレット漏洩",
+      "url_with_auth": "認証情報付きURL",
+      "google_api_key": "Google API Key",
+      "aws_access_id": "AWS Access ID",
+      "slack_app_token": "Slack App Token",
+      "github_classic_pat": "GitHub PAT",
+      "github_fine_grained_pat": "GitHub Fine-Grained PAT",
+      "github_oauth_token": "GitHub OAuth Token",
+      "github_user_to_server_token": "GitHub User-to-Server Token",
+      "github_server_to_server_token": "GitHub Server Token",
+      "stripe_key": "Stripe Key",
+      "jwt": "JWT Token",
+      "openai_api_key": "OpenAI API Key",
+      "anthropic_api_key": "Anthropic API Key",
+      "generic_sk_api_key": "sk- API Key",
+      "fireworks_api_key": "Fireworks API Key"
+    }
   },
   "agent": {
     "selectAgent": "エージェント選択",

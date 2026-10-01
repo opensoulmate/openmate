@@ -5421,7 +5421,60 @@
     "copy": "Copy",
     "loading": "Loading editor...",
     "cancel": "Cancel",
-    "apply": "Apply"
+    "apply": "Apply",
+    "revealSecrets": "Show",
+    "maskSecrets": "Mask",
+    "revealSecretsTip": "Show sensitive data (masked by default)",
+    "maskSecretsTip": "Re-mask sensitive data"
+  },
+  "secretRedaction": {
+    "badge": {
+      "count": "{{n}} sensitive items",
+      "title": "Detected {{n}} sensitive items — click for details",
+      "header": "Security scan — sensitive data detection",
+      "show": "Show original",
+      "hide": "Hide",
+      "note": "Scan runs locally in your browser; no data is sent out. Ref: Warp secret_redaction."
+    },
+    "pill": {
+      "showTip": "{{label}} ({{risk}}) — click to show",
+      "hideTip": "{{label}} ({{risk}}) — click to hide",
+      "ariaShow": "Show sensitive data",
+      "ariaHide": "Hide sensitive data"
+    },
+    "inline": {
+      "tip": "{{label}} ({{risk}}) — click to {{action}}",
+      "revealAction": "reveal",
+      "hideAction": "hide"
+    },
+    "risk": {
+      "critical": "Critical",
+      "high": "High",
+      "medium": "Medium",
+      "low": "Low"
+    },
+    "patterns": {
+      "phone_cn": "Phone (CN)",
+      "id_card_cn": "ID Card (CN)",
+      "email": "Email",
+      "bank_card": "Bank Card",
+      "password_leak": "Password/Secret Leak",
+      "url_with_auth": "URL with Credentials",
+      "google_api_key": "Google API Key",
+      "aws_access_id": "AWS Access ID",
+      "slack_app_token": "Slack App Token",
+      "github_classic_pat": "GitHub PAT",
+      "github_fine_grained_pat": "GitHub Fine-Grained PAT",
+      "github_oauth_token": "GitHub OAuth Token",
+      "github_user_to_server_token": "GitHub User-to-Server Token",
+      "github_server_to_server_token": "GitHub Server Token",
+      "stripe_key": "Stripe Key",
+      "jwt": "JWT Token",
+      "openai_api_key": "OpenAI API Key",
+      "anthropic_api_key": "Anthropic API Key",
+      "generic_sk_api_key": "sk- API Key",
+      "fireworks_api_key": "Fireworks API Key"
+    }
   },
   "agent": {
     "selectAgent": "Select Agent",
