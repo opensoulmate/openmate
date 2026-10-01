@@ -29,12 +29,18 @@ kilocode SessionNetwork语义（network.ts）：
    systemd服务(:8094)，恢复回调通过其HTTP API（/api/mcp/status +
    POST /api/mcp/servers/{id}/connect）重连status=="error"的Server
    （kilocode只重连failed，对应语义）
+5. **turn级park合并**（2026-10-01轮，2026-09-29遗留"park粒度是调用不是turn"
+   销账）：kilocode park的单位是整个turn（ask()一次挂起turn）；移植初版按单次
+   LLM调用park，一个回合多条调用可叠加N×MAX_WAIT_S干等。现合并到turn粒度：
+   同turn并发attach共享一个park会话、本回合park放弃后同turn后续调用fail-fast
+   不再叠加等待（详见"turn级park合并"节）
 
 接线点：agent/llm_engine.py三条传输路径的except httpx.TransportError分支
 （chat()/chat_stream()/chat_stream_with_tools()）——传输错误先过maybe_park，
 离线则park等恢复再走原有重试；app.py /api/network/status暴露park状态可观测。
 """
 import asyncio
+import contextvars
 import logging
 import os
 import time
@@ -210,6 +216,8 @@ class NetworkWait:
     created: float = field(default_factory=time.time)
     restored: float | None = None
     error: str | None = None
+    turn_id: str | None = None  # turn级合并：所属逻辑回合（无turn上下文=None）
+    merged_calls: int = 0  # 合并进本记录的并发调用数（attach共享会话）
 
 
 _waits: dict[str, NetworkWait] = {}
@@ -217,6 +225,7 @@ _stats = {
     "total_parks": 0,  # 进入blocked的次数
     "resumed": 0,      # 恢复续跑次数（retry）
     "aborted": 0,      # 放弃次数
+    "turn_fail_fast": 0,  # turn级合并：本回合已park放弃，后续调用fail-fast不叠加等待
 }
 _restore_callbacks: list = []
 
@@ -227,6 +236,7 @@ def list_waits() -> list[dict]:
         {
             "id": w.id, "message": w.message, "state": w.state,
             "created": w.created, "restored": w.restored, "error": w.error,
+            "turn_id": w.turn_id, "merged_calls": w.merged_calls,
         }
         for w in _waits.values()
     ]
@@ -326,6 +336,52 @@ async def _run_restore_callbacks() -> None:
             logger.warning(f"[网络] 恢复回调失败（续跑照常）: {e}")
 
 
+# ── turn级park合并（kilocode "park整个turn"语义；2026-09-29 09:30轮遗留#3销账）──
+# 移植初版park粒度=单次LLM调用：一个逻辑回合的plan/judge/回复/摘要多条调用各自
+# park，断网回合最坏叠加N×MAX_WAIT_S干等、产生N条wait记录。kilocode park的单位
+# 是整个turn（ask()把整个turn挂起等reply）。本节把park等待合并到turn粒度：
+# 1. 同turn并发调用attach进同一个park会话（turn整体挂起，一条wait记录，
+#    NetworkWait.merged_calls记合并数）；
+# 2. 本回合已有park**放弃**（aborted）后，同turn后续调用遇离线fail-fast返回
+#    ABORTED——turn已等待过一次，再叠加等待只会把可见失败拖长N倍；
+# 3. park恢复续跑（RESUMED）后再次遇新断网允许再park（新outage新park，
+#    RESUMED不占turn预算）——与kilocode "reply后再次错误再ask()"同语义。
+# 无turn上下文的调用（title生成/摘要压缩/discussion）保持旧行为=按调用park。
+# 接线：soulmate TurnLifecycleBus turn.open→begin_turn / turn.close→end_turn。
+
+@dataclass
+class TurnParkState:
+    """一个逻辑回合的park预算（park的单位=kilocode的turn）。"""
+    turn_id: str
+    aborted: bool = False  # 本回合已有park放弃→后续调用fail-fast
+
+
+_current_turn: contextvars.ContextVar["TurnParkState | None"] = (
+    contextvars.ContextVar("network_turn_park_state", default=None)
+)
+
+
+def begin_turn(turn_id: str) -> None:
+    """turn开始：建立本回合park预算（TurnLifecycleBus turn.open接线点）。"""
+    _current_turn.set(TurnParkState(turn_id=str(turn_id or "")))
+
+
+def end_turn() -> None:
+    """turn结束：清除回合上下文（turn.close接线点；无上下文=按调用park旧行为）。"""
+    _current_turn.set(None)
+
+
+@dataclass
+class _ParkSession:
+    """一个进行中的park会话——同turn并发调用attach共享（turn整体挂起）。"""
+    wait: NetworkWait
+    outcome: str = ABORTED  # 会话结束后的最终三态（RESUMED/ABORTED），默认安全值
+    done: asyncio.Event = field(default_factory=asyncio.Event)
+
+
+_active_park: "_ParkSession | None" = None
+
+
 # ── 离线park主入口（kilocode ask()/watch()/restore()/resume()合流）────────
 
 async def maybe_park(exc, cancel_event: asyncio.Event | None = None) -> str:
@@ -338,7 +394,12 @@ async def maybe_park(exc, cancel_event: asyncio.Event | None = None) -> str:
 
     服务端适配（docstring适配#3）：kilocode无界park+人工拒绝，本实现有界park，
     aborted后回落到llm_engine既有重试记账/可见失败路径。
+
+    turn级合并（kilocode "park整个turn"）：同turn并发调用attach共享一个park
+    会话（一条wait记录）；本回合已有park放弃后同turn后续调用fail-fast返回
+    ABORTED，不再叠加等待（详见"turn级park合并"节）。
     """
+    global _active_park
     if not disconnected(exc):
         return NOT_OFFLINE
     # 先探测再park（适配#2）：探测在线=端点级故障，不park
@@ -346,7 +407,32 @@ async def maybe_park(exc, cancel_event: asyncio.Event | None = None) -> str:
         logger.info(f"[网络] 传输错误但探测在线（端点级故障，不park）: {network_message(exc)}")
         return NOT_OFFLINE
 
-    wait = NetworkWait(id=f"nw-{uuid.uuid4().hex[:12]}", message=network_message(exc))
+    turn = _current_turn.get()
+    # turn级合并#1：本回合已有park放弃——fail-fast不叠加等待（turn预算用尽）
+    if turn is not None and turn.aborted:
+        _stats["turn_fail_fast"] += 1
+        logger.warning(
+            f"[网络] 本回合已等待过网络（{turn.turn_id}），"
+            f"合并park不再重复等待: {network_message(exc)}"
+        )
+        return ABORTED
+
+    # turn级合并#2：进行中的park会话——attach共享（turn整体挂起，一条wait记录）
+    session = _active_park
+    if session is not None and not session.done.is_set():
+        session.wait.merged_calls += 1
+        logger.info(
+            f"[网络] 并发调用合并进进行中的park（{session.wait.id}，"
+            f"merged={session.wait.merged_calls}）"
+        )
+        await session.done.wait()
+        return session.outcome
+
+    wait = NetworkWait(
+        id=f"nw-{uuid.uuid4().hex[:12]}",
+        message=network_message(exc),
+        turn_id=turn.turn_id if turn is not None else None,
+    )
     _waits[wait.id] = wait
     _stats["total_parks"] += 1
     logger.warning(
@@ -354,6 +440,23 @@ async def maybe_park(exc, cancel_event: asyncio.Event | None = None) -> str:
         f"上限{MAX_WAIT_S:.0f}s（{wait.id}）"
     )
 
+    session = _ParkSession(wait=wait)
+    _active_park = session
+    try:
+        return await _run_park(session, cancel_event, turn)
+    finally:
+        session.done.set()
+        if _active_park is session:
+            _active_park = None
+
+
+async def _run_park(session: _ParkSession, cancel_event, turn) -> str:
+    """单个park会话的watch()/restore()/resume()主循环（kilocode语义逐字保留）。
+
+    返回前必设session.outcome（attach并发调用据此共享同一三态）；ABORTED路径
+    同时把turn预算标记spent（同turn后续调用fail-fast不再叠加等待）。
+    """
+    wait = session.wait
     # watch()语义：轮询竞速探测，恢复即restore；poll上限双保险（时间+次数，
     # 防asyncio.sleep被测试伪造后时间不走导致死循环）
     max_polls = max(1, int(MAX_WAIT_S / POLL_S) + 1)
@@ -364,6 +467,9 @@ async def maybe_park(exc, cancel_event: asyncio.Event | None = None) -> str:
             wait.state = ABORTED
             wait.error = "cancelled"
             _stats["aborted"] += 1
+            session.outcome = ABORTED
+            if turn is not None:
+                turn.aborted = True
             logger.warning(f"[网络] 离线park被取消（{wait.id}）")
             return ABORTED
         await _sleep(POLL_S)
@@ -378,10 +484,14 @@ async def maybe_park(exc, cancel_event: asyncio.Event | None = None) -> str:
             wait.state = ABORTED
             wait.error = "cancelled during grace"
             _stats["aborted"] += 1
+            session.outcome = ABORTED
+            if turn is not None:
+                turn.aborted = True
             logger.warning(f"[网络] 宽限期内被取消（{wait.id}）")
             return ABORTED
         wait.state = RESUMED
         _stats["resumed"] += 1
+        session.outcome = RESUMED
         logger.info(f"[网络] 离线park恢复续跑（{wait.id}，轮询{polls}次）")
         await _run_restore_callbacks()
         return RESUMED
@@ -389,5 +499,8 @@ async def maybe_park(exc, cancel_event: asyncio.Event | None = None) -> str:
     wait.state = ABORTED
     wait.error = f"timeout after {MAX_WAIT_S:.0f}s"
     _stats["aborted"] += 1
+    session.outcome = ABORTED
+    if turn is not None:
+        turn.aborted = True
     logger.warning(f"[网络] 离线park超时放弃（{wait.id}，{MAX_WAIT_S:.0f}s仍离线）")
     return ABORTED

@@ -68,6 +68,7 @@ from agent import memory_echo
 from agent import memory_marker
 from agent import session_recall
 from agent import turn_lifecycle
+from utils import network_state  # turn级park合并：turn.open/close驱动park预算
 from agent.dynamic_prompt import DynamicPromptBuilder
 from agent.memory_retrieval import MemoryRetrievalEngine
 from agent.tool_cache import ToolResultCache
@@ -295,6 +296,17 @@ class SoulMateAgent:
         self._turn_lifecycle.subscribe(
             turn_lifecycle.EVENT_TURN_CLOSE,
             turn_lifecycle.MemoryDigestCollector(),
+        )
+        # ── turn级park合并（kilocode "park整个turn"）：turn.open/close驱动网络park预算──
+        # 一个逻辑回合最多一次park等待（放弃后同turn fail-fast不叠加等待），
+        # wait记录带turn_id（utils/network_state._current_turn，contextvar跨await继承）
+        self._turn_lifecycle.subscribe(
+            turn_lifecycle.EVENT_TURN_OPEN,
+            lambda record: network_state.begin_turn(record.turn_id),
+        )
+        self._turn_lifecycle.subscribe(
+            turn_lifecycle.EVENT_TURN_CLOSE,
+            lambda record: network_state.end_turn(),
         )
         self._turn_close_reason: dict[str, str] = {}  # session_id -> 非正常收尾原因
         # ── kilocode #4 readTurn：工具动作轮廓(toolSummary)+文件快照diff进记忆──
