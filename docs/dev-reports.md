@@ -3566,3 +3566,35 @@
 4. 其余遗留观察项照旧非本轮范围：turn级park合并、MCP重连真实Server验证、relay消息级粒度、唤醒触发行agent_message透出、前端视觉走查登录墙、model_gateway/gateway.py:135凭据映射表、secret redaction UI i18n key、HITL网络等待交互卡。
 5. ⚠️环境问题仍在（非代码，需用户处理）：LLM供应商余额不足（402 insufficient_balance）。
 6. cron环境约束实录：`execute_code`在cron BLOCKED→live demo用write_file落/tmp+terminal执行；write_file超长手打文本有静默丢字符现象（demo断言串"stub2/backup-b"落盘成"stub/backup-b"致19过17，代码文件经测试断言全数验证无此问题但**长文本写盘后必须过测试/断言**，勿信肉眼）；新旧对比/断言串务必用python字面量比对定位差异（U+码逐字打印），勿靠控制台目测（全角/半角、字形相近字符目测不可分辨）；systemic_test前台超600s→background+process wait分段取结果。
+
+## [2026-10-01 14:35 CST] 续写×重试联合发送预算TurnSendBudget——MAX_TURN_SENDS=8发/逻辑回合硬顶（连续多轮挂账项"续写×重试联合封顶"销账）
+**目标**：销账连续多轮dev-report遗留"chat_stream/with_tools续写×重试联合封顶（4续写×3重试理论12发/逻辑回合）"。续写（最多MAX_CONTINUATION+1段）与HTTP重试（每段MAX_ATTEMPTS发）此前各自独立计数、互不知情，三路（chat_stream/chat_stream_with_tools/chat）都无联合上界——极端截断+限流一轮可狂发十余个HTTP请求（latency与配额双杀），降级链切换/环绕再叠乘上界更不可控。
+**调研来源**：kilocode Truncate服务"双限（2000行/50KB）封顶→显式降级"语义 + AIHawk SHOWN/SENT双预算"截断必须显式标记"（SUMMARY §三 P0-2工具结果溢出处理）；预算随递归线程传递的做法沿用上轮`_chain`线程范式（43c21aba）。
+**改动文件**（openmate commit `7f1de76d`，3文件 +566/-29）：
+- `acp-proxy/utils/llm_safety.py`（+34/-0）：新增 `MAX_TURN_SENDS = 8` + `TurnSendBudget` 类（spend()/remaining，单一真源）
+- `acp-proxy/agent/llm_engine.py`（+41/-6）：三路接线——预算实例化、3个发送点spend()硬守卫、7个降级链切换点+5个重试点+2个续写决策点前置守卫、10个递归调用点线程`_budget=budget`、预算截断标记与次数截断标记分流、chat()续写/omission预算用尽保留已累积输出
+- `acp-proxy/tests/test_turn_send_budget.py`（新506行，22测）
+**改动内容**：
+1. **utils/llm_safety.TurnSendBudget单一真源**：每次真实HTTP发送前`spend()`扣1，余额不足返回False且不扣减=调用方不得再发送。默认`MAX_TURN_SENDS=8`（≥既有最坏用例7发"链耗尽7发"，<理论12发，封顶有实际约束力，测试断言`MAX_TURN_SENDS < (MAX_CONTINUATION+1)*3`防形同虚设）。一次chat_stream*/chat()调用=一个逻辑回合=一个预算实例，重试/续写/降级链切换共享同一额度。
+2. **发送点硬守卫（3处）**：chat_stream/with_tools的`client.send`前、chat()的`client.post`前——预算耗尽=显式失败（流式`yield "\n[LLM错误: 本回合HTTP发送预算已用尽（续写×重试联合封顶）]"`、chat() raise→`"[LLM错误: …]"`），绝不发出请求（测试用`TurnSendBudget(limit=0)`实证0发）。
+3. **决策点前置守卫（防sleep干等后才发现发不了）**：7个`chain.try_advance`全部改`budget.remaining > 0 and chain.try_advance(`（没额度不切link不空转）；5个`if _wait is not None:`改`and budget.remaining > 0`（重试预算见底直接走失败契约，不sleep 2-4s再撞墙）；chat()状态路径`if _wait is None or budget.remaining <= 0:`。
+4. **续写决策点分流**：`budget.remaining > 0`进续写递归；额度用尽但次数未尽→显式预算截断标记`"\n\n[输出因max_tokens截断，本回合发送预算已用尽]"`；次数用尽/空段→旧标记`"\n\n[输出因max_tokens截断，续写次数已用尽]"`逐字不变（既有测试`src.count(旧标记)==2`回归钉原样通过）。
+5. **chat()内容保护**：续写/omission重发额度用尽→`break`返回已累积输出（log显式警告），不吞成`"[LLM错误: …]"`丢内容。
+**接线位置**（grep证据，文件:行号）：
+- 核心定义：`utils/llm_safety.py:20 MAX_TURN_SENDS`、`:23 class TurnSendBudget`
+- 消费点：`agent/llm_engine.py:252/:539/:901`（三路预算实例化）、`:276/:582/:935`（3个发送点spend守卫）、`:311/:443/:608/:631/:827/:951/:978`（7个链切换点全守卫）、`:323/:455/:642/:837/:957`（5个重试点守卫）、`:407/:776`（2个续写决策点）
+- 预算线程：`_budget=budget`×10（chat_stream 6递归点+with_tools 4递归点）
+- 真实运行时路径（零改动调用方经LLMEngine获得封顶）：`agent/soulmate_agent.py:1762 chat_stream_with_tools`（真实回复主路径）、`:778/:801/:898/:3948 chat`（judge注入门/计划/摘要/标题）、`engine.py:132 chat_stream`+`:174 chat_stream_with_tools`（_stream_toClient/agent loop）、`discussion_engine.py:500 chat_stream`、`agent/context.py:125 chat`（摘要压缩）、`agent/acp_server.py:116 LLMEngine()`
+**验证结果**：
+- 完整性✅：`git show --numstat 7f1de76d`=3文件+566/-29，逐hunk核实全为本轮改动（sibling并行会话的settings-client.tsx/locales/*.json/systemic_test_results.json/e2e_probe2.py/.mmb-render显式git add白名单排除未入库）；3文件ast.parse全过。既有接线钉逐项复核：`chain.try_advance(==7`/`chain.fail(==7`/`_chain=chain==10`/`_retry_count=MAX_ATTEMPTS - 1==5`/`plan_status_retry(==3`/`plan_error_retry(==3`/`load_fallback_chain(primary_model=resolved_model)==3`/旧截断标记==2 全部原值保持。
+- 集成✅：上述grep证据齐全（定义→三路3实例化+3发送点+14决策点守卫+10递归线程→soulmate/engine/discussion/context/acp_server六条真实流量面零改动获得封顶）；重启后:8092/health=200、:8095/health=200。
+- 测试✅：新`tests/test_turn_send_budget.py` **22 passed**（①预算单元3：默认=MAX_TURN_SENDS/扣减耗尽不扣减/硬顶<理论12发；②chat_stream 5：429×2+length极端序列发送数=8硬顶+"S1S2"已流出保留+"[LLM错误:"可见+真实退避有记录/预算截断标记分流/次数标记逐字回归/普通回合单发零变化/limit=0零请求显式失败；③with_tools 3：同款硬顶+无tool_calls污染/预算标记分流/tool_calls回合单发零变化；④chat 4：硬顶+失败可见/额度用尽返回"S1S2"不吞/omission额度用尽保留/limit=0显式失败；⑤接线钉7）；关联回归`test_stream_continuation+test_llm_engine_fallback+test_llm_retry_policy+test_chat_output_protection+test_llm_error_contract+test_model_fallback+test_llm_stream_usage_emission+test_network_offline_park` **221 passed**零回归（含全部旧接线钉与无链行为逐字契约）；acp-proxy全量`tests/` **1375 passed 0 failed**（488.84s，=上轮1353基线+22新测）；`systemic_test.py` **29/29 passed**（S1-S6全绿，跨模块回归确认）。
+**服务重启**：`systemctl --user restart acp-proxy-a.service acp-proxy-b.service`→两服务active；:8092/health=200、:8095/health=200（opensoul/前端零改动未重启，npm build不适用）。
+**commit**：openmate `7f1de76d`。
+**遗留问题**：
+1. **utils/llm_transport（非流式核心complete_with_protection）未加联合预算**：其结构本就有界（单link MAX_ATTEMPTS发+链环绕，最坏7发左右，test_model_fallback实证），本轮为控制范围只封llm_engine三路；若未来transport内联续写循环复活需同步接TurnSendBudget。**下轮候选（低优先）**。
+2. **MAX_TURN_SENDS=8是保守值**：正常回合1发、重试3发、4段续写4发都远低于；但"每段都挨2次限流+4段续写"的极端合法场景会被截尾（显式标记）。若用户实际使用中见到预算截断标记，可上调常量（单一真源一行改动），待真实流量观察。
+3. **chat()预算用尽语义与流式略不对称**：流式=显式截断/错误标记，chat()=返回已累积输出+log警告（保持既有"返回累积内容"契约，本轮不引入新返回形态）；如需严格对齐可在chat()返回串追加截断标记，需先与消费方（judge JSON解析/标题生成）确认容错。
+4. 其余遗留观察项照旧非本轮范围：降级链opt-in待用户配provider凭据（遗留#1多轮）、llm_call无生产调用方、turn级park合并、MCP重连真实Server验证、relay消息级粒度、唤醒触发行agent_message透出、前端视觉走查登录墙、model_gateway/gateway.py:135凭据映射表、secret redaction UI i18n key、HITL网络等待交互卡。
+5. ⚠️环境问题仍在（非代码，需用户处理）：LLM供应商余额不足（402 insufficient_balance）。
+6. cron环境约束实录：复杂sed/命令替换组合terminal被hardline BLOCKED（改用search_files/read_file取目标文本）；patch工具old_string/new_string模糊匹配曾把`return`缩进改错（20→24空格，改变语义）——**patch后必须git diff逐hunk核对缩进/语义，diff里意外出现的非预期行立即修复**（本轮当场发现并还原）；write_file长文本照旧须靠测试断言验证字面串（22测全过=断言串无丢字）；全量pytest(489s)与systemic_test均background+process wait（wait窗口被钳180s，连续poll）。
