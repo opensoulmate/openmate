@@ -4,8 +4,9 @@
 缺口：唤醒回合在无客户端headless实例/对端proxy实例执行，_notify_client天然no-op，
 消息落opensoul.db前端只能下次加载可见——会话正连着也"看不见它在干嘛"。
 本面：落库行带turn_origin=wakeup（wakeup_executor窗口 + _save_message metadata
-合并）→ WakeupRelay给本地正连WS会话补推为ACP session/update通知（agent_message
-形状=前端chat-client既有处理面，零前端改动）。
+合并）→ WakeupRelay给本地正连WS会话补推为ACP session/update通知（角色保真：
+user出身行=user_message、assistant出身行=agent_message，与前端loadHistory的
+role映射一致，同一行live视图与历史视图角色不翻转）。
 
 安全声明（测试即规格）：
 1. 普通回合行绝不补推（子进程自己流式，推了=重复）——interleaving也不误推；
@@ -243,13 +244,32 @@ class TestRelayPush:
         )
 
     def test_payload_shape_matches_frontend_contract(self):
-        # 与chat-client.tsx既有sessionUpdate=agent_message处理面同形（零前端改动）
-        p = update_payload(SID, {"content": "唤醒回合回复"})
+        # assistant/缺role行→agent_message（chat-client既有处理面，形状逐字不变）
+        for row in ({"content": "唤醒回合回复"}, {"content": "唤醒回合回复", "role": "assistant"}):
+            p = update_payload(SID, row)
+            assert p["method"] == "session/update"
+            assert p["params"]["sessionId"] == SID
+            upd = p["params"]["update"]
+            assert upd["sessionUpdate"] == "agent_message"
+            assert upd["content"] == {"type": "text", "text": "唤醒回合回复"}
+
+    def test_payload_role_fidelity_user_row(self):
+        # 角色保真（21:40轮遗留#4销账）：user出身行（唤醒触发行）→user_message，
+        # 与前端loadHistory的role='user'→用户气泡映射一致（live/历史视图角色不翻转）
+        p = update_payload(SID, {"role": "user", "content": "⏰ [ScheduleWakeup 到点唤醒]"})
+        upd = p["params"]["update"]
+        assert upd["sessionUpdate"] == "user_message"
+        assert upd["content"] == {"type": "text", "text": "⏰ [ScheduleWakeup 到点唤醒]"}
+        # 除sessionUpdate外形状与agent_message路径完全同构（前端两分支共用content契约）
         assert p["method"] == "session/update"
         assert p["params"]["sessionId"] == SID
-        upd = p["params"]["update"]
-        assert upd["sessionUpdate"] == "agent_message"
-        assert upd["content"] == {"type": "text", "text": "唤醒回合回复"}
+        assert set(upd.keys()) == {"sessionUpdate", "content"}
+
+    def test_payload_role_case_and_empty_fallback(self):
+        # role大小写不敏感匹配，空/None/未知role→agent_message（不误伤非user行）
+        assert update_payload(SID, {"role": "USER", "content": "x"})["params"]["update"]["sessionUpdate"] == "user_message"
+        for row in ({"role": "", "content": "x"}, {"role": None, "content": "x"}, {"role": "tool", "content": "x"}, {}):
+            assert update_payload(SID, row)["params"]["update"]["sessionUpdate"] == "agent_message"
 
     def test_poll_once_pushes_only_wakeup_rows_in_order(self):
         db_path = _make_db()
@@ -264,6 +284,11 @@ class TestRelayPush:
         texts = [p["params"]["update"]["content"]["text"] for p in c.payloads]
         assert pushed == 2
         assert texts == ["⏰ [ScheduleWakeup 到点唤醒]", "唤醒回复1"]
+        # 角色保真：触发行user_message在前、回合输出agent_message在后（顺序即回合时序）
+        assert [p["params"]["update"]["sessionUpdate"] for p in c.payloads] == [
+            "user_message",
+            "agent_message",
+        ]
 
     def test_poll_once_advances_cursor_over_untagged(self):
         # 未标记行推进游标：第二轮不重扫不重推（防重复推送+防O(n²)重扫）
@@ -428,3 +453,50 @@ class TestWiring:
     def test_save_message_merges_origin(self):
         src = self._src("agent/soulmate_agent.py")
         assert "metadata = self._merge_turn_origin(session_id, metadata)" in src
+
+
+# ════════════════════════════════════════════════════════════════
+# ⑥ 前端角色保真接线钉（user_message处理面：写了≠接线了）
+# ════════════════════════════════════════════════════════════════
+
+
+class TestFrontendRoleFidelityWiring:
+    """chat-client user_message分支 + buildUserMessage单一真源 + loadHistory角色映射一致性"""
+
+    def _chat_src(self):
+        return (
+            Path(__file__).parent.parent.parent
+            / "src" / "app" / "(app)" / "chat" / "chat-client.tsx"
+        ).read_text(encoding="utf-8")
+
+    def _helper_src(self):
+        return (
+            Path(__file__).parent.parent.parent
+            / "src" / "app" / "(app)" / "chat" / "user-message.ts"
+        ).read_text(encoding="utf-8")
+
+    def test_chat_client_has_user_message_branch(self):
+        src = self._chat_src()
+        assert "sessionUpdate === 'user_message'" in src
+        assert "import { buildUserMessage } from './user-message'" in src
+        assert "buildUserMessage(text)" in src
+
+    def test_user_message_branch_keeps_loading_state(self):
+        # 触发行先到、回合输出后到：user_message分支不得setLoading(false)结束loading
+        src = self._chat_src()
+        start = src.index("sessionUpdate === 'user_message'")
+        end = src.index("else if", start)
+        branch = src[start:end]
+        assert "setLoading" not in branch
+        assert "buildUserMessage(text)" in branch
+
+    def test_helper_single_source_user_role(self):
+        src = self._helper_src()
+        assert "export function buildUserMessage" in src
+        assert "role: 'user'" in src
+        assert "parts: [{ type: 'text', text }]" in src
+
+    def test_load_history_role_mapping_consistent(self):
+        # 一致性主张的根据：历史加载role='user'→用户气泡（live推送必须同角色）
+        src = self._chat_src()
+        assert "role: isAgent ? 'agent' : 'user'" in src

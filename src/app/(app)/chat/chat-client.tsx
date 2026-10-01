@@ -19,6 +19,7 @@ import { useTranslation } from 'react-i18next';
 import { SmartPrompt } from '@/components/smart-prompt';
 import { AcpApprovalModal, type AcpApprovalRequest } from '@/components/acp-approval-modal';
 import { NetworkWaitBanner } from '@/components/network-wait-banner';
+import { buildUserMessage } from './user-message';
 
 const getApiUrl = () => getApiBaseUrl();
 const getWsUrl = () => getApiUrl().replace('http', 'ws');
@@ -840,6 +841,20 @@ function useAcpWebSocket(params: {
                   return [...prev, { id: Date.now().toString(), role: 'agent', parts: [{ type: 'text', text }], timestamp: new Date(), fileChanges, tokenUsage }];
                 });
                 incrementUnread(updateSessionId, text);
+              }
+            }
+            // ── 系统生成的用户角色行 (user_message，角色保真) ──
+            // 唤醒触发行等role='user'落库行经wakeup_relay按角色推送（21:40轮遗留#4
+            // 销账）：与loadHistory的role='user'→用户气泡映射一致，同一行live视图与
+            // 历史视图角色不翻转。消息构造单一真源buildUserMessage（user-message.ts
+            // 纯函数，composeAskAnswers同款惯例）。不setLoading(false)：触发行先到、
+            // 回合输出（agent_message）后到，agent仍在工作中。
+            else if (sessionUpdate === 'user_message') {
+              const text = update.content?.text as string | undefined;
+              if (text) {
+                updateSessionMessages(updateSessionId, prev => {
+                  return [...prev, buildUserMessage(text)];
+                });
               }
             }
             // ── 思考过程流式块 (agent_thought_chunk) ──

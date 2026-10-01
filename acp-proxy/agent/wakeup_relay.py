@@ -13,8 +13,10 @@ SoulMateAgent._save_message metadata合并），每个proxy实例给**本地正�
 实例间互知/HTTP扇出（对称、无路由表、断连自愈）。
 
 重复推送防线：普通回合行不带标记（子进程自己流式推送），relay只推标记行——
-不与既有流式路径重复。前端chat-client已处理sessionUpdate=agent_message
-（一次性完整消息），relay即用该形状。
+不与既有流式路径重复。推送形状按落库行role保真（21:40轮遗留#4销账）：user出身
+行（唤醒prompt触发行）→sessionUpdate=user_message（前端chat-client已加该处理面
+buildUserMessage），assistant出身行→agent_message（既有处理面逐字不变）——与
+前端loadHistory的role映射一致，同一行live视图与历史视图角色不翻转。
 
 粒度诚实声明：消息级实时（默认2s轮询，env WAKEUP_RELAY_INTERVAL_S可调），
 非token级流式——token chunk跨进程不可复原（不落库），消息落库即推是可达上限。
@@ -111,19 +113,26 @@ def max_row_id(db_path: str, session_id: str) -> int:
 
 
 def update_payload(session_id: str, row: dict) -> dict:
-    """落库行 → ACP session/update通知（agent_message一次性完整消息形状）。
+    """落库行 → ACP session/update通知（角色保真：user_message / agent_message）。
 
-    与前端chat-client.tsx既有sessionUpdate=agent_message处理面完全同形
-    （update.content.text），无需前端改动。user出身行（唤醒prompt系统自动回合
-    声明）同样以agent_message透出——前端session/update无user_message处理面，
-    且该文本自带"系统自动回合，非用户消息"声明，展示语义自洽。"""
+    角色保真（21:40轮遗留#4销账）：user出身行（唤醒prompt触发行）以user_message
+    形状透出——与前端loadHistory的role='user'→用户气泡映射一致，同一行live视图
+    与历史视图角色一致，不再live显示为agent气泡、刷新后翻转为用户气泡（前端
+    chat-client.tsx的session/update已加user_message处理面，buildUserMessage单一
+    真源）。assistant/缺role行沿用agent_message（既有前端处理面，形状逐字不变）。
+    """
+    session_update = (
+        "user_message"
+        if str(row.get("role") or "").strip().lower() == "user"
+        else "agent_message"
+    )
     return {
         "jsonrpc": "2.0",
         "method": "session/update",
         "params": {
             "sessionId": session_id,
             "update": {
-                "sessionUpdate": "agent_message",
+                "sessionUpdate": session_update,
                 "content": {"type": "text", "text": row.get("content") or ""},
             },
         },
