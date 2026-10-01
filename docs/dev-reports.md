@@ -3737,3 +3737,39 @@
 5. 其余遗留观察项照旧非本轮范围：降级链opt-in待用户配provider凭据（多轮）、llm_call无生产调用方、MCP重连真实Server验证（本轮只补注册，真实断网恢复后的重连动作仍待真实MCP Server场景验证）、relay消息级粒度、唤醒触发行agent_message透出、前端视觉走查登录墙、model_gateway/gateway.py:135凭据映射表、环境变量密钥外发误伤面、AgentEngine.run_task未接begin_turn（无生产调用方）。
 6. ⚠️环境问题仍在（非代码，需用户处理）：LLM供应商余额不足（402 insufficient_balance）。
 7. cron环境约束实录：`curl | python3 -m json.tool`管道被tirith"pipe to interpreter"拦截→改`curl -o /tmp/x.json`+独立`python3 -m json.tool`两步；`execute_code`在cron继续BLOCKED（locale index手术脚本write_file落/tmp+terminal执行）；**全量pytest暴露跨测试模块遮蔽**（test_mcp_*把mcp-client目录插sys.path→其routes包缓存进sys.modules→import app的routes.skills解析错包）——client fixture导入期定点清除重解析+用后完整恢复（102测mcp+mine混跑复现验证）；demo脚本自身bug教训：`res = await task`拿不到协程内部赋值的结果（task返回None），断言串必须拿真实变量（demo二跑6/6）；systemic_test_results.json是sibling与systemic共写文件，照旧备份+不入commit。
+
+## [2026-10-01 22:44 CST] P1交互式提问卡（多问题/多选）——clarify升级Warp AskUserQuestion形态（SUMMARY前端差距表P1销账）
+**目标**：销账SUMMARY.md前端差距清单「交互式提问卡（多问题/多选）| acp-approval-modal单问题 | 部分有 | Warp AskUserQuestion/Dify表单 | P1」——agent向用户提问此前只有单问题/单选的clarify选择菜单（一次一个问题、点选即回），复杂任务（如部署确认要问环境+数据库+范围）被迫连续多轮往返、每轮一个60s等待窗口。本轮把clarify升级为**一张卡多问题×多选×可自定义、一次提交全部作答**的交互式提问卡。
+**调研来源**：Warp AskUserQuestion（多问题分页多选卡，SUMMARY P0-9/P1参照）+ Dify表单卡；回流通道沿用本仓库既有clarify `pending_choices` future→`resolve_choice`契约（不新造协议，ACP session/update推送+__openmate_send__作答通道零新增）；作答文本格式=每行「问题：选项A、选项B」写进工具描述（LLM可解析的确定性格式，AIHawk显式标记纪律）。单问题旧形态**逐字不变**（回归钉），符合增量开发原则。
+**改动文件**（openmate commit `d848a05b`，8文件 +875/-37）：
+- `acp-proxy/agent/soulmate_agent.py`（+117/-37）：clarify工具schema加`questions`数组（1-5问、每问2-8有效选项、multi多选、allow_custom自定义）；工具执行面内联块收口为`_handle_clarify`/`_build_clarify_payload`两方法（可单测）；`CLARIFY_WAIT_TIMEOUT_S=60.0`等待上限单一真源（测试可覆写）
+- `src/components/task-choice-menu.tsx`（+162）：`AskQuestionCard`多问题表单（multi=复选框切换/单选钮点选、每问allow_custom自定义输入、全问作答后一次提交、提交后锁定）+ `composeAskAnswers`纯函数（作答文本组合单一真源，render测试与组件共用）；单问题旧JSX渲染零改动
+- `src/app/(app)/chat/chat-client.tsx`（+12/-6）：解析`parsed.questions`、MessagePart加questions字段、挂载`questions`/`onSubmitAnswers`（作答经既有`window.__openmate_send__`→sendAcpPrompt→prompt()的pending_choices闸门回流）
+- `src/locales/zh.json`/`en.json`/`ja.json`（各+7）：`askUser` 5键三语言（multiHint/multiTag/submit/submitted/customPlaceholder）
+- `acp-proxy/tests/test_clarify_ask_card.py`（新347行，23测）
+- `render-test-ask-user.cjs`（新210行，49断言）
+**改动内容**：
+1. **工具schema**：clarify参数新增`questions`（items含id/question/options/multi/allow_custom），required从["question","options"]收为["question"]（多问题形态question=卡标题可留空，运行时校验兜底）；工具描述写明两形态+作答格式契约（每行『问题：选项A、选项B』）。
+2. **payload两形态**：`_build_clarify_payload`——questions非空→`{"type":"choice","text":title,"questions":[{id,question,options,multi,allow_custom}]}`（id缺省qN、title缺省"请回答以下问题："、每问2-8个id+label必填的有效选项、1-5问）；否则→旧`{"type":"choice","text":question,"choices":[…]}`**逐字不变**（不加新校验防回归）。参数错误=显式错误串返回（"clarify参数错误：…"）且**不注册等待不推半截卡**（mem0 §1.1失败可见+不挂起回合）。
+3. **等待/回流语义不变**：`_handle_clarify`推卡（session_update）→注册`_pending_choices`future→等作答（上限CLARIFY_WAIT_TIMEOUT_S，超时消息格式与旧契约一致"用户未在60秒内选择，请继续"）→finally清场；作答从prompt()既有choice闸门（soulmate_agent.py:2834-2847）回流=工具结果文本进LLM上下文。前端通道故障→"clarify失败: …"可见（不假装已展示）。
+4. **前端提问卡**：每问题块=题干+选项按钮（multi点选切换/单选再点取消）+allow_custom自定义输入；全部问题作答后"提交全部作答"按钮才可用（required语义=每问至少一个选择或自定义文本）；提交后锁定显示"已提交作答"。`composeAskAnswers`纯函数：每行`${question}：${标签1、标签2}`，自定义追加`（自定义）${text}`（纯选择/纯自定义/混合三态格式固定）。
+5. **单问题旧形态零回归**：questions缺省/空数组→旧渲染逐字不变（点击即选+自定义输入+分页，无提交按钮）；旧payload契约逐字不变（测试钉字节级相等）。
+**接线位置**（grep证据，文件:行号）：
+- 后端：工具循环`agent/soulmate_agent.py:2279 result = await self._handle_clarify(session_id, func_args)`（`elif func_name == "clarify":`分支，真实_run_llm_with_tools工具执行路径）→ 方法定义`:3957 _handle_clarify`/`:3908 _build_clarify_payload`/`:3906 CLARIFY_WAIT_TIMEOUT_S`；作答回流=既有`prompt()`闸门`:2847 self.resolve_choice(session_id, user_choice.strip())`（零改动复用）；schema在`:1597 clarify_tool`（`all_tools = … + [clarify_tool]`进LLM工具面）
+- 前端：`chat-client.tsx:370`解析（`(parsed.choices || parsed.questions)`）→`:2505`渲染`questions={p.questions}`+`onSubmitAnswers=`→`task-choice-menu.tsx:186 <AskQuestionCard`（`:43`组件本体）→`:76 onSubmitAnswers(composeAskAnswers(…))`→`__openmate_send__`→sendAcpPrompt→prompt()闸门（闭环）
+- 真实运行时路径：ws_acp session/prompt → `_run_llm_with_tools` → clarify分支（2279）——E2E测试即走该真实循环（test_real_loop 2例）
+**验证结果**：
+- 完整性✅：`git diff --cached --numstat`=8文件+875/-37逐项核对全为本轮改动（sibling并行会话的settings-client.tsx/locales各45行settings块显式排除——3份locale经`git show HEAD+insert askUser`index手术只暂存我的+7行×3，`git diff --cached`逐行核对只含askUser内容）；2个Python文件+test ast.parse全过；3份locale json.load全过。
+- 集成✅：上述grep链完整（工具循环→方法→payload→session_update推送→前端解析/渲染→__openmate_send__→prompt()闸门→resolve_choice→工具结果回LLM）；重启后:8092/health=200、:8095/health=200；served build实锤：`.next/static/chunks/2ftxpoxkfjcec.js`含"提交全部作答"+`078wjqq_ckbx0.js`含"Answer all questions, then submit once"（中文/英文UI串都进了部署bundle）。
+- 测试✅：新`tests/test_clarify_ask_card.py` **23 passed**（①payload构建8：单问题payload字节级逐字不变（回归钉）/多问题shape（multi/allow_custom/id缺省qN）/title兜底/6问拒绝/非对象拒绝/空题干拒绝/单选项拒绝/无效选项过滤后不足2拒绝；②handler 7：多问题推卡+作答回流=工具结果/旧形态推卡回流/超时消息契约钉（默认60→"用户未在60秒内选择，请继续"逐字）/超时清场可见/参数错误可见且不注册等待不推半截卡/前端通道故障"clarify失败"可见/无client headless仍可回流；③prompt()闸门2：等待中→作答唤醒future+end_turn不跑新回合/无等待不吞消息；④**真实_run_llm_with_tools循环E2E 2**：clarify(questions)工具调用→提问卡payload真实推送→作答文本作为工具结果进第2轮LLM上下文+工具账本留痕/旧形态同款；⑤接线钉4（工具循环调用点/schema含questions/超时单一真源/两形态同走type:"choice"））；**acp-proxy全量`tests/` 1459 passed 0 failed**（562.59s，=上轮1436基线+23新测，零回归）；`systemic_test.py` **29/29 passed**（S1-S6全绿）；前端`render-test-ask-user.cjs` **49/49 PASS**（①composeAskAnswers纯函数5：多选"、"连接/纯自定义（自定义）前缀/混合三态/未答空行/未知id回退不炸 ②askUser三语言key集一致+5键全语言在场 ③zh卡渲染10：标题/两问题/多选标签仅multi问题1次/全选项label/描述title/提交按钮/自定义输入仅allow_custom问题1次/真button/未提交态 ④en全翻译+**零CJK** ⑤ja翻译 ⑥defaultValue兜底 ⑦旧形态回归钉7：题干/选项/自定义输入/编号/无提交按钮/无多选标签/questions空数组仍走旧渲染 ⑧接线钉10含compose单一真源/chat-client解析+挂载/后端payload契约/作答格式契约）；旧`render-test-secret-redaction.cjs`+`secret-i18n`+`network-banner`+`memory-marker`四套零改动全过；`npm run build` exit 0（96页生成，TypeScript通过）。
+- **行为语义实测**（真实函数调用，非import验证）：`composeAskAnswers`三态输出逐字钉死（"部署环境：生产、预发\n数据库：PostgreSQL"等4组）；真实工具循环E2E用脚本化LLM走完整执行面（工具调用→推送→等待→回流→第2轮上下文），与生产唯一差异是LLM响应来源（402环境问题所迫，见遗留#1）。
+**服务重启**：`systemctl --user restart acp-proxy-a.service acp-proxy-b.service`→两服务active；:8092/health=200、:8095/health=200；重启后`systemic_test.py` 29/29（opensoul零改动未重启；前端已build无需重启openmate-web——但served chunk为重启前构建产物已实证含新串）。
+**commit**：openmate `d848a05b`。
+**遗留问题**：
+1. **⚠️环境问题仍在（非代码，需用户处理）**：LLM供应商余额不足（402）——真实模型回合的live E2E（agent自主调用clarify提问卡）拿不到，本轮E2E用脚本化LLM走真实执行面替代；充值后建议在聊天页让agent发起一次多问题提问亲眼看卡+作答回流。
+2. **前端视觉走查仍受登录墙**（cron无凭证不登录，前例同）——提问卡实际观感（选项按钮chips布局、提交按钮位置、多选高亮）待用户登录后看一眼；渲染HTML字面量已测，布局未人工过目。
+3. **作答组合格式为前端单一真源但依赖约定**：后端把作答文本原样作为工具结果给LLM，格式（每行『问题：选项』）写在工具描述里由LLM解析——若未来要结构化回传（JSON），可在_handle_clarify里加一步解析校验（当前文本格式对LLM足够）。
+4. **clarify等待仍是阻塞式**（提问卡挂着等作答，上限60s）：用户不在场时超时后继续；Warp的分页多问题卡（每页N问）未做（5问上限内单卡展示足够）；超时问题不重试不排队。
+5. schema required从["question","options"]收为["question"]是LLM提示面变化（运行时旧路径逐字不变已钉）——若观察到LLM漏传options导致旧形态空卡，可改回强制或运行时提示补充。
+6. 其余遗留观察项照旧非本轮范围：降级链opt-in待用户配provider凭据（多轮）、llm_call无生产调用方、MCP重连真实Server验证、relay消息级粒度、唤醒触发行agent_message透出、前端视觉走查登录墙、model_gateway/gateway.py:135凭据映射表、环境变量密钥外发误伤面（需先讨论误伤容忍度）、AgentEngine.run_task未接begin_turn（无生产调用方）。
+7. cron环境约束实录：sibling并行会话共用工作树照旧（settings-client.tsx/locales×3被改）——commit走显式git add白名单8文件+locale index手术（`git show HEAD`+insert+`git hash-object -w`+`git update-index --cacheinfo`，脚本heredoc内联执行）；`/tmp`共享文件名被sibling触碰警告（commit message改用唯一文件名/tmp/commit_msg_askcard_5921.txt防串写）；pytest不支持--timeout参数（无pytest-timeout插件）→裸跑；全量pytest(563s)与systemic_test均background+process wait分段取结果。gene skill上报本轮成功（skill_id=skill_549387386ffb，success_rate初始0.0属新建正常）。
