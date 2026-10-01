@@ -3773,3 +3773,38 @@
 5. schema required从["question","options"]收为["question"]是LLM提示面变化（运行时旧路径逐字不变已钉）——若观察到LLM漏传options导致旧形态空卡，可改回强制或运行时提示补充。
 6. 其余遗留观察项照旧非本轮范围：降级链opt-in待用户配provider凭据（多轮）、llm_call无生产调用方、MCP重连真实Server验证、relay消息级粒度、唤醒触发行agent_message透出、前端视觉走查登录墙、model_gateway/gateway.py:135凭据映射表、环境变量密钥外发误伤面（需先讨论误伤容忍度）、AgentEngine.run_task未接begin_turn（无生产调用方）。
 7. cron环境约束实录：sibling并行会话共用工作树照旧（settings-client.tsx/locales×3被改）——commit走显式git add白名单8文件+locale index手术（`git show HEAD`+insert+`git hash-object -w`+`git update-index --cacheinfo`，脚本heredoc内联执行）；`/tmp`共享文件名被sibling触碰警告（commit message改用唯一文件名/tmp/commit_msg_askcard_5921.txt防串写）；pytest不支持--timeout参数（无pytest-timeout插件）→裸跑；全量pytest(563s)与systemic_test均background+process wait分段取结果。gene skill上报本轮成功（skill_id=skill_549387386ffb，success_rate初始0.0属新建正常）。
+
+## [2026-10-02 01:12 CST] 唤醒触发行角色保真——user_message透出+前端user_message处理面（09-26 21:40轮遗留#4连续15轮挂账销账）
+**目标**：销账21:40轮（唤醒回合实时可见跨进程relay）遗留#4原文："唤醒触发行以`agent_message`（agent角色）透出而非user角色——前端session/update无user_message处理面；行文本自带'系统自动回合，非用户消息'声明，语义自洽；如后续前端加user_message处理面可改推该形状"。真实缺陷=**同一行live视图与历史视图角色翻转**：唤醒触发行是role='user'落库行（`_save_message(session_id,"user",user_text)`，_prompt_inner真实回合入口），前端loadHistory按`role==='user'→用户气泡`渲染（历史视图=用户气泡），但live relay一律以agent_message推送→**live显示agent气泡、刷新后翻转为用户气泡**——消息角色随刷新漂移，正是"消息语义诚实"（SUMMARY P0-4可观测性）的直接反例。
+**调研来源**：①09-26 21:40轮WakeUpRelay遗留#4原文（本项目自己的挂账契约，销账即按其指明方向"前端加user_message处理面可改推该形状"执行）；②仓库既有词汇先例：`src/stores/ai-groups-store.ts:305 case 'user_message'`（role:'user'）/`case 'agent_message'`（role:'agent'）——同名同语义，不自创协议词汇；③composeAskAnswers纯函数惯例（10-01 22:44 AskQuestionCard轮：消息构造抽单一真源纯函数、chat-client只做接线、独立可测）；④AIHawk显式标记纪律（改动面与兼容窗口诚实声明）。
+**改动文件**（openmate commit `e5d2327b`，5文件 +223/-16）：
+- `acp-proxy/agent/wakeup_relay.py`（+18/-9）：update_payload按落库行role保真映射+两处docstring更新
+- `src/app/(app)/chat/user-message.ts`（新25行）：buildUserMessage纯函数（消息构造单一真源）
+- `src/app/(app)/chat/chat-client.tsx`（+15）：import + session/update的user_message分支
+- `acp-proxy/tests/test_wakeup_relay.py`（+79/-7）：+6测（角色保真2+大小写兜底1+前端接线钉4）+既有payload契约钉更新为双形态
+- `render-test-user-message.cjs`（新86行，18断言）
+**改动内容**：
+1. **relay角色保真**：`update_payload`按row["role"]映射——user（strip+lower，防御goose/kilocode/codex导入会话大小写差异）→`sessionUpdate:"user_message"`；assistant/缺role/空/None/未知role→`"agent_message"`（既有前端处理面形状**逐字不变**，回归钉钉住）；除sessionUpdate外payload形状两分支完全同构（content契约共享，测试钉键集）。
+2. **前端user_message处理面**：chat-client session/update switch新增`user_message`分支——`buildUserMessage(text)`构造用户气泡消息（键集{id,parts,role:'user',timestamp}与loadHistory映射产物同形）；**不setLoading(false)**（触发行先到、回合输出agent_message后到，agent仍在工作中）**不计未读**（非agent产出内容）——两个语义均有接线钉防漂移。
+3. **buildUserMessage单一真源**（user-message.ts纯函数，composeAskAnswers同款惯例）：可独立编译单测，chat-client只做接线；render-test真实编译require调用（非静态字符串验证）。
+4. **词汇与仓库约定一致**：user_message/agent_message命名与ai-groups-store.ts既有case同名同语义，非新造协议词。
+**接线位置**（grep证据，文件:行号）：
+- 定义：`acp-proxy/agent/wakeup_relay.py:115 def update_payload` / `:124-128 session_update`（role映射单一真源）/ `:183 await self._send(update_payload(session_id, row))`（poll_once推送消费点）
+- 真实推送链：`ws_acp.py:269 WakeupRelay(...)`（/ws/acp真实聊天连接，agent_id=="soulmate"分支）→ `run()`轮询→`poll_once`→update_payload→WS客户端
+- 数据源：`agent/soulmate_agent.py:3086-3087 _save_message(session_id,"user",user_text)`（_prompt_inner真实回合入口落库，触发行role='user'）→`_merge_turn_origin`（:385）turn_origin=wakeup标记→relay is_wakeup_meta识别
+- 前端：`src/app/(app)/chat/chat-client.tsx:852 sessionUpdate === 'user_message'`分支（WS onmessage真实消息处理路径）→`:856 buildUserMessage(text)`←`src/app/(app)/chat/user-message.ts:18`（单一真源）；一致性根据=同文件loadHistory `role: isAgent ? 'agent' : 'user'`映射
+- 命名先例：`src/stores/ai-groups-store.ts:305 case 'user_message'`（role:'user'同语义既有消费面）
+**验证结果**：
+- 完整性✅：`git diff --cached --numstat`=5文件+223/-16（wakeup_relay +18/-9、tests +79/-7、render-test 86新、chat-client +15、user-message 25新）逐hunk核对全为本轮改动（sibling并行会话的settings-client.tsx/locales×3/systemic_test_results.json/e2e_probe2.py显式git add白名单排除）；2个Python文件ast.parse全过；npm run build exit 0（TypeScript通过+96页生成）。
+- 集成✅：上述grep链完整（定义→poll_once消费→ws_acp真实WS连接→_save_message数据源→chat-client WS onmessage分支→buildUserMessage单一真源→loadHistory一致性根据）；**served bundle实锤**：`.next/static/chunks/38_81p5zxmlqt.js`含编译后分支`else if("user_message"===l){...role:"user"...}`（buildUserMessage被bundler内联）；重启后:8092/health=200、:8095/health=200、:3000/chat=200、/health的wakeup_relay观测键在场（双实例）。
+- 测试✅：新`tests/test_wakeup_relay.py` **31 passed**（25既有+6新：①payload契约双形态2——缺role与assistant行形状逐字不变（回归钉）②角色保真2——user行→user_message形状键集同构/poll推送顺序[user_message,agent_message]即回合时序③大小写与兜底1——"USER"→user_message、空/None/tool/缺role→agent_message不误伤④前端接线钉4——分支在场+import单一真源/分支内无setLoading无incrementUnread/helper role:'user'单一真源/loadHistory角色映射一致性根据在场）；wakeup家族+message_tree+memory_marker回归批**121 passed**零回归；**acp-proxy全量`tests/` 1465 passed 0 failed**（563.70s，=上轮1459基线+6新测零回归）；`systemic_test.py` **29/29 passed**（S1-S6全绿）；前端`render-test-user-message.cjs` **18/18 PASS**（①buildUserMessage行为7：role固定user/单text part/text原文保真/id兜底/显式id优先/timestamp=Date②键集同形2：{id,parts,role,timestamp}与loadHistory产物逐字一致③接线钉9：chat-client分支+import+调用+loadHistory映射+分支不动loading不计未读+relay推user_message+角色判定单一真源）；既有5套render-test（ask-user 49/memory-marker/network-banner 51/secret-i18n 53/secret-redaction 36）**零改动全过**（chat-client改动零回归）。
+- **live行为实锤**（/tmp/live_role_fidelity_demo_1002.py，真实SoulMateAgent._save_message标记窗口+真实WakeupRelay.poll_once+真实update_payload，零stub，**9断言全过**）：真实落库触发行(role=user)+回合输出(role=assistant)→relay推送2条→payload[0]=`sessionUpdate:"user_message"`（"⏰ [ScheduleWakeup 到点唤醒｜系统自动回合，非用户消息]…"文本保真）+payload[1]=`"agent_message"`→DB回读历史角色=[user,agent]与live推送[user_message,agent_message]**逐一同向不翻转**（缺陷修复的直接实证；demo结尾标签"8/8"为计数笔误，实际9条PASS行）。
+**服务重启**：`systemctl --user restart acp-proxy-a.service acp-proxy-b.service openmate-web.service`→四服务（含opensoul）active；:8092/health=200（wakeup_relay键）、:8095/health=200、:3000/chat=200；重启后`systemic_test.py` 29/29（opensoul本轮零改动未重启）。
+**commit**：openmate `e5d2327b`。
+**遗留问题**：
+1. **前端视觉走查仍受登录墙**（cron无凭证不登录，前例同）——唤醒触发行以用户气泡渲染的实际观感（"⏰ [ScheduleWakeup…]"长文本在用户气泡内的排版）待用户下次唤醒场景亲眼看一次；渲染形状已测，布局未人工过目。
+2. **滚动部署兼容窗口**：旧前端bundle无user_message分支时触发行live不显示（未知sessionUpdate静默忽略，刷新后历史可见非丢数据）——同仓同发（本次build+重启同轮完成）实际影响趋零；如未来前后端分离部署需加能力协商。
+3. **user_message仅覆盖relay推送面**：普通回合用户消息的本地回显（前端onSend本地写入）与ws_acp既有user消息路径未动（本来就角色正确）；若未来有其他跨进程推送user角色行的场景（如handoff回放），update_payload可直接复用。
+4. 其余遗留观察项照旧非本轮范围：relay消息级粒度/relay每WS轮询（有意接受的上限）、环境变量密钥外发误伤面（需先讨论误伤容忍度）、污点分析近似、双侧镜像人工同步、model_gateway/gateway.py:135凭据映射表低优先、AgentEngine.run_task未接begin_turn（无生产调用方）、MCP重连真实Server验证、attach跨turn共享、RESUMED后同turn多episode单记录。
+5. ⚠️环境问题仍在（非代码，需用户处理）：LLM供应商余额不足（402 insufficient_balance）。
+6. cron环境约束实录：patch工具本轮零翻车（沿用≥3行上下文+git diff逐hunk核对惯例）；全量pytest(564s)与systemic_test均background+process wait分段取结果；sibling并行会话共用工作树照旧（settings-client.tsx/locales×3/systemic_test_results.json/e2e_probe2.py/.ask-card-*显式排除，commit走显式git add白名单5文件）；systemic_test_results.json照旧备份/tmp不入commit；commit message走/tmp唯一文件名+`git commit -F`惯例。
