@@ -5427,6 +5427,15 @@
     "revealSecretsTip": "Show sensitive data (masked by default)",
     "maskSecretsTip": "Re-mask sensitive data"
   },
+  "networkWait": {
+    "title": "Waiting for network",
+    "waiting": "Network disconnected, waiting to resume…",
+    "elapsed": "Waited {{seconds}}s (max {{max}}s)",
+    "merged": "{{count}} concurrent calls merged",
+    "restored": "Network restored, auto-resume in {{seconds}}s (can reject)",
+    "reject": "Reject & stop",
+    "rejecting": "Rejected, stopping…"
+  },
   "secretRedaction": {
     "badge": {
       "count": "{{n}} sensitive items",

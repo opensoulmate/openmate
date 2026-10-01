@@ -41,11 +41,14 @@ kilocode SessionNetwork语义（network.ts）：
 """
 import asyncio
 import contextvars
+import glob
+import json
 import logging
 import os
 import time
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import httpx
 
@@ -225,6 +228,7 @@ _stats = {
     "total_parks": 0,  # 进入blocked的次数
     "resumed": 0,      # 恢复续跑次数（retry）
     "aborted": 0,      # 放弃次数
+    "human_rejected": 0,  # HITL人工拒绝放弃次数（kilocode拒绝按钮语义）
     "turn_fail_fast": 0,  # turn级合并：本回合已park放弃，后续调用fail-fast不叠加等待
 }
 _restore_callbacks: list = []
@@ -383,6 +387,188 @@ class _ParkSession:
 _active_park: "_ParkSession | None" = None
 
 
+# ── HITL人工拒绝 + 跨进程park状态可见（kilocode人工拒绝窗口语义补全）────────
+# kilocode SessionNetwork带人工拒绝（前端"等待网络恢复…[拒绝]"卡片，RESUME_MS
+# 宽限期=人工拒绝窗口）；移植初版（适配#3）只有有界park超时出口，人工拒绝面
+# 缺失（dev-reports多轮挂账"HITL网络等待交互卡"）。本节补两件配套：
+# 1. **拒绝标志文件**：park真实发生在agent子进程（ws_acp spawn的agent.start
+#    --stdio），拒绝入口在app进程（POST /api/network/reject）——进程内存Event
+#    跨不过进程边界，用标志文件（与tool_output账本同款跨进程模式）。park循环
+#    每次轮询消费检查；宽限期（人工拒绝窗口本体）结束后、自动续跑前再查一次
+#    ——窗口内拒绝 > 自动续跑。命中→ABORTED(error=human_rejected)，
+#    llm_engine既有"[LLM错误: …]"可见失败契约不变。
+# 2. **per-pid状态快照**：park状态此前只在park所在进程内存可见——app端
+#    /api/network/status看不到子进程chat turn的park（观测面形同虚设）。
+#    每次状态变化写 state.<pid>.json（原子写），app端合并读取+死pid清理。
+PARK_STATE_DIR = os.environ.get("NETWORK_PARK_STATE_DIR") or str(
+    Path(__file__).resolve().parent.parent / "data" / "network_park"
+)
+REJECT_FLAG_NAME = "reject.json"
+# 跨进程合并时只对计数器求和；配置标量（poll_s/probe_urls等）取本地不求和
+COUNTER_KEYS = (
+    "total_parks", "resumed", "aborted", "human_rejected", "turn_fail_fast", "pending",
+)
+
+
+def _state_dir() -> str:
+    """状态目录（每次调用解析env，测试可重定向tmp）；建目录失败返回''→写侧fail-safe"""
+    try:
+        d = os.environ.get("NETWORK_PARK_STATE_DIR") or PARK_STATE_DIR
+        os.makedirs(d, exist_ok=True)
+        return d
+    except Exception:
+        return ""
+
+
+def _pid_alive(pid: int) -> bool:
+    """pid存活判定（load_park_state清理死进程快照的seam，测试可替换）"""
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except Exception:
+        return True  # 无权限等不确定情况：宁可保留快照不误删
+
+
+def _atomic_write_json(path: str, payload: dict) -> bool:
+    """原子写（tmp+rename）；任何失败fail-safe返回False不抛出（观测/拒绝面不反噬主流程）"""
+    try:
+        tmp = f"{path}.tmp-{os.getpid()}"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False)
+        os.replace(tmp, path)
+        return True
+    except Exception as e:
+        logger.warning(f"[网络] 状态写入失败（fail-safe忽略）: {e}")
+        return False
+
+
+def request_reject(wait_ids: list) -> dict:
+    """人工拒绝入口（app进程 /api/network/reject调用，跨进程标志文件）。
+
+    拒绝只对用户看到的pending wait生效（显式id列表）——不设通配：通配标志
+    会被拒绝时刻之后新起的park误伤，也会被先到的park单方面消费。"""
+    ids = [str(w) for w in (wait_ids or []) if w]
+    payload = {"wait_ids": ids, "ts": time.time()}
+    if not ids:
+        return payload  # 无可拒绝目标：不写标志文件（防空标志残留）
+    d = _state_dir()
+    if d:
+        _atomic_write_json(os.path.join(d, REJECT_FLAG_NAME), payload)
+    logger.warning(f"[网络] 收到人工拒绝请求: {ids}")
+    return payload
+
+
+def _consume_reject(wait_id: str) -> bool:
+    """park循环消费拒绝标志：本wait在列表中→从列表移除（空则删文件）→True。
+    文件缺失/损坏fail-safe返回False（绝不误伤正常park等待）。"""
+    d = _state_dir()
+    if not d:
+        return False
+    path = os.path.join(d, REJECT_FLAG_NAME)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        ids = [str(w) for w in (data or {}).get("wait_ids") or []]
+    except FileNotFoundError:
+        return False
+    except Exception:
+        return False
+    if wait_id not in ids:
+        return False
+    ids.remove(wait_id)
+    if ids:
+        _atomic_write_json(path, {"wait_ids": ids, "ts": (data or {}).get("ts")})
+    else:
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+    return True
+
+
+def _persist_state() -> None:
+    """per-pid快照（跨进程可见的数据源）：state.<pid>.json = {pid,updated,stats,waits}"""
+    d = _state_dir()
+    if not d:
+        return
+    _atomic_write_json(
+        os.path.join(d, f"state.{os.getpid()}.json"),
+        {"pid": os.getpid(), "updated": time.time(), "stats": stats(), "waits": list_waits()},
+    )
+
+
+def load_park_state(exclude_pid: int | None = None) -> dict:
+    """合并读取全部存活pid快照（app端 /api/network/status消费）：
+    - 每个进程一份 state.<pid>.json（无跨进程写竞争）；
+    - 死pid文件删除（进程退出的遗留快照不污染观测面）；
+    - 坏文件跳过（fail-safe：观测面不能因脏文件崩）；
+    - waits按id去重（后读覆盖前读），计数器跨源求和。
+    exclude_pid：排除本进程（调用方另有进程内存态，防重复计数）。"""
+    d = _state_dir()
+    merged_stats: dict = {}
+    merged_waits: dict = {}
+    sources: list = []
+    if not d:
+        return {"stats": merged_stats, "waits": [], "sources": sources}
+    for path in sorted(glob.glob(os.path.join(d, "state.*.json"))):
+        try:
+            pid = int(Path(path).stem.split(".")[1])
+        except Exception:
+            continue
+        if pid == exclude_pid:
+            continue
+        if not _pid_alive(pid):
+            try:
+                os.remove(path)
+            except Exception:
+                pass
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            continue
+        if not isinstance(data, dict):
+            continue
+        for k, v in (data.get("stats") or {}).items():
+            if k in COUNTER_KEYS and isinstance(v, (int, float)) and not isinstance(v, bool):
+                merged_stats[k] = merged_stats.get(k, 0) + v
+            else:
+                merged_stats.setdefault(k, v)
+        for w in data.get("waits") or []:
+            if isinstance(w, dict) and w.get("id"):
+                merged_waits[w["id"]] = w
+        sources.append({"pid": pid, "updated": data.get("updated")})
+    return {
+        "stats": merged_stats,
+        "waits": sorted(merged_waits.values(), key=lambda w: w.get("created") or 0),
+        "sources": sources,
+    }
+
+
+def merge_park_states(local_stats: dict, local_waits: list, remote: dict) -> dict:
+    """本进程内存态 × 跨进程快照 合并（/api/network/status响应的单一真源）：
+    waits按id去重（本地优先）；计数器跨源求和；配置标量取本地；pending按合并后
+    waits重算（挂账语义：'是不是在等网络'以wait记录为真源，不信任任何单侧计数）。"""
+    merged_waits = {w["id"]: w for w in (remote.get("waits") or []) if w.get("id")}
+    for w in local_waits:
+        merged_waits[w["id"]] = w
+    out: dict = dict(remote.get("stats") or {})
+    for k, v in local_stats.items():
+        if k in COUNTER_KEYS:
+            out[k] = out.get(k, 0) + (v if isinstance(v, (int, float)) else 0)
+        else:
+            out[k] = v
+    out["pending"] = sum(1 for w in merged_waits.values() if w.get("state") == BLOCKED)
+    return {
+        "stats": out,
+        "waits": sorted(merged_waits.values(), key=lambda w: w.get("created") or 0),
+        "sources": remote.get("sources") or [],
+    }
+
+
 # ── 离线park主入口（kilocode ask()/watch()/restore()/resume()合流）────────
 
 async def maybe_park(exc, cancel_event: asyncio.Event | None = None) -> str:
@@ -426,6 +612,7 @@ async def maybe_park(exc, cancel_event: asyncio.Event | None = None) -> str:
             f"[网络] 并发调用合并进进行中的park（{session.wait.id}，"
             f"merged={session.wait.merged_calls}）"
         )
+        _persist_state()  # merged_calls变化同步快照
         await session.done.wait()
         return session.outcome
 
@@ -436,6 +623,7 @@ async def maybe_park(exc, cancel_event: asyncio.Event | None = None) -> str:
     )
     _waits[wait.id] = wait
     _stats["total_parks"] += 1
+    _persist_state()  # HITL：park开始即写快照，前端卡片/观测面立刻可见
     logger.warning(
         f"[网络] 离线park开始（{wait.message}），每{POLL_S:.0f}s竞速探测，"
         f"上限{MAX_WAIT_S:.0f}s（{wait.id}）"
@@ -472,6 +660,20 @@ async def _run_park(session: _ParkSession, cancel_event, turn) -> str:
             if turn is not None:
                 turn.aborted = True
             logger.warning(f"[网络] 离线park被取消（{wait.id}）")
+            _persist_state()
+            return ABORTED
+        # HITL人工拒绝（kilocode拒绝按钮语义）：每轮询消费一次跨进程拒绝标志，
+        # 命中即ABORTED（error=human_rejected），不再等满MAX_WAIT_S
+        if _consume_reject(wait.id):
+            wait.state = ABORTED
+            wait.error = "human_rejected"
+            _stats["aborted"] += 1
+            _stats["human_rejected"] += 1
+            session.outcome = ABORTED
+            if turn is not None:
+                turn.aborted = True
+            logger.warning(f"[网络] 离线park被人工拒绝（{wait.id}）")
+            _persist_state()
             return ABORTED
         await _sleep(POLL_S)
         polls += 1
@@ -479,6 +681,7 @@ async def _run_park(session: _ParkSession, cancel_event, turn) -> str:
             continue
         # restore()：标记恢复+事件；resume()：10s宽限后自动续跑（人工拒绝窗口）
         wait.restored = time.time()
+        _persist_state()  # restored时间戳同步快照（前端卡片进入"已恢复宽限期"观感）
         logger.info(f"[网络] 网络恢复（{wait.id}），{RESUME_GRACE_S:.0f}s宽限后自动续跑")
         await _sleep(RESUME_GRACE_S)
         if cancel_event is not None and cancel_event.is_set():
@@ -489,11 +692,25 @@ async def _run_park(session: _ParkSession, cancel_event, turn) -> str:
             if turn is not None:
                 turn.aborted = True
             logger.warning(f"[网络] 宽限期内被取消（{wait.id}）")
+            _persist_state()
+            return ABORTED
+        # HITL：宽限期=kilocode人工拒绝窗口本体——窗口内人工拒绝 > 自动续跑
+        if _consume_reject(wait.id):
+            wait.state = ABORTED
+            wait.error = "human_rejected"
+            _stats["aborted"] += 1
+            _stats["human_rejected"] += 1
+            session.outcome = ABORTED
+            if turn is not None:
+                turn.aborted = True
+            logger.warning(f"[网络] 宽限期内人工拒绝，不自动续跑（{wait.id}）")
+            _persist_state()
             return ABORTED
         wait.state = RESUMED
         _stats["resumed"] += 1
         session.outcome = RESUMED
         logger.info(f"[网络] 离线park恢复续跑（{wait.id}，轮询{polls}次）")
+        _persist_state()
         await _run_restore_callbacks()
         return RESUMED
 
@@ -504,4 +721,5 @@ async def _run_park(session: _ParkSession, cancel_event, turn) -> str:
     if turn is not None:
         turn.aborted = True
     logger.warning(f"[网络] 离线park超时放弃（{wait.id}，{MAX_WAIT_S:.0f}s仍离线）")
+    _persist_state()
     return ABORTED

@@ -48,6 +48,18 @@ async def main():
     llm_config = load_llm_config()
     llm_engine = LLMEngine(**llm_config)
 
+    # 网络恢复回调（kilocode reply()的MCP重连语义）必须注册在park所在进程：
+    # 真实chat turn的LLM调用/park发生在本agent进程（app.py的注册只覆盖app进程内
+    # 的discussion park），此前子进程park恢复后MCP重连从未执行——接线补到真源。
+    try:
+        from utils import network_state
+        network_state.register_restore_callback(
+            network_state.reconnect_failed_mcp_servers
+        )
+        logger.info("network restore callback registered (MCP reconnect)")
+    except Exception as e:
+        logger.warning(f"network restore callback register failed (非致命): {e}")
+
     # 检查是否是stdio模式（供ACP Proxy子进程调用）
     if "--stdio" in sys.argv:
         await _run_stdio(llm_engine)

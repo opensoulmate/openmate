@@ -5435,6 +5435,15 @@
     "revealSecretsTip": "显示敏感数据（默认已遮蔽）",
     "maskSecretsTip": "重新遮蔽敏感数据"
   },
+  "networkWait": {
+    "title": "等待网络恢复",
+    "waiting": "网络中断，正在等待恢复…",
+    "elapsed": "已等待 {{seconds}}s（上限 {{max}}s）",
+    "merged": "{{count}} 个并发调用合并等待",
+    "restored": "网络已恢复，{{seconds}}s 内自动续跑（可拒绝）",
+    "reject": "拒绝并停止",
+    "rejecting": "已拒绝，正在停止…"
+  },
   "secretRedaction": {
     "badge": {
       "count": "{{n}} 项敏感数据",

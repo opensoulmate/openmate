@@ -5323,6 +5323,15 @@
     "revealSecretsTip": "機密データを表示（デフォルトでマスク）",
     "maskSecretsTip": "機密データを再マスク"
   },
+  "networkWait": {
+    "title": "ネットワーク復旧待ち",
+    "waiting": "ネットワークが切断されました。復旧を待機中…",
+    "elapsed": "待機 {{seconds}}s（上限 {{max}}s）",
+    "merged": "同時呼び出し {{count}} 件を統合待機",
+    "restored": "ネットワーク復旧、{{seconds}}s後に自動再開（拒否可能）",
+    "reject": "拒否して停止",
+    "rejecting": "拒否しました。停止中…"
+  },
   "secretRedaction": {
     "badge": {
       "count": "機密データ {{n}} 件",

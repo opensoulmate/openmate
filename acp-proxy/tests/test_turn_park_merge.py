@@ -41,8 +41,10 @@ def _src(rel):
 
 
 @pytest.fixture
-def clean(monkeypatch):
-    """模块级状态清零 + turn上下文清零，防测试互相污染"""
+def clean(monkeypatch, tmp_path):
+    """模块级状态清零 + turn上下文清零，防测试互相污染；
+    状态目录重定向tmp（park快照/拒绝标志不落data/network_park真实目录）"""
+    monkeypatch.setenv("NETWORK_PARK_STATE_DIR", str(tmp_path))
     network_state._waits.clear()
     for k in network_state._stats:
         network_state._stats[k] = 0

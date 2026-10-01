@@ -435,12 +435,49 @@ except Exception:
 @app.get("/api/network/status")
 async def network_status():
     """网络离线三态可观测（kilocode SessionNetwork wait/peek语义）：
-    汇总（parks/resumed/aborted/pending）+ 全部wait记录（blocked/resumed/aborted）。
+    汇总（parks/resumed/aborted/pending/human_rejected）+ 全部wait记录（blocked/
+    resumed/aborted）。
+    跨进程合并：park真实发生在agent子进程（ws_acp spawn的agent.start --stdio，
+    真实chat turn的LLM调用面），本进程内存态只有discussion park——合并读取
+    子进程per-pid快照（load_park_state）后，"agent是不是在等网络恢复"对真实
+    chat回合才真正可见（此前子进程park对本端点不可见=观测面形同虚设）。
     "agent是不是在等网络恢复"必须可见——直接回答用户可观测性诉求，
     不新建页面（monitoring页/health探测本端点即可）。"""
     if _network_state is None:
         return {"error": "network_state unavailable"}
-    return {"stats": _network_state.stats(), "waits": _network_state.list_waits()}
+    remote = _network_state.load_park_state(exclude_pid=os.getpid())
+    return _network_state.merge_park_states(
+        _network_state.stats(), _network_state.list_waits(), remote
+    )
+
+
+from pydantic import BaseModel as _PydanticBaseModel  # noqa: E402
+
+
+class NetworkRejectRequest(_PydanticBaseModel):
+    wait_id: str | None = None
+
+
+@app.post("/api/network/reject")
+async def network_reject(req: NetworkRejectRequest | None = None):
+    """HITL人工拒绝（kilocode"等待网络恢复…[拒绝]"卡片的按钮后端）：
+    显式wait_id=拒绝该等待；缺省body=拒绝当前全部pending（用户看到的就是这些，
+    显式id列表不设通配——通配标志会误伤拒绝后新起的park）。
+    写跨进程拒绝标志文件，park所在进程（含agent子进程）下一轮询消费即中止，
+    走既有"[LLM错误: …]"可见失败契约（wait.error=human_rejected可观测）。"""
+    if _network_state is None:
+        return {"error": "network_state unavailable"}
+    if req is not None and req.wait_id:
+        ids = [req.wait_id]
+    else:
+        merged = _network_state.merge_park_states(
+            _network_state.stats(),
+            _network_state.list_waits(),
+            _network_state.load_park_state(exclude_pid=os.getpid()),
+        )
+        ids = [w["id"] for w in merged["waits"] if w.get("state") == "blocked"]
+    flag = _network_state.request_reject(ids)
+    return {"ok": True, "rejected_ids": ids, "flag": flag}
 
 
 @app.get("/health")

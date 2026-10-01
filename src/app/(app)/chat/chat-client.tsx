@@ -18,6 +18,7 @@ import { useSidebar } from '@/components/ui/sidebar';
 import { useTranslation } from 'react-i18next';
 import { SmartPrompt } from '@/components/smart-prompt';
 import { AcpApprovalModal, type AcpApprovalRequest } from '@/components/acp-approval-modal';
+import { NetworkWaitBanner } from '@/components/network-wait-banner';
 
 const getApiUrl = () => getApiBaseUrl();
 const getWsUrl = () => getApiUrl().replace('http', 'ws');
@@ -2851,6 +2852,9 @@ export function ChatClient() {
           </>
         }
       />
+
+      {/* 网络等待交互卡 — kilocode人工拒绝窗口：断网park期间可见+可拒绝 */}
+      <NetworkWaitBanner />
 
       {/* ACP审批弹窗 — human.approval.required事件触发 */}
       <AcpApprovalModal
