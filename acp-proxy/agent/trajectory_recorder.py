@@ -189,23 +189,33 @@ class TrajectoryRecorder:
         token_usage: int = 0,
         status: str = "ok",
         tools: list[dict] | None = None,
+        agent_id: str = "soulmate",
+        source: str = "",
     ) -> str:
         """LLM段span（child of turn root）+ 其工具调用span（child of llm span）。
 
         tools=all_tool_calls条目（soulmate _run_llm_with_tools轨迹账本形状），
         每条一个tool_call事件：name/arguments/result_preview/permission进metadata
         （截断防爆：观察面只需要轮廓），失败/拦截status=error（失败必须可见）。
+
+        agent_id/source（relay轨迹轮新增，默认值=既有soulmate路径零变化）：非
+        soulmate引擎（hermes/openclaw/opencode/mimo）的回合由ws_acp纯透传层的
+        RelayTrajectory按消息流记账（agent_id=路由引擎名，source="relay"），观察面
+        可区分"引擎内深记录"与"代理层浅记录"两种来源。
         """
         if not session_id or not parent_id:
             return ""
         tools = tools or []
+        metadata: dict = {"tool_count": len(tools), "rounds_hint": content[:120]}
+        if source:
+            metadata["source"] = str(source)[:40]
         data = await self._post(
             f"/api/trajectory/sessions/{session_id}/events",
             {
                 "event_type": "llm_call",
-                "agent_id": "soulmate",
+                "agent_id": agent_id,
                 "content": content[:500],
-                "metadata": {"tool_count": len(tools), "rounds_hint": content[:120]},
+                "metadata": metadata,
                 "parent_event_id": parent_id,
                 "token_usage": int(token_usage or 0),
                 "duration_ms": float(duration_ms or 0.0),
@@ -217,21 +227,22 @@ class TrajectoryRecorder:
             return span_id
         await self._post(
             f"/api/trajectory/sessions/{session_id}/events/batch",
-            {"events": self._tool_child_events(tools, span_id)},
+            {"events": self._tool_child_events(tools, span_id, agent_id=agent_id)},
         )
         return span_id
 
     # ── round级span（P1 span粒度round级嵌套：root→llm段→round→tool_call四级）──
 
-    def _tool_child_events(self, tools: list[dict], parent_span_id: str) -> list[dict]:
+    def _tool_child_events(self, tools: list[dict], parent_span_id: str, agent_id: str = "soulmate") -> list[dict]:
         """tool_call子span事件列表——record_llm_call平面批与record_round的round级
-        批共用同一实现（禁止双实现漂移）。单批50条封顶，防病态回合刷爆观察面。"""
+        批共用同一实现（禁止双实现漂移）。单批50条封顶，防病态回合刷爆观察面。
+        agent_id透传（relay轨迹轮新增，默认"soulmate"=既有调用方零变化）。"""
         events = []
         for t in tools[:50]:  # 单批50工具调用封顶
             events.append(
                 {
                     "event_type": "tool_call",
-                    "agent_id": "soulmate",
+                    "agent_id": agent_id,
                     "content": str(t.get("name", ""))[:120],
                     "metadata": {
                         "name": str(t.get("name", ""))[:120],
@@ -359,7 +370,11 @@ class TrajectoryRecorder:
     def _tool_status(entry: dict) -> str:
         perm = str(entry.get("permission", "")).lower()
         preview = str(entry.get("result_preview", ""))[:80]
-        if any(k in perm for k in ("deny", "block", "terminate", "reject")):
+        # perm关键词含fail/cancel：relay轨迹轮把ACP工具状态（completed/failed/
+        # cancelled）放在permission位，失败必须可见（mem0 §1.1）；soulmate既有
+        # permission取值（allow/deny/loop_guard:*/infection:*/sandbox-restricted）
+        # 均不含这两个词，零误伤。
+        if any(k in perm for k in ("deny", "block", "terminate", "reject", "fail", "cancel")):
             return "error"
         if preview.startswith(("blocked", "failed", "错误", "失败", "[BLOCKED]")):
             return "error"

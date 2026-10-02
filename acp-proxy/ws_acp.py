@@ -186,6 +186,23 @@ async def ws_acp_endpoint(client_ws: WebSocket):
     acp_state: dict = {"acp_sid": None}
     extra_filter_ids: set = set()  # 重放initialize的响应id，不透传给客户端
 
+    # relay轨迹观察者（04:20轮遗留#4销账）：非soulmate引擎（hermes/openclaw/
+    # opencode/mimo等外部进程）的回合由本层按消息流记账落trajectory——soulmate
+    # 路由（agent.start --stdio，引擎内TrajectoryRecorder深记录）跳过防双记。
+    # 只旁路观察，转发内容零改动；记账失败绝不阻塞会话流。
+    traj_relay = None
+    if route["cmd"] != DEFAULT_ROUTE["cmd"]:
+        try:
+            from agent.relay_trajectory import RelayTrajectory
+
+            traj_relay = RelayTrajectory(
+                agent_id=agent_id,
+                session_id_getter=lambda: acp_state.get("acp_sid"),
+            )
+            logger.info(f"[ACP] relay trajectory observer on for agent '{agent_id}'")
+        except Exception as e:
+            logger.warning(f"[ACP] relay trajectory observer init failed (非致命): {e}")
+
     # 启动Agent子进程（Hermes需要用pty模式，因为hermes acp的asyncio不支持非TTY stdin）
     proc = None
     use_pty = agent_id == "hermes"
@@ -207,7 +224,10 @@ async def ws_acp_endpoint(client_ws: WebSocket):
             os.close(slave_fd)  # 子进程已fork，关闭slave端
         else:
             # 传递进化引擎API地址给子进程
-            import os
+            # （P0修复2026-10-02：此处原有函数内"import os"，把os变成函数局部
+            # 变量——pty分支（hermes）的os.close/os.write在其执行前引用即
+            # UnboundLocalError"cannot access local variable 'os'"，hermes路由
+            # 每次启动子进程必炸。os已由模块顶部import，删除局部import即可。）
             env = dict(os.environ)
             env["EVOLUTION_API_URL"] = "http://127.0.0.1:8092"
             proc = await asyncio.create_subprocess_exec(
@@ -223,6 +243,13 @@ async def ws_acp_endpoint(client_ws: WebSocket):
         logger.info(f"[ACP] Started {agent_id} subprocess (pid={proc.pid}, pty={use_pty})")
     except Exception as e:
         logger.error(f"[ACP] Failed to start {agent_id}: {e}")
+        # 子进程可能已spawn成功但后续步骤炸了（如P0 os遮蔽案例：create_*
+        # 成功后os.close抛UnboundLocalError）——不清理会留孤儿进程占pty
+        if proc is not None and proc.returncode is None:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
         await _send_acp(client_ws, {"jsonrpc": "2.0", "id": session_msg.get("id"), "error": {"code": -32603, "message": f"Agent {agent_id} unavailable: {e}"}})
         await client_ws.close()
         return
@@ -284,6 +311,12 @@ async def ws_acp_endpoint(client_ws: WebSocket):
                 if '"method":"ping"' in raw or '"method": "ping"' in raw:
                     continue
                 logger.info(f"[{user_id}] ws_to_stdin: forwarding {len(raw)} chars")
+                if traj_relay is not None:
+                    # relay轨迹观察（旁路，never-raise）：session/prompt=回合起点
+                    try:
+                        traj_relay.observe_client(json.loads(raw))
+                    except (json.JSONDecodeError, ValueError):
+                        pass
                 if use_pty:
                     os.write(master_fd, (raw + "\n").encode())
                 else:
@@ -326,6 +359,10 @@ async def ws_acp_endpoint(client_ws: WebSocket):
                 logger.info(f"[{agent_id}] captured ACP sessionId: {_sid}")
         # 记录并转发给客户端
         logger.info(f"[{agent_id}] → client: id={parsed.get('id')} method={parsed.get('method')} has_result={'result' in parsed}")
+        if traj_relay is not None:
+            # relay轨迹观察（旁路，never-raise）：prompt响应=回合收口，
+            # session/update增量（agent_message_chunk/tool_call[_update]）入账
+            traj_relay.observe_agent(parsed)
         await ws.send_text(msg)
 
     async def stdout_to_ws():
@@ -477,6 +514,12 @@ async def ws_acp_endpoint(client_ws: WebSocket):
         pass
     if relay_task is not None:
         relay_task.cancel()
+    if traj_relay is not None:
+        # relay轨迹收尾：未收口回合判error落账（失败必须可见）后停worker
+        try:
+            await traj_relay.close()
+        except Exception as e:
+            logger.debug(f"[ACP] relay trajectory close failed (非致命): {e}")
     if proc.returncode is None:
         try:
             proc.terminate()
