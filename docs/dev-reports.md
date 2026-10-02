@@ -4142,3 +4142,36 @@
 6. 其余遗留观察项照旧：relay round级需引擎侧自报/两消费者近重复文件去重/树内搜索与扁平搜索整合/回放与树互斥/跨session搜索/LLM_FALLBACK_CHAIN未配置（402环境项）/环境变量密钥外发误伤面/污点分析近似/双侧镜像人工同步/model_gateway凭据映射表/engine.py死代码清理候选/MCP重连真实Server验证/attach跨turn共享/RESUMED后同turn多episode单记录。
 7. cron环境约束实录：`curl | python3`管道被tirith安全扫描拦（curl_pipe_shell）→拆成curl落文件+独立python读文件；execute_code在cron被BLOCKED照旧；sibling并行会话共用工作树（config/rbac_policy.csv）照旧排除；全量pytest输出落/tmp按需查（184s/EXIT=0）。
 8. 第7步gene skill上报成功：`skill_4ec108cc2f34`（execution_log=read_file→terminal→patch→write_file，success=true，响应event=ADD+success_rate=1.0=本轮新代码在上报路径自身生效）。
+
+## [2026-10-03 02:15 CST] gene技能一键回滚——revert-preview+revert（23:55轮遗留#4销账，P0-7自进化闭环补"回滚"半边）
+**目标**：销账23:55轮遗留#4"回滚只有依据没有一键回滚：DELETE/UPDATE的old_json留档=手工回滚依据，但无一键revert API"。这是SUMMARY P0-7自进化闭环五要素（触发器/动作/护栏/**回滚**/记账）中唯一还缺的半边——上轮把"记账"做完了（skill_audit审计表），本轮把"回滚"做成一键操作：技能被进化改坏时能一键恢复到任意历史版本之前，而不是手工翻审计行照着old_json拼SQL。
+**调研来源**：①Agent Zero _time_travel七件套（plugins/_time_travel/，snapshot/history_list/diff/**preview**/travel/**revert**，其AGENTS.md契约原文"Revert and travel operations must avoid unintended writes…Preserve enough metadata for clear preview and diff inspection **before destructive actions**"——本轮revert-preview零写入diff预览就是这条契约的实现）；②evolution-engine-patterns §4.4"自修改必须先snapshot再改，随时revert"+§4.3"回滚点本身不可被进化改写"（保护区）——本轮审计表只追加不改写、回滚记REVERT事件而非改旧行；③mem0 §1.2审计表old/new留档语义（上轮已建表，本轮old快照从部分字段升级为全保真=无损恢复的前提）。
+**改动文件**（opensoul commit `6a53e718`，3文件+546/-0）：
+- `src/gene/skill_learner.py`（+176/-0）：revert_preview/revert_skill/_apply_state/_pick_event/current_state/_skill_row_state + 快照全保真补字段
+- `src/api/gene.py`（+37/-0）：GET /skill/{id}/revert-preview + POST /skill/{id}/revert
+- `tests/test_gene_skill_revert.py`（新333行，14测）
+**改动内容**（全增量old_string/new_string，无全量重写）：
+1. **快照全保真**（回滚的前提）：DELETE审计old补齐parameters/tags/source_session/avg_duration_ms/created_at/last_used_at、UPDATE审计old补齐三个时间/时长字段——此前old只有部分字段，undelete会丢数据。
+2. **revert_preview（零写入diff预览）**：返回action（restore/update/delete）+逐字段changes{from,to}+current/target两态；Agent Zero"破坏性动作前先看清diff"契约。
+3. **revert_skill（一键回滚）**：缺省=回滚最近一次有状态变更的事件（UPDATE/DELETE/REVERT）；显式audit_id=回到任意事件之前（含ADD→删除技能）；只有ADD史的技能不自动选（防误删——POST /revert误触不会把新技能删掉）。回滚记REVERT审计（old=回滚前整行、new=恢复后整行）——**回滚可再被回滚**（第二次缺省revert选中REVERT事件=翻回去，Agent Zero travel链语义）。
+4. **保护区**：审计表只追加不改写（测试钉：revert后旧UPDATE的old_json逐字节原样）；`_apply_state`对旧审计行缺字段容错（target没记录的字段保留当前值，测试钉legacy形状）。
+5. **API二端点**：GET revert-preview（404=无可回滚事件、400=FAIL事件无状态可回滚）、POST revert（同错误契约，reason参数留痕）。
+**接线位置**（grep证据，文件:行号）：
+- 定义：`src/gene/skill_learner.py:214 _pick_event`/`:237 revert_preview`/`:269 _apply_state`/`:313 revert_skill`/`:326 preview调用`/`:330 _apply_state调用`
+- 真实运行时路径：`src/api/gene.py:354 skill_revert_preview`→`:360 skill_learner.revert_preview(...)`；`:379 skill_learner.revert_skill(...)`（POST /api/gene/skill/{id}/revert）
+- router挂载：`src/main.py:33 import gene_router`→`:554 app.include_router(gene_router, prefix="/api/gene")`
+**验证结果**：
+- 完整性✅：`git diff --numstat`=skill_learner.py +176/-0、gene.py +37/-0+新测试333行，逐hunk核对全为本轮改动（sibling并行会话的config/rbac_policy.csv显式排除，commit走git add白名单3文件）。
+- 集成✅：上述grep链完整（定义→API handler调用→router挂载）；重启后live curl全链实证（下述）。
+- 测试✅：新`tests/test_gene_skill_revert.py` **14/14 PASS**（一键回滚恢复内容+计数+created_at保留/自动选最近改动(v3→v2非一路到v1)/travel链revert-of-revert=redo/审计只追加不改写+原行原样/undelete全保真12字段逐一对/ADD需显式audit_id防误删/revert-the-revert-undelete/preview零写入+diff形状/FAIL事件ValueError×2/未知skill与事件None/跨skill事件隔离/legacy旧快照缺字段容错/API接线2（完整流程+404/400错误契约））；既有`tests/test_gene_skill_audit.py` 15 passed零回归；**opensoul全量tests/ 2300 passed 0 failed**（160s，2286+14新精确吻合）。
+- **live E2E实证**（curl真实链，零stub）：①extract×2→ADD→UPDATE同skill_id ②revert-preview 200：action=update、changes含code_template{from:v2模板,to:v1模板}（diff真实）③POST revert→200：restored回v1模板、reverted_to_before=UPDATE事件id ④**travel链**：再POST revert→200翻回v2（restored含v2模板），history=[REVERT,REVERT,UPDATE,ADD]只追加 ⑤**DELETE→undelete**：DELETE 200→preview action=restore→POST revert→200整行复活（name/counts 2/2全保真）→history=[REVERT,DELETE,REVERT]→最终DELETE清理 ⑥reason全程留痕（'e2e-revert revert_to_before_audit_id=29'）。
+**服务重启**：`systemctl --user restart opensoul.service`→active、/api/gene/health=200（重启后新端点才live，API测试与E2E都在重启后跑）；openmate/acp-proxy本轮零改动。
+**commit**：opensoul `6a53e718`。
+**遗留问题**：
+1. **前端无回滚UI**：revert-preview/revert数据面已通，OpenMate侧无消费界面（与上轮遗留#5"前端无审计视图"同根——审计+回滚的可视化半边待做，且受"改造现有页面不擅自建新页"约束需先定挂载点）。
+2. **record_usage无调用方照旧**（23:55轮遗留#1）：本轮未动；回滚如果回退了usage计数而后续record_usage又无生产写入方，计数语义闭环还差"使用遥测"一环。
+3. **FAIL记录不分trivial/审计表无retention照旧**（23:55轮遗留#2/#3）。
+4. **回滚到"任意中间版本"vs"事件之前"语义声明**：revert(audit_id=N)恢复的是事件N**之前**的状态（old快照），不是事件N**之后**的状态（new快照）——要回到某事件之后的状态，选它下一个事件的audit_id即可，语义与Agent Zero revert一致；如需"restore to new of event N"的便捷入口等真实使用反馈再定。
+5. 其余遗留观察项照旧：relay round级需引擎侧自报/两消费者近重复文件去重/树内搜索与扁平搜索整合/回放与树互斥/跨session搜索/LLM_FALLBACK_CHAIN未配置（402环境项）/环境变量密钥外发误伤面/污点分析近似/双侧镜像人工同步/model_gateway凭据映射表/engine.py死代码清理候选/MCP重连真实Server验证/attach跨turn共享/RESUMED后同turn多episode单记录。
+6. cron环境约束实录：测试文件f-string含反斜杠字面量直接lint炸（f-string expression不能含反斜杠）——测试里算skill_id的野路子删掉改从审计面取；`or True`废断言自查抓掉（断言永真=没测）；sibling并行会话共用工作树（config/rbac_policy.csv）照旧排除；全量pytest输出落/tmp按需查（160s/EXIT=0）。
+7. 第7步gene skill上报成功：`skill_7b35df505f90`（execution_log=read_file→search_files→terminal→patch→write_file，success=true，event=ADD+success_rate=1.0）。
