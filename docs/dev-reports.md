@@ -4209,3 +4209,38 @@
 5. 其余遗留观察项照旧：relay round级需引擎侧自报/两消费者近重复文件去重/树内搜索与扁平搜索整合/回放与树互斥/跨session搜索/LLM_FALLBACK_CHAIN未配置（402环境项）/环境变量密钥外发误伤面/污点分析近似/双侧镜像人工同步/model_gateway凭据映射表/engine.py死代码清理候选/MCP重连真实Server验证/attach跨turn共享/RESUMED后同turn多episode单记录。
 6. cron环境约束实录：测试类级MARKER共享导致测试耦合（前测失败残留行→后测ADD变UPDATE）——已改per-test uuid marker，教训：live服务API测试必须每测独立marker；`curl | python3`管道被拦照旧拆两步；sibling并行会话共用工作树（config/rbac_policy.csv）照旧排除；全量pytest输出179s/EXIT=0。
 7. 第7步gene skill上报✅：POST /api/gene/skill/extract 200——skill_id=`skill_00a3fc80f6e0`（"gene技能使用遥测闭环"，read_file→search_files→terminal→patch→write_file短序列，event=ADD+success_rate=1.0）已入gene技能库供find_relevant检索复用。
+
+## [2026-10-03 06:47 CST] gene技能消费回执接线——recommend注入记账→回合收口POST /skill/{id}/usage + 基础设施失败不计usage（04:19轮遗留#1销账）
+**目标**：销账连续挂账的"消费方回执未接进acp-proxy"——opensoul POST /api/gene/skill/{id}/usage数据面已通但真实消费方（soulmate recommend→注入链）没调用：技能"被使用"只有extract FAIL分支一个记账点，消费回合的真实成败永远回不到success_rate，find_relevant排序拿不到真实成败信号（CAMEL WorkflowMemoryManager §1.6"复用必须带真实成败信号"的最后一环）。同轮修复live E2E实锤的语义缺口：基础设施失败回合（LLM 402/超时）被当作技能失败回执→供应商抖动稀释好技能成功率（指标说谎）。
+**调研来源**：①evolution-engine-patterns §1.6 CAMEL WorkflowMemoryManager"失败的反面=成功的复用"：复用必须带真实成败信号，成败率是复用排序依据（04:19轮排序公式已改rate*0.6+min(usage,10)*0.02但当时只有FAIL一个信号源）；②kilocode TurnClose"只有完整turn才digest"（同repo既有订阅器语义）——非正常收尾回合不计usage与之同门；③本repo `llm_outcome_status`（trajectory_recorder.py:42，专为"402失败以文本形态混进回复"而生，前缀标记不误伤正常回答）——基础设施失败判定单一真源直接复用，不自创。
+**改动文件**（openmate commits `73f1efd6`+`5c11343e`，3文件+639/-36）：
+- `acp-proxy/agent/soulmate_agent.py`（+73/-0→再改gate）：_note_skill_injected/_take_injected_skills/_report_skill_usage三方法 + 注入点记账 + 回执点
+- `acp-proxy/tests/test_skill_usage_receipt.py`（新，16测）
+- `acp-proxy/e2e_skill_usage_receipt.py`（新，live E2E按回合结局二选一诚实断言）
+**改动内容**（全增量old_string/new_string，无全量重写）：
+1. 注入归因清单（_note_skill_injected）：9模块注入"4. 技能推荐"处recommend前先清上回合残留（空覆盖写——recommend失败/空结果不留脏清单），200且有skills时记前3个skill_id（与注入上限[:3]同口径）；lazy init兼容__new__测试agent。
+2. 一次性消费（_take_injected_skills）：取走即清，不留跨回合残留。
+3. 回执单一裁决（_report_skill_usage(client, skill_ids, full_response, close_reason)）：不计usage三态——空清单/非正常收尾（interrupted/superseded）/基础设施失败（llm_outcome_status=error）；真实结局success=回复无错误标记（与capability/evaluate同款turn结局启发式）；逐个POST /api/gene/skill/{id}/usage，非200不计、异常debug级吞掉不阻塞回合收尾（CowAgent记账哲学）。
+4. 语义分工：extract记"学习"（usage+1进UPDATE审计），回执记"消费"——两个记账点并存互补；失败可见性由trajectory error span承担（基础设施失败不进技能成功率，但绝不静默）。
+**接线位置**（grep证据，文件:行号）：
+- 定义：`acp-proxy/agent/soulmate_agent.py:2732 _note_skill_injected`/`:2746 _take_injected_skills`/`:2750 _report_skill_usage`
+- **真实运行时路径调用点**（都在_soulmate _prompt_inner内=每条用户消息必经）：`:3512`（recommend前清残留）/`:3521`（注入记账）/`:4065 _report_skill_usage(self._take_injected_skills(session_id), …)`（回合收口回执）
+- 上游数据面：opensoul `src/api/gene.py` POST /skill/{id}/usage → skill_learner.record_usage（04:19轮已建，本轮接上真实消费方）
+**验证结果**：
+- 完整性✅：`git diff --numstat`两笔commit逐hunk核对全为本轮改动（sibling并行会话的src/前端改动+systemic_test_results.json显式排除，commit走git add白名单3文件）；三文件ast.parse语法OK。
+- 集成✅：上述grep链完整（定义→_prompt_inner两个真实调用点→opensoul API→record_usage）；重启后live E2E两轮全链实证（下述）。
+- 测试✅：新`tests/test_skill_usage_receipt.py` **16/16 PASS**（①归因清单5：前3口径+空覆盖清残留+一次性消费+session隔离+lazy init；②回执行为7：成功载荷逐个POST×2/失败结局照常回执success=False/基础设施失败（"推理错误: …402…"）零POST/interrupted与superseded都零POST/404不计不抛/异常吞掉返0/空列表no-op；③真实_prompt_inner接线钉4：注入→收口真实POST URL×3带success=True/真实steer中断（/abort进队列→drain→close_reason=INTERRUPTED）不回执但清单照清/无注入零回执/跨回合归因不残留）；**acp-proxy全量tests/ 1549 passed 0 failed**（579s，1533+16新精确吻合，含plan_execution/steering/session_lifecycle等邻居零回归）；`systemic_test.py` **29/29 passed**（终版代码上重跑）。
+- **live E2E两轮实证**（e2e_skill_usage_receipt.py全真实链零stub：真实WS /ws/acp→agent_id=soulmate真实子进程→真实opensoul skills.db）：
+  ①**wire实锤（gate前build同调用点）9/9**：种子技能真实extract提炼（skill_4254b56bac3e ADD）→recommend返回top1（注入前提）→真实LLM回合→**usage_count 9999→10000精确+1**（修复前该端点零生产调用方，计数不可能动）→success delta=0如实记录。
+  ②**gate实锤（终版build）8/8**：同链路下trajectory llm段status=error（LLM 402 Insufficient account balance）→**usage_count 9999→9999纹丝不动**（基础设施失败不计usage的live实证）→DELETE清理200+再404零残留。两轮合起来=同一调用点"真实结局计/基础设施失败不计"两分支都有live落库证据。
+**服务重启**：`systemctl --user restart acp-proxy-a.service acp-proxy-b.service`（两轮各一次）→active、:8090/:8092/:8095健康检查全200（soulmate子进程由ws_acp按需spawn，重启后新代码生效）；opensoul本轮零改动无需重启；前端零改动无需build。
+**commit**：openmate `73f1efd6`（接线）+`5c11343e`（基础设施失败gate）。
+**遗留问题**：
+1. **真实结局回合的live usage+1在终版build上未重证**：live LLM供应商402余额不足（环境项，与历史遗留"LLM 402"同源），终版build的live回合全部是基础设施失败分支（gate实证）；"真实结局→+1"由①run1同调用点live实锤+②单测success=True/False真实POST断言共同覆盖。LLM余额恢复后跑一轮e2e_skill_usage_receipt.py即自动走+1分支（脚本已按trajectory llm段status二选一，无需改码）。
+2. **success启发式仍是子串匹配**：`"错误" not in full_response and "error" not in full_response.lower()`（与capability/evaluate同款）——正常回复里含"error"单词会被误判失败；llm_outcome_status的前缀标记哲学同样适用于"工具失败"判定，等真实数据里误伤率出来再收紧。
+3. **"注入≠使用"精度**：技能只是注入为上下文提示，无法证明模型真按它执行——回执语义是"推荐被消费的回合结局"。更高精度需工具调用与技能模板匹配（kilocode per-message diff账本是方向）。
+4. **前端无回滚UI/审计视图照旧**（02:15/23:55轮遗留）：受"改造现有页面不擅自建新页+需先定挂载点"约束，等挂载点拍板。
+5. **FAIL记录不分trivial/审计表无retention照旧**（23:55轮遗留#2/#3）。
+6. 其余遗留观察项照旧：relay round级需引擎侧自报/两消费者近重复文件去重/树内搜索与扁平搜索整合/回放与树互斥/跨session搜索/LLM_FALLBACK_CHAIN未配置（402环境项）/环境变量密钥外发误伤面/污点分析近似/双侧镜像人工同步/model_gateway凭据映射表/engine.py死代码清理候选/MCP重连真实Server验证/attach跨turn共享/RESUMED后同turn多episode单记录。
+7. cron环境约束实录：**patch工具"报错但实际已应用"**——old_string多行匹配报not unique后重试造成重复插入（__init__属性插了两份，grep自查抓掉立即去重）；教训：patch报错后必须grep确认没被半应用再重试；build_env空llm_call_responses→TaskPlanner.plan判retry走简单路径→撞__new__ agent缺`_tracer`（被LLM error兜底吞，测试静默走错路径）——复杂任务路径测试必须带JUDGE_CONTINUE；aclose_turn会pop close_reason，中断断言要断收口前产物（消息文本）而非dict残留；e2e嵌套函数改外部变量用nonlocal非global。
+8. 第7步gene skill上报✅：skill_id=`skill_a574c3bd7277`（event=ADD+success_rate=1.0）已入gene技能库供find_relevant检索复用。
