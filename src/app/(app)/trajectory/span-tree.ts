@@ -153,3 +153,141 @@ export function formatTokens(n: number): string {
   if (n < 1000000) return `${(n / 1000).toFixed(1)}k`
   return `${(n / 1000000).toFixed(1)}M`
 }
+
+// ── 树内搜索/过滤（2026-10-02，06:30轮遗留#4销账） ─────────────────────
+// "树内匹配span高亮+过滤（只看tool_call/error）"：在树形观察面内直接
+// 搜索/筛事件，不必切回扁平搜索视图。语义（VS Code树搜索同款）：
+// 命中节点+其祖先上下文保留，未命中的兄弟子树整枝剪掉；祖先=上下文
+// （不亮），命中行=高亮。过滤态自动全展开（剪过的树=全是相关路径）。
+
+export interface TreeFilter {
+  /** 自由文本：event_type/content/agent_id/status 不区分大小写子串；空=不按文本过滤 */
+  query: string
+  /** 事件类型白名单（空/缺省=全部）——"只看tool_call" */
+  types?: Set<string>
+  /** true=只看status≠ok的错误/异常节点 */
+  errorsOnly?: boolean
+}
+
+/** 节点是否命中过滤条件（文本×类型×错误三条件AND） */
+export function nodeMatches(node: SpanNode, filter: TreeFilter): boolean {
+  const q = (filter.query || "").trim().toLowerCase()
+  if (q) {
+    const hay = `${node.event_type || ""}\n${node.content || ""}\n${node.agent_id || ""}\n${node.status || ""}`.toLowerCase()
+    if (!hay.includes(q)) return false
+  }
+  if (filter.types && filter.types.size > 0 && !filter.types.has(node.event_type)) return false
+  if (filter.errorsOnly && (node.status || "ok") === "ok") return false
+  return true
+}
+
+/**
+ * 过滤树：保留命中节点+祖先上下文，剪掉未命中兄弟子树。
+ * 返回新树（浅拷贝节点、children=剪后数组），**不改原树**（React state友好）。
+ * 命中节点的未命中子节点也被剪（结果集=命中路径，可解释性优先）。
+ */
+export function filterTree(roots: SpanNode[], filter: TreeFilter): SpanNode[] {
+  const out: SpanNode[] = []
+  for (const node of roots || []) {
+    const keptChildren = filterTree(node.children || [], filter)
+    if (nodeMatches(node, filter) || keptChildren.length > 0) {
+      out.push({ ...node, children: keptChildren })
+    }
+  }
+  return out
+}
+
+/** 命中节点id集（行高亮用）——pre-order遍历，命中=nodeMatches */
+export function matchIds(roots: SpanNode[], filter: TreeFilter): Set<string> {
+  const out = new Set<string>()
+  const walk = (nodes: SpanNode[]) => {
+    for (const node of nodes || []) {
+      if (nodeMatches(node, filter)) out.add(node.id)
+      walk(node.children || [])
+    }
+  }
+  walk(roots || [])
+  return out
+}
+
+/** 全部可展开节点id（过滤态自动展开：剪过的树全是相关路径） */
+export function expandAllIds(roots: SpanNode[]): Set<string> {
+  const out = new Set<string>()
+  const walk = (nodes: SpanNode[]) => {
+    for (const node of nodes || []) {
+      if (isExpandable(node)) out.add(node.id)
+      walk(node.children || [])
+    }
+  }
+  walk(roots || [])
+  return out
+}
+
+/**
+ * 过滤态rollup：对（剪过的）children递归求和，公式与opensoul
+ * store.py get_trace_tree的rollup()逐项一致
+ * （events=1+Σ子、tokens=自身+Σ子、duration=自身+Σ子）。
+ * 过滤态不能用subtree_*（那是全树汇总，剪过之后是假数）。
+ */
+export function filteredRollup(node: SpanNode): SubtreeRollup {
+  let events = 1
+  let tokens = node.token_usage ?? 0
+  let durationMs = node.duration_ms ?? 0
+  for (const child of node.children || []) {
+    const r = filteredRollup(child)
+    events += r.events
+    tokens += r.tokens
+    durationMs += r.durationMs
+  }
+  return { events, tokens, durationMs: Math.round(durationMs * 10) / 10 }
+}
+
+/** 事件类型计数（过滤chips数据源）：按数量降序、类型名升序稳定 */
+export function eventTypeCounts(roots: SpanNode[]): Array<{ type: string; count: number }> {
+  const counts = new Map<string, number>()
+  const walk = (nodes: SpanNode[]) => {
+    for (const node of nodes || []) {
+      counts.set(node.event_type, (counts.get(node.event_type) || 0) + 1)
+      walk(node.children || [])
+    }
+  }
+  walk(roots || [])
+  return [...counts.entries()]
+    .map(([type, count]) => ({ type, count }))
+    .sort((a, b) => b.count - a.count || (a.type < b.type ? -1 : 1))
+}
+
+/** status≠ok节点计数（errorsOnly chip徽标） */
+export function countErrors(roots: SpanNode[]): number {
+  let n = 0
+  const walk = (nodes: SpanNode[]) => {
+    for (const node of nodes || []) {
+      if ((node.status || "ok") !== "ok") n++
+      walk(node.children || [])
+    }
+  }
+  walk(roots || [])
+  return n
+}
+
+/**
+ * 文本按查询切成高亮段（不区分大小写、全部非重叠命中）。
+ * 段text拼回=原文（render-test钉住）；空查询=单段不亮。
+ */
+export function splitMatch(text: string, query: string): Array<{ text: string; hit: boolean }> {
+  const q = (query || "").trim()
+  if (!q) return [{ text: text || "", hit: false }]
+  const lower = (text || "").toLowerCase()
+  const needle = q.toLowerCase()
+  const out: Array<{ text: string; hit: boolean }> = []
+  let pos = 0
+  for (;;) {
+    const idx = lower.indexOf(needle, pos)
+    if (idx < 0) break
+    if (idx > pos) out.push({ text: (text || "").slice(pos, idx), hit: false })
+    out.push({ text: (text || "").slice(idx, idx + needle.length), hit: true })
+    pos = idx + needle.length
+  }
+  if (pos < (text || "").length) out.push({ text: (text || "").slice(pos), hit: false })
+  return out.length > 0 ? out : [{ text: text || "", hit: false }]
+}
