@@ -4027,3 +4027,83 @@
 6. 其余遗留观察项照旧：两消费者近重复文件去重（抽共享组件重构轮）/树内搜索与扁平搜索整合/回放与树互斥/过滤态折叠交互/跨session搜索/LLM_FALLBACK_CHAIN未配置（402环境项）/relay消息级粒度（本轮给到回合级+工具级，更细消息级仍无）/环境变量密钥外发误伤面/污点分析近似/双侧镜像人工同步/model_gateway凭据映射表/MCP重连真实Server验证/attach跨turn共享/RESUMED后同turn多episode单记录/`engine.py`的AgentEngine经查grep无任何运行时调用方（仅定义+测试docstring提及）=死代码——"AgentEngine.run_task未接begin_turn"实为死代码清理候选而非接线缺口，下轮可整文件删除或接线二选一。
 7. cron环境约束实录：**live E2E是本轮P0发现渠道——只跑单测根本暴露不了hermes路由必炸**（既有测试不启动子进程）；教训沉淀：涉及子进程/pty/路由的改动必须live E2E先行，单测只是回归面；AST回归钉防"函数内import遮蔽模块名"bug家族复发（同类：任何函数内`import X`遮蔽模块级X→UnboundLocalError）；test_trajectory_recorder.py本轮实测**19 passed**（19个test函数，HEAD同此），13:49轮报告的"24 passed"与文件实际不符（疑计数口径/笔误，以实测为准，建议下轮顺带erratum）；sibling并行会话共用工作树照旧（settings-client.tsx/locales×3/systemic_test_results.json显式排除）。
 8. 第7步gene skill上报成功：`skill_aca8a201adfc`（execution_log=read_file→terminal→patch→write_file→process，success=true）。
+
+## [2026-10-02 18:55 CST] relay轨迹接线HTTP /acp/send入口（10:02轮遗留#3销账）
+**目标**：销账上轮遗留#3"relay只覆盖WS /ws/acp路径：HTTP /acp/send（proxy.py硬编码hermes acp路由）不经过ws_acp观察者——该入口的hermes回合仍不落trajectory"。HTTP入口（stability_test_http/systemic_test S2/HTTP客户端都在用）的hermes回合在/trajectory观察面全盲——同一引擎的回合走WS就可见、走HTTP就消失，观察面覆盖不一致直击"我都不知道他们在干嘛"（SUMMARY P0-4）。
+**调研来源**：①本项目上轮挂账契约原文（"下轮候选：proxy.py同款接线或评估废除该入口"——评估结论：入口仍被systemic_test S2/stability_test_http使用，不废除，做同款接线）；②本项目RelayTrajectory既有公共面（observe_client/observe_agent双形状解析+单worker顺序落账+失败必须可见，ws_acp已live验证的同一实现，禁止另建一套）；③langfuse instrumentation语义（span在真实执行路径被记录——接线点必须在_prompt_parts/_read_loop真实消息路径上，不是死代码）；④CowAgent记账哲学（observe同步never-raise+记账故障绝不阻塞会话流）；⑤mem0 §1.1禁止静默降级（CLI兜底回答=用户可见回合，观察面必须两笔都记：ACP失败回合+CLI兜底回合，否则只见error回合与用户体感对不上）；⑥per-session观察者=跨会话并发隔离（S4并发契约：_session_locks已把同会话FIFO串行=单回合在途，per-session单turn状态机成立）。
+**改动文件**（openmate commit `3349c44c`，4文件+685/-1）：
+- `acp-proxy/proxy.py`（+134/-1）：import+__init__字段+6个辅助方法+5处接线
+- `acp-proxy/agent/relay_trajectory.py`（+52/-0）：observe_cli_turn+finalize_open两个公共面
+- `acp-proxy/tests/test_proxy_relay_traj.py`（新~340行，14测）
+- `acp-proxy/e2e_proxy_relay_traj.py`（新~150行）：live E2E可复跑脚本
+**改动内容**：
+1. **per-session RelayTrajectory注册表**（proxy.py `_traj_relay_for`）：按ACP session_id lazy建观察者（共享TrajectoryRecorder，测试可注入替身），跨会话并发各记各的；sid为空→None绝不写无主span。
+2. **_prompt_parts回合起点**：session/prompt请求构造后、写stdin前调`_traj_observe_client(request, session_id)`（防"响应先到观察后到"竞态丢收口），并登记msg_id→sid路由表。
+3. **_read_loop消息流路由**：id=0过滤后调`_traj_observe_agent(msg)`（与chunk收集同口径=只记用户可见面）——session/update按params.sessionId路由到per-session观察者（缺失才广播），prompt响应按msg_id→sid路由（超时后迟到响应自动no-op）。
+4. **死亡收口点3+1**：stdin不可用/写管道失败/超时三处`_traj_fail_turn(msg_id, sid)`收口error（不悬挂root）；read_loop退出（子进程死）`_traj_finalize_all("error")`全量收口。
+5. **CLI兜底回合记账**（_send_message_inner的`_cli()`后调`_traj_cli_turn`）：hermes -z降级回答落独立回合（source=relay+duration真实计时+stopReason映射status）——禁止静默降级的观察面语义。
+6. **RelayTrajectory新公共面**：`observe_cli_turn`（CLI回合start→record→end单闭包收口+挤掉语义）+`finalize_open`（显式收口，调用方知道回合已死时用）。
+**接线位置**（grep证据，文件:行号）：
+- 定义：`proxy.py:407 _traj_relay_for`/`:429 _traj_observe_client`/`:444 _traj_observe_agent`/`:477 _traj_fail_turn`/`:488 _traj_finalize_all`/`:499 _traj_cli_turn`；`agent/relay_trajectory.py:214 finalize_open`/`:222 observe_cli_turn`
+- 真实路径5接线点：`proxy.py _prompt_parts`内`self._traj_observe_client(request, session_id)`（写stdin前）+`self._traj_fail_turn(msg_id, session_id)`×3（stdin不可用/写失败/超时）；`_read_loop`内`self._traj_observe_agent(msg)`（id=0过滤后）+退出收尾`self._traj_finalize_all("error")`；`_send_message_inner`内`self._traj_cli_turn(text, result, sid, ...)`（`await self._cli(text)`拿到结果后）
+- 钉子：`tests/test_proxy_relay_traj.py:321 test_proxy_wiring_pins`（observe_client在stdin.write前+fail_turn×3逐计数+observe_agent在id=0过滤后+cli_turn在_cli()后+恒记账双记防护`'"hermes", "acp", "--accept-hooks"'`+6入口never-raise逐个钉）
+**验证结果**：
+- 完整性✅：`git diff --numstat` = relay_trajectory.py +52/-0、proxy.py +134/-1 + 2新文件，逐hunk核对全为本轮改动（sibling并行会话的settings-client.tsx/locales×3/systemic_test_results.json显式排除，commit走git add白名单4文件）。
+- 集成✅：上述grep链完整；**live E2E 10/10 PASS**（e2e_proxy_relay_traj.py全真实链零stub：HTTP POST /acp/send→proxy._prompt_parts真实观察→真实hermes acp子进程→真实LLM回合8.2s content='收到'→RelayTrajectory→真实TrajectoryRecorder HTTP→真实opensoul:8090→/trace回读）：①回合1 session_id=2007f72b真实返回②trajectory session ensure（agent_id=hermes）③root=user_input/turn_root（content='请只回答两个字：收到'）④**root→llm_call子span（metadata.source=relay, agent_id=hermes, status=ok, dur=2519ms, content='收到'=HTTP入口回合真实落库**⑤root已end收口（subtree rollup 2事件）⑥回合2同session（content='确认'）⑦**两回合都落库且收口（roots=2, closed=2, total_events=4）**=per-session观察者复用+回合独立落账live实证。
+- 测试✅：新`tests/test_proxy_relay_traj.py` **14/14 PASS**（①HTTP全链prompt→chunk→response→start/record/end ②跨会话并发隔离（A/B各自root血缘不串）③session/update按sid路由（B的chunk不落A）④无sid广播只进未收口回合⑤未知id/迟到重复响应/畸形消息no-op never-raise⑥fail_turn收口error+msg_id映射清理⑦finalize_all全量收口⑧CLI回合start/record/end+duration透传⑨refusal→error+挤掉语义⑩空sid零写入⑪observe_cli_turn单元⑫finalize_open无turn no-op⑬接线钉⑭公共面钉）；既有`tests/test_relay_trajectory.py` 19 passed零回归；**全量tests/ 1522 passed 0 failed**（567s，1508+14新增精确吻合）；`systemic_test.py` **29/29 passed**（S1-S6全绿，S2 ACP工具执行链路走的就是本轮接线的/acp/send入口）。
+**服务重启**：`systemctl --user restart acp-proxy-a.service acp-proxy-b.service`（proxy.py新观察者加载）→active、:8092/health=200、:8095/health=200、:8090/api/trajectory/health=200；重启后live E2E 10/10+systemic 29/29。opensoul本轮零改动未重启。
+**commit**：openmate `3349c44c`。
+**遗留问题**：
+1. **stream_message/stream_message_parts（proxy.py内联构造session/prompt，不经_prompt_parts）未接线**：/ws/chat（已废弃端点）的流式回合仍不落trajectory——端点docstring明示"不再维护新功能"，本轮有意不接；若要覆盖需在流式生成器收尾处补收口钩（生成器被客户端中途放弃=永不收口的新悬挂面），等真实使用需求再定。
+2. **CLI兜底回合的工具span不可见**：hermes -z一次性CLI看不到工具调用流（本来就没有），CLI回合=纯文本llm段——非本轮缺口，是CLI形态的固有粒度。
+3. **ACP空响应（非refusal）→CLI兜底的双回合形态声明**：ACP回合（空文本status=ok）+CLI回合（真实回答）各自落一笔root——观察面如实反映"引擎空转了一次+CLI兑底答了一次"两件事，与客户端响应标记（acp_empty_response）口径一致；如嫌噪声可后续合并为一笔带fallback标记的回合（改动在observe_cli_turn合成交互，等真实数据反馈再定）。
+4. **hermes工具span的live验证受限照旧**（上轮遗留#2）：本轮live回合纯文本（tool_call×0）——工具span形状由单测覆盖（双形状解析沿用test_relay_trajectory.py既有19测）；带工具的hermes回合live验证待后续。
+5. **session无completed收口照旧**（04:20轮遗留#2）：session.status恒running；HTTP入口的trajectory session同此语义（turn级root有end收口，session级无）。
+6. 其余遗留观察项照旧：relay浅记录粒度（回合级+工具级，round级需引擎侧自报）/两消费者近重复文件去重/树内搜索与扁平搜索整合/回放与树互斥/过滤态折叠交互/跨session搜索/LLM_FALLBACK_CHAIN未配置（402环境项）/环境变量密钥外发误伤面/污点分析近似/双侧镜像人工同步/model_gateway凭据映射表/`engine.py`死代码清理候选（AgentEngine无运行时调用方）/MCP重连真实Server验证/attach跨turn共享/RESUMED后同turn多episode单记录/13:49轮报告"test_trajectory_recorder 24 passed"与文件实际19个test函数不符的erratum待顺带修正。
+7. cron环境约束实录：接线钉测试的src.index()锚点踩坑实录——**anchor字符串在同一文件出现多次时必须带start参数**（`"async def send_message_with_image"`在_prompt_parts之前出现→切片为空；`"# ── relay轨迹观察者"`在__init__注释里先出现）→两次钉子失败后改`src.index(anchor, start_pos)`；全量pytest输出落盘/tmp按需查（572K截断教训沿用）；sibling并行会话共用工作树照旧（settings-client.tsx/locales×3/systemic_test_results.json显式排除）。
+8. 第7步gene skill上报成功：`skill_2df6d2f24fb3`（execution_log=read_file→terminal→search_files→patch→write_file→process，success=true）。
+
+## [2026-10-02 21:40 CST] trajectory session活跃度收口——status不再恒running（04:20轮遗留#2销账）
+**目标**：销账挂账最久的04:20轮遗留#2"trajectory session无completed收口：chat session长生命周期，session.status恒running（end_session端点未接）——前端status过滤语义待定，先观察使用形态"。观察使用形态的结论（本轮取证）：live DB 15个session **15/15全"running"**（含2.5小时前的僵尸），前端trajectory-client.tsx:261-291早已按running/completed渲染色块（绿/蓝/灰）但永远全绿——"我都不知道他们在干嘛"（SUMMARY P0-4）里"哪些session还活着"这个最基本的问题观察面答不了。本轮把session.status从"恒running"变成活跃度生命周期（running↔completed），三层收口。
+**调研来源**：①本项目04:20轮挂账契约原文（"end_session端点未接……先观察使用形态"——观察完成，语义按使用形态定案：trajectory session=观察窗，chat session长生命周期由"事件自愈重开"覆盖，两个对象解耦）；②langfuse Trace status语义（Trace有completed收口态，Observation的open/closed是span级——本轮把同款"层级分治"落下来：session.status=活跃度生命周期，span/event.status=结果语义ok/error，失败可见性不变）；③CowAgent记账哲学（记账/收口失败绝不阻塞会话流——sweep读路径fail-safe、end_session never-raise）；④agno后台作业stale回收语义（无心跳/超时→回收，本轮闲置清扫=同一"idle即回收"思想）；⑤单一真源纪律（收口动作只在store.end_session一个UPDATE里做，三层收口全走它；禁止acp-proxy直写status字段旁路）。
+**改动文件**（opensoul commit `9e35bbc3` 4文件+355/-6；openmate commit `f167678e` 4文件+413/-1）：
+- opensoul `src/trajectory/store.py`（+44/-4）：add_event自愈重开+end_session首收口守卫+sweep_idle_sessions
+- opensoul `src/api/trajectory.py`（+28/-0）：_session_idle_s/_sweep_idle_sessions+2读路径接线
+- opensoul `tests/test_trajectory_session_lifecycle.py`（新273行，16测）
+- opensoul `tests/test_trajectory_store.py`（+11/-2）：test_end_session钉有意演进
+- openmate `acp-proxy/agent/trajectory_recorder.py`（+24/-1）：end_session公共面+_post allow_404
+- openmate `acp-proxy/ws_acp.py`（+23/-0）：共享recorder+teardown收口接线
+- openmate `acp-proxy/tests/test_session_lifecycle.py`（新182行，11测）
+- openmate `acp-proxy/e2e_session_lifecycle.py`（新184行）：live E2E可复跑脚本
+**改动内容**（全增量old_string/new_string，无全量重写）：
+1. **语义定案**：session.status=活跃度生命周期 running（有在途/最近活动）↔ completed（已收口不再活跃）；span/event级status仍是结果语义（ok/error）失败可见性不变。长生命周期chat session跨连接/跨天继续→新事件把completed翻回running（"chat session长生命周期"挂账时的犹豫由此解掉：session=观察窗，chat=更长生命周期的对象）。
+2. **store.add_event自愈重开**：计数UPDATE加`status='running', ended_at=NULL`——事件=活动，重开只由事件触发（ensure/读不重开，测试钉住）。
+3. **store.end_session首收口守卫**：`WHERE id=? AND (status='running' OR ended_at IS NULL)`——重复收口no-op不重盖ended_at（teardown+termination双收口点不打架）；顺带补ensure_tables（与delete_session等其余store方法对齐，fresh DB上调用不再炸no such table——本轮测试抓到的真实缺口）。
+4. **store.sweep_idle_sessions闲置清扫兜底**：running且超过idle_seconds（env TRAJ_SESSION_IDLE_S默认1800s）无事件→completed；最后活跃=MAX(event.created_at)（无事件回退session.created_at，ISO同格式字典序=时间序）；只翻running行不碰其他status；返回翻转数。
+5. **api读路径接线**：list_sessions/get_session两个handler入口`await _sweep_idle_sessions()`（fail-safe吞异常绝不影响读）——崩溃没走到收尾的session也不会永远running。
+6. **recorder.end_session**：POST `/api/trajectory/sessions/{sid}/end?status=…`，never-raise；_post加`allow_404`——零回合连接收口时session没建=正常no-op，不计错误风暴熔断（否则3次空连接就把合法写入打进60s冷却窗）。
+7. **ws_acp teardown接线**：共享TrajectoryRecorder（soulmate路由也收口——引擎内深记录只管span不管session生命周期，relay观察者复用同一实例）；顺序纪律=traj_relay.close()（drain完回合事件）+子进程死透（soulmate写入方不再有在途事件）之后、client_ws.close()之前await收口。
+**接线位置**（grep证据，文件:行号）：
+- store定义：`src/trajectory/store.py:300 end_session`（:312守卫WHERE）/`:318 sweep_idle_sessions`/`:388 add_event的status='running', ended_at=NULL`
+- API接线：`src/api/trajectory.py:38 _sweep_idle_sessions`→`:129 list_sessions handler`+`:148 get_session handler`（真实GET /api/trajectory/sessions读路径）
+- recorder定义：`agent/trajectory_recorder.py:164 end_session`
+- ws_acp接线：`ws_acp.py:212 recorder=traj_recorder`（relay共享）→`:548 await traj_recorder.end_session(_end_sid, status="completed")`（最终清理块，`# 最终清理`锚点之后）
+- 前端消费（零改动免费生效）：`trajectory-client.tsx:261-262 statusColor(running绿/completed蓝/其他灰)`+`:291 {session.status}`
+- 数据面：GET :8090/api/trajectory/sessions?status=running/completed过滤器随status真实化自动正确
+**验证结果**：
+- 完整性✅：opensoul `git diff --cached --numstat`=4文件+355/-6、openmate=4文件+413/-1，逐hunk核对全为本轮改动（opensoul的config/rbac_policy.csv、openmate的settings-client.tsx/locales×3/systemic_test_results.json=sibling并行会话改动，显式排除，两边commit各走git add白名单）。
+- 集成✅：上述grep链完整（store定义→API读路径2接线点→recorder公共面→ws_acp teardown→前端既有渲染）；重启后`GET :8090/api/trajectory/health`=200、`:8092/health`=200、`:8095/health`=200；trajectory-v2（trajectory_api.py）经查是"从events派生session、无status列"的旧模型，本就不在恒running缺口内，有意不动。
+- 测试✅：新`tests/test_trajectory_session_lifecycle.py` **16/16 PASS**（真实SQLite temp_store跑真行为：自愈重开2/首收口生效+重复收口no-op+重开后可再收口+missing id no-op=4/闲置清扫6（stale翻completed/新事件保running/最后活跃=最新事件而非session.created_at/已收口不重盖ended_at+只数翻转/阈值0全收/无事件回退created_at）/读路径接线钉3（list+get触发清扫、清扫炸了读不受影响）/env解析1/收口后仅读不重开1）；新`acp-proxy/tests/test_session_lifecycle.py` **11/11 PASS**（公共面5/allow_404熔断2/ws_acp接线钉4）；既有回归：opensoul轨迹5套+新=**73 passed**（test_trajectory_store.test_end_session钉有意演进：`execute.call_count==1`→"恰好1条UPDATE+守卫WHERE在场"，因end_session补ensure_tables的DDL——注释留案）；**opensoul全量tests/ 2258 passed 0 failed**（214s，--ignore=test_trajectory.py）+live服务上`test_trajectory.py` **13 passed**；**acp-proxy全量tests/ 1533 passed 0 failed**（560s，1522+11新精确吻合）；`systemic_test.py` **29/29 passed**（S1-S6全绿）。
+- **live E2E 10/10 PASS**（e2e_session_lifecycle.py全真实链零stub）：①HTTP生命周期3（新session=running/显式收口→completed+ended_at/事件自愈重开→running+ended_at清空）②**闲置清扫前后对照2：重启前快照15/15僵尸全running→重启后首读翻completed 15/15（idle~155min>1800s阈值），session列表statuses={'running':1,'completed':15}——不再恒running的live实证**③真实WS hermes回合5（initialize/session/new/真实LLM回合stopReason=end_turn/回合落库时session=running/**断开WS→teardown收口completed+ended_at盖章**）。
+**服务重启**：`systemctl --user restart opensoul.service acp-proxy-a.service acp-proxy-b.service`→三服务active、:8090/:8092/:8095健康检查全200；重启后live E2E 10/10+systemic 29/29。前端零改动无需build（既有status渲染直接生效）。
+**commit**：opensoul `9e35bbc3`、openmate `f167678e`（docs另笔含上轮未提交的18:55报告文本）。
+**遗留问题**：
+1. **ACP session/termination未观察**：前端不发该消息（grep src/零命中=死代码纪律跳过），收口由teardown兜底（毫秒级差异）；若未来客户端接termination语义，在ws_acp客户端消息路径加一行end_session即可。
+2. **proxy.py HTTP /acp/send入口的session未显式收口**：read_loop退出（子进程死）≠session结束语义不清（proxy可respawn续会话），有意不收，由闲置清扫兜底（1800s）；如需实时收口需先定义HTTP入口的session结束语义。
+3. **迟到事件竞态声明（自愈但非瞬时）**：teardown收口后若仍有理论迟到事件落库，add_event会翻回running，由清扫1800s后再收口——自愈闭环成立但非瞬时；relay侧已用drain顺序纪律消掉主路径竞态。
+4. **status两态声明**：只有running/completed（schema允许任意string）；"idle"中间态（连接活着但空闲）未引入——前端other=灰，等真实使用反馈再定是否要第三态。前端status过滤下拉/按status筛选列表的交互未做（数据面?status=过滤器已正确）。
+5. **前端视觉走查受登录墙照旧**：色块从全绿变蓝绿相间的实际观感待用户登录看一眼（本轮前端零改动，纯数据面变化）。
+6. 其余遗留观察项照旧：relay round级需引擎侧自报/两消费者近重复文件去重/树内搜索与扁平搜索整合/回放与树互斥/过滤态折叠交互/跨session搜索/LLM_FALLBACK_CHAIN未配置（402环境项）/relay消息级粒度/环境变量密钥外发误伤面/污点分析近似/双侧镜像人工同步/model_gateway凭据映射表/`engine.py`死代码清理候选/MCP重连真实Server验证/attach跨turn共享/RESUMED后同turn多episode单记录。
+7. **erratum销账**：13:49轮报告"test_trajectory_recorder 24 passed"与文件实际19个test函数不符——以实测19为准（16:24轮已发现，本轮正式记账）。
+8. cron环境约束实录：sibling并行会话共用工作树照旧（opensoul本轮新观测到config/rbac_policy.csv被sibling改动，一并进排除清单）；`sibling subagent modified`警告×3再现但git diff逐hunk核对只含本轮改动；pytest管道tail有exit code假象提示→结果以log尾行+EXIT=为准；pyright对monkeypatch鸭子类型（`rec._post=fake`，house风格）误报照旧忽略；live E2E里GET /sessions/{id}轮询等后台队列落库（≤5s）防"响应先到落账后到"假阴性。
+9. 第7步gene skill上报成功：`skill_fa866a7be80f`（execution_log=terminal→patch→write_file→process，success=true）。
