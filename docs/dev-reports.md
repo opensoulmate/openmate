@@ -4175,3 +4175,37 @@
 5. 其余遗留观察项照旧：relay round级需引擎侧自报/两消费者近重复文件去重/树内搜索与扁平搜索整合/回放与树互斥/跨session搜索/LLM_FALLBACK_CHAIN未配置（402环境项）/环境变量密钥外发误伤面/污点分析近似/双侧镜像人工同步/model_gateway凭据映射表/engine.py死代码清理候选/MCP重连真实Server验证/attach跨turn共享/RESUMED后同turn多episode单记录。
 6. cron环境约束实录：测试文件f-string含反斜杠字面量直接lint炸（f-string expression不能含反斜杠）——测试里算skill_id的野路子删掉改从审计面取；`or True`废断言自查抓掉（断言永真=没测）；sibling并行会话共用工作树（config/rbac_policy.csv）照旧排除；全量pytest输出落/tmp按需查（160s/EXIT=0）。
 7. 第7步gene skill上报成功：`skill_7b35df505f90`（execution_log=read_file→search_files→terminal→patch→write_file，success=true，event=ADD+success_rate=1.0）。
+
+## [2026-10-03 04:19 CST] gene技能使用遥测闭环——record_usage从死代码接进FAIL执行路径 + success_rate如实回填 + 失败不抬排名（02:15轮遗留#2销账）
+**目标**：销账连续两轮挂账的"record_usage无调用方"——技能"被使用"事件无生产写入方；顺带修复同根数据质量问题：①`/skill/recommend`响应的success_rate恒返回get缺省0.0（learned_skills表没这列，指标说谎）②失败执行不计usage→success_rate恒1.0（只成功计数）③find_relevant排序公式`success*0.3+usage*0.1`在失败计usage后会因失败反而加分——失败越多排名越前。
+**调研来源**：①evolution-engine-patterns §1.6 CAMEL WorkflowMemoryManager"失败的反面——成功的复用"：复用必须带真实成败信号，成败率是复用排序的依据（本轮success_rate随真实成败漂移+排序降权即此语义）；②SUMMARY P0-5评估闭环"度量前提=指标不说谎"——success_rate恒0.0/1.0就是"一直没进化"的度量假象之一（推荐面永远看不出技能好坏）；③mem0 §1.2审计与遥测分离（上轮定下的"USAGE遥测不进审计表"设计保持，本轮只补真实写入方）。
+**改动文件**（opensoul commit `1d68fa67`，3文件+279/-2）：
+- `src/gene/skill_learner.py`（+50/-2）：FAIL分支接线record_usage + find_relevant回填success_rate/排序公式改造 + record_usage返回计数
+- `src/api/gene.py`（+17/-0）：SkillUsageRequest + POST /skill/{skill_id}/usage
+- `tests/test_gene_skill_usage.py`（新214行，11测）
+**改动内容**（全增量old_string/new_string，无全量重写）：
+1. **record_usage从死代码变真实记账点**（核心）：extract FAIL分支调用`self.record_usage(skill_id, success=False)`——失败执行也是"使用"：usage_count+1、success_count不动、last_used_at刷新。技能族尚无成功提炼行时updated=False纯no-op（不落learned_skills行，"没技能可归因只留FAIL审计"——上轮test_failure_recorded_in_fail_branch的n_skills==0契约不破坏）。
+2. **success_rate如实回填**：find_relevant给每行算`success_count/usage_count`（此前行里没这列，recommend的`s.get("success_rate", 0.0)`恒0.0）。
+3. **排序公式失败不抬名次**：`success*0.3+usage*0.1`→`success_rate*0.6 + min(usage,10)*0.02`——成功率主导+证据权重封顶10次（防老技能堆量躺赢）；失败只稀释success_rate不加分。
+4. **record_usage升级可观测**：返回`{updated, usage_count, success_count, success_rate}`（调用方/日志立刻看到成功率漂移）；刻意不写USAGE审计（遥测量大，审计记"进化变更"，计数留痕在extract的UPDATE审计）。
+5. **新API**：POST /api/gene/skill/{id}/usage {success}——消费方用完推荐技能回执成败的数据面（404=未知技能不静默吞）。
+**接线位置**（grep证据，文件:行号）：
+- 定义：`src/gene/skill_learner.py:627 record_usage`/`:576 find_relevant`
+- **真实执行路径调用点**：`src/gene/skill_learner.py:394 self.record_usage(skill_id, success=False)`（extract FAIL分支——POST /api/gene/skill/extract是本cron每轮第7步+任何消费方上报执行的必经入口）；`src/api/gene.py:332 skill_learner.record_usage(...)`（POST /skill/{id}/usage handler）
+- find_relevant消费方：`src/api/gene.py:309`（/skill/recommend）+`src/gene/skill_learner.py:612`（get_context_prompt注入）
+- router挂载：`src/main.py:554 app.include_router(gene_router, prefix="/api/gene")`
+**验证结果**：
+- 完整性✅：`git show --stat 1d68fa67`=skill_learner.py +50/-2、gene.py +17/-0、test新214行，逐hunk核对全为本轮改动（sibling并行会话的config/rbac_policy.csv +58/-1显式排除，commit走git add白名单3文件）。
+- 集成✅：上述grep链完整（定义→FAIL执行路径调用点→API handler→router挂载）；重启后live curl全链实证（下述）。
+- 测试✅：新`tests/test_gene_skill_usage.py` **11/11 PASS**（FAIL计入usage稀释rate 1.0→0.5/last_used_at刷新/无行no-op不落行+FAIL审计照旧/[FAIL,ADD]族谱不破坏/record_usage返回计数×2（成功→2/2、失败→3/2≈0.667）/未知id no-op/USAGE不写审计/失败不抬排名（乙usage4>甲usage1仍排后，rate 0.25）/success_rate字段在场/API 2测（usage回执→rate 0.5+recommend回填+404契约、FAIL extract→usage 2+rate 0.5））；gene套件usage+audit+revert=**40 passed**零回归；**opensoul全量tests/ 2311 passed 0 failed**（179s，2300+11新精确吻合）。
+- **live E2E实证**（curl真实链，零stub）：①extract success→200 `event=ADD success_rate=1.0` ②同payload success=false→400（契约不变，但FAIL已计入usage）③recommend→200 **usage_count=2 success_rate=0.5（修复前恒0.0）** ④POST /usage success=false→200 `usage_count=3 success_count=1 success_rate=0.333`（回执真实落库）⑤未知id→404 `skill not found` ⑥清理：e2e skill+早前测试耦合残留行（skill_b7dc867181d4）DELETE 200×2，残留清零。
+**服务重启**：`systemctl --user restart opensoul.service`→active、/api/gene/health=200（重启后新端点才live，API测试与E2E都在重启后跑）；openmate/acp-proxy本轮零改动。
+**commit**：opensoul `1d68fa67`。
+**遗留问题**：
+1. **消费方回执未接进acp-proxy**：POST /skill/{id}/usage数据面已通，真实消费方（acp-proxy soulmate agent的skill_manager/skill注入链）还没调用——目前生产写入方是extract FAIL分支（本cron每轮+执行上报方必经）；待OpenMate侧技能推荐被agent真实消费时把回执接进消费链（或在recommend响应里带usage回执指引）。
+2. **前端无回滚UI/审计视图照旧**（02:15轮遗留#1+23:55轮遗留#5）：受"改造现有页面不擅自建新页+需先定挂载点"约束，等挂载点拍板。
+3. **FAIL记录不分trivial/审计表无retention照旧**（02:15轮遗留#3）。
+4. **排序公式是启发式**：`rate*0.6+min(usage,10)*0.02`的权重是拍的，等真实数据形态（多技能混排）再校准；关键词加分0.5/0.3未动。
+5. 其余遗留观察项照旧：relay round级需引擎侧自报/两消费者近重复文件去重/树内搜索与扁平搜索整合/回放与树互斥/跨session搜索/LLM_FALLBACK_CHAIN未配置（402环境项）/环境变量密钥外发误伤面/污点分析近似/双侧镜像人工同步/model_gateway凭据映射表/engine.py死代码清理候选/MCP重连真实Server验证/attach跨turn共享/RESUMED后同turn多episode单记录。
+6. cron环境约束实录：测试类级MARKER共享导致测试耦合（前测失败残留行→后测ADD变UPDATE）——已改per-test uuid marker，教训：live服务API测试必须每测独立marker；`curl | python3`管道被拦照旧拆两步；sibling并行会话共用工作树（config/rbac_policy.csv）照旧排除；全量pytest输出179s/EXIT=0。
+7. 第7步gene skill上报✅：POST /api/gene/skill/extract 200——skill_id=`skill_00a3fc80f6e0`（"gene技能使用遥测闭环"，read_file→search_files→terminal→patch→write_file短序列，event=ADD+success_rate=1.0）已入gene技能库供find_relevant检索复用。
