@@ -12,6 +12,9 @@ import {
   BarChart3, Layers, AlertCircle, CheckCircle, XCircle, Eye,
   Copy, Terminal, MessageSquare, Bot, Wrench, ArrowLeft,
 } from "lucide-react"
+import { SpanTreeView } from "../../trajectory/span-tree-view"
+// 展示格式化+SpanNode类型=span-tree单一真源（本地副本已删，防双实现漂移）
+import { formatDuration, formatTokens, type SpanNode } from "../../trajectory/span-tree"
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -96,18 +99,6 @@ function getEventColor(type: string): string {
 
 function getEventIcon(type: string): React.ElementType {
   return EVENT_ICONS[type] || Activity
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)}ms`
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
-  return `${Math.round(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`
-}
-
-function formatTokens(n: number): string {
-  if (n < 1000) return String(n)
-  if (n < 1000000) return `${(n / 1000).toFixed(1)}k`
-  return `${(n / 1000000).toFixed(1)}M`
 }
 
 function timeAgo(ts: string): string {
@@ -569,6 +560,12 @@ export function TrajectoryTab() {
   // Fork state
   const [forking, setForking] = useState(false)
 
+  // Span树状态（2026-10-02 P1，Warp orchestration树——/system tab第二消费者
+  // 接树，与trajectory-client同款）：treeMode默认开=观察面优先，列表一键可回；
+  // traceRoots=GET /sessions/{id}/trace嵌套树（数据单一真源=opensoul get_trace_tree）
+  const [treeMode, setTreeMode] = useState(true)
+  const [traceRoots, setTraceRoots] = useState<SpanNode[] | null>(null)
+
   const replayTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // ── Data Fetching ──────────────────────────────────────────
@@ -627,6 +624,18 @@ export function TrajectoryTab() {
     } catch {}
   }, [apiBase])
 
+  // span树数据：GET /sessions/{id}/trace（opensoul get_trace_tree嵌套+rollup，
+  // 环防护/悬空父提升root都在服务端——前端不重复建树防双实现漂移）
+  const fetchTrace = useCallback(async (sessionId: string) => {
+    try {
+      const r = await fetch(`${apiBase}/api/trajectory/sessions/${sessionId}/trace`)
+      if (r.ok) {
+        const d = await r.json()
+        setTraceRoots(d.roots || [])
+      }
+    } catch {}
+  }, [apiBase])
+
   useEffect(() => {
     fetchStats()
     fetchSessions()
@@ -672,8 +681,10 @@ export function TrajectoryTab() {
     setReplayMode(false)
     setReplayPlaying(false)
     setReplayIdx(0)
+    setTraceRoots(null)  // 清上一棵树（防切换会话闪现旧树）
     fetchEvents(id)
-  }, [fetchEvents])
+    fetchTrace(id)
+  }, [fetchEvents, fetchTrace])
 
   // ── Fork ───────────────────────────────────────────────────
 
@@ -1051,6 +1062,20 @@ export function TrajectoryTab() {
                 >
                   <GitBranch size={12} /> {forking ? t("trajectory.forking") : t("trajectory.fork")}
                 </button>
+                {/* span树/列表切换（Warp orchestration树）——
+                    切树关回放（两种检视模式互斥，回放吃扁平事件序） */}
+                <button
+                  onClick={() => { setReplayMode(false); setReplayPlaying(false); setTreeMode(!treeMode) }}
+                  style={{
+                    padding: "5px 12px", borderRadius: 6, fontSize: 12,
+                    border: `1px solid ${treeMode ? "hsl(var(--primary))" : "hsl(var(--border))"}`,
+                    background: treeMode ? "hsl(var(--primary) / 0.1)" : "transparent",
+                    color: treeMode ? "hsl(var(--primary))" : "hsl(var(--muted-foreground))",
+                    cursor: "pointer", display: "flex", alignItems: "center", gap: 4,
+                  }}
+                >
+                  <Layers size={12} /> {treeMode ? t("trajectory.listView") : t("trajectory.treeView")}
+                </button>
                 <div style={{
                   marginLeft: "auto", fontSize: 12, color: "hsl(var(--muted-foreground))",
                   display: "flex", alignItems: "center", gap: 8,
@@ -1096,8 +1121,16 @@ export function TrajectoryTab() {
               </div>
             )}
 
-            {/* Events */}
-            {displayEvents.length === 0 ? (
+            {/* Events — span树优先（treeMode且trace数据在场且非回放/搜索），
+                否则原有扁平事件列表逐字不变（与trajectory-client同款条件） */}
+            {view === "detail" && treeMode && !replayMode && traceRoots && traceRoots.length > 0 ? (
+              <SpanTreeView
+                key={selectedSession}
+                roots={traceRoots}
+                getEventColor={getEventColor}
+                getEventIcon={getEventIcon}
+              />
+            ) : displayEvents.length === 0 ? (
               <div style={{
                 textAlign: "center", padding: 40, color: "hsl(var(--muted-foreground))",
               }}>
