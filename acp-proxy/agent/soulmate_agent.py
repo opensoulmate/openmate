@@ -313,6 +313,9 @@ class SoulMateAgent:
             lambda record: network_state.end_turn(),
         )
         self._turn_close_reason: dict[str, str] = {}  # session_id -> 非正常收尾原因
+        # ── gene技能消费回执归因清单：session_id -> 本回合注入过的技能id
+        # （recommend注入→回合收口按结局回执usage，CAMEL复用带真实成败信号）──
+        self._skill_injected: dict[str, list[str]] = {}
         # ── kilocode #4 readTurn：工具动作轮廓(toolSummary)+文件快照diff进记忆──
         self._turn_read_view = TurnReadView()
         
@@ -2725,6 +2728,54 @@ You can send files to the user natively: to deliver a file, write a brief confir
         self._activity_store.upsert(activity)
         return full_response, all_tool_calls
 
+    # ── gene技能消费回执（CAMEL WorkflowMemoryManager §1.6"复用必须带真实成败信号"）──
+    def _note_skill_injected(self, session_id: str, skills: list | None) -> None:
+        """记下本回合注入过的技能id（usage回执的归因清单，每回合覆盖写）。
+
+        传空列表=清上回合残留（recommend失败/空结果不留脏清单）；
+        lazy初始化兼容 __new__ 搭建的测试agent（不依赖__init__先跑）。
+        """
+        store = getattr(self, "_skill_injected", None)
+        if store is None:
+            store = {}
+            self._skill_injected = store
+        store[session_id] = [
+            s.get("skill_id", "") for s in (skills or [])[:3] if s.get("skill_id")
+        ]
+
+    def _take_injected_skills(self, session_id: str) -> list[str]:
+        """取走并清空本回合注入清单（一次性消费，不留跨回合残留）。"""
+        return getattr(self, "_skill_injected", {}).pop(session_id, [])
+
+    async def _report_skill_usage(
+        self, client, skill_ids: list[str], success: bool
+    ) -> int:
+        """逐个回执技能使用结局（POST /api/gene/skill/{id}/usage）。
+
+        成败=消费回合的真实结局：success_rate随真实成败漂移→find_relevant排序
+        据此降权/提权（opensoul record_usage单一入口）。回执失败只记debug日志
+        不阻塞回合收尾（CowAgent记账哲学：记账失败绝不阻塞主流程）。
+        返回成功回执条数（可观测）。
+        """
+        ok = 0
+        for skill_id in skill_ids:
+            try:
+                resp = await client.post(
+                    f"http://127.0.0.1:8090/api/gene/skill/{skill_id}/usage",
+                    json={"success": success},
+                    timeout=2,
+                )
+                if resp.status_code == 200:
+                    ok += 1
+                else:
+                    logger.debug(
+                        f"[gene] skill usage回执非200(非致命): "
+                        f"{skill_id} -> {resp.status_code}"
+                    )
+            except Exception as e:
+                logger.debug(f"[gene] skill usage回执失败(非致命): {skill_id}: {e}")
+        return ok
+
     async def _request_foreign_read_approval(
         self, session_id: str, target_session_id: str, owner: str
     ) -> bool:
@@ -3457,6 +3508,8 @@ You can send files to the user natively: to deliver a file, write a brief confir
                         messages.insert(0, {"role": "system", "content": pref_data["context"]})
 
                 # 4. 技能推荐
+                # 消费遥测归因清单：先清上回合残留（recommend失败/空结果不留脏清单）
+                self._note_skill_injected(session_id, [])
                 skill_resp = await _client.post(
                     "http://127.0.0.1:8090/api/gene/skill/recommend",
                     json={"task_description": user_text}, timeout=2,
@@ -3464,6 +3517,8 @@ You can send files to the user natively: to deliver a file, write a brief confir
                 if skill_resp.status_code == 200:
                     skill_data = skill_resp.json()
                     if skill_data.get("skills"):
+                        # 本回合注入的技能记账→回合收口后按结局回执usage
+                        self._note_skill_injected(session_id, skill_data["skills"])
                         skill_names = [s["name"] for s in skill_data["skills"][:3]]
                         skill_ctx = f"\n## 相关技能\n可用技能: {', '.join(skill_names)}\n"
                         messages.insert(0, {"role": "system", "content": skill_ctx})
@@ -3984,6 +4039,24 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             "success": True,
                         },
                         timeout=2,
+                    )
+                # 2.5 技能使用回执（CAMEL §1.6复用必须带真实成败信号）——本回合
+                # 注入过的技能逐个回执结局：success_rate随真实成败漂移→find_relevant
+                # 排序据此降权/提权。只计正常收尾回合（interrupted/superseded结局
+                # 不完整不计，与TurnClose"只有完整turn才digest"同门）；归因清单
+                # 一次性消费（take），不留跨回合残留
+                _injected_skills = self._take_injected_skills(session_id)
+                if _injected_skills and (
+                    self._turn_close_reason.get(session_id, turn_lifecycle.CLOSE_COMPLETED)
+                    == turn_lifecycle.CLOSE_COMPLETED
+                ):
+                    await self._report_skill_usage(
+                        _client,
+                        _injected_skills,
+                        success=(
+                            "错误" not in full_response
+                            and "error" not in full_response.lower()
+                        ),
                     )
                 # 3. 长期记忆存储（重要对话）——kilocode防记忆回声：
                 # 本轮召回过记忆则服务端跳过digest（"答案来自记忆的回合不能再蒸馏回记忆"）
