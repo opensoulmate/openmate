@@ -21,6 +21,10 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+# relay轨迹观察者（10:02轮遗留#3销账）：HTTP /acp/send入口的hermes回合记账
+from agent.relay_trajectory import RelayTrajectory
+from agent.trajectory_recorder import TrajectoryRecorder
+
 # --- Logging setup ---
 LOG_DIR = "/tmp"
 LOG_FILE = os.path.join(LOG_DIR, "acp-proxy.log")
@@ -54,7 +58,8 @@ class PendingPrompt:
 
 
 class ACPProcess:
-    def __init__(self):
+    def __init__(self, traj_recorder: Any = None):
+        # traj_recorder: TrajectoryRecorder或测试替身（duck-typed，可注入）
         self._proc: asyncio.subprocess.Process | None = None
         self._msg_id: int = 0
         self._initialized: bool = False
@@ -88,6 +93,14 @@ class ACPProcess:
         # loop a chance to exist — _health_task is only created inside
         # start(), so a fresh instance has NO self-heal until first start.
         self._warmup_task: asyncio.Task | None = None
+        # ── relay轨迹观察者（10:02轮遗留#3销账）──
+        # HTTP /acp/send（本文件硬编码hermes acp路由）此前不经ws_acp观察者，
+        # 该入口的hermes回合零记账——/trajectory观察面对HTTP入口全盲。
+        # per-session观察者（跨会话并发各记各的；同会话已被_session_locks
+        # FIFO串行=单回合在途）+共享recorder（测试可注入替身）。
+        self._traj_relays: dict[str, RelayTrajectory] = {}
+        self._traj_prompt_sid: dict[str, str] = {}
+        self._traj_recorder: TrajectoryRecorder | None = traj_recorder
 
     @property
     def is_running(self) -> bool:
@@ -324,6 +337,11 @@ class ACPProcess:
                     logger.debug(f"Ignoring system message id=0: {method}")
                     continue
 
+                # relay轨迹观察（10:02轮遗留#3销账，旁路never-raise）：
+                # 消息流→per-session观察者→trajectory（转发内容零改动）。
+                # 放在id=0过滤之后=只记用户可见面（与chunk收集同口径）。
+                self._traj_observe_agent(msg)
+
                 # RPC response
                 if msg_id and msg_id in self._rpc_pending:
                     fut = self._rpc_pending.pop(msg_id)
@@ -389,6 +407,111 @@ class ACPProcess:
                 p.response = {"error": "ACP read loop exited"}
                 self._active_prompt_ids.discard(pid)
                 p.done.set()
+        # relay轨迹收尾（失败必须可见）：子进程死了，所有未收口回合判error
+        self._traj_finalize_all("error")
+
+    # ── relay轨迹观察者（10:02轮遗留#3销账）────────────────────────
+    # ws_acp同款RelayTrajectory旁路观察（转发/响应内容零改动，CowAgent
+    # 记账哲学：observe同步never-raise，落账走观察者后台单worker）。
+
+    def _traj_relay_for(self, sid: str) -> RelayTrajectory | None:
+        """per-session观察者（lazy建）。sid为空→None（绝不写无主span）。"""
+        try:
+            if not sid:
+                return None
+            relay = self._traj_relays.get(sid)
+            if relay is None:
+                rec = self._traj_recorder
+                if rec is None:
+                    rec = TrajectoryRecorder()
+                    self._traj_recorder = rec
+                relay = RelayTrajectory(
+                    agent_id="hermes",
+                    session_id_getter=lambda s=sid: s,
+                    recorder=rec,
+                )
+                self._traj_relays[sid] = relay
+            return relay
+        except Exception as e:
+            logger.debug(f"[relay-traj] relay_for failed (non-fatal): {e}")
+            return None
+
+    def _traj_observe_client(self, request: dict, sid: str) -> None:
+        """session/prompt发出前观察（回合起点）。never-raise。"""
+        try:
+            relay = self._traj_relay_for(sid)
+            if relay is None:
+                return
+            msg_id = str(request.get("id", "") or "")
+            if msg_id:
+                self._traj_prompt_sid[msg_id] = sid
+            relay.observe_client(request)
+        except Exception as e:
+            logger.debug(f"[relay-traj] observe_client failed (non-fatal): {e}")
+
+    def _traj_observe_agent(self, msg) -> None:
+        """子进程→客户端消息观察：session/update按sessionId路由，
+        prompt响应按msg_id→sid路由（超时后迟到响应自动no-op）。never-raise。"""
+        try:
+            if not isinstance(msg, dict):
+                return
+            if msg.get("method") == "session/update":
+                sid = str((msg.get("params") or {}).get("sessionId") or "")
+                if sid:
+                    relay = self._traj_relays.get(sid)
+                    if relay is not None:
+                        relay.observe_agent(msg)
+                else:
+                    # sessionId缺失（协议违规）：广播——只影响有未收口回合的观察者
+                    for relay in list(self._traj_relays.values()):
+                        relay.observe_agent(msg)
+                return
+            msg_id = str(msg.get("id", "") or "")
+            if not msg_id or ("result" not in msg and "error" not in msg):
+                return
+            sid = self._traj_prompt_sid.pop(msg_id, None)
+            if not sid:
+                return
+            relay = self._traj_relays.get(sid)
+            if relay is not None:
+                relay.observe_agent(msg)
+        except Exception as e:
+            logger.debug(f"[relay-traj] observe_agent failed (non-fatal): {e}")
+
+    def _traj_fail_turn(self, msg_id: str, sid: str) -> None:
+        """回合确定已死（写管道失败/超时）：收口未完成turn为error（不悬挂root）。"""
+        try:
+            self._traj_prompt_sid.pop(msg_id, None)
+            relay = self._traj_relays.get(sid)
+            if relay is not None:
+                relay.finalize_open("error")
+        except Exception as e:
+            logger.debug(f"[relay-traj] fail_turn failed (non-fatal): {e}")
+
+    def _traj_finalize_all(self, status: str = "error") -> None:
+        """子进程死亡收尾：所有未收口回合判error（失败必须可见）。"""
+        try:
+            for relay in list(self._traj_relays.values()):
+                relay.finalize_open(status)
+            self._traj_prompt_sid.clear()
+        except Exception as e:
+            logger.debug(f"[relay-traj] finalize_all failed (non-fatal): {e}")
+
+    def _traj_cli_turn(self, text: str, result: dict, sid: str, duration_ms: float = 0.0) -> None:
+        """CLI兜底回合记账：ACP失败/空响应后hermes -z给用户的回答也必须在
+        观察面可见（否则只见error回合，与用户实际拿到回答对不上）。never-raise。"""
+        try:
+            relay = self._traj_relay_for(sid)
+            if relay is None:
+                return
+            relay.observe_cli_turn(
+                text,
+                result.get("response_text") or "",
+                stop_reason=str(result.get("stop_reason") or result.get("stopReason") or ""),
+                duration_ms=duration_ms,
+            )
+        except Exception as e:
+            logger.debug(f"[relay-traj] cli_turn failed (non-fatal): {e}")
 
     async def send_message(self, text: str, session_id: str | None = None) -> dict[str, Any]:
         if not self.is_running or not self._initialized:
@@ -540,7 +663,11 @@ class ACPProcess:
                 f"(session {sid} preserved), CLI fallback with explicit markers"
             )
         # Fallback to CLI — 结果必须携带session_id，客户端才能续接会话
+        t_cli = time.time()
         result = await self._cli(text)
+        # relay轨迹（10:02轮遗留#3销账）：CLI兜底回合同样记账（禁止静默降级
+        # 的观察面语义——用户拿到了回答，观察面不能只有ACP失败回合）
+        self._traj_cli_turn(text, result, sid, (time.time() - t_cli) * 1000.0)
         result["session_id"] = sid
         if got_empty_acp_response:
             # ACP侧空响应对客户端可见（禁止静默降级）；恢复策略决策同样可见
@@ -879,10 +1006,14 @@ class ACPProcess:
         pending = PendingPrompt(msg_id=msg_id, session_id=session_id)
         self._prompt_pending[msg_id] = pending
         self._active_prompt_ids.add(msg_id)
+        # relay轨迹观察（10:02轮遗留#3销账）：回合起点在写stdin前注册，
+        # 防"响应先到观察后到"竞态丢收口；转发内容零改动
+        self._traj_observe_client(request, session_id)
 
         if not self._proc or not self._proc.stdin:
             self._prompt_pending.pop(msg_id, None)
             self._active_prompt_ids.discard(msg_id)
+            self._traj_fail_turn(msg_id, session_id)
             raise BrokenPipeError("ACP process stdin not available")
         try:
             self._proc.stdin.write((json.dumps(request) + "\n").encode())
@@ -890,6 +1021,7 @@ class ACPProcess:
         except (BrokenPipeError, OSError) as e:
             self._prompt_pending.pop(msg_id, None)
             self._active_prompt_ids.discard(msg_id)
+            self._traj_fail_turn(msg_id, session_id)
             raise
 
         # Wait for prompt response (timeout: 120s — ACP LLM calls can be slow but not infinite)
@@ -898,6 +1030,7 @@ class ACPProcess:
         except asyncio.TimeoutError:
             self._prompt_pending.pop(msg_id, None)
             self._active_prompt_ids.discard(msg_id)
+            self._traj_fail_turn(msg_id, session_id)
             raise TimeoutError(f"ACP prompt timeout (120s) for msg_id={msg_id}")
 
         # Clean up

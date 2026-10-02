@@ -211,6 +211,58 @@ class RelayTrajectory:
         except Exception as e:
             logger.debug(f"[relay-traj] observe_agent failed (non-fatal): {e}")
 
+    def finalize_open(self, status: str = "error") -> None:
+        """显式收口未完成回合（子进程退出/写管道失败/超时——回合确定已死时
+        调用方主动收口error，不等下一个prompt"挤掉"，不悬挂root）。"""
+        self._finalize(status_override=status)
+
+    def observe_cli_turn(
+        self,
+        user_text: str,
+        answer_text: str,
+        stop_reason: str = "",
+        duration_ms: float = 0.0,
+    ) -> None:
+        """CLI兜底回合记账（proxy.py HTTP /acp/send的hermes -z降级路径）。
+
+        ACP回合失败/空响应后CLI兜底给用户的回答同样是一整个用户可见回合——
+        观察面必须"ACP失败回合+CLI兜底回合"两笔都看得到（禁止静默降级的
+        观察面语义，mem0 §1.1），否则只见error回合，与用户实际拿到回答的
+        体感对不上。回合在单个闭包里start→record→end一次收口（无悬挂root）。
+        """
+        try:
+            # 与observe_client同款"挤掉"语义：前序未收口回合判error
+            self._finalize(status_override="error")
+            sid = str(self._session_id_getter() or "")
+            self.turns_seen += 1
+
+            async def _one(
+                s: str = sid,
+                tx: str = user_text,
+                ax: str = answer_text,
+                stop: str = stop_reason,
+                dur: float = duration_ms,
+            ):
+                if not s:
+                    return
+                root_id = await self.recorder.start_turn(s, tx, agent_id=self.agent_id)
+                status = (
+                    "error" if stop in STOP_ERROR_REASONS else llm_outcome_status(ax)
+                )
+                await self.recorder.record_llm_call(
+                    s, root_id, content=ax, duration_ms=dur,
+                    status=status, tools=[], agent_id=self.agent_id, source="relay",
+                )
+                await self.recorder.end_turn(s, root_id, status=status)
+                logger.debug(
+                    f"[relay-traj] cli turn closed: agent={self.agent_id} sid={s} "
+                    f"status={status} stop={stop or '-'} chars={len(ax)}"
+                )
+
+            self._enqueue(_one)
+        except Exception as e:
+            logger.debug(f"[relay-traj] observe_cli_turn failed (non-fatal): {e}")
+
     # ── 内部：回合收口 ─────────────────────────────────────────
 
     def _finalize(self, status_override: str | None = None, stop_reason: str = "") -> None:
