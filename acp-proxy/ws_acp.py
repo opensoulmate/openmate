@@ -190,6 +190,17 @@ async def ws_acp_endpoint(client_ws: WebSocket):
     # opencode/mimo等外部进程）的回合由本层按消息流记账落trajectory——soulmate
     # 路由（agent.start --stdio，引擎内TrajectoryRecorder深记录）跳过防双记。
     # 只旁路观察，转发内容零改动；记账失败绝不阻塞会话流。
+    # session收口recorder（04:20轮遗留#2销账：session.status不再恒running）：
+    # 连接teardown时把trajectory session翻completed（soulmate路由也用——引擎内
+    # 深记录只管span不管session生命周期）。与relay观察者共享同一实例。
+    traj_recorder = None
+    try:
+        from agent.trajectory_recorder import TrajectoryRecorder
+
+        traj_recorder = TrajectoryRecorder()
+    except Exception as e:
+        logger.warning(f"[ACP] trajectory recorder init failed (非致命): {e}")
+
     traj_relay = None
     if route["cmd"] != DEFAULT_ROUTE["cmd"]:
         try:
@@ -198,6 +209,7 @@ async def ws_acp_endpoint(client_ws: WebSocket):
             traj_relay = RelayTrajectory(
                 agent_id=agent_id,
                 session_id_getter=lambda: acp_state.get("acp_sid"),
+                recorder=traj_recorder,
             )
             logger.info(f"[ACP] relay trajectory observer on for agent '{agent_id}'")
         except Exception as e:
@@ -526,6 +538,17 @@ async def ws_acp_endpoint(client_ws: WebSocket):
             await asyncio.wait_for(proc.wait(), timeout=5)
         except Exception:
             proc.kill()
+    _end_sid = acp_state.get("acp_sid") or ""
+    if traj_recorder is not None and _end_sid:
+        # session收口（04:20轮遗留#2销账）：连接结束=观察窗结束，trajectory
+        # session翻completed（opensoul侧add_event自愈可翻回running）。
+        # 顺序纪律：必须在traj_relay.close()（drain完回合事件）与proc死透
+        # （soulmate写入方不再有在途事件）之后——先落事件后收口。
+        try:
+            await traj_recorder.end_session(_end_sid, status="completed")
+            logger.info(f"[ACP] trajectory session closed: {_end_sid}")
+        except Exception as e:
+            logger.debug(f"[ACP] trajectory session end failed (非致命): {e}")
     logger.info(f"[ACP] user {user_id} session with {agent_id} ended (exit={proc.returncode})")
     try:
         await client_ws.close(code=1000, reason="session ended")

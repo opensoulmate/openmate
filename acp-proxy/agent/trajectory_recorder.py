@@ -98,11 +98,14 @@ class TrajectoryRecorder:
     def is_paused(self) -> bool:
         return time.time() < self._paused_until
 
-    async def _post(self, path: str, payload: dict) -> dict | None:
+    async def _post(self, path: str, payload: dict, allow_404: bool = False) -> dict | None:
         """POST到opensoul trajectory面。成功返回json dict，任何失败返回None。
 
         连续 max_consecutive_failures 次失败 → 冷却 cooldown_s（错误风暴熔断：
         opensoul已死时不给每个事件白付timeout）。熔断进出各记一条warning。
+        allow_404=True：目标不存在（如session收口时session还没建）=正常no-op
+        返回None，不计熔断失败——end_session的404是常态不是故障，不能让它把
+        合法写入打进冷却窗。
         """
         if self.is_paused:
             return None
@@ -110,6 +113,8 @@ class TrajectoryRecorder:
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 resp = await client.post(url, json=payload)
+            if resp.status_code == 404 and allow_404:
+                return None
             if resp.status_code >= 400:
                 raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:120]}")
             data = resp.json()
@@ -154,6 +159,24 @@ class TrajectoryRecorder:
             self._ensured_sessions.add(session_id)
             return True
         return False
+
+    @_fail_safe(False)
+    async def end_session(self, session_id: str, status: str = "completed") -> bool:
+        """收口trajectory session（04:20轮遗留#2销账：session.status不再恒running）。
+
+        ws_acp连接teardown调用（实时收口）；opensoul侧闲置清扫兜底+add_event
+        自愈翻回running（长生命周期chat session跨连接继续不卡死）。顺序纪律：
+        必须在回合事件全部落库（relay.close()已drain / 子进程死透）之后调用。
+        session不存在=正常no-op（404不计熔断）。never-raise。
+        """
+        if not session_id:
+            return False
+        data = await self._post(
+            f"/api/trajectory/sessions/{session_id}/end?status={status}",
+            {},
+            allow_404=True,
+        )
+        return bool(data and data.get("ended"))
 
     @_fail_safe("")
     async def start_turn(
