@@ -164,6 +164,15 @@ def build_env(tmp_path, monkeypatch, steps, llm_scripts, llm_call_responses,
         async def record_llm_call(self, *a, **k):
             return ""
 
+        async def start_llm_span(self, *a, **k):
+            return ""
+
+        async def record_round(self, *a, **k):
+            return ""
+
+        async def end_llm_span(self, *a, **k):
+            return None
+
         async def end_turn(self, *a, **k):
             return None
 

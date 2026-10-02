@@ -208,15 +208,139 @@ def test_soulmate_wiring_pins():
     assert "self._traj_recorder = TrajectoryRecorder()" in src
     # 回合根：_prompt_inner在user_text非空后start_turn
     assert "traj_root_id = await self._traj_recorder.start_turn(session_id, user_text)" in src
-    # 三条LLM路径（简单分支/plan步骤/plan重试）+ LLM失败可见
-    assert src.count("await self._traj_recorder.record_llm_call(") == 4
+    # round级嵌套（04:20轮遗留#3）：3条LLM路径（简单分支/plan步骤/plan重试）
+    # 先建段span拿id再收口；每条路径异常分支同样收口（段span不悬挂）
+    assert src.count("await self._traj_recorder.start_llm_span(") == 3
+    assert src.count("await self._traj_recorder.end_llm_span(") == 6  # 3正常+3异常
+    # 平面tool批退役：record_llm_call只剩"段未建"的失败兜底1处
+    assert src.count("await self._traj_recorder.record_llm_call(") == 1
     assert 'content="llm_call failed", status="error"' in src
+    # 三条调用方都把段id传进工具循环（不传=round不落，防"写了≠接线了"）
+    assert src.count("traj_seg_id=_traj_seg") == 3
+    # _run_llm_with_tools每轮收口：循环尾+3早返点（steer中断/FORCE_STOP/TERMINATE）
+    assert src.count("await self._traj_record_round(") == 4
+    assert "_round_start = len(all_tool_calls)" in src
+    assert "_round_resp_mark = len(full_response)" in src
     # 收口：正常回合end_turn + 缓存命中回合end_turn
     assert src.count("self._traj_recorder.end_turn(") == 2
     # 失败必须可见：llm段/回合status按llm_outcome_status单一真源判定（非无条件ok）
     assert src.count("status=llm_outcome_status(") == 4
-    # 简单分支把工具账本交给了record_llm_call（tools=tool_calls_log）
-    assert "tools=tool_calls_log," in src
+    # 简单分支的段span带user_text标签（工具计数由Σrollup承载，不再写死进label）
+    assert "content=f\"chat_turn: {(user_text or '')[:100]}\"" in src
     # import在文件顶部（仓库铁律）
     import_line = src.index("from agent.trajectory_recorder import TrajectoryRecorder")
     assert import_line < src.index("class SoulMateAgent"), "import必须在类定义之前"
+
+
+# ── 6. round级span嵌套（P1 span粒度round级，04:20轮遗留#3销账）────────
+
+def test_start_llm_span_shape():
+    fake = FakePoster([{"id": "seg-1"}])
+    rec = _rec(fake)
+    seg = run(rec.start_llm_span("s1", "root-1", content="chat_turn: 你好"))
+    assert seg == "seg-1"
+    path, body = fake.calls[0]
+    assert path == "/api/trajectory/sessions/s1/events"
+    assert body["event_type"] == "llm_call"
+    assert body["metadata"]["kind"] == "llm_segment"
+    assert body["parent_event_id"] == "root-1", "llm段parent=turn root（血缘单一真源）"
+    assert body["content"] == "chat_turn: 你好"
+
+
+def test_record_round_span_and_tool_children_lineage():
+    tools = [
+        {"name": "terminal", "arguments": {"command": "ls"}, "result_preview": "ok", "permission": "allow"},
+        {"name": "write_file", "arguments": {"path": "x"}, "result_preview": "blocked", "permission": "deny"},
+    ]
+    fake = FakePoster([{"id": "round-0"}, {"recorded": 2, "events": []}])
+    rec = _rec(fake)
+    rid = run(rec.record_round("s1", "seg-1", round_index=0, content="先看看文件",
+                               duration_ms=120.0, tools=tools))
+    assert rid == "round-0"
+    ev_body = fake.calls[0][1]
+    assert ev_body["parent_event_id"] == "seg-1", "round parent=llm段span（四级血缘）"
+    assert ev_body["metadata"]["kind"] == "round"
+    assert ev_body["metadata"]["round"] == 0
+    assert ev_body["metadata"]["tool_count"] == 2
+    assert ev_body["duration_ms"] == 120.0
+    assert ev_body["token_usage"] == 0, "round不重复计token（段end按delta回填session累计）"
+    batch = fake.calls[1][1]["events"]
+    assert all(e["parent_event_id"] == "round-0" for e in batch), "tool_call parent=round span"
+    assert batch[0]["status"] == "ok" and batch[1]["status"] == "error"
+
+
+def test_record_round_empty_round_noop():
+    fake = FakePoster()
+    rec = _rec(fake)
+    assert run(rec.record_round("s1", "seg-1", round_index=3, content="  ", tools=[])) == ""
+    assert run(rec.record_round("s1", "seg-1", content="", tools=None)) == ""
+    assert fake.calls == [], "空round（无文本无工具）不落噪声span"
+
+
+def test_record_round_all_tools_error_marks_round_error():
+    tools = [{"name": "t", "permission": "deny", "result_preview": "blocked"}]
+    fake = FakePoster([{"id": "r1"}, {"recorded": 1, "events": []}])
+    rec = _rec(fake)
+    run(rec.record_round("s1", "seg-1", tools=tools))
+    assert fake.calls[0][1]["status"] == "error", "全部工具被拒的round判error（失败必须可见）"
+
+
+def test_record_round_failure_marker_text_marks_error():
+    fake = FakePoster([{"id": "r1"}])
+    rec = _rec(fake)
+    run(rec.record_round("s1", "seg-1", content="[LLM错误: 402]"))
+    assert fake.calls[0][1]["status"] == "error"
+
+
+def test_record_round_tool_batch_capped_at_50():
+    tools = [{"name": f"t{i}", "arguments": {}, "result_preview": ""} for i in range(80)]
+    fake = FakePoster([{"id": "r1"}, {"recorded": 50, "events": []}])
+    rec = _rec(fake)
+    run(rec.record_round("s1", "seg-1", tools=tools))
+    assert len(fake.calls[1][1]["events"]) == 50, "round级批同样50封顶（防刷爆观察面）"
+
+
+def test_tool_children_shared_single_source():
+    """record_llm_call平面批与record_round round级批共用_tool_child_events（禁双实现）"""
+    tools = [{"name": "terminal", "arguments": {"command": "ls"}, "result_preview": "a",
+              "permission": "allow", "cached": True}]
+    fake1 = FakePoster([{"id": "x"}, {"recorded": 1, "events": []}])
+    r1 = _rec(fake1)
+    run(r1.record_llm_call("s1", "root", tools=tools))
+    fake2 = FakePoster([{"id": "y"}, {"recorded": 1, "events": []}])
+    r2 = _rec(fake2)
+    run(r2.record_round("s1", "seg", tools=tools))
+    e1 = dict(fake1.calls[1][1]["events"][0])
+    e2 = dict(fake2.calls[1][1]["events"][0])
+    e1["parent_event_id"] = e2["parent_event_id"] = "P"
+    assert e1 == e2, "两路径tool子span形状逐字一致（单一真源）"
+    assert e1["metadata"]["cached"] is True
+
+
+def test_end_llm_span_posts_end_and_folds_token():
+    fake = FakePoster([{"id": "seg-1", "end_at": "x"}])
+    rec = _rec(fake)
+    run(rec.end_llm_span("s1", "seg-1", status="error", token_usage=88))
+    path, body = fake.calls[0]
+    assert path == "/api/trajectory/events/seg-1/end"
+    assert body == {"status": "error", "token_usage": 88}
+
+
+def test_end_llm_span_empty_id_noop_and_never_raise():
+    fake = FakePoster()
+    rec = _rec(fake)
+    run(rec.end_llm_span("", "seg"))
+    run(rec.end_llm_span("s1", ""))
+    run(rec.start_llm_span("", "root"))
+    run(rec.record_round("", "seg", tools=[{"name": "t"}]))
+    run(rec.record_round("s1", "", tools=[{"name": "t"}]))
+    assert fake.calls == [], "空id全部跳过零网络"
+
+    async def boom(path, payload):
+        raise RuntimeError("opensoul down")
+
+    rec2 = TrajectoryRecorder()
+    rec2._post = boom
+    run(rec2.end_llm_span("s1", "seg-1"))  # 不抛即过
+    assert run(rec2.start_llm_span("s1", "root")) == ""
+    assert run(rec2.record_round("s1", "seg", tools=[{"name": "t"}])) == ""

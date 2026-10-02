@@ -8,7 +8,7 @@ trajectory_store 有 Trace→Observation→Score 全套API与前端展示面，�
 "我都不知道他们在干嘛"的观察面无数据可看（写了≠接线了）。
 
 本模块是接线端：把每个真实回合写成嵌套span树
-    user_input(turn root) ── llm_call ── tool_call × N
+    user_input(turn root) ── llm_call(段) ── llm_call(round N) ── tool_call × M
 经既有HTTP面（:8090 /api/trajectory/*）落库，前端trajectory页与
 GET /sessions/{id}/trace 嵌套树端点即有真实数据。
 
@@ -215,8 +215,19 @@ class TrajectoryRecorder:
         span_id = (data or {}).get("id", "")
         if not span_id or not tools:
             return span_id
+        await self._post(
+            f"/api/trajectory/sessions/{session_id}/events/batch",
+            {"events": self._tool_child_events(tools, span_id)},
+        )
+        return span_id
+
+    # ── round级span（P1 span粒度round级嵌套：root→llm段→round→tool_call四级）──
+
+    def _tool_child_events(self, tools: list[dict], parent_span_id: str) -> list[dict]:
+        """tool_call子span事件列表——record_llm_call平面批与record_round的round级
+        批共用同一实现（禁止双实现漂移）。单批50条封顶，防病态回合刷爆观察面。"""
         events = []
-        for t in tools[:50]:  # 单回合50工具调用封顶，防病态回合刷爆观察面
+        for t in tools[:50]:  # 单批50工具调用封顶
             events.append(
                 {
                     "event_type": "tool_call",
@@ -229,14 +240,97 @@ class TrajectoryRecorder:
                         "permission": str(t.get("permission", ""))[:60],
                         "cached": bool(t.get("cached", False)),
                     },
-                    "parent_event_id": span_id,
+                    "parent_event_id": parent_span_id,
                     "status": self._tool_status(t),
                 }
             )
+        return events
+
+    @_fail_safe("")
+    async def start_llm_span(
+        self, session_id: str, parent_id: str, content: str = ""
+    ) -> str:
+        """llm段span占位（langfuse Observation start→end语义）。
+
+        round级嵌套要求段span先于round子span存在：先建段拿到id，_run_llm_with_tools
+        每轮把round子span挂进来（record_round），最后end_llm_span盖总账。"""
+        if not session_id or not parent_id:
+            return ""
+        data = await self._post(
+            f"/api/trajectory/sessions/{session_id}/events",
+            {
+                "event_type": "llm_call",
+                "agent_id": "soulmate",
+                "content": (content or "")[:500],
+                "metadata": {"kind": "llm_segment"},
+                "parent_event_id": parent_id,
+                "status": "ok",
+            },
+        )
+        return (data or {}).get("id", "")
+
+    @_fail_safe("")
+    async def record_round(
+        self,
+        session_id: str,
+        segment_span_id: str,
+        round_index: int = 0,
+        content: str = "",
+        duration_ms: float = 0.0,
+        tools: list[dict] | None = None,
+    ) -> str:
+        """round级span（child of llm段span）+ 其tool_call子span（child of round）。
+
+        树形：user_input → llm_call(段) → llm_call(round N) → tool_call × M——
+        多轮工具循环里"哪次LLM决策带出哪些工具"按round分组可见（此前平面tool批
+        把轮次边界压平）。空round（无文本无工具，如steer在LLM前中止）不落噪声span；
+        文本带LLM失败标记、或全部工具被拒/拦截→round判error（失败必须可见）。"""
+        if not session_id or not segment_span_id:
+            return ""
+        tools = tools or []
+        if not tools and not (content or "").strip():
+            return ""
+        round_status = llm_outcome_status(content or "")
+        if tools and round_status == "ok" and all(
+            self._tool_status(t) == "error" for t in tools
+        ):
+            round_status = "error"
+        data = await self._post(
+            f"/api/trajectory/sessions/{session_id}/events",
+            {
+                "event_type": "llm_call",
+                "agent_id": "soulmate",
+                "content": (content or "")[:500],
+                "metadata": {
+                    "kind": "round",
+                    "round": int(round_index),
+                    "tool_count": len(tools),
+                },
+                "parent_event_id": segment_span_id,
+                # 段end时按delta回填session累计，round不重复计token
+                "token_usage": 0,
+                "duration_ms": float(duration_ms or 0.0),
+                "status": round_status,
+            },
+        )
+        span_id = (data or {}).get("id", "")
+        if not span_id or not tools:
+            return span_id
         await self._post(
-            f"/api/trajectory/sessions/{session_id}/events/batch", {"events": events}
+            f"/api/trajectory/sessions/{session_id}/events/batch",
+            {"events": self._tool_child_events(tools, span_id)},
         )
         return span_id
+
+    async def _end_span(
+        self, session_id: str, span_id: str, status: str, token_usage: int
+    ) -> None:
+        """span收口单一真源（end_turn回合根与end_llm_span llm段共用，禁止双实现
+        漂移）：end_at盖章，store单一时钟推导duration，token按delta回填session累计。"""
+        await self._post(
+            f"/api/trajectory/events/{span_id}/end",
+            {"status": status, "token_usage": int(token_usage or 0)},
+        )
 
     @_fail_safe(None)
     async def end_turn(
@@ -245,10 +339,19 @@ class TrajectoryRecorder:
         """回合根span收口（end_at盖章，store侧单一时钟推导duration）。"""
         if not session_id or not root_id:
             return
-        await self._post(
-            f"/api/trajectory/events/{root_id}/end",
-            {"status": status, "token_usage": int(token_usage or 0)},
-        )
+        await self._end_span(session_id, root_id, status, token_usage)
+
+    @_fail_safe(None)
+    async def end_llm_span(
+        self, session_id: str, span_id: str, status: str = "ok", token_usage: int = 0
+    ) -> None:
+        """llm段span收口（与start_llm_span配对：round子span挂齐后盖总账）。
+
+        duration由store单一时钟created_at→end_at推导（与回合根同一时钟）；
+        token_usage由store按delta回填session累计（段建时token=0，不会双记）。"""
+        if not session_id or not span_id:
+            return
+        await self._end_span(session_id, span_id, status, token_usage)
 
     # ── 工具结局判定（失败必须可见）─────────────────────────────
 

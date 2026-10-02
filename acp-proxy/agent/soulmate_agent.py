@@ -1121,14 +1121,46 @@ class SoulMateAgent:
         except Exception as e:
             return f"[CODE_MODE] 工具执行异常: {func_name}: {e}"
 
+    async def _traj_record_round(
+        self,
+        session_id: str,
+        seg_span_id: str,
+        round_index: int,
+        content: str,
+        duration_ms: float,
+        tools: list[dict],
+    ) -> None:
+        """round级span落库钩子（P1 span粒度round级嵌套，04:20轮遗留#3）。
+
+        seg_span_id为空=未接trajectory的调用（测试/纯文本路径）直接跳过；
+        recorder层已never-raise，此层再吞一层——观察面故障绝不破坏会话流。"""
+        if not seg_span_id:
+            return
+        try:
+            await self._traj_recorder.record_round(
+                session_id,
+                seg_span_id,
+                round_index=round_index,
+                content=content,
+                duration_ms=duration_ms,
+                tools=tools,
+            )
+        except Exception as e:
+            logger.debug(f"[trajectory] round span failed (non-fatal): {e}")
+
     async def _run_llm_with_tools(
         self,
         messages: list[dict],
         session_id: str,
         matched_skills: list[dict] | None = None,
         user_text: str = "",
+        traj_seg_id: str = "",
     ) -> tuple[str, list[dict]]:
-        """LLM推理 + 工具调用循环。模型返回tool_calls就执行，纯文本就结束。"""
+        """LLM推理 + 工具调用循环。模型返回tool_calls就执行，纯文本就结束。
+
+        traj_seg_id：trajectory llm段span id（调用方start_llm_span先建）——非空时
+        每轮落一个round子span（root→llm段→round→tool_call四级树），空=不落
+        （向后兼容：既有测试/纯调用方零感知）。"""
         MAX_ROUNDS = 15
         cwd = self._session_cwds.get(session_id, self._project_root)
         system_prompt = f"""你是SoulMate，OpenMate内置的AI助手。请用简洁清晰的中文回答。
@@ -1734,6 +1766,11 @@ You can send files to the user natively: to deliver a file, write a brief confir
         guard = self._loop_guard_for(session_id)
         loop_intervene_count = 0
         for _round in range(MAX_ROUNDS):
+            # ── P1 span粒度round级：本轮边界标记（LLM文本切片+工具账本切片+耗时，
+            # round子span在循环尾/早返点收口）──
+            _round_start = len(all_tool_calls)
+            _round_t0 = time.time()
+            _round_resp_mark = len(full_response)
             # ── P1: turn间隙批量注入插话 ──
             # goose Steer: between-turns drain（上一角色=Tool或回合刚结束）+ with_steer标记；
             # Khoj interrupt_queue: 拼进当前任务历史、保留已完成迭代继续跑；
@@ -1763,6 +1800,12 @@ You can send files to the user natively: to deliver a file, write a brief confir
                         turn_lifecycle.CLOSE_SUPERSEDED
                         if self._steering.pending(session_id)
                         else turn_lifecycle.CLOSE_INTERRUPTED
+                    )
+                    await self._traj_record_round(
+                        session_id, traj_seg_id, _round,
+                        full_response[_round_resp_mark:],
+                        (time.time() - _round_t0) * 1000,
+                        all_tool_calls[_round_start:],
                     )
                     return full_response + "\n\n[任务被用户插话中断]", all_tool_calls
             got_tool_call = False
@@ -1877,6 +1920,12 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             activity.mark_idle()
                             self._activity_store.upsert(activity)
                             logger.warning(f"[loop-guard] session={session_id} FORCE_STOP，任务提前终止")
+                            await self._traj_record_round(
+                                session_id, traj_seg_id, _round,
+                                full_response[_round_resp_mark:],
+                                (time.time() - _round_t0) * 1000,
+                                all_tool_calls[_round_start:],
+                            )
                             return full_response, all_tool_calls
                         if lg_severity == "intervene":
                             # DeerFlow INTERVENE：剥离工具执行，合成拦截结果（协议保持完整，loop不断）
@@ -1952,6 +2001,12 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             self._activity_store.upsert(activity)
                             logger.warning(
                                 f"[infection-guard] session={session_id} TERMINATE，工具调用未执行")
+                            await self._traj_record_round(
+                                session_id, traj_seg_id, _round,
+                                full_response[_round_resp_mark:],
+                                (time.time() - _round_t0) * 1000,
+                                all_tool_calls[_round_start:],
+                            )
                             return full_response, all_tool_calls
                         # CLARIFY：工具未执行，合成拦截结果（协议完整、loop不断）
                         synthetic_ig = (
@@ -2610,6 +2665,27 @@ You can send files to the user natively: to deliver a file, write a brief confir
                     f"[peek] session={session_id} noop streak={activity.noop_streak} "
                     "(本轮无工具调用也无文本输出)"
                 )
+
+            # ── round边界=本轮LLM流结束：冲出redactor holdback尾部（redactor是
+            # "每个流式输出生命周期一个实例"——round就是流的生命周期；不在此flush，
+            # 本轮尾部token（CJK无空白整段）压在holdback里，round span内容为空且
+            # 会串到下一轮切片）。flush()先_redact_text再外发，脱敏保证不变。──
+            _round_tail = redactor.flush()
+            if _round_tail:
+                full_response += _round_tail
+                if self._client is not None:
+                    await self._client.session_update(
+                        session_id=session_id,
+                        update=acp.update_agent_message_text(_round_tail),
+                    )
+                    self._streamed_flags[session_id] = True
+            # round级span收口（本round的LLM文本+工具执行批，挂在llm段span下）
+            await self._traj_record_round(
+                session_id, traj_seg_id, _round,
+                full_response[_round_resp_mark:],
+                (time.time() - _round_t0) * 1000,
+                all_tool_calls[_round_start:],
+            )
 
             # 如果没有工具调用，模型返回了纯文本，结束循环
             if not got_tool_call:
@@ -3536,22 +3612,27 @@ You can send files to the user natively: to deliver a file, write a brief confir
                 })
 
                 step.status = StepStatus.RUNNING
+                _traj_seg = ""
                 try:
-                    _traj_t0 = time.time()
-                    step_result, _step_tools = await self._run_llm_with_tools(step_messages, session_id, matched_skills=matched_skills)
+                    # trajectory span：plan步骤LLM段（round级子span由_run_llm_with_tools
+                    # 内部落——段span先建拿id，执行完end盖总账；tools账本由round承载）
+                    _traj_seg = await self._traj_recorder.start_llm_span(
+                        session_id, traj_root_id,
+                        content=f"plan_step: {step.description[:120]}")
+                    step_result, _step_tools = await self._run_llm_with_tools(step_messages, session_id, matched_skills=matched_skills, traj_seg_id=_traj_seg)
                     step.result = step_result
                     step.completed_at = time.time()
-                    # trajectory span：plan步骤LLM段+工具调用（child of turn root）
-                    await self._traj_recorder.record_llm_call(
-                        session_id, traj_root_id,
-                        content=f"plan_step: {step.description[:120]}",
-                        duration_ms=(time.time() - _traj_t0) * 1000,
+                    # trajectory span：plan步骤LLM段收口（结局按llm_outcome_status判定）
+                    await self._traj_recorder.end_llm_span(
+                        session_id, _traj_seg,
                         status=llm_outcome_status(step_result),
-                        tools=_step_tools,
                     )
                 except Exception as e:
                     step.result = f"执行异常: {e}"
                     step.error = str(e)
+                    # 段span不悬挂：异常路径同样收口（失败必须可见）
+                    await self._traj_recorder.end_llm_span(
+                        session_id, _traj_seg, status="error")
 
                 # 自省校验
                 reflection = await self._self_reflector.reflect(step)
@@ -3583,21 +3664,23 @@ You can send files to the user natively: to deliver a file, write a brief confir
                         "content": "⚠️ 上次执行失败了。注意：不要创建新文件、不要写代码脚本。直接用已有数据以文本形式输出结果。",
                     })
                     try:
-                        _traj_t0 = time.time()
-                        retry_result, _retry_tools = await self._run_llm_with_tools(step_messages, session_id, matched_skills=matched_skills)
+                        _traj_seg = ""
+                        _traj_seg = await self._traj_recorder.start_llm_span(
+                            session_id, traj_root_id,
+                            content=f"plan_step_retry: {step.description[:120]}")
+                        retry_result, _retry_tools = await self._run_llm_with_tools(step_messages, session_id, matched_skills=matched_skills, traj_seg_id=_traj_seg)
                         step.result = retry_result
                         step.completed_at = time.time()
-                        # trajectory span：重试LLM段+工具调用（同root下可区分重试）
-                        await self._traj_recorder.record_llm_call(
-                            session_id, traj_root_id,
-                            content=f"plan_step_retry: {step.description[:120]}",
-                            duration_ms=(time.time() - _traj_t0) * 1000,
+                        # trajectory span：重试LLM段收口（同root下可区分重试）
+                        await self._traj_recorder.end_llm_span(
+                            session_id, _traj_seg,
                             status=llm_outcome_status(retry_result),
-                            tools=_retry_tools,
                         )
                     except Exception as e2:
                         step.result = f"重试执行异常: {e2}"
                         step.error = str(e2)
+                        await self._traj_recorder.end_llm_span(
+                            session_id, _traj_seg, status="error")
                     # P0修复（retry结局说谎+落库丢失）：重试结果同样过SelfReflector
                     # （原实现无条件标SUCCESS），且先落库再推进——原continue跳过
                     # save_plan，重试结局在断点续跑时永久丢失。
@@ -3662,13 +3745,19 @@ You can send files to the user natively: to deliver a file, write a brief confir
             # 简单任务：直接调用 LLM（原有逻辑）
             full_response = ""
             tool_calls_log = []
+            _traj_seg = ""  # llm段span id（异常路径收口用，防unbound）
             try:
                 # P2监控：tracer + 成本追踪
                 trace_id = self._tracer.start_trace(session_id)
                 from agent.agent_tracer import TraceEventType
                 span_id = self._tracer.start_span(TraceEventType.LLM_REQUEST, {"message_count": len(messages)})
                 llm_start = time.time()
-                full_response, tool_calls_log = await self._run_llm_with_tools(messages, session_id, matched_skills=matched_skills, user_text=user_text)
+                # trajectory span：本回合LLM段（round级子span由_run_llm_with_tools
+                # 内部落——段先建拿id，执行完end盖总账；tools账本由round承载）
+                _traj_seg = await self._traj_recorder.start_llm_span(
+                    session_id, traj_root_id,
+                    content=f"chat_turn: {(user_text or '')[:100]}")
+                full_response, tool_calls_log = await self._run_llm_with_tools(messages, session_id, matched_skills=matched_skills, user_text=user_text, traj_seg_id=_traj_seg)
                 llm_duration = time.time() - llm_start
                 self._tracer.end_span(span_id, {"response_len": len(full_response), "tool_calls": len(tool_calls_log)})
                 # Token分析（估算）
@@ -3682,14 +3771,11 @@ You can send files to the user natively: to deliver a file, write a brief confir
                     model="mimo", session_id=session_id,
                     input_tokens=prompt_tokens, output_tokens=completion_tokens,
                 )
-                # trajectory span：本回合LLM段+工具调用（child of turn root）
-                await self._traj_recorder.record_llm_call(
-                    session_id, traj_root_id,
-                    content=f"llm_rounds tools={len(tool_calls_log)}",
-                    duration_ms=llm_duration * 1000,
+                # trajectory span：本回合LLM段收口（结局按llm_outcome_status判定）
+                await self._traj_recorder.end_llm_span(
+                    session_id, _traj_seg,
                     token_usage=prompt_tokens + completion_tokens,
                     status=llm_outcome_status(full_response),
-                    tools=tool_calls_log,
                 )
                 # 事件总线发布
                 asyncio.ensure_future(self._event_bus.emit("llm.completed", {
@@ -3699,9 +3785,14 @@ You can send files to the user natively: to deliver a file, write a brief confir
             except Exception as e:
                 logger.error(f"LLM error: {e}", exc_info=True)
                 # trajectory span：LLM失败必须可见（mem0 §1.1不静默吞）——
-                # error状态的llm_call段照样落树，"跑了但错了"可查
-                await self._traj_recorder.record_llm_call(
-                    session_id, traj_root_id, content="llm_call failed", status="error")
+                # 段span已建→按error收口（round子span保留已记录部分）；
+                # 未建→补记error段，"跑了但错了"照样落树可查
+                if _traj_seg:
+                    await self._traj_recorder.end_llm_span(
+                        session_id, _traj_seg, status="error")
+                else:
+                    await self._traj_recorder.record_llm_call(
+                        session_id, traj_root_id, content="llm_call failed", status="error")
                 # P0-4: 异常路径也要结束活动观测，否则peek永远显示running（假活性）
                 err_act = self._activity(session_id)
                 err_act.mark_idle()
