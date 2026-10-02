@@ -3990,3 +3990,40 @@
 4. **行为变化声明**：redactor holdback窗口从"整个回合"收紧到"单轮LLM流"（round边界flush）——对用户可见输出无差异（同一批文本只是提前到轮末外发+落库），脱敏类不变量未破坏（flush先_redact_text），但严格说流式输出时序有微调；test_output_guard接线钉3→4是本次有意演进。
 5. cron环境约束实录：pytest无--timeout插件（去掉该参数）；pytest输出572K被截断→全量测试输出落盘hermes cache按需查；`sibling subagent modified`警告再现实录（test_plan_execution/test_trajectory_recorder被警告但git diff核对只含本轮hunk——sibling改动在settings/locales面，commit白名单纪律照旧兜底）；sibling并行会话共用工作树照旧（settings-client.tsx/locales×3/systemic_test_results.json显式排除）。
 6. 第7步gene skill上报成功：`skill_d7858b756e19`（execution_log=read_file→terminal→search_files→patch→write_file，success=true）。
+
+## [2026-10-02 16:24 CST] P0修复hermes路由os遮蔽必炸（live E2E抓到）+ relay轨迹落非soulmate引擎回合（04:20轮遗留#4销账）
+**目标**：两个问题一条链一次销账：①04:20轮遗留#4"hermes引擎回合不落trajectory"——ws_acp纯透传层对hermes/openclaw/opencode/mimo等外部引擎的回合零记账，/trajectory观察面（SUMMARY P0-4"我都不知道他们在干嘛"）对这些引擎全盲；②本轮live E2E开跑即抓到**P0 bug：hermes路由根本跑不了**——ws_acp_endpoint函数内`import os`把os变成函数局部变量，pty分支（hermes专用）的os.close/os.write在局部import执行前引用即UnboundLocalError（实测error "Agent hermes unavailable: cannot access local variable 'os'"），hermes路由每次启动子进程必炸+已spawn子进程泄漏不清理。不修P0则遗留#4无从验证——先修bug再接线，同链一次销账。
+**调研来源**：①本项目04:20轮挂账契约原文（"hermes引擎回合不落trajectory"）+ TrajectoryRecorder既有公共面（start_turn/record_llm_call/end_turn形状复用，opensoul零改动）；②langfuse instrumentation语义（span在真实执行路径被记录，P0-4三层模型——观察面来源可区分：metadata.source="relay"浅记录 vs 引擎内round级深记录）；③CowAgent记账哲学（观察面故障绝不阻塞会话流——observe同步入队+后台顺序worker，透传零延迟）；④mem0 §1.1失败必须可见（error响应/stopReason∈{error,refusal,cancelled}/新prompt挤掉旧回合/断线未收口→status=error）；⑤chat-client.tsx的tool_call双形状契约（content.text=JSON字符串{toolCallId,name,arguments} + 标准ACP toolCallId/title/rawInput在update上——两种都认）；⑥WakeupRelay的session_id_getter lambda惯例（acp_sid捕获复用）+单一真源纪律（工具子span批复用_tool_child_events，禁止relay侧另建一套）。
+**改动文件**（openmate commit `076415d4`，5文件 +972/-8）：
+- `acp-proxy/ws_acp.py`（+44/-1）：P0修复2处+relay观察者接线4处
+- `acp-proxy/agent/relay_trajectory.py`（新341行）：RelayTrajectory
+- `acp-proxy/agent/trajectory_recorder.py`（+22/-7）：agent_id/source参数+_tool_status扩展
+- `acp-proxy/tests/test_relay_trajectory.py`（新426行，19测）
+- `acp-proxy/e2e_relay_traj.py`（新139行）：live E2E可复跑脚本
+**改动内容**：
+1. **P0修复①**（ws_acp.py else分支）：删除函数内`import os`（模块顶部已有import os）——局部遮蔽是hermes pty路由必炸根因，注释留案。
+2. **P0修复②**（ws_acp.py启动失败except）：terminate已spawn子进程（此前create_subprocess_exec成功后炸在os.close=孤儿hermes进程占pty泄漏）。
+3. **RelayTrajectory**（新模块）：_TurnState回合状态对象（prompt_id/sid/t0/text_parts/tools/root_id）+单worker顺序队列（start_turn→record_llm_call→end_turn血缘顺序保真，root_id经turn对象在闭包执行时读取）；observe_client认session/prompt（回合起点；新prompt挤掉旧回合→旧回合error落账不悬挂root）；observe_agent认prompt响应（收口）+session/update增量（agent_message_chunk累积/agent_message回退真源/agent_thought只计数不入content/tool_call+tool_call_update双形状解析）；close()断线收尾判error；无session id（session/new响应未到）零写入不写无主span；observe_*同步never-raise。
+4. **TrajectoryRecorder**（增量）：record_llm_call/_tool_child_events加`agent_id`/`source`参数（默认"soulmate"/""=既有soulmate payload逐字不变）；source="relay"进metadata标记浅记录来源；_tool_status的perm关键词加fail/cancel（ACP工具状态failed/cancelled→tool span status=error；soulmate既有permission取值allow/deny/loop_guard:*/infection:*/sandbox-restricted零误伤）。
+5. **ws_acp接线**（4处）：`route["cmd"] != DEFAULT_ROUTE["cmd"]`门闸（soulmate路由cmd==DEFAULT_ROUTE=引擎内深记录负责，跳过防双记）；ws_to_stdin观察客户端消息；_process_line观察agent消息；连接收尾close()。
+**接线位置**（grep证据，文件:行号）：
+- 定义：`agent/relay_trajectory.py:71 class RelayTrajectory`/`:138 observe_client`/`:168 observe_agent`/`:124 close`/`:216 _finalize`/`:295 _add_tool`/`:318 _update_tool`
+- ws_acp消费点：`ws_acp.py:195 门闸 if route["cmd"] != DEFAULT_ROUTE["cmd"]`→`:198 traj_relay = RelayTrajectory(`→`:307 traj_relay.observe_client(json.loads(raw))`（ws_to_stdin客户端→子进程路径）→`:355 traj_relay.observe_agent(parsed)`（_process_line子进程→客户端路径）→`:510 await traj_relay.close()`
+- recorder透传：`agent/trajectory_recorder.py:192-193 agent_id/source参数`→`:230 payload agent_id=agent_id`→`:236 _tool_child_events(..., agent_id=agent_id)`→`:377 fail/cancel关键词`
+- 复用面（opensoul零改动）：`POST /api/trajectory/sessions/{sid}/events`+`/events/batch`+`/events/{id}/end`（EventRecordRequest原生收agent_id/metadata任意dict）
+**验证结果**：
+- 完整性✅：`git diff --cached --numstat`=5文件+972/-8逐hunk核对全为本轮改动（sibling并行会话的settings-client.tsx/locales×3/systemic_test_results.json显式排除，commit走git add白名单5文件）；P0修复2 hunk+relay接线4处均在diff中。
+- 集成✅：上述grep链完整；**live E2E 10/10 PASS**（e2e_relay_traj.py全真实链零stub：WS /ws/acp?token=JWT→session/new agent_id="hermes"→真实`hermes acp`子进程→真实LLM回合5.2s stop=end_turn→RelayTrajectory→真实TrajectoryRecorder HTTP→真实opensoul :8090→/trace回读）：①session/new hermes路由（acp_sid=1ee7c77d-85e3-42ee-848c-3730f6c36702）②trajectory session ensure（id=acp_sid, agent_id=hermes）③root=user_input/turn_root（content='请只回答两个字：收到'）④root→llm_call子span（metadata.source=relay, agent_id=hermes, status=ok, dur=5244ms, content='收到'=真实hermes LLM回答）⑤root已end（end_at盖章+subtree rollup 2事件）。
+- **P0 bug live前后对照**：修复前同一E2E脚本实测session/new即error "Agent hermes unavailable: cannot access local variable 'os'"（hermes回合0个能跑）；修复后10/10——P0修复的证据是同脚本前后对照而非单测推断。
+- 测试✅：新`tests/test_relay_trajectory.py` **19/19 PASS**（①基本回合start/record/end序列+agent_id/source透传 ②工具双形状解析+failed→_tool_status error+跳步兜底建条目 ③失败必须可见4：error响应/refusal/LLM失败标记文本/挤掉旧回合 ④close断线收尾error ⑤无session id零写入 ⑥畸形消息never-raise ⑦agent_message回退真源+thought不入content ⑧ws_acp接线钉：构造+门闸+3调用点位置纪律（observe_client须在ws_to_stdin内、observe_agent须在_process_line内）+soulmate/hermes路由cmd对比防双记 ⑨P0回归钉2：AST级ws_acp_endpoint函数体内禁os绑定+Failed to start分支400字符内proc.terminate()清理 ⑩recorder兼容钉：默认值下soulmate payload逐字不变+_tool_status关键词扩展零误伤）；**tests/全量1508 passed 0 failed**（607.70s，含test_trajectory_recorder 19/test_trajectory_rounds 5/test_plan_execution 18/test_output_guard等既有零回归）；`systemic_test.py` **29/29 passed**（S1-S6全绿）。
+**服务重启**：`systemctl --user restart acp-proxy-a.service acp-proxy-b.service`（共2次：P0修复前后各1次，保证live E2E跑在最终代码上）→active、:8092/health=200、:8095/health=200、:8090/api/trajectory/health=200；重启后live E2E 10/10+systemic 29/29。opensoul本轮零改动未重启。
+**commit**：openmate `076415d4`。
+**遗留问题**：
+1. **relay浅记录粒度声明**（诚实边界）：代理层看不到hermes引擎内部LLM轮次，hermes回合=扁平llm_call段（metadata.source="relay"）而非soulmate的round级四级树——round级需引擎侧自报（跨进程协议扩展），非本轮范围；观察面可用source字段区分两种来源。
+2. **hermes工具span的live验证受限**：本轮E2E是纯文本回合（tool_call×0）——工具span形状由单测双形状解析+跳步兜底覆盖；带工具的hermes回合live验证留待后续（形状走record_llm_call既有路径，非新逻辑）。
+3. **relay只覆盖WS /ws/acp路径**：HTTP /acp/send（proxy.py硬编码hermes acp路由，e2e_ws_calibration.py注释实录）不经过ws_acp观察者——该入口的hermes回合仍不落trajectory（下轮候选：proxy.py同款接线或评估废除该入口）。
+4. **session无completed收口照旧**（04:20轮遗留#2）：session.status恒running；relay回合的trajectory session同此语义（turn级root有end收口，session级无）。
+5. **前端零改动**（有意）：relay回合用既有event_type渲染，"浅记录来源徽标（relay vs 深记录）"展示增强待真实数据积累后再定。
+6. 其余遗留观察项照旧：两消费者近重复文件去重（抽共享组件重构轮）/树内搜索与扁平搜索整合/回放与树互斥/过滤态折叠交互/跨session搜索/LLM_FALLBACK_CHAIN未配置（402环境项）/relay消息级粒度（本轮给到回合级+工具级，更细消息级仍无）/环境变量密钥外发误伤面/污点分析近似/双侧镜像人工同步/model_gateway凭据映射表/MCP重连真实Server验证/attach跨turn共享/RESUMED后同turn多episode单记录/`engine.py`的AgentEngine经查grep无任何运行时调用方（仅定义+测试docstring提及）=死代码——"AgentEngine.run_task未接begin_turn"实为死代码清理候选而非接线缺口，下轮可整文件删除或接线二选一。
+7. cron环境约束实录：**live E2E是本轮P0发现渠道——只跑单测根本暴露不了hermes路由必炸**（既有测试不启动子进程）；教训沉淀：涉及子进程/pty/路由的改动必须live E2E先行，单测只是回归面；AST回归钉防"函数内import遮蔽模块名"bug家族复发（同类：任何函数内`import X`遮蔽模块级X→UnboundLocalError）；test_trajectory_recorder.py本轮实测**19 passed**（19个test函数，HEAD同此），13:49轮报告的"24 passed"与文件实际不符（疑计数口径/笔误，以实测为准，建议下轮顺带erratum）；sibling并行会话共用工作树照旧（settings-client.tsx/locales×3/systemic_test_results.json显式排除）。
+8. 第7步gene skill上报成功：`skill_aca8a201adfc`（execution_log=read_file→terminal→patch→write_file→process，success=true）。
