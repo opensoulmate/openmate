@@ -3955,3 +3955,38 @@
 6. span粒度LLM段级/session无completed收口/hermes引擎回合不落trajectory照旧非本轮范围；其余遗留观察项照旧：LLM_FALLBACK_CHAIN未配置（402环境项——真实生产trace 4节点全status=error的根因，充值/配链前真实LLM回合仍全失败）/两消费者近重复文件去重（抽共享组件重构轮）/relay消息级粒度/环境变量密钥外发误伤面/污点分析近似/双侧镜像人工同步/model_gateway凭据映射表/AgentEngine.run_task未接begin_turn/MCP重连真实Server验证/attach跨turn共享/RESUMED后同turn多episode单记录。
 7. cron环境约束实录：`curl | python3`管道照旧被tirith拦→urllib脚本（同前例）；render-test断言踩坑实录：**preview被splitMatch切成高亮分段后，HTML里连续字符串断开**（`includes('user_input r1 hello')`必然失败）→样本节点加独特marker（'needle-leaf'）当存在/absence判据；`resultsFor.split('{{')[0]`在插值键开头时=空字符串（`includes('')`恒真）——断言别用split取前缀，用字面量；测试tmpdir结束时rmSync清理（.span-tree-search-*不再留垃圾）；sibling并行会话共用工作树照旧（settings-client.tsx/locales×3/systemic_test_results.json显式排除）。
 8. 第7步gene skill上报成功：`skill_5a59d2c84cca`（execution_log=read_file→search_files→terminal→patch→write_file，success=true）。
+
+## [2026-10-02 13:49 CST] round级span嵌套——root→llm段→round→tool_call四级树（04:20轮遗留#3销账）
+**目标**：销账04:20轮遗留#3"span粒度是LLM段级非round级：_run_llm_with_tools内部MAX_ROUNDS=15的每轮LLM调用/工具执行合并为一个llm_call span+其下tool_call平面批，round级嵌套需进_run_llm_with_tools内部加钩（4个return点/7个append点）"。多轮工具循环里"哪次LLM决策带出哪些工具"的轮次边界被平面tool批压平——一个15轮的agent循环在观察面（SUMMARY P0-4"我都不知道他们在干嘛"）显示为1个llm_call+一堆无序tool_call，轮次结构不可见。本轮进_run_llm_with_tools内部加钩，落四级树：`user_input(turn root) → llm_call(段) → llm_call(round N) → tool_call × M`。
+**调研来源**：①本项目04:20轮挂账契约原文（"进_run_llm_with_tools内部加钩（4个return点/7个append点）"——销账即按其指明的解剖图执行，4收口点=循环尾+steer中断/FORCE_STOP/TERMINATE 3早返，切片标记替代逐append点打标：`all_tool_calls[_round_start:]`+`full_response[_round_resp_mark:]`）；②langfuse Observation start→end语义（SUMMARY P0-4三层模型——span先建拿id、执行中挂children、end盖总账）；③store.end_event单一时钟纪律（duration由created_at→end_at推导、token按delta回填session累计不双记——沿用回合根同款收口语义）；④本项目单一真源纪律（tool子span批抽_tool_child_events共用，禁止record_llm_call平面批与round级批双实现漂移；_end_span共用禁end_turn/end_llm_span漂移）+失败必须可见（mem0 §1.1：文本带失败标记或全工具被拒→round判error）；⑤Warp/Khoj"流的生命周期"语义（redactor docstring"每个流式输出生命周期一个实例"——round就是本轮LLM流的生命周期终点，边界flush是规格内语义）。
+**改动文件**（openmate commit `dce7e81a`，6文件+509/-40）：
+- `acp-proxy/agent/trajectory_recorder.py`（+111/-8）：start_llm_span/record_round/end_llm_span三方法+tool子span批抽_tool_child_events单一真源+end_turn/end_llm_span共用_end_span
+- `acp-proxy/agent/soulmate_agent.py`（+118/-27）：traj_seg_id入参+_traj_record_round钩子+4收口点+轮次边界标记+round边界redactor flush+3条LLM路径start/end改造
+- `acp-proxy/tests/test_trajectory_recorder.py`（+128/-4）：round嵌套12断言组+接线钉更新
+- `acp-proxy/tests/test_trajectory_rounds.py`（新139行，5测）：真实_run_llm_with_tools行为测试
+- `acp-proxy/tests/test_plan_execution.py`（+9/-0）：_NoopTraj测试替身补新API（有意演进）
+- `acp-proxy/tests/test_output_guard.py`（+4/-1）：flush接线钉3→4（round边界收口新增）
+**改动内容**：
+1. **recorder三方法**：`start_llm_span`（段span占位拿id，metadata.kind=llm_segment）→`record_round`（round span，metadata.kind=round+round号+tool_count，child of段；tool批child of round；**空round不落噪声span**；结局判定=llm_outcome_status(文本)或全工具被拒→error）→`end_llm_span`（POST /events/{id}/end，status/token收口，duration由store单一时钟推导）。
+2. **_run_llm_with_tools内钩**（挂账解剖图逐点落实）：循环顶`_round_start=len(all_tool_calls)/_round_t0/_round_resp_mark=len(full_response)`三标记→4收口点（循环尾+steer中断早返+loop-guard FORCE_STOP早返+注入审计TERMINATE早返）各落一次`_traj_record_round`（切片=本轮LLM文本增量+本轮工具账本，返回2-tuple签名零改动=既有测试/调用方零感知）。
+3. **round边界redactor flush（行为修正，超出原挂账范围的必要配套）**：round文本经SecretStreamRedactor.feed()按空白边界holdback——CJK无空白整段（如"这是正常回答。"）整个压在holdback里，round收口时full_response切片为空（首跑测试实锤）。round=本轮LLM流生命周期终点（redactor"每个流式输出生命周期一个实例"规格），边界flush()先_redact_text再外发，脱敏保证不变（feed/flush拼接永不含完整秘密的类不变量未破坏）；顺带消灭holdback跨轮串扰（此前round N尾token会拼进round N+1的流）。
+4. **3条LLM路径start/end改造**：plan步骤/plan重试/简单分支各自`start_llm_span(label)`→`_run_llm_with_tools(..., traj_seg_id=_traj_seg)`→`end_llm_span(status=llm_outcome_status(...))`；异常分支同样收口（段span不悬挂）；平面record_llm_call仅剩"段未建"失败兜底1处（保留原error段语义）。
+**接线位置**（grep证据，文件:行号）：
+- 定义：`agent/trajectory_recorder.py:250 start_llm_span`/`:273 record_round`/`:345 end_llm_span`/`:227 _tool_child_events`/`:327 _end_span`；`agent/soulmate_agent.py:1124 _traj_record_round`
+- 工具循环内钩（4收口点）：`soulmate_agent.py:1804`（steer中断早返）/`:1923`（FORCE_STOP早返）/`:2004`（TERMINATE早返）/`:2683`（循环尾）+轮次标记`:1769-1771`
+- 3条LLM路径接线：`:3619 start_llm_span→:3626 end_llm_span`（plan步骤）/`:3668→:3675`（plan重试）/`:3757→:3775`（简单分支，label=chat_turn）+`:3791`（异常收口/兜底record_llm_call）
+- 钉子：`tests/test_trajectory_recorder.py:213-225`接线钉（start×3/end×6/record_llm_call×1/钩子×4/traj_seg_id=_traj_seg×3逐计数钉死）
+**验证结果**：
+- 完整性✅：`git diff --cached --numstat`=6文件+509/-40逐hunk核对全为本轮改动（sibling并行会话的settings-client.tsx/locales×3/systemic_test_results.json显式排除，commit走git add白名单6文件）。
+- 集成✅：上述grep链完整；**live真实链E2E 13/13 PASS**（/tmp/e2e_rounds_real_turn.py，WS /ws/acp?token=JWT→真实子进程agent.start --stdio→真实_prompt_inner→真实recorder→真实opensoul→/trace回读，402失败回合照样全链验证）：initialize握手✅/session/new soulmate路由（acp_sid=om-a300d54c17ca）✅/真实LLM回合✅/root=user_input/turn_root✅/**root→llm段(kind=llm_segment)在场=start_llm_span真实接线**✅/**段end_at收口+dur=400.5ms+token=361=end_llm_span真实接线**✅/**段→round(kind=round,round=0)子span=_traj_record_round循环钩真实接线**✅/round.parent=段id四级血缘✅/round结局判定（402文本"[LLM错误…"→status=error）✅/root收口+subtree rollup（3事件/361token）✅。
+- 测试✅：`tests/test_trajectory_recorder.py` **24 passed**（新增12：start_llm_span形状/round span+tool血缘+token不双记/空round no-op/全工具被拒→round error/失败标记文本→error/50封顶/tool子span两路径逐字一致单一真源/end_llm_span收口/空id零网络+never-raise；既有12含接线钉更新）；新`tests/test_trajectory_rounds.py` **5 passed**（真实_run_llm_with_tools行为：工具轮+文本轮2 span轮次切片/混合轮content=本轮增量非整段/无traj_seg_id=零trajectory调用向后兼容/TERMINATE早返仍收口round+intercept条目入账/纯文本轮1 span）；既有`test_plan_execution`18+`test_output_guard`+`test_infection_guard`/`test_loop_guard_wiring`/`test_turn_lifecycle`等19套**457 passed**；**全量tests/ 1472 passed 0 failed**（557s）+`test_acp_concurrency.py` **17 passed**（合计1489 passed零回归）；`systemic_test.py` **29/29 passed**（S1-S6全绿）。
+- live recorder→opensoul形状demo **21/21 PASS**（/tmp/live_rounds_demo_1002.py，真实recorder→真实:8090→/trace回读：四级血缘/空round no-op/deny→error/rollup/round顺序0,2）。
+**服务重启**：`systemctl --user restart acp-proxy-a.service acp-proxy-b.service`（新钩子+recorder加载）→active、:8092/health=200、:8095/health=200、:8090/api/trajectory/health=200；重启后live E2E 13/13+systemic 29/29。opensoul本轮零改动未重启。
+**commit**：openmate `dce7e81a`。
+**遗留问题**：
+1. **402环境项照旧**（LLM供应商余额不足+LLM_FALLBACK_CHAIN未配置）：真实LLM回合全失败→真实多轮工具循环（round×N+tool_call挂在round下）无法由真实LLM产生，多round树形由单测（真实_run_llm_with_tools+FakeLLM脚本化2-3轮）+live形状demo补证；充值/配链后前端树形即可见真多轮数据。
+2. **前端树形零改动**（有意）：round span是event_type=llm_call+metadata.kind=round，既有span树/列表视图直接渲染（图标=llm_call同款）；"round专属图标/轮次徽标"等展示增强待真实多轮数据积累后再定。
+3. **session无completed收口/hermes引擎回合不落trajectory照旧非本轮范围**（04:20轮遗留#2/#4）；其余遗留观察项照旧：两消费者近重复文件去重（抽共享组件重构轮）/树内搜索与扁平搜索整合/回放与树互斥/过滤态折叠交互/跨session搜索/LLM_FALLBACK_CHAIN未配置（402环境项）/relay消息级粒度/环境变量密钥外发误伤面/污点分析近似/双侧镜像人工同步/model_gateway凭据映射表/AgentEngine.run_task未接begin_turn/MCP重连真实Server验证/attach跨turn共享/RESUMED后同turn多episode单记录。
+4. **行为变化声明**：redactor holdback窗口从"整个回合"收紧到"单轮LLM流"（round边界flush）——对用户可见输出无差异（同一批文本只是提前到轮末外发+落库），脱敏类不变量未破坏（flush先_redact_text），但严格说流式输出时序有微调；test_output_guard接线钉3→4是本次有意演进。
+5. cron环境约束实录：pytest无--timeout插件（去掉该参数）；pytest输出572K被截断→全量测试输出落盘hermes cache按需查；`sibling subagent modified`警告再现实录（test_plan_execution/test_trajectory_recorder被警告但git diff核对只含本轮hunk——sibling改动在settings/locales面，commit白名单纪律照旧兜底）；sibling并行会话共用工作树照旧（settings-client.tsx/locales×3/systemic_test_results.json显式排除）。
+6. 第7步gene skill上报成功：`skill_d7858b756e19`（execution_log=read_file→terminal→search_files→patch→write_file，success=true）。
