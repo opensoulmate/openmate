@@ -170,13 +170,37 @@ async def main() -> int:
         check("真实WS soulmate回合", False, f"{e!r}")
         return 1
 
-    # 4. 回执落库断言：usage_count精确+1（成功回执恰好一次）
+    # 4. 回执落库断言：按回合真实结局二选一（诚实断言，不许两头猜）
+    #    - 真实结局回合 → usage_count精确+1（成功/失败回执恰好一次）
+    #    - 基础设施失败回合（LLM 402/超时，trajectory llm段status=error）
+    #      → usage_count不动（gate live实证：供应商抖动不稀释技能成功率）
     usage_after, success_after = db_counts(skill_id)
-    check("usage回执落库（usage_count+1）", usage_after == usage_before + 1,
-          f"before={usage_before}/{success_before} -> after={usage_after}/{success_after}")
-    check("success计数漂移∈{0,+1}（结局诚实）",
-          success_after - success_before in (0, 1),
-          f"delta={success_after - success_before}（1=回合无错误标记，0=有错误标记）")
+    llm_error = False
+    try:
+        tree = get_json(f"/api/trajectory/sessions/{sid}/trace")
+
+        def _walk(n):
+            nonlocal llm_error
+            if n.get("event_type") == "llm_call" and n.get("status") == "error":
+                llm_error = True
+            for c in n.get("children") or []:
+                _walk(c)
+
+        for r in tree.get("roots") or []:
+            _walk(r)
+    except Exception:
+        pass
+    if llm_error:
+        check("基础设施失败回合→usage不计（gate live实证）",
+              usage_after == usage_before,
+              f"llm段status=error，before={usage_before}/{success_before} -> "
+              f"after={usage_after}/{success_after}")
+    else:
+        check("usage回执落库（usage_count+1）", usage_after == usage_before + 1,
+              f"before={usage_before}/{success_before} -> after={usage_after}/{success_after}")
+        check("success计数漂移∈{0,+1}（结局诚实）",
+              success_after - success_before in (0, 1),
+              f"delta={success_after - success_before}（1=回合无错误标记，0=有错误标记）")
 
     # 5. 清理：DELETE种子技能（不给live库留e2e残留）
     code = delete(f"/api/gene/skill/{skill_id}?reason=e2e-usage-cleanup")

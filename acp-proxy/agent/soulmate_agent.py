@@ -2748,15 +2748,32 @@ You can send files to the user natively: to deliver a file, write a brief confir
         return getattr(self, "_skill_injected", {}).pop(session_id, [])
 
     async def _report_skill_usage(
-        self, client, skill_ids: list[str], success: bool
+        self, client, skill_ids: list[str], full_response: str, close_reason: str
     ) -> int:
         """逐个回执技能使用结局（POST /api/gene/skill/{id}/usage）。
 
-        成败=消费回合的真实结局：success_rate随真实成败漂移→find_relevant排序
-        据此降权/提权（opensoul record_usage单一入口）。回执失败只记debug日志
-        不阻塞回合收尾（CowAgent记账哲学：记账失败绝不阻塞主流程）。
-        返回成功回执条数（可观测）。
+        三种情况不计usage（诚实优先于记账）：
+        1. skill_ids空；
+        2. 回合非正常收尾（interrupted/superseded结局不完整，与TurnClose
+           "只有完整turn才digest"同门）；
+        3. 基础设施失败（llm_outcome_status=error，如LLM 402/超时——错误以文本
+           形态混进回复，技能没被真实消费；供应商抖动不能稀释好技能的success_rate，
+           失败可见性由trajectory error span承担）。
+        成败=消费回合的真实结局（success=回复无错误标记，与capability/evaluate
+        同款turn结局启发式）。回执失败只记debug日志不阻塞回合收尾（CowAgent
+        记账哲学）。返回成功回执条数（可观测）。
         """
+        if not skill_ids:
+            return 0
+        if close_reason != turn_lifecycle.CLOSE_COMPLETED:
+            logger.debug(
+                f"[gene] 回合{close_reason}结局不完整，skill usage不计: {skill_ids}")
+            return 0
+        if llm_outcome_status(full_response) == "error":
+            logger.debug(
+                f"[gene] 回合基础设施失败(LLM错误)，skill usage不计: {skill_ids}")
+            return 0
+        success = "错误" not in full_response and "error" not in full_response.lower()
         ok = 0
         for skill_id in skill_ids:
             try:
@@ -4042,22 +4059,16 @@ You can send files to the user natively: to deliver a file, write a brief confir
                     )
                 # 2.5 技能使用回执（CAMEL §1.6复用必须带真实成败信号）——本回合
                 # 注入过的技能逐个回执结局：success_rate随真实成败漂移→find_relevant
-                # 排序据此降权/提权。只计正常收尾回合（interrupted/superseded结局
-                # 不完整不计，与TurnClose"只有完整turn才digest"同门）；归因清单
-                # 一次性消费（take），不留跨回合残留
-                _injected_skills = self._take_injected_skills(session_id)
-                if _injected_skills and (
-                    self._turn_close_reason.get(session_id, turn_lifecycle.CLOSE_COMPLETED)
-                    == turn_lifecycle.CLOSE_COMPLETED
-                ):
-                    await self._report_skill_usage(
-                        _client,
-                        _injected_skills,
-                        success=(
-                            "错误" not in full_response
-                            and "error" not in full_response.lower()
-                        ),
-                    )
+                # 排序据此降权/提权。不计usage三态（空清单/非正常收尾/基础设施失败）
+                # 由_report_skill_usage单一裁决；归因清单一次性消费（take），不留
+                # 跨回合残留
+                await self._report_skill_usage(
+                    _client,
+                    self._take_injected_skills(session_id),
+                    full_response,
+                    self._turn_close_reason.get(
+                        session_id, turn_lifecycle.CLOSE_COMPLETED),
+                )
                 # 3. 长期记忆存储（重要对话）——kilocode防记忆回声：
                 # 本轮召回过记忆则服务端跳过digest（"答案来自记忆的回合不能再蒸馏回记忆"）
                 # （kilocode #7：回合digest已迁移到TurnClose订阅器 MemoryDigestCollector——

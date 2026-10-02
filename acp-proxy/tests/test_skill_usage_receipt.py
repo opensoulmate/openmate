@@ -8,9 +8,11 @@ find_relevant排序拿不到真实成败信号。
 本轮接线（CAMEL WorkflowMemoryManager §1.6"复用必须带真实成败信号"）：
 1. 注入点（_prompt_inner 9模块注入"4. 技能推荐"）：本回合注入的技能id记入
    _skill_injected 归因清单（先清上回合残留）；
-2. 回执点（_prompt_inner 后处理"2.5 技能使用回执"）：回合正常收尾才回执
-   （interrupted/superseded结局不完整不计，与TurnClose"只有完整turn才digest"
-   同门），success=本回合无错误标记；清单一次性消费不留跨回合残留。
+2. 回执点（_prompt_inner 后处理"2.5 技能使用回执"）：_report_skill_usage单一
+   裁决不计usage三态——空清单/非正常收尾（interrupted/superseded，与TurnClose
+   "只有完整turn才digest"同门）/基础设施失败（llm_outcome_status=error如LLM
+   402，供应商抖动不稀释好技能成功率）；真实结局success=回复无错误标记；
+   清单一次性消费不留跨回合残留。
 
 三层锁死：
 ① 归因清单bookkeeping（记/清/一次性/lazy init）
@@ -25,6 +27,7 @@ import httpx
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from agent import turn_lifecycle
 from tests.test_plan_execution import JUDGE_CONTINUE, build_env, run_prompt
 from tests.test_steering import make_agent, run
 
@@ -135,8 +138,11 @@ class TestInjectedLedger:
 
 
 # ════════════════════════════════════════════════════════════════
-# ② _report_skill_usage 回执行为
+# ② _report_skill_usage 回执行为（含不计usage三态单一裁决）
 # ════════════════════════════════════════════════════════════════
+
+DONE = turn_lifecycle.CLOSE_COMPLETED
+
 
 class TestReportUsage:
     def test_posts_usage_per_skill_with_outcome(self, tmp_path):
@@ -144,14 +150,48 @@ class TestReportUsage:
         agent = make_agent(tmp_path)
         RecordingClient.usage_posts = []
         ok = run(agent._report_skill_usage(
-            RecordingClient(), ["skill_a", "skill_b"], success=False))
+            RecordingClient(), ["skill_a", "skill_b"],
+            full_response="任务完成，结果正常", close_reason=DONE))
         assert ok == 2
         urls = [u for u, _ in RecordingClient.usage_posts]
         assert urls == [
             "http://127.0.0.1:8090/api/gene/skill/skill_a/usage",
             "http://127.0.0.1:8090/api/gene/skill/skill_b/usage",
         ]
-        assert all(p == {"success": False} for _, p in RecordingClient.usage_posts)
+        assert all(p == {"success": True} for _, p in RecordingClient.usage_posts)
+
+    def test_failure_outcome_receipted_as_failure(self, tmp_path):
+        """真实失败结局（非基础设施）→照常回执但success=False（成败诚实）"""
+        agent = make_agent(tmp_path)
+        RecordingClient.usage_posts = []
+        ok = run(agent._report_skill_usage(
+            RecordingClient(), ["skill_f"],
+            full_response="执行遇到错误：工具没有返回结果", close_reason=DONE))
+        assert ok == 1
+        assert RecordingClient.usage_posts[0][1] == {"success": False}
+
+    def test_infra_failure_turn_not_receipted(self, tmp_path):
+        """基础设施失败（LLM 402/超时，错误以文本混进回复）→不计usage——
+        供应商抖动不能稀释好技能的success_rate（指标不许说谎）"""
+        agent = make_agent(tmp_path)
+        RecordingClient.usage_posts = []
+        ok = run(agent._report_skill_usage(
+            RecordingClient(), ["skill_x"],
+            full_response="推理错误: LLM API error 402: Insufficient account balance",
+            close_reason=DONE))
+        assert ok == 0
+        assert RecordingClient.usage_posts == []
+
+    def test_interrupted_turn_not_receipted(self, tmp_path):
+        """非正常收尾（interrupted/superseded）结局不完整→不计usage"""
+        agent = make_agent(tmp_path)
+        for reason in (turn_lifecycle.CLOSE_INTERRUPTED, turn_lifecycle.CLOSE_SUPERSEDED):
+            RecordingClient.usage_posts = []
+            ok = run(agent._report_skill_usage(
+                RecordingClient(), ["skill_i"],
+                full_response="回复正常", close_reason=reason))
+            assert ok == 0
+            assert RecordingClient.usage_posts == []
 
     def test_non_200_not_counted_no_raise(self, tmp_path):
         """404（技能已被删）不计数也不抛——回执失败不阻塞回合收尾"""
@@ -163,19 +203,22 @@ class TestReportUsage:
                     return FakeResp(404, {})
                 return FakeResp(200, {})
 
-        ok = run(agent._report_skill_usage(NotFoundClient(), ["x"], success=True))
+        ok = run(agent._report_skill_usage(
+            NotFoundClient(), ["x"], full_response="ok", close_reason=DONE))
         assert ok == 0
 
     def test_exception_swallowed_returns_zero(self, tmp_path):
         """opensoul不可达→debug级吞掉返回0（CowAgent记账哲学）"""
         agent = make_agent(tmp_path)
-        ok = run(agent._report_skill_usage(RaisingClient(), ["a", "b"], success=True))
+        ok = run(agent._report_skill_usage(
+            RaisingClient(), ["a", "b"], full_response="ok", close_reason=DONE))
         assert ok == 0
 
     def test_empty_list_noop(self, tmp_path):
         agent = make_agent(tmp_path)
         RecordingClient.usage_posts = []
-        ok = run(agent._report_skill_usage(RecordingClient(), [], success=True))
+        ok = run(agent._report_skill_usage(
+            RecordingClient(), [], full_response="ok", close_reason=DONE))
         assert ok == 0
         assert RecordingClient.usage_posts == []
 
