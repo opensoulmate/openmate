@@ -111,6 +111,30 @@ class TestTurnOutcomeSuccess:
 
 
 # ════════════════════════════════════════════════════════════════
+# ①-bis 小节标题误伤面收敛（「常见错误：」类行首标题≠失败汇报）
+# ════════════════════════════════════════════════════════════════
+
+class TestHeadingFalsePositives:
+    def test_common_errors_heading_is_success(self):
+        """「常见错误：」小节标题曾把整回合误判成失败（残余误伤面销账）——
+        技能提取被挡在门外+usage回执记FAIL+缓存拒收，全是假信号"""
+        assert turn_outcome_success(
+            "## 常见错误：\n1. 忘记加引号\n2. 路径写错\n按上述步骤排查即可。")
+
+    def test_various_heading_forms_are_success(self):
+        for text in ("典型失败：汇总如下。", "几种常见错误与失败：略。",
+                     "其他错误：见附录。", "关于失败的说明：略。"):
+            assert turn_outcome_success(text), text
+
+    def test_heading_filter_never_spares_machine_errors(self):
+        """标题过滤不误放真报错——动作动词前缀不含标题线索词"""
+        for text in ("写入失败: permission denied", "解析错误: unexpected EOF",
+                     "未知错误: xxx", "校验失败: checksum mismatch",
+                     "执行遇到错误：工具没有返回结果"):
+            assert not turn_outcome_success(text), text
+
+
+# ════════════════════════════════════════════════════════════════
 # ② _report_skill_usage 回执载荷（真实调用点）
 # ════════════════════════════════════════════════════════════════
 

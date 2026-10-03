@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import difflib
 import logging
+import re
 
 logger = logging.getLogger("acp.read_turn")
 
@@ -78,15 +79,94 @@ def _error_brief(error: str) -> str:
     return text
 
 
-# 工具结果失败形态（各工具分支统一用「错误:/失败:/[被拦截/超时」等前缀报错）
-_FAIL_MARKERS = ("错误", "失败", "[被拦截", "超时", "异常", "⚠️", "❌")
+# 行首小节标题误伤面过滤（turn_outcome残余误伤面销账）：「常见错误：…」
+# 「典型失败：…」「几种常见错误与失败：…」类小节标题不是失败汇报。判法=
+# 前缀非空且命中标题线索词。线索词全是多字词且避开机器动作动词——
+# 「解析/写入/执行/搜索/比较/校验…」类动作前缀不命中任何线索词，照旧判
+# 失败；空前缀（「错误: …」裸形态机器兜底）不是标题→判失败。
+# （曾试过"前缀整段由标题用字构成"的字符集判法，被「解析错误:」误放行——
+# "解释/分析"的单字混进字符集，教训：判标题用词不用字。）
+_HEADING_CUES = (
+    "常见", "典型", "各种", "各类", "其他", "另外", "几种", "几个", "几类",
+    "以下", "上述", "这些", "那些", "关于", "已知", "历史", "可能", "注意",
+    "避免", "防止", "示例", "例如", "说明", "区别", "差异", "对比", "问答",
+    "什么", "为何", "为什么", "如何", "哪种", "哪些", "汇总", "列表", "清单",
+    "归类", "分类", "讨论", "介绍", "相关", "附录",
+)
+
+
+def is_heading_prefix(prefix: str) -> bool:
+    """「常见错误：」类行首小节标题前缀判定（结构化失败判定共用——
+    trajectory_recorder.turn_outcome_success同引此过滤标题误伤）。"""
+    p = (prefix or "").strip()
+    return bool(p) and any(c in p for c in _HEADING_CUES)
+
+
+# ── 工具结果成败判定（结构化失败标记）────────────────────────────
+# 与trajectory_recorder.turn_outcome_success同哲学的工具侧：只认机器报错
+# 模板的结构化标记，不用"错误/失败/超时/异常/⚠️/❌"子串包含——旧启发式
+# （头60字符子串匹配）会把内容里带这些字样的读取/搜索结果误判成失败：
+# 读一个讲错误处理的文件、搜"错误"关键词、日志首行有"⚠️"=假失败→工具审计
+# success指标说谎+成功读取不进结果缓存+记忆工具行误标error（soulmate_agent
+# audit_call处注释早已声明"首部结构化失败标记"，此处把实现对齐到声明）。
+# 机器报错模板形态（均为**首行**报出，来源逐一grep核实）：
+#   「错误: …」「错误：…」                    session_recall.py:577、tool_output_handler.py:365
+#   「X失败: …」（写入/执行/修改/搜索/clarify…） soulmate_agent.py各工具分支兜底
+#   「执行超时（60秒）」                       soulmate_agent.py:2284
+#   「[MCP 工具调用超时]」「[MCP resource调用超时]」「[CODE_MODE] 工具执行超时:」
+#   「[MCP 工具调用失败]」「[CODE_MODE] 批量执行失败:」「[被拦截…」  各分支
+#   「⚠️ …不可用: …」                         soulmate_agent.py wakeup分支
+#   「工具 `X` 调用失败 (第N次尝试)」          tool_errors.to_model_message
+#   「❌ 文件 `path` X失败: …」                edit_safety.py:68
+# 判定窗口=结果**首行**（机器失败=结果本体）。两面收紧：①误伤消除（子串→
+# 结构化）②首行内晚报出的失败不再漏（旧60字符截断会把长路径「❌ 文件
+# `…80字符路径…` 写入失败」漏成假成功）。残余面（显式记账）：多行结果第2行
+# 起的失败报出不判（真实模板均首行报错）；首行内容恰为「错误: …」形态的文件
+# 内容不可分辨（文本启发式固有极限，与turn_outcome同款残余）。
+_LINE_START_FAIL_TOKENS = ("⚠️", "❌")
+
+_RESULT_FAIL_MARKERS = (
+    "[被拦截",
+    "[MCP 工具调用失败]",
+    "[MCP 工具调用超时]",
+    "[MCP resource调用超时]",
+    "[CODE_MODE] 批量执行失败",
+    "[CODE_MODE] 工具执行超时",
+)
+
+_RESULT_FAIL_RES = (
+    # 「错误: …」/「X失败: …」行首结构化前缀（捕获前缀供小节标题过滤）
+    re.compile(r"^(?:❌[ \t]*)?(\S{0,12})(?:错误|失败)[:：]"),
+    # 「执行超时（60秒）」类超时汇报（超时不接中文词——「超时时间/超时配置」
+    # 类正常文本不误伤）
+    re.compile(r"^\S{0,12}超时(?![\u4e00-\u9fff])"),
+    # tool_errors.to_model_message 固定格式「工具 `X` 调用失败 (第N次尝试)」
+    re.compile(r"工具 `[^`\n]+` 调用失败"),
+    # edit_safety：「❌ 文件 `path` …失败: …」（长路径不设60字符窗——首行即窗口）
+    re.compile(r"^❌[^\n]+失败[:：]"),
+    # 行首英文同款：「Error: …」「Exception: …」「Failed: …」
+    re.compile(r"^(?:error|exception|failed|failure)[:：]", re.I),
+)
 
 
 def result_ok(result) -> bool:
-    """工具结果成败启发式：只看开头60字符（错误都是结果前缀报出的——
-    正文里出现'错误'二字不算失败）。与ToolAuditor的success判定同族。"""
-    text = str(result or "").lstrip()[:60]
-    return not any(m in text for m in _FAIL_MARKERS)
+    """工具结果成败判定（结构化失败标记×首行判定，见上方形态清单）。
+
+    失败=首行报出机器失败标记；空结果/正常输出=ok。与ToolAuditor的success
+    判定同族（audit_call的success=result_ok单一真源）。"""
+    text = str(result or "").lstrip()
+    first_line = text.split("\n", 1)[0]
+    if not first_line:
+        return True
+    if first_line.startswith(_LINE_START_FAIL_TOKENS):
+        return False
+    if any(m in first_line for m in _RESULT_FAIL_MARKERS):
+        return False
+    for pat in _RESULT_FAIL_RES:
+        m = pat.search(first_line)
+        if m and not (m.groups() and is_heading_prefix(m.group(1))):
+            return False
+    return True
 
 
 def diff_line_stats(old_text: str | None, new_text: str | None) -> tuple[int, int] | None:

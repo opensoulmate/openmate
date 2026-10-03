@@ -31,6 +31,8 @@ import time
 
 import httpx
 
+from agent.read_turn import is_heading_prefix
+
 logger = logging.getLogger("acp-proxy.trajectory-recorder")
 
 TRAJECTORY_BASE_URL = "http://127.0.0.1:8090"
@@ -63,22 +65,27 @@ def llm_outcome_status(response_text: str) -> str:
 #   「错误: …」/「错误：…」               session_recall.py:577、tool_output_handler.py:365
 #   「写入失败: …」「执行失败: …」等X失败:  soulmate_agent.py各工具分支兜底
 #   「{emoji} 工具 `X` 调用失败 (第N次尝试)」 tool_errors.to_model_message
-#   「❌ 文件 `path` 写入失败: …」         edit_safety.py:68
+#   「❌ 文件 `path` …失败: …」            edit_safety.py:68
 #   「[MCP 工具调用失败]…」「[CODE_MODE] 批量执行失败:…」「[被拦截」  各分支
 _TURN_FAILURE_MARKERS = (
     "[MCP 工具调用失败]",
     "[CODE_MODE] 批量执行失败",
     "[被拦截",
 )
-_TURN_FAILURE_RES = (
+# 带前缀捕获的行首前缀族（捕获组1=前缀，供小节标题误伤面过滤——「常见错误：
+# …」类小节标题≠失败汇报，见read_turn.is_heading_prefix；机器报错前缀是动作
+# 动词含标题集外字符，照旧判失败）
+_TURN_FAILURE_PREFIX_RES = (
     # 行首结构化前缀：「错误: …」/「错误：…」/「写入失败: …」/「执行遇到错误：…」
-    re.compile(r"^[ \t]*(?:❌[ \t]*)?\S{0,12}(?:错误|失败)[:：]", re.M),
+    re.compile(r"^[ \t]*(?:❌[ \t]*)?(\S{0,12})(?:错误|失败)[:：]", re.M),
     # 行首英文同款：「Error: …」「Exception: …」「Failed: …」
     re.compile(r"^[ \t]*(?:error|exception|failed|failure)[:：]", re.M | re.I),
+)
+_TURN_FAILURE_RES = (
     # tool_errors.to_model_message 固定格式：「工具 `X` 调用失败 (第N次尝试)」
-    re.compile(r"工具 `[^\n`]+` 调用失败"),
-    # edit_safety：「❌ 文件 `path` …失败: …」/「❌ 改进失败: …」
-    re.compile(r"^❌[^\n]{0,60}失败[:：]", re.M),
+    re.compile(r"工具 `[^`\n]+` 调用失败"),
+    # edit_safety：「❌ 文件 `path` …失败: …」/「❌ 改进失败: …」（长路径不限60字符）
+    re.compile(r"^❌[^\n]+失败[:：]", re.M),
 )
 
 
@@ -90,14 +97,22 @@ def turn_outcome_success(response_text: str) -> bool:
     无辜稀释、能力评估按0.3记分、成功回合被挡在技能提取门外（"不进化"的度量
     假象之一）。现与llm_outcome_status同哲学：LLM基础设施失败仍判error；
     否则只认上列结构化失败标记（行首前缀/固定格式）。
-    残余误伤面：行首「常见错误：…」类小节标题（罕见）；反向漏检：模型用自然
-    语言改述失败（如"我没有权限访问"）——文本启发式的固有极限。
+    小节标题误伤面已收敛：行首「常见错误：…」「典型失败：…」类标题经
+    read_turn.is_heading_prefix过滤，不再判失败（此前正是残余误伤面）。
+    反向残余：模型用自然语言改述失败（如"我没有权限访问"）——文本启发式
+    的固有极限。
     """
     text = response_text or ""
     if llm_outcome_status(text) == "error":
         return False
-    return not (any(m in text for m in _TURN_FAILURE_MARKERS)
-                or any(p.search(text) for p in _TURN_FAILURE_RES))
+    if any(m in text for m in _TURN_FAILURE_MARKERS):
+        return False
+    for pat in _TURN_FAILURE_PREFIX_RES:
+        for m in pat.finditer(text):
+            if m.groups() and is_heading_prefix(m.group(1)):
+                continue  # 「常见错误：」类小节标题≠失败汇报
+            return False
+    return not any(p.search(text) for p in _TURN_FAILURE_RES)
 
 
 def _fail_safe(fallback):

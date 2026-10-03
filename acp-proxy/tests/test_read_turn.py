@@ -121,6 +121,50 @@ class TestResultOk:
         assert result_ok("")
         assert result_ok("[CODE_MODE] ✅ 3次工具调用已合并为1轮执行")
 
+    def test_content_with_marker_words_in_head_is_ok(self):
+        # 结构化判定的核心收益：内容里带"错误/失败/超时/异常"字样的正常读取/
+        # 搜索结果≠失败（旧60字符子串启发式会把它们全判成假失败→工具审计
+        # success指标说谎+成功读取不进结果缓存+记忆工具行误标error）
+        assert result_ok("错误处理.md\n1|def handle_error():\n2|    pass")
+        assert result_ok("找到 3 个匹配: src/x.py:12: logger.error('错误')")
+        assert result_ok("超时时间设置为 60 秒（见配置项 timeout）")
+        assert result_ok("异常处理流程分为三步……" + "。" * 30)
+
+    def test_machine_bracket_markers_fail(self):
+        # soulmate_agent各分支机器标记（[MCP 工具调用超时]:735等，逐一grep核实）
+        for text in ("[MCP 工具调用超时] web_search",
+                     "[CODE_MODE] 工具执行超时: read_file",
+                     "[MCP resource调用超时] read_resource",
+                     "⚠️ wakeup调度不可用: conn refused"):
+            assert not result_ok(text), text
+
+    def test_timeout_report_fail_but_timeout_word_in_prose_ok(self):
+        assert not result_ok("执行超时（60秒）")  # soulmate_agent.py:2284真实形态
+        assert not result_ok("操作超时")
+        assert result_ok("超时重试策略见下文")
+        assert result_ok("设置 timeout=30 可避免超时")
+
+    def test_heading_first_line_is_ok(self):
+        # 首行恰为「常见错误：」类小节标题≠失败
+        assert result_ok("常见错误：\n1. 忘记加引号")
+
+    def test_long_path_edit_safety_fail_not_missed(self):
+        # 旧60字符截断窗口的漏检面：长路径把「失败」推到60字符外=旧判假成功
+        long_path = "/tmp/" + "a" * 80 + ".py"
+        assert not result_ok(f"❌ 文件 `{long_path}` 写入失败: disk full")
+
+    def test_first_line_window_semantics(self):
+        # 判定窗口=结果首行（机器模板均首行报出）；行2+失败报出不判=显式残余
+        assert result_ok("正常输出内容\n错误: boom")
+        # 行中散文里的「错误:」引用不算失败（与turn_outcome同哲学）
+        assert result_ok("这是一段" + "。" * 80 + "错误: 只是引用示例")
+
+    def test_heading_filter_never_spares_machine_errors(self):
+        # 标题过滤不误放真报错（动作动词前缀不含标题线索词）
+        for text in ("解析错误: unexpected EOF", "未知错误: xxx",
+                     "校验失败: checksum mismatch", "提取失败: empty"):
+            assert not result_ok(text), text
+
 
 # ════════════════════════════════════════════════════════════════
 # 3. diff_line_stats（readTurn快照diff行级统计）
