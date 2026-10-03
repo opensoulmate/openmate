@@ -4273,3 +4273,29 @@
 5. 其余遗留观察项照旧：前端无回滚UI/审计视图/FAIL记录不分trivial/审计表无retention/usage排序公式启发式/relay round级需引擎侧自报/两消费者近重复文件去重/树内搜索与扁平搜索整合/回放与树互斥/跨session搜索/LLM_FALLBACK_CHAIN未配置（402环境项）/环境变量密钥外发误伤面/污点分析近似/双侧镜像人工同步/model_gateway凭据映射表/engine.py死代码清理候选/MCP重连真实Server验证/attach跨turn共享/RESUMED后同turn多episode单记录。
 6. cron环境约束实录：`sed -n "..." file`组合命令被tirith拦（command parser limit）→拆用search_files/read_file；patch工具sibling修改告警需git diff核实归属（本轮trajectory_recorder.py diff只有本人hunk）；sibling并行会话共用工作树（src/前端+locales）照旧白名单排除；全量pytest 598s。
 7. 第7步gene skill上报✅：skill_id=`skill_8cca5dd7ff8a`（event=ADD+success_rate=1.0）已入gene技能库供find_relevant检索复用。
+
+## [2026-10-03 14:20 CST] 复杂任务回合工具账本汇入tool_calls_log——销09:42轮遗留#4（P1"不进化"堵点）
+**目标**：销账09:42轮遗留#4"plan复杂路径tool_calls_log恒空"：复杂任务执行环两处 `_run_llm_with_tools` 返回的步骤工具账本（`_step_tools`/`_retry_tools`）被丢弃，回合账本恒空→下游能力评估/技能提取/进化观察/自动学习/aclose_turn工具计数整体不触发（工具调用被当成"无工具回合"）——复杂任务的学习/记账链断裂（"不进化"堵点之一）。
+**调研来源**：①SUMMARY P0-5评估闭环"度量前提=指标不说谎"+P0-7自进化机制（成功回合必须能进入学习链）；②上轮（09:42）遗留#4原文已定位缺口与位置（soulmate_agent.py:3694只接step_result），本轮照此销账不另立目标；③3598行既有注释"tool_calls_log = [] # 初始化，两条路径都会用到"=原设计意图，本轮是兑现而非新设计。
+**改动文件**（openmate commit `146d6ac7`，2文件+206/-2）：
+- `acp-proxy/agent/soulmate_agent.py`（+13/-2）：两处汇入
+- `acp-proxy/tests/test_plan_tool_ledger.py`（新，6测）
+**改动内容**（全增量old_string/new_string，无全量重写）：
+1. 首试汇入（soulmate_agent.py:3697）：`_step_tools`改名`step_tools`并 `tool_calls_log.extend(step_tools)`——跨步骤累积（replan新步骤/retry都算本回合真实工具面）。
+2. retry汇入（:3753）：`_retry_tools`改名`retry_tools`并 `tool_calls_log.extend(retry_tools)`——失败首试的工具也按真实执行记账，不因结局回滚账本。
+3. 下游零改动：capability/extract/进化/学习/aclose_turn的门条件（`if tool_calls_log`/`and turn_outcome_success`）与简单路径共用同一账本变量，语义不走样。
+**接线位置**（grep证据，文件:行号）：
+- 汇入点：`acp-proxy/agent/soulmate_agent.py:3705 tool_calls_log.extend(step_tools)`/`:3758 tool_calls_log.extend(retry_tools)`（grep确认`_step_tools`/`_retry_tools`丢弃写法已清零）
+- 消费点（同一tool_calls_log变量的真实运行时路径，_prompt_inner收口区）：`:3980 try_learn_skill(tool_calls=…)`/`:3991/:4004-4005 进化观察`/`:4025 capability/evaluate`/`:4056 gene/skill/extract`/`:4120 aclose_turn(tool_calls=len(…))`
+**验证结果**：
+- 完整性✅：`git diff --numstat`=soulmate_agent.py +13/-2逐hunk核对全为本轮改动（改名2行+新增11行），测试新文件206-2=204行；sibling并行会话的src/前端+locales+systemic_test_results.json显式排除（commit走git add白名单2文件）；ast.parse语法OK。
+- 集成✅：上述grep链完整（两汇入点→5个消费点全在同一_prompt_inner收口区）；测试即接线证据——TestStepToolsAccumulate走真实_prompt_inner复杂路径+真实内建工具分支（read_file真读文件、write_file真落盘断言），下游POST走FakeAsyncClient留痕断言。
+- 测试✅：新`tests/test_plan_tool_ledger.py` **6/6 PASS**（①跨步骤累积2：两步骤read_file+write_file按执行顺序入账+result_preview含真实文件内容+out.txt真实落盘+capability/extract两POST真实触发；失败首试+retry两工具都入账（names=[read_file,read_file]，均含真实内容预览）②下游门2：复杂回合零工具→capability/extract照旧不发+空账本如实传学习侧；有工具但结局失败（正文含`\n[LLM响应超时]`机器失败形态→turn_outcome_success=False）→capability照发、extract被门拦、账本不因结局丢 ③接线防死代码2：两extend在源码中+丢弃写法清除+简单路径账本来源不变护栏）；邻居套件plan_execution+turn_outcome+skill_usage_receipt+plan_tool_ledger+tool_output_wiring=**78 passed**零回归；**acp-proxy全量tests/ 1575 passed 0 failed**（629s，1569+6新精确吻合）；`systemic_test.py` **29/29 passed**（双服务重启后终版代码上跑）。
+**服务重启**：`systemctl --user restart acp-proxy-a.service acp-proxy-b.service`→active、:8092/:8095 health=200、:8090 /api/gene/health=200；opensoul本轮零改动无需重启；前端零改动无需build。
+**commit**：openmate `146d6ac7`。
+**遗留问题**：
+1. **失败首试工具入账的语义边界**：retry后账本含两次调用（同名read_file×2）——"执行面"如实但"能力评估"的efficiency等指标会把重试成本算进同一回合；细分per-step归因需trajectory span级账本（langfuse span嵌套方向，SUMMARY P0-4）。
+2. **extract的execution_log仍是str(tool_calls_log)[:1000]截断**：复杂多步骤回合工具多时日志尾部丢（显式截断非静默，但信息损失）；后续可按步骤结构化摘要。
+3. **残余遗留观察项照旧**：前端无回滚UI/审计视图/FAIL记录不分trivial/审计表无retention/usage排序公式启发式/turn_outcome行首前缀残余误伤面/result_ok 60字符窗口/relay round级需引擎侧自报/两消费者近重复文件去重/树内搜索与扁平搜索整合/回放与树互斥/跨session搜索/LLM_FALLBACK_CHAIN未配置（402环境项）/环境变量密钥外发误伤面/污点分析近似/双侧镜像人工同步/model_gateway凭据映射表/engine.py死代码清理候选/MCP重连真实Server验证/attach跨turn共享/RESUMED后同turn多episode单记录。
+4. cron环境约束实录：wait超时被clamp到180s（notify_on_complete在one-shot runner不可用）→全量pytest 629s分4次poll等到；测试替身SimpleNamespace优于MagicMock（gate_result字段被build_provenance消费，MagicMock会产生假对象入账本）。
+5. 第7步gene skill上报✅：skill_id=`skill_04cf8045bfad`（event=ADD+success_rate=1.0）已入gene技能库供find_relevant检索复用。
