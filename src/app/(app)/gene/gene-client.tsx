@@ -6,7 +6,7 @@ import { getApiBaseUrl } from "@/lib/api-client"
 import {
   Dna, Loader2, Plus, Trash2, Play, Search, Tag, Package,
   ChevronDown, ChevronRight, Copy, CheckCircle, X, Settings,
-  Download, Upload, CopyPlus,
+  Download, Upload, CopyPlus, History, RotateCcw, RefreshCw,
 } from "lucide-react"
 import { PageLayout } from '@/components/page-layout';
 
@@ -32,7 +32,41 @@ interface GeneHealth {
   by_category: Record<string, number>
 }
 
-type ActiveTab = "browse" | "create" | "instantiate" | "import"
+// 学习型技能（learned_skills行——GET /api/gene/skill库存盘点端点）
+interface LearnedSkill {
+  skill_id: string
+  name: string
+  description: string
+  category: string
+  usage_count: number
+  success_count: number
+  success_rate: number
+  created_at: number
+  last_used_at: number
+  source_session: string
+  tags: string[]
+  parameters: string[]
+}
+
+// 技能审计事件（skill_audit行——ADD/UPDATE/DELETE/FAIL/REVERT）
+interface AuditEvent {
+  audit_id: number
+  skill_id: string
+  event: string
+  actor: string
+  reason: string
+  created_at: number
+}
+
+// 回滚预览（revert-preview零写入先行——Agent Zero _time_travel语义）
+interface RevertPreview {
+  skill_id: string
+  event: AuditEvent
+  action: string
+  changes: Record<string, { from: unknown; to: unknown }>
+}
+
+type ActiveTab = "browse" | "create" | "instantiate" | "import" | "skills"
 
 const CATEGORY_COLORS: Record<string, string> = {
   agent: "#3b82f6",
@@ -78,6 +112,15 @@ export function GeneClient() {
   const [importLoading, setImportLoading] = useState(false)
   const [importResult, setImportResult] = useState<Record<string, unknown> | null>(null)
   const [importOverwrite, setImportOverwrite] = useState(false)
+
+  // Skills tab state（技能库：审计视图+一键回滚）
+  const [skills, setSkills] = useState<LearnedSkill[]>([])
+  const [skillsLoading, setSkillsLoading] = useState(false)
+  const [expandedSkill, setExpandedSkill] = useState<string | null>(null)
+  const [skillHistory, setSkillHistory] = useState<Record<string, AuditEvent[]>>({})
+  const [revertPreview, setRevertPreview] = useState<RevertPreview | null>(null)
+  const [reverting, setReverting] = useState(false)
+  const [revertResult, setRevertResult] = useState<string>("")
 
   const fetchAll = useCallback(async () => {
     try {
@@ -216,6 +259,76 @@ export function GeneClient() {
     }
   }, [importJson, importOverwrite, apiBase, fetchAll])
 
+  // ── 技能库（learned_skills）：库存盘点+审计历史+回滚 ──────────────
+
+  const fetchSkills = useCallback(async () => {
+    setSkillsLoading(true)
+    try {
+      const res = await fetch(`${apiBase}/api/gene/skill`)
+      const data = await res.json()
+      setSkills(data.skills || [])
+    } catch {} finally {
+      setSkillsLoading(false)
+    }
+  }, [apiBase])
+
+  useEffect(() => { fetchSkills() }, [fetchSkills])
+
+  const loadSkillHistory = useCallback(async (skillId: string) => {
+    try {
+      const res = await fetch(`${apiBase}/api/gene/skill/${skillId}/history`)
+      const data = await res.json()
+      setSkillHistory(prev => ({ ...prev, [skillId]: data.events || [] }))
+    } catch {}
+  }, [apiBase])
+
+  const toggleSkillHistory = useCallback(async (skillId: string) => {
+    if (expandedSkill === skillId) {
+      setExpandedSkill(null)
+      return
+    }
+    setExpandedSkill(skillId)
+    if (!skillHistory[skillId]) await loadSkillHistory(skillId)
+  }, [expandedSkill, skillHistory, loadSkillHistory])
+
+  const handleRevertPreview = useCallback(async (skillId: string, auditId: number) => {
+    setRevertResult("")
+    try {
+      const res = await fetch(`${apiBase}/api/gene/skill/${skillId}/revert-preview?audit_id=${auditId}`)
+      const data = await res.json()
+      if (res.ok) setRevertPreview(data as RevertPreview)
+      else setRevertResult(String(data.detail || "preview failed"))
+    } catch {}
+  }, [apiBase])
+
+  const handleRevert = useCallback(async () => {
+    if (!revertPreview) return
+    setReverting(true)
+    setRevertResult("")
+    try {
+      const { skill_id: skillId, event } = revertPreview
+      const res = await fetch(
+        `${apiBase}/api/gene/skill/${skillId}/revert?audit_id=${event.audit_id}`,
+        { method: "POST" },
+      )
+      const data = await res.json()
+      if (res.ok) {
+        setRevertResult(t("gene.revertDone"))
+        setRevertPreview(null)
+        await fetchSkills()
+        await loadSkillHistory(skillId)
+      } else {
+        setRevertResult(String(data.detail || "revert failed"))
+      }
+    } catch {
+      setRevertResult("revert request failed")
+    } finally {
+      setReverting(false)
+    }
+  }, [revertPreview, apiBase, fetchSkills, loadSkillHistory, t])
+
+  const fmtTime = (ts: number) => (ts ? new Date(ts * 1000).toLocaleString() : "—")
+
   const filtered = templates.filter(t => {
     if (selectedCategory && t.category !== selectedCategory) return false
     if (searchQuery) {
@@ -240,6 +353,7 @@ export function GeneClient() {
     { key: "create", label: t("gene.text5"), icon: Plus },
     { key: "instantiate", label: t("gene.text6"), icon: Play },
     { key: "import", label: t("gene.export"), icon: Download },
+    { key: "skills", label: t("gene.skillLibraryTab"), icon: History },
   ]
 
   return (
@@ -292,6 +406,152 @@ export function GeneClient() {
           )
         })}
       </div>
+
+      {/* Skills Tab — 技能库：审计视图 + 一键回滚（revert-preview零写入先行） */}
+      {activeTab === "skills" && (
+        <div className="space-y-4">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <h3 className="font-semibold flex items-center gap-2">
+                <History className="w-4 h-4" /> {t("gene.skillLibrary")}
+              </h3>
+              <p className="text-xs text-muted-foreground mt-1">{t("gene.skillLibraryDesc")}</p>
+            </div>
+            <button
+              onClick={fetchSkills}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-muted/30 text-muted-foreground hover:bg-muted/50 transition-all shrink-0"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${skillsLoading ? "animate-spin" : ""}`} />
+              {t("gene.refresh")}
+            </button>
+          </div>
+
+          {revertResult && (
+            <div className="rounded-lg p-3 text-xs lg:text-sm bg-emerald-500/10 text-emerald-400">
+              {revertResult}
+            </div>
+          )}
+
+          {/* 回滚预览：先看逐字段diff再动手（Agent Zero _time_travel preview语义） */}
+          {revertPreview && (
+            <div className="bg-card border border-amber-500/40 rounded-xl p-3 lg:p-4 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <h4 className="text-sm font-semibold flex items-center gap-2 min-w-0">
+                  <RotateCcw className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span className="truncate">{t("gene.revertPreviewTitle")}</span>
+                  <span className="text-xs text-muted-foreground font-mono shrink-0">
+                    #{revertPreview.event.audit_id} · {revertPreview.action}
+                  </span>
+                </h4>
+                <button
+                  onClick={() => setRevertPreview(null)}
+                  className="text-muted-foreground hover:text-foreground shrink-0"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="space-y-1 text-xs font-mono">
+                {Object.entries(revertPreview.changes).map(([field, ch]) => (
+                  <div key={field} className="flex items-center gap-2">
+                    <span className="text-muted-foreground shrink-0 w-28 truncate">{field}</span>
+                    <span className="text-red-400 truncate">{JSON.stringify(ch.from)}</span>
+                    <span className="text-muted-foreground shrink-0">→</span>
+                    <span className="text-emerald-400 truncate">{JSON.stringify(ch.to)}</span>
+                  </div>
+                ))}
+                {Object.keys(revertPreview.changes).length === 0 && (
+                  <div className="text-muted-foreground">{t("gene.noChanges")}</div>
+                )}
+              </div>
+              <button
+                onClick={handleRevert}
+                disabled={reverting}
+                className="w-full py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-lg font-medium text-xs lg:text-sm disabled:opacity-40 disabled:cursor-not-allowed hover:from-amber-600 hover:to-orange-600 transition-all flex items-center justify-center gap-2"
+              >
+                {reverting ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
+                {t("gene.revertConfirm")}
+              </button>
+            </div>
+          )}
+
+          {skillsLoading && skills.length === 0 ? (
+            <div className="flex items-center justify-center h-24">
+              <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : skills.length === 0 ? (
+            <div className="bg-card border border-border rounded-xl p-6 text-center text-sm text-muted-foreground">
+              {t("gene.noSkills")}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {skills.map(skill => (
+                <div key={skill.skill_id} className="bg-card border border-border rounded-xl overflow-hidden">
+                  <button
+                    onClick={() => toggleSkillHistory(skill.skill_id)}
+                    className="w-full flex items-center gap-3 p-3 text-left hover:bg-muted/30 transition-colors"
+                  >
+                    {expandedSkill === skill.skill_id ? (
+                      <ChevronDown className="w-4 h-4 shrink-0 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="w-4 h-4 shrink-0 text-muted-foreground" />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium truncate">{skill.name}</div>
+                      <div className="text-xs text-muted-foreground truncate">{skill.description}</div>
+                    </div>
+                    <div className="flex items-center gap-2 lg:gap-3 shrink-0 text-xs text-muted-foreground">
+                      <span className="px-2 py-0.5 rounded bg-muted/40">{skill.category}</span>
+                      <span>{t("gene.skillUsage")} {skill.usage_count}</span>
+                      <span className={skill.success_rate >= 0.8 ? "text-emerald-400" : skill.success_rate >= 0.5 ? "text-amber-400" : "text-red-400"}>
+                        {t("gene.skillSuccessRate")} {(skill.success_rate * 100).toFixed(0)}%
+                      </span>
+                      <span className="hidden lg:inline">{fmtTime(skill.last_used_at || skill.created_at)}</span>
+                    </div>
+                  </button>
+                  {expandedSkill === skill.skill_id && (
+                    <div className="border-t border-border p-3 space-y-2">
+                      <div className="text-xs text-muted-foreground">
+                        {t("gene.skillSource")}: <span className="font-mono">{skill.source_session || "—"}</span>
+                        {skill.tags.length > 0 && <> · {t("gene.skillTags")}: {skill.tags.join(", ")}</>}
+                      </div>
+                      <h5 className="text-xs font-semibold flex items-center gap-1.5">
+                        <History className="w-3.5 h-3.5" /> {t("gene.skillHistory")}
+                      </h5>
+                      {(skillHistory[skill.skill_id] || []).length === 0 ? (
+                        <div className="text-xs text-muted-foreground">{t("gene.historyEmpty")}</div>
+                      ) : (
+                        <div className="space-y-1">
+                          {(skillHistory[skill.skill_id] || []).map(ev => (
+                            <div key={ev.audit_id} className="flex items-center gap-2 text-xs bg-muted/20 rounded-lg px-2.5 py-1.5">
+                              <span className={`px-1.5 py-0.5 rounded font-mono shrink-0 ${
+                                ev.event === "FAIL" ? "bg-red-500/15 text-red-400"
+                                : ev.event === "REVERT" ? "bg-amber-500/15 text-amber-400"
+                                : "bg-emerald-500/15 text-emerald-400"
+                              }`}>{ev.event}</span>
+                              <span className="text-muted-foreground truncate flex-1">
+                                #{ev.audit_id} · {ev.actor || "—"} · {ev.reason || "—"}
+                              </span>
+                              <span className="text-muted-foreground shrink-0 hidden sm:inline">{fmtTime(ev.created_at)}</span>
+                              {ev.event !== "FAIL" && (
+                                <button
+                                  onClick={() => handleRevertPreview(skill.skill_id, ev.audit_id)}
+                                  className="shrink-0 px-2 py-1 rounded bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 transition-colors"
+                                >
+                                  {t("gene.revertToBefore")}
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Browse Tab */}
       {activeTab === "browse" && (
