@@ -4299,3 +4299,39 @@
 3. **残余遗留观察项照旧**：前端无回滚UI/审计视图/FAIL记录不分trivial/审计表无retention/usage排序公式启发式/turn_outcome行首前缀残余误伤面/result_ok 60字符窗口/relay round级需引擎侧自报/两消费者近重复文件去重/树内搜索与扁平搜索整合/回放与树互斥/跨session搜索/LLM_FALLBACK_CHAIN未配置（402环境项）/环境变量密钥外发误伤面/污点分析近似/双侧镜像人工同步/model_gateway凭据映射表/engine.py死代码清理候选/MCP重连真实Server验证/attach跨turn共享/RESUMED后同turn多episode单记录。
 4. cron环境约束实录：wait超时被clamp到180s（notify_on_complete在one-shot runner不可用）→全量pytest 629s分4次poll等到；测试替身SimpleNamespace优于MagicMock（gate_result字段被build_provenance消费，MagicMock会产生假对象入账本）。
 5. 第7步gene skill上报✅：skill_id=`skill_04cf8045bfad`（event=ADD+success_rate=1.0）已入gene技能库供find_relevant检索复用。
+
+## [2026-10-03 14:55 CST] gene技能提炼wire格式修复 + find_relevant冷启动盲区——生产学习链数据完整性（P0 wire bug，live E2E连环实锤）
+**目标**：两处让"学了≠学到"的数据完整性缺口：①soulmate发给/api/gene/skill/extract的execution_log是`str(tool_calls_log)[:1000]`（Python repr非JSON）→opensoul json.loads失败→tool_calls=[]→extract_from_execution空契约直接None→**每个真实回合的技能提炼恒400"没提炼出技能"（生产学习链全灭，写了≠接线了≠能跑了）**；即便能解析，扁平形态{name,arguments,result_preview}无function包装→tools_used全空名；`[:1000]`还静默截断。②live验证中连带实锤find_relevant冷启动盲区：先按usage_count DESC开LIMIT*3窗口再做相关性评分——库里高usage旧技能占满窗口后**新学技能再相关也查不到**（进化闭环断链：学了→检索不到→永不被复用→success_rate无从生长）。
+**调研来源**：①SUMMARY P0-7自进化机制"成功回合必须能进入学习链"+P0-5"指标不许说谎"（提炼恒400=完全没有学习）；②P0-2工具结果溢出处理"截断必须显式标记"（AIHawk SHOWN/SENT双预算）+kilocode Truncate双端保留（保头尾丢中段）；③SUMMARY P0-6三因子检索（相关性必须参与候选排序，usage不能前置垄断窗口）；④goose宽容反序列化（多候选提取/容忍格式漂移）→解码侧literal_eval兜底。哨兵约定（__x__ dunder名=元数据）自gene_wire起为两侧契约，消费方过滤不自创第二真源。
+**改动文件**（openmate commit `96a4b0ee` 3文件+286/-1；opensoul commit `7ba55d3d` 4文件+270/-8）：
+- `acp-proxy/agent/gene_wire.py`（新98行）：tool_calls_for_extract单一序列化真源
+- `acp-proxy/agent/soulmate_agent.py`（+8/-1）：import + 提炼载荷一行换gene_wire
+- `acp-proxy/tests/test_gene_extract_wire.py`（新180行，11测）
+- `opensoul/src/api/gene.py`（+21/-2）：解码宽容（json→literal_eval兜底）+形态归一
+- `opensoul/src/gene/skill_learner.py`（+25/-6）：_is_wire_sentinel哨兵过滤 + find_relevant候选全集
+- `opensoul/tests/test_gene_extract_wire.py`（新155行，10测）+ `tests/test_gene_find_relevant_coldstart.py`（新69行，4测）
+**改动内容**（全增量old_string/new_string，无全量重写）：
+1. **gene_wire.tool_calls_for_extract**：扁平账本→契约`[{"function":{"name","arguments"}}]`JSON字符串；arguments值按arg_chars=300裁剪（标量直过/容器浅递归限量）；预算8000内完整序列，超预算保头尾各半预算丢中段+`__TRUNCATED__`哨兵（arguments={"dropped":N,"total":M}）显式记账（截断不静默）；空账本→"[]"（空契约语义不变）；巨条目极端情形至少保首条。
+2. **消费方哨兵过滤**（skill_learner._is_wire_sentinel）：dunder名=元数据条目，不进tool_sequence/参数/模板——否则同一任务不同截断点→不同skill_id碎片化；过滤后空=只有元数据→同样不提炼。
+3. **API wire边界解码归一**（gene.py）：json.loads失败→ast.literal_eval兜底旧repr载荷（goose宽容反序列化同门）；扁平形态补function包装（live E2E曾实锤不归一会得空tool_sequence+异skill_id——修复中途抓到的第二形态缺口）；非列表照旧空契约→400非静默。
+4. **find_relevant冷启动修复**：废除usage序LIMIT*3预窗口，相关性/评分对全集做最后才截limit（评分公式不变：rate*0.6+min(usage,10)*0.02+关键词0.5/0.3）。
+**接线位置**（grep证据，文件:行号）：
+- 定义：`acp-proxy/agent/gene_wire.py:64 tool_calls_for_extract`/`opensoul/src/gene/skill_learner.py:21 _is_wire_sentinel`
+- **真实运行时路径调用点**（_prompt_inner=每条带工具用户消息必经）：`agent/soulmate_agent.py:4078 gene_wire.tool_calls_for_extract(tool_calls_log)`（/api/gene/skill/extract载荷）；`opensoul/src/api/gene.py:272 extract_skill`（解码+归一）→`gene.py:306 skill_learner.extract_from_execution`→`skill_learner.py:373 _is_wire_sentinel过滤`；find_relevant消费方：`gene.py:321 /skill/recommend`+`skill_learner.py:641 get_context_prompt`
+- 防回退护栏测试直接读源码断言`str(tool_calls_log)`写法清零
+**验证结果**：
+- 完整性✅：两笔commit `git diff --cached --numstat`逐hunk核对全为本轮改动（openmate的systemic_test_results.json、opensoul的config/rbac_policy.csv sibling改动显式排除，commit走git add白名单）；6文件ast.parse全OK。
+- 集成✅：上述grep链完整（定义→_prompt_inner真实调用点→API解码归一→extract_from_execution哨兵过滤→find_relevant两个消费方）；测试即接线证据——TestExtractPostWiring走真实_prompt_inner复杂路径（真实read_file/write_file执行），断言真实POST载荷json.loads可解+function形态+真实参数随行。
+- 测试✅：新测试25个全过（acp-proxy test_gene_extract_wire 11/11：契约roundtrip/奇异参数/空账本/裁剪/预算内无哨兵/截断哨兵dropped·total如实/保头尾/载荷不超发/巨条目兜底/真实_prompt_inner载荷契约/防回退护栏；opensoul test_gene_extract_wire 10/10 + test_gene_find_relevant_coldstart 4/4：哨兵不进模板/skill_id对截断点稳定/纯哨兵不提炼/普通名不误伤/契约JSON 200/旧repr扁平同skill_id/扁平JSON归一同id/哨兵API面同id/垃圾400/非列表400/20条高usage旧行后新技能仍top1/相关性胜usage/limit照旧/空库空列表）；邻居套件49+53 passed零回归；**acp-proxy全量tests/ 1586 passed 0 failed**（604s，1575+11精确吻合）；**opensoul全量tests/ 2325 passed 0 failed**（158s，2311+14精确吻合）；`systemic_test.py` **29/29 passed**。
+- **live E2E实锤**（真实WS外全链：gene_wire产物→live :8090→真实skills.db，零stub）：修复中途一轮抓到第二缺口（旧repr扁平载荷得空tool_sequence+异skill_id）→补形态归一后复跑**三方skill_id一致**：①契约载荷200 `tool_sequence=read_file → write_file` ②旧repr扁平载荷200同id（解码等价）③__TRUNCATED__哨兵载荷200 UPDATE同id（防碎片化）④垃圾载荷400；测试残留skill行DELETE 200清零。
+- **live机制实锤**（find_relevant冷启动）：真实skills.db 135行中12条(usage2,success2)旧测试行占满旧LIMIT9窗口→新行(2,1)被截→test_gene_skill_usage两个live API测试StopIteration复现；修复后同测试通过（新行关键词+0.5排top1）。
+**服务重启**：`systemctl --user restart opensoul.service`（wire归一+find_relevant两次改动各重启一次）→/api/gene/health=200；`systemctl --user restart acp-proxy-a.service acp-proxy-b.service`→:8092/:8095 health=200（终版代码上跑全量+systemic）；前端零改动无需build。
+**commit**：openmate `96a4b0ee` + opensoul `7ba55d3d`。
+**遗留问题**：
+1. **find_relevant全集扫描无上限**：表规模现135行没问题，学习技能无retention会长期膨胀（与既有"审计表无retention"遗留同源）；到千行级需加last_used_at窗口或索引。
+2. **成功回合的live usage+1仍未在真实LLM回合上重证**（06:47遗留#1照旧，LLM 402余额不足环境项）——本轮wire修复让"提炼"端活了，但真实LLM回合的提炼→usage闭环要等余额恢复跑e2e_skill_usage_receipt.py。
+3. **live库测试行累积无清理**：每次全量跑在真实skills.db留~14行测试技能（本轮135行里大量"wire解码测试/遥测接线测试"行）——正是它们引爆了冷启动盲区；建议测试client接独立测试库或测试后批量DELETE（下轮P2可做）。
+4. **哨兵契约只在两端实现**：若未来第三个消费方接入extract需同样过滤dunder名（契约已写进gene_wire docstring，无独立schema文档）。
+5. 残余遗留观察项照旧：前端无回滚UI/审计视图/FAIL记录不分trivial/审计表无retention/usage排序公式启发式/turn_outcome行首前缀残余误伤面/result_ok 60字符窗口/提取execution_log的str()[:1000]截断（本轮已由gene_wire预算化取代）/relay round级需引擎侧自报/两消费者近重复文件去重/树内搜索与扁平搜索整合/回放与树互斥/跨session搜索/LLM_FALLBACK_CHAIN未配置（402环境项）/环境变量密钥外发误伤面/污点分析近似/双侧镜像人工同步/model_gateway凭据映射表/engine.py死代码清理候选/MCP重连真实Server验证/attach跨turn共享/RESUMED后同turn多episode单记录。
+6. cron环境约束实录：**pkill -f模式含自身命令串会自杀并殃及同pattern的后台pytest**（本轮两个全量跑被带走一次，教训：kill用pid不用pattern）；live服务API测试随跑随累积行→先后两次全量跑结果不同（第一次2 failed正是累积引爆）；wait超时clamp 180s照旧分段poll。
+7. 第7步gene skill上报✅：skill_id=`skill_8620ecef5a65`（wire格式修复）+`skill_8a634cd99973`（冷启动修复），均event=ADD+success_rate=1.0，已入gene技能库供find_relevant检索复用。
