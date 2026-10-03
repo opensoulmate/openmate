@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import functools
 import logging
+import re
 import time
 
 import httpx
@@ -54,6 +55,49 @@ def llm_outcome_status(response_text: str) -> str:
     if "\n[LLM错误" in text or "\n[LLM响应超时" in text:
         return "error"
     return "ok"
+
+
+# 工具/执行侧失败的结构化文本标记（llm_outcome_status同哲学：认显式结构化
+# 标记，不用"错误/error"子串包含——正常回答讨论error/报错/失败案例不能误判
+# 成失败）。形态来源（全为本仓库机器生成的报错前缀/固定格式）：
+#   「错误: …」/「错误：…」               session_recall.py:577、tool_output_handler.py:365
+#   「写入失败: …」「执行失败: …」等X失败:  soulmate_agent.py各工具分支兜底
+#   「{emoji} 工具 `X` 调用失败 (第N次尝试)」 tool_errors.to_model_message
+#   「❌ 文件 `path` 写入失败: …」         edit_safety.py:68
+#   「[MCP 工具调用失败]…」「[CODE_MODE] 批量执行失败:…」「[被拦截」  各分支
+_TURN_FAILURE_MARKERS = (
+    "[MCP 工具调用失败]",
+    "[CODE_MODE] 批量执行失败",
+    "[被拦截",
+)
+_TURN_FAILURE_RES = (
+    # 行首结构化前缀：「错误: …」/「错误：…」/「写入失败: …」/「执行遇到错误：…」
+    re.compile(r"^[ \t]*(?:❌[ \t]*)?\S{0,12}(?:错误|失败)[:：]", re.M),
+    # 行首英文同款：「Error: …」「Exception: …」「Failed: …」
+    re.compile(r"^[ \t]*(?:error|exception|failed|failure)[:：]", re.M | re.I),
+    # tool_errors.to_model_message 固定格式：「工具 `X` 调用失败 (第N次尝试)」
+    re.compile(r"工具 `[^\n`]+` 调用失败"),
+    # edit_safety：「❌ 文件 `path` …失败: …」/「❌ 改进失败: …」
+    re.compile(r"^❌[^\n]{0,60}失败[:：]", re.M),
+)
+
+
+def turn_outcome_success(response_text: str) -> bool:
+    """回合真实结局判定（技能usage回执/能力评估/技能提取/语义缓存准入共用单一真源）。
+
+    修复"指标说谎"：旧启发式 `"错误" not in text and "error" not in text.lower()`
+    把正常回答里讨论error/报错/失败案例的回合误判成失败——技能success_rate被
+    无辜稀释、能力评估按0.3记分、成功回合被挡在技能提取门外（"不进化"的度量
+    假象之一）。现与llm_outcome_status同哲学：LLM基础设施失败仍判error；
+    否则只认上列结构化失败标记（行首前缀/固定格式）。
+    残余误伤面：行首「常见错误：…」类小节标题（罕见）；反向漏检：模型用自然
+    语言改述失败（如"我没有权限访问"）——文本启发式的固有极限。
+    """
+    text = response_text or ""
+    if llm_outcome_status(text) == "error":
+        return False
+    return not (any(m in text for m in _TURN_FAILURE_MARKERS)
+                or any(p.search(text) for p in _TURN_FAILURE_RES))
 
 
 def _fail_safe(fallback):

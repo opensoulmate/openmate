@@ -92,7 +92,7 @@ from agent.reflection_engine import ReflectionEngine
 from agent.memory_consolidator import MemoryConsolidator
 from agent.skill_learner import SkillLearner
 from agent.observability import ObservabilityManager, SpanType, SpanStatus
-from agent.trajectory_recorder import TrajectoryRecorder, llm_outcome_status
+from agent.trajectory_recorder import TrajectoryRecorder, llm_outcome_status, turn_outcome_success
 from agent.context_analyzer import ContextAnalyzer, ContextComponent
 from agent.session_fsm import SessionStateMachine, SessionState, SessionEvent
 from agent.parallel_executor import ParallelToolExecutor
@@ -2605,10 +2605,12 @@ You can send files to the user natively: to deliver a file, write a brief confir
                                 session_id=session_id, tool_name=func_name,
                                 arguments=func_args, result=str(result),
                                 duration_ms=tool_duration * 1000,
-                                success="错误" not in str(result),
+                                # 结局走result_ok单一真源（首部结构化失败标记）——
+                                # "错误"子串会把内容里带"错误"的读取结果误判成失败
+                                success=result_ok(result),
                             )
                             # 缓存只读工具结果
-                            if func_name in ("read_file", "list_files", "search_files") and "错误" not in str(result):
+                            if func_name in ("read_file", "list_files", "search_files") and result_ok(result):
                                 self._tool_cache.put(func_name, func_args, str(result))
                         except Exception as _audit_err:
                             # mem0 §1.1失败必须可见：审计失效是安全事件，禁止DEBUG级静默
@@ -2759,8 +2761,9 @@ You can send files to the user natively: to deliver a file, write a brief confir
         3. 基础设施失败（llm_outcome_status=error，如LLM 402/超时——错误以文本
            形态混进回复，技能没被真实消费；供应商抖动不能稀释好技能的success_rate，
            失败可见性由trajectory error span承担）。
-        成败=消费回合的真实结局（success=回复无错误标记，与capability/evaluate
-        同款turn结局启发式）。回执失败只记debug日志不阻塞回合收尾（CowAgent
+        成败=消费回合的真实结局（success=turn_outcome_success单一真源：只认
+        结构化失败标记，不认"错误/error"子串——正常回答讨论error/报错不能
+        误判失败稀释success_rate）。回执失败只记debug日志不阻塞回合收尾（CowAgent
         记账哲学）。返回成功回执条数（可观测）。
         """
         if not skill_ids:
@@ -2773,7 +2776,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
             logger.debug(
                 f"[gene] 回合基础设施失败(LLM错误)，skill usage不计: {skill_ids}")
             return 0
-        success = "错误" not in full_response and "error" not in full_response.lower()
+        success = turn_outcome_success(full_response)
         ok = 0
         for skill_id in skill_ids:
             try:
@@ -3893,8 +3896,9 @@ You can send files to the user natively: to deliver a file, write a brief confir
                 full_response = formatted.content
                 logger.info(f"[output-fmt] 输出已格式化: {formatted.content_type}")
 
-            # 2. 语义缓存存储（只缓存高质量回复）
-            if len(full_response) > 50 and "错误" not in full_response and "error" not in full_response.lower():
+            # 2. 语义缓存存储（只缓存高质量回复；结局走turn_outcome_success
+            # 单一真源——含"error/错误"字样但非失败的回复同样值得缓存）
+            if len(full_response) > 50 and turn_outcome_success(full_response):
                 self._semantic_cache.put(
                     query=user_text, response=full_response,
                     tokens_used=len(full_response) // 3,
@@ -3985,7 +3989,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
                 obs_type = "conversation"
                 if tool_calls_log:
                     obs_type = "conversation_with_tools"
-                if "错误" in full_response or "error" in full_response.lower():
+                if not turn_outcome_success(full_response):
                     obs_type = "conversation_error"
                 if len(user_text) < 10:
                     obs_type = "conversation_short"
@@ -4000,7 +4004,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
                         "tool_calls": tool_calls_log,
                         "tool_count": len(tool_calls_log),
                         "response_length": len(full_response),
-                        "has_error": "错误" in full_response or "error" in full_response.lower(),
+                        "has_error": not turn_outcome_success(full_response),
                     },
                 )
             except Exception as e:
@@ -4019,7 +4023,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
 
                 # 0.5. 能力评估（如果有工具调用）
                 if tool_calls_log:
-                    has_error = "错误" in full_response or "error" in full_response.lower()
+                    has_error = not turn_outcome_success(full_response)
                     await _client.post(
                         "http://127.0.0.1:8090/api/benchmark/capability/evaluate",
                         json={
@@ -4046,8 +4050,10 @@ You can send files to the user natively: to deliver a file, write a brief confir
                     ]},
                     timeout=2,
                 )
-                # 2. 技能提取（如果任务成功且有工具调用）
-                if tool_calls_log and "错误" not in full_response:
+                # 2. 技能提取（如果任务成功且有工具调用；结局走turn_outcome_success
+                # 单一真源——旧"错误"子串门会把讨论error/报错的成功回合挡在学习
+                # 门外="不进化"的度量假象之一）
+                if tool_calls_log and turn_outcome_success(full_response):
                     await _client.post(
                         "http://127.0.0.1:8090/api/gene/skill/extract",
                         json={
