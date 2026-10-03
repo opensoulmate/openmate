@@ -4244,3 +4244,32 @@
 6. 其余遗留观察项照旧：relay round级需引擎侧自报/两消费者近重复文件去重/树内搜索与扁平搜索整合/回放与树互斥/跨session搜索/LLM_FALLBACK_CHAIN未配置（402环境项）/环境变量密钥外发误伤面/污点分析近似/双侧镜像人工同步/model_gateway凭据映射表/engine.py死代码清理候选/MCP重连真实Server验证/attach跨turn共享/RESUMED后同turn多episode单记录。
 7. cron环境约束实录：**patch工具"报错但实际已应用"**——old_string多行匹配报not unique后重试造成重复插入（__init__属性插了两份，grep自查抓掉立即去重）；教训：patch报错后必须grep确认没被半应用再重试；build_env空llm_call_responses→TaskPlanner.plan判retry走简单路径→撞__new__ agent缺`_tracer`（被LLM error兜底吞，测试静默走错路径）——复杂任务路径测试必须带JUDGE_CONTINUE；aclose_turn会pop close_reason，中断断言要断收口前产物（消息文本）而非dict残留；e2e嵌套函数改外部变量用nonlocal非global。
 8. 第7步gene skill上报✅：skill_id=`skill_a574c3bd7277`（event=ADD+success_rate=1.0）已入gene技能库供find_relevant检索复用。
+
+## [2026-10-03 09:42 CST] 回合结局判定单一真源——turn_outcome_success废除"错误/error"子串误判（06:47轮遗留#2销账，P0-5"指标不许说谎"）
+**目标**：销账06:47轮遗留#2"success启发式仍是子串匹配——正常回复里含'error'单词会被误判失败"。旧判定 `"错误" not in text and "error" not in text.lower()` 在acp-proxy有8个判定点，把讨论error/报错/失败案例的正常回合误判成失败：①技能usage回执success=False→success_rate被无辜稀释（指标说谎）②能力评估accuracy按0.3记分（指标说谎）③技能提取被整轮跳过——成功回合学不到东西（"不进化"的度量假象之一）④语义缓存拒绝含error字样的优质回复⑤工具审计把内容带"错误"的读取结果记为失败且拒绝缓存。
+**调研来源**：①SUMMARY P0-5评估闭环"度量前提=指标不说谎"（success_rate/accuracy失真是"一直没进化"的度量假象）；②本repo llm_outcome_status的既定哲学（trajectory_recorder.py:48原文："判定用前缀/行首标记，不用'错误'子串包含（正常回答里也会出现，不能误伤）"）——06:47轮遗留#2原文方向"llm_outcome_status的前缀标记哲学同样适用于'工具失败'判定"，本轮照此实现不自创；③read_turn.result_ok同族注释（"错误都是结果前缀报出的——正文里出现'错误'二字不算失败"）；④失败形态清单逐一取自本仓库机器生成报错串（session_recall.py:577「错误: …」/tool_output_handler.py:365「错误：…」/tool_errors.to_model_message「工具 `X` 调用失败」/edit_safety.py:68「❌ 文件 `x` …失败:」/[CODE_MODE]批量执行失败/[MCP 工具调用失败]）。
+**改动文件**（openmate commit `339f1261`，3文件+372/-13）：
+- `acp-proxy/agent/trajectory_recorder.py`（+44/-0）：turn_outcome_success + _TURN_FAILURE_MARKERS/_TURN_FAILURE_RES
+- `acp-proxy/agent/soulmate_agent.py`（+19/-13）：8处判定点接单一真源
+- `acp-proxy/tests/test_turn_outcome.py`（新，20测）
+**改动内容**（全增量old_string/new_string，无全量重写）：
+1. **turn_outcome_success单一真源**（trajectory_recorder.py:85）：llm_outcome_status=error→失败（基础设施失败语义不变）；否则只认结构化失败标记——行首「错误:/X失败:」前缀（含全角冒号）、行首「Error:/Exception:/Failed:」、tool_errors固定格式、edit_safety「❌ 文件 `x` …失败:」、机器标记[MCP 工具调用失败]/[CODE_MODE] 批量执行失败/[被拦截；显式标注残余误伤面（行首「常见错误：」小节标题）与漏检面（自然语言改述失败）。
+2. **8处判定点统一**：usage回执success(:2779)/语义缓存准入(:3901)/进化obs_type(:3992)/进化观察has_error(:4007)/能力评估has_error(:4026)/技能提取门(:4056)→turn_outcome_success；工具审计success与只读结果缓存(:2612/:2615)→read_turn.result_ok（工具结果侧既有同族真源）。
+3. 语义修复：extract门从"含'错误'就跳过"变"结构化失败才跳过"——讨论error的成功回合重新进入技能学习（"不进化"堵点之一）。
+**接线位置**（grep证据，文件:行号）：
+- 定义：`acp-proxy/agent/trajectory_recorder.py:85 turn_outcome_success`
+- 真实运行时路径调用点（都在_soulmate _prompt_inner/_run_llm_with_tools=每条用户消息必经）：`agent/soulmate_agent.py:95 import`→`:2779`（_report_skill_usage回执）→`:3901`（语义缓存）→`:3992`/`:4007`（进化观察）→`:4026`（capability/evaluate accuracy）→`:4056`（skill/extract门）；工具侧`:2612 audit_call success=result_ok(result)`→`:2615 只读缓存准入=result_ok(result)`
+**验证结果**：
+- 完整性✅：`git diff --numstat`=trajectory_recorder.py +44/-0、soulmate_agent.py +19/-13、test新增290行，逐hunk核对全为本轮改动（sibling并行会话的src/前端+locales+systemic_test_results.json显式排除，commit走git add白名单3文件）；两文件ast.parse语法OK。
+- 集成✅：上述grep链完整（定义→6个_prompt_inner真实判定点+2个工具判定点）；测试即接线证据——TestPromptInnerGates走真实_prompt_inner简单路径（真实_run_llm_with_tools工具轮+真实后处理POST捕获），TestToolAuditAndCache走真实read_file工具执行路径（非stub）。
+- 测试✅：新`tests/test_turn_outcome.py` **20/20 PASS**（①单元12：英文error正文/中文报错正文/空None→success；「错误:」/全角「错误：」/「写入失败:」等X失败:×4/「执行遇到错误：」/tool_errors格式/edit_safety×2/[MCP]/[CODE_MODE]/[被拦截]/LLM基础设施×2/行首Error:/长回复中夹报错行→failure；任务报告正常多行→success ②回执3：讨论error回复→success=True（旧False，误判修复实锤）/英文error回复→success=True/结构化失败→success=False ③_prompt_inner真实路径2：正文带"错误"的成功回合→extract POST照发+accuracy=0.8+details.success=True（旧：跳过extract+0.3）；「写入失败:」回合→无extract+accuracy=0.3 ④工具审计2：内容带"错误"的读取结果→audit success=True+缓存put（断言结果确实含"错误"防伪测）；「错误:」失败结果→success=False+不缓存）；邻居套件receipt+trajectory_recorder+read_turn+tool_output_wiring+no_silent_truncation+plan_execution=**134 passed**零回归；**acp-proxy全量tests/ 1569 passed 0 failed**（598s，1549+20新精确吻合）；`systemic_test.py` **29/29 passed**（双服务重启后终版代码上跑）。
+**服务重启**：`systemctl --user restart acp-proxy-a.service acp-proxy-b.service`→active、:8092/:8095 health=200、:8090 /api/gene/health=200；opensoul本轮零改动无需重启；前端零改动无需build。
+**commit**：openmate `339f1261`。
+**遗留问题**：
+1. **残余误伤面**：行首「常见错误：…」类小节标题会被判失败（罕见；比旧全串匹配窄两个数量级）；反向漏检=模型自然语言改述失败（"我没有权限访问"）无标记可认——文本启发式固有极限，等真实数据误伤率再调。
+2. **「X失败:」行首前缀宽度**：`\S{0,12}失败[:：]`覆盖所有已知机器形态（写入/修改/执行/搜索/抓取/读取图片/clarify/改进失败）但也会认「任务失败：原因分析」类行首——语义上行首宣告失败的回复按失败算可接受。
+3. **result_ok仍是60字符窗口**：工具结果侧首部60字符内的"错误"字样仍误伤（读到开头就提"错误"的文件）；进一步收紧需工具执行器返回结构化ok字段而非文本嗅探。
+4. **plan复杂路径tool_calls_log恒空（新发现，建议下轮P1）**：_step_tools被丢弃（soulmate_agent.py:3694只接step_result）→复杂任务回合的capability/extract/技能usage回执整体不触发（本轮测试只覆盖简单路径）——独立缺口，接上后复杂任务的学习/记账链才闭合。
+5. 其余遗留观察项照旧：前端无回滚UI/审计视图/FAIL记录不分trivial/审计表无retention/usage排序公式启发式/relay round级需引擎侧自报/两消费者近重复文件去重/树内搜索与扁平搜索整合/回放与树互斥/跨session搜索/LLM_FALLBACK_CHAIN未配置（402环境项）/环境变量密钥外发误伤面/污点分析近似/双侧镜像人工同步/model_gateway凭据映射表/engine.py死代码清理候选/MCP重连真实Server验证/attach跨turn共享/RESUMED后同turn多episode单记录。
+6. cron环境约束实录：`sed -n "..." file`组合命令被tirith拦（command parser limit）→拆用search_files/read_file；patch工具sibling修改告警需git diff核实归属（本轮trajectory_recorder.py diff只有本人hunk）；sibling并行会话共用工作树（src/前端+locales）照旧白名单排除；全量pytest 598s。
+7. 第7步gene skill上报✅：skill_id=`skill_8cca5dd7ff8a`（event=ADD+success_rate=1.0）已入gene技能库供find_relevant检索复用。
