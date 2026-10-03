@@ -1644,6 +1644,8 @@
     "skillLibraryTab": "スキルライブラリ",
     "skillLibrary": "スキルライブラリ（学習済み）",
     "skillLibraryDesc": "過去の実行から学習したスキル——展開して監査履歴を確認し、差分プレビュー後にワンクリックでロールバック",
+    "skillCount": "{{shown}} / {{total}} 件のスキルを表示",
+    "loadMore": "さらに読み込む",
     "refresh": "更新",
     "noSkills": "学習スキルはまだありません",
     "skillUsage": "使用",

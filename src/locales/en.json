@@ -1649,6 +1649,8 @@
     "skillLibraryTab": "Skill Library",
     "skillLibrary": "Skill Library (Learned)",
     "skillLibraryDesc": "Skills learned from past executions — expand for audit history, preview field diffs and roll back with one click",
+    "skillCount": "Showing {{shown}} / {{total}} skills",
+    "loadMore": "Load more",
     "refresh": "Refresh",
     "noSkills": "No learned skills yet",
     "skillUsage": "Uses",

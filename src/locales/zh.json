@@ -1646,6 +1646,8 @@
     "skillLibraryTab": "技能库",
     "skillLibrary": "技能库（学习技能）",
     "skillLibraryDesc": "从历史执行中学习到的技能——展开查看审计历史，逐字段预览后一键回滚",
+    "skillCount": "已显示 {{shown}} / {{total}} 个技能",
+    "loadMore": "加载更多",
     "refresh": "刷新",
     "noSkills": "暂无学习技能",
     "skillUsage": "使用",

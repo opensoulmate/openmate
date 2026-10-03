@@ -116,6 +116,12 @@ export function GeneClient() {
   // Skills tab state（技能库：审计视图+一键回滚）
   const [skills, setSkills] = useState<LearnedSkill[]>([])
   const [skillsLoading, setSkillsLoading] = useState(false)
+  const [skillTotal, setSkillTotal] = useState(0)
+  const [skillHasMore, setSkillHasMore] = useState(false)
+  const [skillLoadingMore, setSkillLoadingMore] = useState(false)
+  // 可回滚事件集=后端AUDIT_STATE_EVENTS单一真源（GET /skill的revertible_events透出），
+  // 按钮可见性据此判断——不再前端硬编码"FAIL除外"（新增事件类型两端漂移）
+  const [revertibleEvents, setRevertibleEvents] = useState<string[]>(["ADD", "UPDATE", "DELETE", "REVERT"])
   const [expandedSkill, setExpandedSkill] = useState<string | null>(null)
   const [skillHistory, setSkillHistory] = useState<Record<string, AuditEvent[]>>({})
   const [revertPreview, setRevertPreview] = useState<RevertPreview | null>(null)
@@ -261,14 +267,23 @@ export function GeneClient() {
 
   // ── 技能库（learned_skills）：库存盘点+审计历史+回滚 ──────────────
 
-  const fetchSkills = useCallback(async () => {
-    setSkillsLoading(true)
+  const fetchSkills = useCallback(async (offset = 0, append = false) => {
+    if (append) setSkillLoadingMore(true)
+    else setSkillsLoading(true)
     try {
-      const res = await fetch(`${apiBase}/api/gene/skill`)
+      const res = await fetch(`${apiBase}/api/gene/skill?limit=100&offset=${offset}`)
       const data = await res.json()
-      setSkills(data.skills || [])
+      const rows: LearnedSkill[] = data.skills || []
+      setSkills(prev => (append ? [...prev, ...rows] : rows))
+      // total=库存真实总数（不是本页条数——count只是len(本页)，122技能只显示100的病根）
+      setSkillTotal(typeof data.total === "number" ? data.total : rows.length)
+      setSkillHasMore(Boolean(data.has_more))
+      if (Array.isArray(data.revertible_events) && data.revertible_events.length > 0) {
+        setRevertibleEvents(data.revertible_events)
+      }
     } catch {} finally {
       setSkillsLoading(false)
+      setSkillLoadingMore(false)
     }
   }, [apiBase])
 
@@ -416,9 +431,14 @@ export function GeneClient() {
                 <History className="w-4 h-4" /> {t("gene.skillLibrary")}
               </h3>
               <p className="text-xs text-muted-foreground mt-1">{t("gene.skillLibraryDesc")}</p>
+              {skillTotal > 0 && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  {t("gene.skillCount", { shown: skills.length, total: skillTotal })}
+                </p>
+              )}
             </div>
             <button
-              onClick={fetchSkills}
+              onClick={() => fetchSkills()}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-muted/30 text-muted-foreground hover:bg-muted/50 transition-all shrink-0"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${skillsLoading ? "animate-spin" : ""}`} />
@@ -532,7 +552,7 @@ export function GeneClient() {
                                 #{ev.audit_id} · {ev.actor || "—"} · {ev.reason || "—"}
                               </span>
                               <span className="text-muted-foreground shrink-0 hidden sm:inline">{fmtTime(ev.created_at)}</span>
-                              {ev.event !== "FAIL" && (
+                              {revertibleEvents.includes(ev.event) && (
                                 <button
                                   onClick={() => handleRevertPreview(skill.skill_id, ev.audit_id)}
                                   className="shrink-0 px-2 py-1 rounded bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 transition-colors"
@@ -548,6 +568,16 @@ export function GeneClient() {
                   )}
                 </div>
               ))}
+              {skillHasMore && (
+                <button
+                  onClick={() => fetchSkills(skills.length, true)}
+                  disabled={skillLoadingMore}
+                  className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium bg-muted/30 text-muted-foreground hover:bg-muted/50 transition-all disabled:opacity-50"
+                >
+                  {skillLoadingMore && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  {t("gene.loadMore")}
+                </button>
+              )}
             </div>
           )}
         </div>
