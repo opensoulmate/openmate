@@ -66,6 +66,7 @@ from agent.mcp_resources import (
 )
 from agent import memory_echo
 from agent import memory_marker
+from agent import gene_wire
 from agent import session_recall
 from agent import turn_lifecycle
 from utils import network_state  # turn级park合并：turn.open/close驱动park预算
@@ -4069,7 +4070,13 @@ You can send files to the user natively: to deliver a file, write a brief confir
                         "http://127.0.0.1:8090/api/gene/skill/extract",
                         json={
                             "task_description": user_text[:200],
-                            "execution_log": str(tool_calls_log)[:1000],
+                            # extract契约wire格式（gene_wire单一序列化真源）：
+                            # 旧str(tool_calls_log)[:1000]是Python repr→
+                            # opensoul json.loads失败→tool_calls=[]→提炼恒400
+                            # （生产学习链全灭），且扁平形态无function包装。
+                            # 预算化截断显式记账（__TRUNCATED__哨兵）。
+                            "execution_log": gene_wire.tool_calls_for_extract(
+                                tool_calls_log),
                             "success": True,
                         },
                         timeout=2,
