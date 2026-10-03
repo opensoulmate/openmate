@@ -4393,3 +4393,29 @@
 3. 遗留#2（测试marker字符串识别/learned_skills source列）、#3（~/.opensoul/templates两个devnorm-gp-test垃圾文件待核实来源后清理+TemplateEngine写入护栏）、#5残余观察项照旧未动，下轮候选。
 4. cron约束实录复发确认：curl|python3管道被tirith拦截→curl落/tmp文件再python读（本轮两次命中，拆分方案稳定可用）。
 5. 第7步gene skill上报✅：skill_id=`skill_e6ab87c17fb8`（event=ADD+success_rate=1.0，tool_sequence=terminal→read_file→search_files→patch→write_file→terminal），已入gene技能库供find_relevant检索复用。
+
+## [2026-10-03 21:38] TemplateEngine生产存储写入护栏+垃圾模板清理（销17:01轮遗留#3指定项，含P0级路径穿越堵死）
+**目标**：①~/.opensoul/templates残留2个假模板（devnorm-gp-test_reject_002/review_001.json）让/api/gene/templates列表出现假条目，来源待核实不敢删；②核实过程中发现真实安全缺口——template_id完全用户可控（POST /api/gene/templates、/import、clone）直接拼接`storage_dir / f"{template_id}.json"`→**路径穿越任意文件写/删**；③加载侧文件名与内部template_id不符照单全收（可伪造来源）；④write_text非原子写，崩溃留半截JSON被_load_user_templates以debug静默跳过=静默丢模板无感知。
+**调研来源**：17:01轮遗留#3原话"建议下轮核实来源后清理并考虑TemplateEngine生产存储写入加护栏"；SUMMARY immune P1"skill供应链防御（origin钉死+原子swap+校验）kilocode discovery.ts ~80行"——护栏三件套整段照此实现（校验=白名单字符集、钉死=文件名==id、原子swap=tmp+os.replace）；P0-4可观测性"拒载必须可见"（debug静默跳过→warning）；记忆沉淀"脚本先断言后写盘"。
+**来源核实**（删除前完成）：两文件author=gene-loop、template_id=`devnorm-{proposal_id}`（promote.py:94拼接规则精确吻合）、proposal_id=`gp-test_reject_002`/`gp-test_review_001`、evidence.source=`evo_feedback.json:test_*`、created_at=2026-09-21 12:52/18:31——确认为gene_loop promote的测试/dev提案（gp-test_*）在旧版测试打live :8090时期落入生产TemplateEngine存储；现行gene_loop测试已全部FakeGeneClient stub（test_promote.py/test_review.py grep确认），泄漏通道已闭。备份/tmp/templates-junk-bak-20261003/后删除，生产~/.opensoul/templates清零（22内置模板纯内存注册不落盘）。
+**改动文件**：opensoul `src/gene/templates.py`（+66/-4）、`src/api/gene.py`（+6/-2）、`tests/test_template_write_guard.py`（新192行，24测）。
+**改动内容**（全增量old_string/new_string，无全量重写）：
+1. **校验**：`_TEMPLATE_ID_RE = ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$` + `TemplateValidationError` + `_validate_template_id()`——首字符字母数字+禁路径分隔符/前导点/非ASCII/超长，create/import/clone/delete/_save全写路径校验（clone经import_template自动覆盖）。
+2. **containment双保险**：_save_template解析后parent必须==storage_dir.resolve()，regex失守也穿不出去。
+3. **原子swap**：`.{tid}.json.tmp`写入+os.replace——崩溃不再留半截JSON。
+4. **origin钉死**：_load_user_templates要求文件名stem==template_id且id过白名单，否则拒载；拒载日志debug→warning（假模板/丢模板必须可观测）。
+5. **字段校验**：create_template必填name/category缺失或空白→TemplateValidationError（曾data["name"] KeyError→API 500）；空template_id自动生成user-{ts}（沿用API层既有语义）。
+6. **API边界**：gene.py create端点捕获TemplateValidationError→HTTP 400；import按契约逐条回(error msg)不炸整批；delete非法id直接False不触盘。
+**接线位置**（grep证据，文件:行号）：`src/gene/templates.py:45 TemplateValidationError`/`:49 _validate_template_id`/`:89 _save_template必经校验`/`:117 os.replace原子swap`/`:1008,1010 create校验`/`:1029 delete校验`/`:1157 import校验`；**API真实调用点**：`src/api/gene.py:9 import`→`:107 except TemplateValidationError`（POST /api/gene/templates端点=runtime路径）；三条写路径（create/import/clone）全部收口于_save_template单一落盘点。
+**验证结果**：
+- 完整性✅：`git diff --cached --numstat`=3文件+255/-6（gene.py 6/2、templates.py 66/4、tests 192/0），config/rbac_policy.csv为环境既有sibling改动显式排除；ast.parse两src文件OK。
+- 集成✅：grep链如上——护栏在POST /api/gene/templates真实HTTP路径生效；**live实证**（重启后）：①POST template_id="../pwn-live"→**400** `{"detail":"invalid template_id: '../pwn-live' ..."}`且`../pwn-live.json`不存在+storage零文件（穿越写被堵死的运行时铁证）②GET /api/gene/templates=200共22条（全内置），**junk present: []**（假模板已清）③POST合法t-live-guard-check→200+文件落盘content template_id吻合→DELETE 200→storage清零（正路径无误伤）。
+- 测试✅：新文件**24/24 passed**（11种evil id参数化拒绝不触盘/空id自动生成/必填字段/原子swap调用证据+零tmp残留+roundtrip加载/origin钉死filename≠id拒载+warning可观测/坏id文件拒载/import·clone·delete坏id/API 400·400·200+listed/import逐条报错）；邻居test_gene+test_gene_test_isolation+test_gene_templates 12/12零回归；**opensoul全量tests/ 2364 passed 0 failed**（180s，2340+24精确吻合）。首轮全量30 failed为环境对撞（全量跑中重启opensoul.service→live client测试ConnectError），复跑同两文件18 passed+终版全量2364全过坐实非回归。
+**服务重启**：`systemctl --user restart opensoul.service`→/api/gene/health=200；acp-proxy零改动；前端零改动无需build。
+**commit**：opensoul `70ab73d9`。
+**遗留问题**：
+1. retention缺省阈值/显式audit_id回滚404（19:17轮#1/#2）照旧；17:01遗留#2（测试marker字符串识别/learned_skills source列）本轮未动，仍为下轮P2候选。
+2. gene_loop旧测试泄漏通道已由FakeGeneClient闭合，但若未来有人在gene_loop测试里去掉stub打live :8090，护栏只保证id合法不拦"测试内容进生产存储"——结构性根治仍需gene_loop测试侧隔离fixture（类比gene_client），下轮候选。
+3. 残余遗留观察项照旧（17:01轮#5清单+19:17轮#3残余）。
+4. 全量跑与服务重启存在时序对撞（live client测试依赖服务存活）——教训：**重启服务必须避开全量跑窗口**，已实录。
+5. 第7步gene skill上报✅：skill_id=`skill_347601fd8629`（event=ADD+success_rate=1.0，tool_sequence=read_file→terminal→search_files→patch→write_file），已入gene技能库供find_relevant检索复用。
