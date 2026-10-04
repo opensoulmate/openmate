@@ -4568,3 +4568,33 @@
 4. 残余遗留观察项照旧：前端未接category过滤控件（技能库API已支持category参数）、分页offset稳定性（可改keyset）、learned_skills source列（测试marker字符串识别）、gene_loop测试侧隔离fixture、relay round级需引擎侧自报、两消费者近重复文件去重、树内搜索与扁平搜索整合、回放与树互斥、跨session搜索、LLM_FALLBACK_CHAIN未配置（402环境项）、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步、model_gateway凭据映射表、engine.py死代码清理候选、MCP重连真实Server验证、attach跨turn共享、RESUMED后同turn多episode单记录。
 5. cron环境约束实录：全量pytest前台420s超时被掐→terminal background+process wait轮询（662s跑完）；live验证脚本写/tmp文件执行（/tmp/warn_fail_live_check.py）稳定可用。
 6. 第7步gene skill上报✅：skill_id=`skill_f6117507cbca`（event=ADD+success_rate=1.0，tool_sequence=read_file→search_files→terminal→patch→write_file→terminal→process），已入gene技能库供find_relevant检索复用。
+
+## [2026-10-04 14:20 CST] 技能库分类过滤chip端到端接线——categories facet单一真源（多轮挂账"前端未接category过滤控件"销账，P1进化链可见性）
+**目标**：GET /api/gene/skill的category参数**写了≠接线了**——后端list_skills/count_skills过滤早已支持（06:05/07:35轮），但前端无任何过滤控件消费，生产库124技能×6分类（general 76/coding 31/file_operations 11/web_operations 3/agent_standard 2/system_operations 1）对用户不可筛；且过滤控件没有真值源——选项集+计数若从分页rows推断，limit=100截断会漏分类（07:35轮"122技能只显示100"同族指标说谎）。本轮把过滤做成**标准faceted-search语义**：chip计数=全局分布（过滤后不变），"已显示X/Y"的Y随过滤变。
+**调研来源**：SUMMARY P0-6 Khoj"记忆CRUD API（用户可看/可改/删AI对自己的记忆）"信任设计在技能域的过滤面收口（06:05轮枚举面/07:35轮分页真值面之后的第三块）；facet不受过滤影响+total随过滤变=faceted-search行业通用语义（多搜索面互证）；"指标不许说谎"贯穿：facet/过滤/总数三面口径归一（_CATEGORY_NORM_SQL单一真源）。
+**改动文件**（opensoul commit `a6220c35`，3文件+111/-2；openmate commit `3ace1e1f`，1文件+45/-2；全增量old_string/new_string）：
+- `src/gene/skill_learner.py`（+23/-2）：`_CATEGORY_NORM_SQL`归一常量三处共用 + `category_counts()` facet方法 + list_skills/count_skills过滤口径归一 + list_skills输出category归一
+- `src/api/gene.py`（+3/-0）：GET /skill响应透出`categories`字段
+- `tests/test_gene_skill_list.py`（+85/-0）：TestCategoryFacet 3测
+- `src/app/(app)/gene/gene-client.tsx`（+45/-2）：skillCategory/skillCategories态 + fetchSkills带&category=参数 + 过滤chip行（"全部"+各分类带全局计数）
+**改动内容**：
+1. **facet真值源**（`skill_learner.py:804 category_counts()`）：GROUP BY分类计数、计数降序同数分类名典序——**全局分布，不受category过滤影响**（过滤后chip计数不变）；选项集+计数不从分页rows推断（limit截断会漏分类）；facet计数与count_skills(category)同一张表同一归一口径（测试钉死两面相等+facet求和=总数）。
+2. **口径归一单一真源**：`_CATEGORY_NORM_SQL=COALESCE(NULLIF(category,''),'general')`三处共用（list_skills WHERE/count_skills WHERE/facet GROUP BY），NULL/空串category统一按general计——facet、过滤、总数三面数字不许各说各话；list_skills输出行category同步归一（UI显示与过滤命中一致）。
+3. **前端过滤chip**：skillCategory=""=全部（不带参）；点击chip→fetchSkills重建→useEffect自动带参重查分页从0重来；chip选项集+计数=data.categories（后端facet单一真源，过滤/刷新/翻页均随之漂移）；"全部"chip计数=**facet求和而非skillTotal**（过滤时skillTotal是过滤后的，不冒充全局总数——写完当场自查修掉的口径坑）；零locale改动（复用既有gene.allCategories三语键，分类名机器标识符直出——避开locales与sibling共文件hunk拆分）。
+**接线位置**（grep证据，文件:行号）：
+- 后端定义：`skill_learner.py:756 _CATEGORY_NORM_SQL`/`:804 category_counts`；同文件消费：`:769`（list_skills WHERE）+`:799`（count_skills WHERE）+`:813`（facet GROUP BY）
+- API调用点：`api/gene.py:378 "categories": skill_learner.category_counts()`（GET /api/gene/skill内，router经main.py挂载prefix=/api/gene既有链路）
+- 前端真实消费点：`gene-client.tsx:279 catParam拼&category=`（真实fetch路径）/`:289 setSkillCategories(data.categories)`/`:297 useCallback依赖[apiBase, skillCategory]`/`:466,480 chip选中态`/`:459-490 chip渲染块`/`useEffect:295 fetchSkills()随skillCategory变更自动重查`
+**验证结果**：
+- 完整性✅：opensoul `git diff --cached --numstat`=api +3/-0、skill_learner +23/-2、tests +85/-0（合计+111/-2与commit stat逐行吻合，sibling既存脏文件config/rbac_policy.csv显式排除）；openmate=gene-client.tsx +45/-2单文件（locales/settings-client.tsx的sibling脏改动未入commit，git add白名单）；2个py文件ast.parse OK。
+- 集成✅：grep链如上（定义→3处同文件消费→api/gene.py端点→前端fetch/chip消费点）；**live 11/11 ALL PASS**（/tmp/gene_category_facet_live_check.py，重启后生产库真数据+sqlite直查对照）：①facet与sqlite GROUP BY**两面一致**（{general:76,coding:31,file_operations:11,web_operations:3,agent_standard:2,system_operations:1}）②facet求和=124=库存总数③过滤category=coding→total=31列表全coding**facet照旧不变**④无命中分类total=0 facet照旧⑤过滤+limit=1 has_more真值（general 76→True）；**部署bundle接线字符串实证**：`.next/static/chunks/08vrbtb7upvtm.js`含`&category=`/`categories`/`allCategories`/`revertible_events`各1命中（新fetch参数+facet解析+chip标签均进产物）；openmate-web重启后`/gene` 200。
+- 测试✅：tests/test_gene_skill_list.py **12 passed**（9基线+3新精确吻合，含1次中途修正：API测试payload单tool call不达提取门槛→补第二调用，改后全绿）；gene子集5文件**61 passed**；**opensoul全量tests/ 2391 passed 0 failed**（173s，2388基线+3新精确吻合）；`systemic_test.py` **29/29 passed**（跨模块协同面：opensoul↔acp-proxy全链无回归）；前端`npm run build`通过（TypeScript+96页生成，/gene路由在产物中）。
+**服务重启**：`systemctl --user restart opensoul.service`→/api/gene/health 200（facet字段已在运行进程）；`systemctl --user restart openmate-web.service`→/gene 200（新build已部署）；acp-proxy零改动无需重启。
+**commit**：opensoul `a6220c35` + openmate `3ace1e1f`。
+**遗留问题**：
+1. ⚠️前端视觉走查受登录墙（cron无凭据不登录，同前例）——用户登录后Gene→技能库 tab看一眼chip行排版（6分类+全部一行可放下），如有瑕疵下轮修。
+2. 分类名chip直出机器标识符（general/coding/file_operations…）未做三语本地化显示——本轮零locale改动是为避开sibling共文件；若用户要求可下轮加gene.category.*映射键（需git apply --cached按hunk拆分暂存）。
+3. chip单选够用即弃；若未来分类数超~20需"更多"折叠控件（当前6分类无碍）。
+4. 残余遗留观察项照旧：⚠️线索窗启发式残余/❌结果侧整token旧语义/read_turn遗留#1#2、分页offset稳定性（可改keyset）、learned_skills source列、gene_loop测试侧隔离fixture、relay round级需引擎侧自报、两消费者近重复文件去重、树内搜索与扁平搜索整合、回放与树互斥、跨session搜索、LLM_FALLBACK_CHAIN未配置（402环境项）、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步、model_gateway凭据映射表、engine.py死代码清理候选、MCP重连真实Server验证、attach跨turn共享、RESUMED后同turn多episode单记录。
+5. cron环境约束实录：patch工具对skill_learner.py/api/gene.py报"sibling subagent改过"警告——git diff核实为**误报**（工作区仅本轮改动+既存rbac_policy.csv），已核对无夹带；全量pytest走terminal background+process wait轮询（173s跑完）稳定。
+6. 第7步gene skill上报✅：skill_id=`skill_44b30e4dd1f8`（event=ADD+success_rate=1.0，tool_sequence=skill_view→read_file→search_files→terminal→patch→write_file→process），已入gene技能库供find_relevant检索复用。
