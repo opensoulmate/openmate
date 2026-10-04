@@ -4807,3 +4807,39 @@
 4. **两消费者近重复文件去重照旧**（SearchBar/EventCard共享化专项轮未做——本轮改动再次双侧镜像+hunk逐字核对；上轮同款双编辑成本仍在，仍是最高性价比的工程债）；其余残余遗留观察项照旧：⚠️线索窗启发式残余/❌结果侧整token旧语义/read_turn遗留#1首行窗口残余/#2标题线索词边界、gene_loop测试侧隔离fixture、FAIL记录不分trivial、relay round级需引擎侧自报、LLM_FALLBACK_CHAIN未配置（402环境项）、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步、model_gateway凭据映射表、engine.py死代码清理候选、MCP重连真实Server验证、attach跨turn共享、RESUMED后同turn多episode单记录。
 5. cron环境约束实录：execute_code被BLOCKED（cron无审批人）→hunk拆分脚本改write_file写/tmp后terminal跑；render-test断言踩了3个SSR坑记档备查：**splitMatch分段渲染后命中行全文在HTML里不连续**（断言要查后缀段）、**title属性引号被转义&quot;**（断言前归一）、**i18n插值键的原文含{{placeholder}}不等于渲染文本**（断言取split('{{')[0]前缀）。
 6. 第7步gene skill上报✅：skill_id=`skill_4c19b7b002ea`（success=true，source=extract，tool_sequence=read_file→terminal→patch→write_file），已入gene技能库供find_relevant检索复用。
+
+## [2026-10-05 04:46 CST] 扁平面携带过滤——搜索→钻取在无trace树会话/列表视图同样生效（02:18轮遗留#2销账，P1可观测性工作流闭环补全）
+**目标**：销上轮（02:18）遗留#2——无trace树的会话（traceRoots空，纯扁平事件）携带过滤**无处生效**（SpanTreeView不渲染→扁平detail列表全量未过滤、无命中高亮、无命中计数、无来源chip），用户搜"error的tool_call"→点组头"打开会话"→**"点开后没反应"**（过滤面被静默丢弃=上轮"一个查询两个面一致"只做了一半：树面生效、扁平面哑火）。本轮把携带过滤补全到扁平面——树/扁平两个渲染面对同一查询一致。
+**调研来源**：①上轮dev-report遗留#2原文"下轮给扁平EventCard补命中高亮"（本轮按同方向实现并补全配套面：剪枝+计数+来源chip+清除——只高亮不剪枝时"点开后没反应"观感依旧，剪枝+计数+来源chip才让过滤生效可见）；②树面语义照抄不自创：span-tree.ts filterTree"未命中兄弟剪掉"→扁平同款=只留命中+原序号保留、SpanTreeBody"命中计数/生效条件可见"→FlatFilterBar"命中X/共Y"、span-tree-view"来自搜索"来源chip+tooltip+点"全部"清除→FlatFilterBar同款同键（fromSearchHint文案"点'全部'可清除"在扁平面同样成立）；③既定纪律合抄："未知不猜/不冒充"（status未映射直出机器原值、fromSearch=false不亮chip）+"指标不许说谎"（matchCount/total吃filterFlatEvents真值不推算；active=filterIsActive**不从命中率反推**——全命中时仍算生效）+"两消费者import同一模块防双实现漂移"（filterFlatEvents/FlatFilterBar/MatchedText全部单一真源，镜像hunk逐字同款）。
+**改动文件**（openmate `ad9910df`，10文件+519/-13，全增量old_string/new_string）：
+- `src/app/(app)/trajectory/span-tree.ts`（+17/-2）：FilterableEvent最小形状（:191）+nodeStatus/nodeMatches签名放宽（:181/:199）
+- `src/app/(app)/trajectory/cross-search.ts`（+46/-1）：FlatFilterResult+filterFlatEvents（:149）
+- `src/app/(app)/trajectory/cross-search-view.tsx`（+119）：READONLY_CHIP_STYLE+FlatFilterBar（:217）+MatchedText（:290）
+- `src/app/(app)/trajectory/trajectory-client.tsx` + `src/app/(app)/system/tabs/trajectory-tab.tsx`（各+34/-6，镜像hunk逐字同款）：imports（:19/:22）+EventCard highlightQuery（:324/:405）+flatFiltered计算（:788）+扁平分支改写（:1245/:1243）
+- `src/locales/{zh,en,ja}.json`（各+1）：trajectory.flatMatches（"命中 {{match}} / 共 {{total}}"三语）
+- `render-test-flat-drilldown.cjs`（+276，新）：75断言；`render-test-trajectory-cross-search.cjs`（+3）：补编译span-tree.js（cross-search.js新value-import）
+**改动内容**：
+1. **filterFlatEvents单一真源**（cross-search.ts）：filter未携带/未生效=**恒等**（visible=全量带原始序号，既有扁平列表形态零变化——回归钉）；生效=只留命中（树面"未命中兄弟剪掉"扁平同款），idx=**原始序号**不重排（EventCard编号"#7/20"可回溯会话内位置）；active=filterIsActive（不从matchCount<total推算——全命中时推算会假性失效）；匹配判定吃nodeMatches（文本×类型×errorsOnly×status四条件AND，status精确档warn不冒充error、空status归一ok，与树面同判据）。
+2. **FilterableEvent签名放宽**（span-tree.ts）：nodeMatches入参从SpanNode放宽到{event_type,content,agent_id?,status?}最小形状——TrajectoryEvent结构兼容直接复用（匹配逻辑**零复制**；既有SpanNode调用不受影响，span-tree系render-test回归全绿）。
+3. **FlatFilterBar**（cross-search-view.tsx两消费者单一真源）：条件chips（query/types/errorsOnly/status——status未映射直出机器原值）+"命中X/共Y"（i18n插值真值）+"来自搜索"来源chip（tooltip=清除指引，同树面样式）+"全部"清除按钮（onClearAll→setCarriedTreeFilter(null)恢复全量）；filter未携带/未生效=渲染null（既有形态零变化）。条件chip有意**只读**（过滤条件入口在搜索框，"全部"=唯一动作整体清除）。
+4. **EventCard命中高亮**：highlightQuery可选prop→MatchedText×splitMatch分段渲染（hit段同树行高亮样式），空查询=原文逐字不变；只在过滤生效时开。
+5. **零命中空态**：过滤生效且0命中→noMatchingEvents空态（过滤条仍在场可清除——不留死胡同）。
+**接线位置**（grep证据，文件:行号）：
+- 纯函数：`cross-search.ts:149 filterFlatEvents`（内部`filterIsActive(filter)`+`nodeMatches(event, filter)`——匹配/生效判定吃span-tree单一真源）← `span-tree.ts:191 FilterableEvent`/`:199 nodeMatches`
+- 消费链（双消费者镜像）：`trajectory-client.tsx:788 filterFlatEvents(displayEvents, carriedTreeFilter)`→`:789 flatFilterActive=flatFiltered.active`→`:1245 <FlatFilterBar>`（`onClearAll={() => setCarriedTreeFilter(null)}`）→`flatFiltered.visible.map(({ event: ev, idx })`→`highlightQuery={flatFilterActive ? (carriedTreeFilter?.query || "") : ""}`→`EventCard:405 <MatchedText text={event.content} query={highlightQuery} />`（tab镜像:788/:789/:1243逐字同款）
+- 共享组件：`cross-search-view.tsx:217 FlatFilterBar`/`:290 MatchedText`（双消费者经`.../cross-search-view` import，无本地副本——anti-pin钉`function (filterFlatEvents|FlatFilterBar|MatchedText)`与`function nodeMatches`在消费侧归零）
+- **部署bundle实证**：`.next/static/chunks/0t4ww6ica-fcf.js`等3 chunks含`flatMatches`+`命中 {{match}}`/`matched / {{total}}`插值模板（新i18n键+组件已进产物）
+**验证结果**：
+- 完整性✅：`git diff --cached --stat`=10文件+519/-13与commit逐行吻合；两消费文件各6 hunk逐条核对100%为本轮（git diff全量过目，无sibling夹带）；locales×3与sibling settings共文件，`/tmp/stage_mine_flat_1005.py`按hunk拆分只暂存flatMatches键hunk各+1（KEEP夹带断言+SKIP反向断言，连续七轮实证）；settings-client.tsx/systemic_test_results.json/sibling locale hunk照旧不入commit。
+- 集成✅：grep链如上（定义→双消费者渲染真路径→EventCard高亮→bundle）；anti-pin：`{displayEvents.map((ev, idx) => (`旧扁平直渲归零（扁平分支确定改吃filterFlatEvents）。
+- 测试✅：新`render-test-flat-drilldown.cjs` **75/75 ALL PASS**（①filterFlatEvents语义：恒等/空条件恒等/query剪枝+原始序号/真值计数/**全命中仍active=true**（不从命中率反推）/status精确档warn不冒充×errorsOnly放宽档对照钉/空status归一ok/三条件AND/零命中total不缩水/空列表②FlatFilterBar SSR：null×2/来源chip+tooltip（&quot;转义归一后比）/query·type·status·errorsOnly chips/命中计数i18n插值真值/"全部"按钮/fromSearch=false不亮chip/未知status直出原值③MatchedText：高亮样式/段拼回=原文/空查询单段/大小写保真④接线钉：双消费者×10项（filterFlatEvents真路径/active判定/过滤条+清除落state/visible映射原序号/高亮开关/EventCard接线/两路import）+单一真源防漂移+旧形态归零anti-pin+既有携带链（initialFilter/组头onOpen携带）回归钉⑤i18n：flatMatches三语+en零CJK+消费键防删除钉+en SSR全英文⑥契约回归：nodeMatches↔filterFlatEvents同判据"两面一致"实锤+splitMatch/filterIsActive/treeFilterFromSearch契约不变）；全量15套render-test零回归：新1套75/75+既有14套全绿（cross-search 67 passed、search-drilldown 73 ALL PASS、span-tree×3+tab-tree ALL PASS、其余8套OK）；`npm run build` exit=0（TypeScript全过+/trajectory·/system路由在产物）。
+- 前端⚠️：视觉走查受登录墙（cron无凭据不登录，同前例）——用户登录后Trajectory页：搜关键词→点组头"打开会话"进**无trace树**会话，看过滤条（条件chips/来源chip/命中计数）/命中高亮/未命中剪除/"全部"清除观感。
+**服务重启**：`systemctl --user restart openmate-web.service`→active→`/trajectory 200`+`/system 200`（新build已部署）；opensoul/acp-proxy零改动无需重启。
+**commit**：openmate `ad9910df`。
+**遗留问题**：
+1. ⚠️前端视觉走查受登录墙未人工过目（同前例）——用户登录后走一遍搜索→钻取（扁平会话）流程。
+2. **扁平条件chip只读**（无单chip点掉解除单档过滤的交互）：设计如此（过滤条件入口在搜索框，"全部"=唯一动作整体清除，fromSearchHint文案已声明）——若用户反馈想单点解除status/类型档，再开交互面。
+3. **replayMode×携带过滤叠加**：过滤吃displayEvents（回放=revealed切片）——回放中途可见=已揭示∩命中；EventCard的`idx={replayMode ? replayIdx : idx}`旧语义逐字保留（回放态卡编号既有形态本轮未动）。
+4. **两消费者近重复文件去重照旧**（SearchBar/EventCard共享化专项轮未做——本轮EventCard/扁平分支再次双侧镜像+hunk逐字核对，双编辑成本仍在，仍是最高性价比的工程债）；其余残余遗留观察项照旧：⚠️线索窗启发式残余/❌结果侧整token旧语义/read_turn遗留#1首行窗口残余/#2标题线索词边界、gene_loop测试侧隔离fixture、FAIL记录不分trivial、relay round级需引擎侧自报、LLM_FALLBACK_CHAIN未配置（402环境项）、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步、model_gateway凭据映射表、engine.py死代码清理候选、MCP重连真实Server验证、attach跨turn共享、RESUMED后同turn多episode单记录。
+5. cron环境约束实录：render-test-ask-user.cjs跑完留`.ask-card-*`tmpdir垃圾（该harness未接exit自清理——本轮已手清；"其余render-test自清理未逐个补"此项仍在，下轮顺手统一进harness）；patch工具对trajectory/locales文件报"sibling subagent修改"告警但git diff逐hunk核对无夹带（以git diff为准，告警为陈旧元数据）。
+6. 第7步gene skill上报✅：skill_id=`skill_2cb27913f1be`（success=true，source=extract，tool_sequence=read_file→terminal→patch→write_file→terminal→patch→terminal），已入gene技能库供find_relevant检索复用。
