@@ -54,6 +54,9 @@ Module._resolveFilename = function (request, ...args) {
 // 输出镜像源码相对布局：system/tabs/ → ../../trajectory/ 的相对解析真实成立
 const treeFile = compile('src/app/(app)/trajectory/span-tree.ts', 'trajectory/span-tree.js');
 compile('src/app/(app)/trajectory/span-tree-view.tsx', 'trajectory/span-tree-view.js');
+// 跨会话搜索共享模块（2026-10-04）：tab的新import同款真实解析，缺编译=require抛MODULE_NOT_FOUND
+compile('src/app/(app)/trajectory/cross-search.ts', 'trajectory/cross-search.js');
+compile('src/app/(app)/trajectory/cross-search-view.tsx', 'trajectory/cross-search-view.js');
 const tabFile = compile('src/app/(app)/system/tabs/trajectory-tab.tsx', 'system/tabs/trajectory-tab.js');
 
 const { formatDuration, formatTokens } = require(treeFile);

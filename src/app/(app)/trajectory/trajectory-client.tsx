@@ -15,6 +15,10 @@ import {
 import { PageLayout } from '@/components/page-layout';
 import { SpanTreeView } from "./span-tree-view"
 import { formatDuration, formatTokens, type SpanNode } from "./span-tree"
+import {
+  buildSearchQueryString, groupEventsBySession, type ServerSessionMatch,
+} from "./cross-search"
+import { StatusFilterChips, SessionGroupHeader } from "./cross-search-view"
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -162,6 +166,7 @@ function StatsBar({ stats, loading }: { stats: TrajectoryStats | null; loading: 
 
 function SearchBar({
   query, onQueryChange, eventTypes, selectedTypes, onTypeToggle, onSearch,
+  status, onStatusChange,
 }: {
   query: string
   onQueryChange: (q: string) => void
@@ -169,6 +174,8 @@ function SearchBar({
   selectedTypes: Set<string>
   onTypeToggle: (t: string) => void
   onSearch: () => void
+  status: string
+  onStatusChange: (s: string) => void
 }) {
   const [showFilters, setShowFilters] = useState(false)
   const { t } = useTranslation()
@@ -217,7 +224,9 @@ function SearchBar({
           {t("trajectory.search")}
         </button>
       </div>
-      {showFilters && eventTypes.length > 0 && (
+      {showFilters && (
+        <>
+        {eventTypes.length > 0 && (
         <div style={{
           display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8, padding: "8px 12px",
           borderRadius: 8, background: "hsl(var(--muted) / 0.3)",
@@ -243,6 +252,9 @@ function SearchBar({
             )
           })}
         </div>
+        )}
+        <StatusFilterChips value={status} onChange={onStatusChange} />
+        </>
       )}
     </div>
   )
@@ -550,6 +562,9 @@ export function TrajectoryClient() {
   // Search state
   const [query, setQuery] = useState("")
   const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set())
+  // 跨会话搜索状态（2026-10-04）：status过滤 + /search/sessions分组元数据
+  const [searchStatus, setSearchStatus] = useState("")
+  const [searchGroupMeta, setSearchGroupMeta] = useState<Record<string, ServerSessionMatch>>({})
 
   // Replay state
   const [replayIdx, setReplayIdx] = useState(0)
@@ -645,23 +660,32 @@ export function TrajectoryClient() {
   // ── Search ─────────────────────────────────────────────────
 
   const doSearch = useCallback(async () => {
-    if (!query.trim() && selectedTypes.size === 0) {
+    if (!query.trim() && selectedTypes.size === 0 && !searchStatus) {
       setSearchResults(null)
+      setSearchGroupMeta({})
       setView("list")
       return
     }
     try {
-      const params = new URLSearchParams()
-      if (query.trim()) params.set("q", query.trim())
-      if (selectedTypes.size === 1) params.set("event_type", Array.from(selectedTypes)[0])
-      const r = await fetch(`${apiBase}/api/trajectory/search?${params}`)
-      if (r.ok) {
-        const d = await r.json()
+      // 参数名钉死在buildSearchQueryString（P0回归钉：曾误传q=→文本搜索哑火）
+      const qs = buildSearchQueryString({ query, selectedTypes, status: searchStatus })
+      const [evR, grpR] = await Promise.all([
+        fetch(`${apiBase}/api/trajectory/search?${qs}`),
+        fetch(`${apiBase}/api/trajectory/search/sessions?${qs}`),
+      ])
+      if (evR.ok) {
+        const d = await evR.json()
         setSearchResults(d.events || [])
-        setView("search")
       }
+      if (grpR.ok) {
+        const gd = await grpR.json()
+        const byId: Record<string, ServerSessionMatch> = {}
+        for (const g of gd.sessions || []) byId[g.session_id] = g
+        setSearchGroupMeta(byId)
+      }
+      setView("search")
     } catch {}
-  }, [apiBase, query, selectedTypes])
+  }, [apiBase, query, selectedTypes, searchStatus])
 
   const toggleType = useCallback((t: string) => {
     setSelectedTypes(prev => {
@@ -731,6 +755,12 @@ export function TrajectoryClient() {
   const displayEvents = view === "search" && searchResults ? searchResults :
     replayMode ? events.slice(0, replayIdx + 1) : events
 
+  // 跨会话分组（"哪个session有error的tool_call"）：扁平命中按session聚合，
+  // 组头吃/search/sessions的GROUP BY真值（searchGroupMeta）
+  const searchGroups = view === "search" && searchResults
+    ? groupEventsBySession(searchResults)
+    : null
+
   // 回放×树协同（2026-10-04，"回放与树互斥"销账）：已揭示事件id集=
   // events[0..replayIdx]，SpanTreeView按此渐进揭示（与扁平回放的
   // events.slice同语义——同一进度两种视图各吃各的渲染面）
@@ -791,6 +821,8 @@ export function TrajectoryClient() {
         selectedTypes={selectedTypes}
         onTypeToggle={toggleType}
         onSearch={doSearch}
+        status={searchStatus}
+        onStatusChange={setSearchStatus}
       />
 
       {/* Main content */}
@@ -1128,6 +1160,14 @@ export function TrajectoryClient() {
                 <Search size={14} />
                 {searchResults?.length || 0} {t("trajectory.resultsFor", { count: searchResults?.length || 0, query })}
                 {selectedTypes.size > 0 && ` (${t("trajectory.filtered", { types: Array.from(selectedTypes).join(", ") })})`}
+                {searchGroups && searchGroups.length > 0 && (
+                  <span style={{
+                    marginLeft: "auto", padding: "1px 8px", borderRadius: 10, fontSize: 10,
+                    background: "hsl(var(--primary) / 0.12)", color: "hsl(var(--primary))",
+                  }}>
+                    {t("trajectory.matchSessions", { count: searchGroups.length })}
+                  </span>
+                )}
               </div>
             )}
 
@@ -1150,6 +1190,29 @@ export function TrajectoryClient() {
                 <p style={{ fontSize: 14 }}>
                   {view === "search" ? t("trajectory.noMatchingEvents") : t("trajectory.noEventsInSession")}
                 </p>
+              </div>
+            ) : searchGroups ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                {searchGroups.map(g => (
+                  <div key={g.session_id}>
+                    <SessionGroupHeader
+                      sessionId={g.session_id}
+                      visibleCount={g.visible_count}
+                      meta={searchGroupMeta[g.session_id] || null}
+                      onOpen={selectSession}
+                    />
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+                      {g.events.map((ev, idx) => (
+                        <EventCard
+                          key={ev.id || idx}
+                          event={ev}
+                          idx={idx}
+                          total={g.events.length}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
