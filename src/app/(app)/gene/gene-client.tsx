@@ -119,6 +119,10 @@ export function GeneClient() {
   const [skillTotal, setSkillTotal] = useState(0)
   const [skillHasMore, setSkillHasMore] = useState(false)
   const [skillLoadingMore, setSkillLoadingMore] = useState(false)
+  // 分类过滤（GET /skill的categories facet单一真源）——chip选项集+全局计数从后端
+  // facet渲染，不从分页rows推断（limit截断会漏分类=指标说谎）；skillCategory=""=全部
+  const [skillCategory, setSkillCategory] = useState("")
+  const [skillCategories, setSkillCategories] = useState<Array<{ category: string; count: number }>>([])
   // 可回滚事件集=后端AUDIT_STATE_EVENTS单一真源（GET /skill的revertible_events透出），
   // 按钮可见性据此判断——不再前端硬编码"FAIL除外"（新增事件类型两端漂移）
   const [revertibleEvents, setRevertibleEvents] = useState<string[]>(["ADD", "UPDATE", "DELETE", "REVERT"])
@@ -271,13 +275,18 @@ export function GeneClient() {
     if (append) setSkillLoadingMore(true)
     else setSkillsLoading(true)
     try {
-      const res = await fetch(`${apiBase}/api/gene/skill?limit=100&offset=${offset}`)
+      // category过滤接线（遗留"前端未接category过滤控件"销账）：""=全部不带参
+      const catParam = skillCategory ? `&category=${encodeURIComponent(skillCategory)}` : ""
+      const res = await fetch(`${apiBase}/api/gene/skill?limit=100&offset=${offset}${catParam}`)
       const data = await res.json()
       const rows: LearnedSkill[] = data.skills || []
       setSkills(prev => (append ? [...prev, ...rows] : rows))
       // total=库存真实总数（不是本页条数——count只是len(本页)，122技能只显示100的病根）
+      // 选了分类后=该分类真实总数（随过滤变，facet不变——标准faceted-search语义）
       setSkillTotal(typeof data.total === "number" ? data.total : rows.length)
       setSkillHasMore(Boolean(data.has_more))
+      // 分类facet=全局分布单一真源（chip选项集+计数），过滤/分页/刷新均随之漂移
+      if (Array.isArray(data.categories)) setSkillCategories(data.categories)
       if (Array.isArray(data.revertible_events) && data.revertible_events.length > 0) {
         setRevertibleEvents(data.revertible_events)
       }
@@ -285,7 +294,7 @@ export function GeneClient() {
       setSkillsLoading(false)
       setSkillLoadingMore(false)
     }
-  }, [apiBase])
+  }, [apiBase, skillCategory])
 
   useEffect(() => { fetchSkills() }, [fetchSkills])
 
@@ -445,6 +454,40 @@ export function GeneClient() {
               {t("gene.refresh")}
             </button>
           </div>
+
+          {/* 分类过滤chip——选项集+全局计数=categories facet单一真源（"全部"+各分类）；
+              点击切过滤：skillCategory变更→fetchSkills重建→useEffect自动带参重查，
+              分页从0重来；chip计数是全局分布（过滤后不变），"已显示X/Y"的Y随过滤变 */}
+          {skillCategories.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                onClick={() => setSkillCategory("")}
+                className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-all ${
+                  skillCategory === ""
+                    ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-400"
+                    : "bg-muted/30 border-border text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                }`}
+              >
+                {t("gene.allCategories")}
+                {/* 全局总数=facet求和（不是skillTotal——过滤时skillTotal是过滤后的） */}
+                <span className="ml-1 text-[10px] opacity-70">{skillCategories.reduce((n, c) => n + c.count, 0)}</span>
+              </button>
+              {skillCategories.map(c => (
+                <button
+                  key={c.category}
+                  onClick={() => setSkillCategory(c.category)}
+                  className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-all ${
+                    skillCategory === c.category
+                      ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-400"
+                      : "bg-muted/30 border-border text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                  }`}
+                >
+                  {c.category}
+                  <span className="ml-1 text-[10px] opacity-70">{c.count}</span>
+                </button>
+              ))}
+            </div>
+          )}
 
           {revertResult && (
             <div className="rounded-lg p-3 text-xs lg:text-sm bg-emerald-500/10 text-emerald-400">
