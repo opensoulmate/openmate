@@ -10,6 +10,7 @@ import {
 } from "lucide-react"
 import { PageLayout } from '@/components/page-layout';
 import { skillsListUrl } from "./skill-list-url"
+import { sourceLabelKey, sourceTone, categoryLabelKey, labelOrRaw } from "./skill-display"
 
 interface Template {
   template_id: string
@@ -45,6 +46,8 @@ interface LearnedSkill {
   created_at: number
   last_used_at: number
   source_session: string
+  // 来源列（skill_learner.py口径归一后透出：extract/seed/test/unknown，不猜）
+  source: string
   tags: string[]
   parameters: string[]
 }
@@ -488,7 +491,7 @@ export function GeneClient() {
                       : "bg-muted/30 border-border text-muted-foreground hover:text-foreground hover:bg-muted/50"
                   }`}
                 >
-                  {c.category}
+                  {labelOrRaw(t, categoryLabelKey(c.category), c.category)}
                   <span className="ml-1 text-[10px] opacity-70">{c.count}</span>
                 </button>
               ))}
@@ -569,7 +572,9 @@ export function GeneClient() {
                       <div className="text-xs text-muted-foreground truncate">{skill.description}</div>
                     </div>
                     <div className="flex items-center gap-2 lg:gap-3 shrink-0 text-xs text-muted-foreground">
-                      <span className="px-2 py-0.5 rounded bg-muted/40">{skill.category}</span>
+                      <span className="px-2 py-0.5 rounded bg-muted/40">{labelOrRaw(t, categoryLabelKey(skill.category), skill.category)}</span>
+                      {/* 来源chip（后端source口径归一直出）：extract绿/seed蓝/test玫红/unknown灰，未映射值虚线框直出原值 */}
+                      <span className={`px-2 py-0.5 rounded ${sourceTone(skill.source || "")}`}>{labelOrRaw(t, sourceLabelKey(skill.source || ""), skill.source || "—")}</span>
                       <span>{t("gene.skillUsage")} {skill.usage_count}</span>
                       <span className={skill.success_rate >= 0.8 ? "text-emerald-400" : skill.success_rate >= 0.5 ? "text-amber-400" : "text-red-400"}>
                         {t("gene.skillSuccessRate")} {(skill.success_rate * 100).toFixed(0)}%
@@ -580,7 +585,7 @@ export function GeneClient() {
                   {expandedSkill === skill.skill_id && (
                     <div className="border-t border-border p-3 space-y-2">
                       <div className="text-xs text-muted-foreground">
-                        {t("gene.skillSource")}: <span className="font-mono">{skill.source_session || "—"}</span>
+                        {t("gene.sourceKind")}: <span className="font-mono">{skill.source || "—"}</span> · {t("gene.skillSource")}: <span className="font-mono">{skill.source_session || "—"}</span>
                         {skill.tags.length > 0 && <> · {t("gene.skillTags")}: {skill.tags.join(", ")}</>}
                       </div>
                       <h5 className="text-xs font-semibold flex items-center gap-1.5">

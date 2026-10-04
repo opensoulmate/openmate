@@ -1651,6 +1651,21 @@
     "skillUsage": "使用",
     "skillSuccessRate": "成功率",
     "skillSource": "来源セッション",
+    "sourceKind": "ソース種別",
+    "source": {
+      "extract": "学習抽出",
+      "seed": "標準シード",
+      "test": "テストデータ",
+      "unknown": "既存（不明）"
+    },
+    "categories": {
+      "general": "一般",
+      "coding": "コーディング",
+      "file_operations": "ファイル操作",
+      "web_operations": "Web操作",
+      "agent_standard": "Agent標準",
+      "system_operations": "システム操作"
+    },
     "skillTags": "ツールタグ",
     "skillHistory": "監査履歴",
     "historyEmpty": "監査イベントはありません",

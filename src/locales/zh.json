@@ -1653,6 +1653,21 @@
     "skillUsage": "使用",
     "skillSuccessRate": "成功率",
     "skillSource": "来源会话",
+    "sourceKind": "来源类型",
+    "source": {
+      "extract": "学习提炼",
+      "seed": "标准种子",
+      "test": "测试数据",
+      "unknown": "存量未知"
+    },
+    "categories": {
+      "general": "通用",
+      "coding": "编程",
+      "file_operations": "文件操作",
+      "web_operations": "网络操作",
+      "agent_standard": "Agent规范",
+      "system_operations": "系统操作"
+    },
     "skillTags": "工具标签",
     "skillHistory": "审计历史",
     "historyEmpty": "暂无审计事件",

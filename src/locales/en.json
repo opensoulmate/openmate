@@ -1656,6 +1656,21 @@
     "skillUsage": "Uses",
     "skillSuccessRate": "Success",
     "skillSource": "Source session",
+    "sourceKind": "Source kind",
+    "source": {
+      "extract": "Learned",
+      "seed": "Seed",
+      "test": "Test data",
+      "unknown": "Legacy unknown"
+    },
+    "categories": {
+      "general": "General",
+      "coding": "Coding",
+      "file_operations": "File operations",
+      "web_operations": "Web operations",
+      "agent_standard": "Agent standard",
+      "system_operations": "System operations"
+    },
     "skillTags": "Tool tags",
     "skillHistory": "Audit history",
     "historyEmpty": "No audit events",
