@@ -16,10 +16,10 @@ import { PageLayout } from '@/components/page-layout';
 import { SpanTreeView } from "./span-tree-view"
 import { formatDuration, formatTokens, type SpanNode, type TreeFilter } from "./span-tree"
 import {
-  buildSearchQueryString, groupEventsBySession, treeFilterFromSearch,
+  buildSearchQueryString, filterFlatEvents, groupEventsBySession, treeFilterFromSearch,
   type CrossSearchQueryInput, type ServerSessionMatch,
 } from "./cross-search"
-import { StatusFilterChips, SessionGroupHeader } from "./cross-search-view"
+import { StatusFilterChips, SessionGroupHeader, FlatFilterBar, MatchedText } from "./cross-search-view"
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -321,7 +321,7 @@ function SessionCard({
 
 // ── Event Card ─────────────────────────────────────────────────
 
-function EventCard({ event, idx, total }: { event: TrajectoryEvent; idx: number; total: number }) {
+function EventCard({ event, idx, total, highlightQuery = "" }: { event: TrajectoryEvent; idx: number; total: number; highlightQuery?: string }) {
   const [expanded, setExpanded] = useState(false)
   const { t } = useTranslation()
   const color = getEventColor(event.event_type)
@@ -401,7 +401,8 @@ function EventCard({ event, idx, total }: { event: TrajectoryEvent; idx: number;
           background: "hsl(var(--muted) / 0.3)",
         }}
       >
-        {event.content}
+        {/* 查询命中片段高亮（MatchedText×splitMatch单一真源）；空查询=原文逐字不变 */}
+        {highlightQuery ? <MatchedText text={event.content} query={highlightQuery} /> : event.content}
       </pre>
 
       {/* Expand / Collapse */}
@@ -779,6 +780,13 @@ export function TrajectoryClient() {
   const revealedSpanIds = replayMode
     ? new Set(events.slice(0, replayIdx + 1).map(ev => String(ev.id)))
     : null
+
+  // 扁平面携带过滤（2026-10-05 02:18轮遗留#2销账）：搜索→钻取在无trace树
+  // 会话/列表视图同样生效——命中保留（原始序号不重排）+未命中剪掉+命中计数
+  // +来源chip，与树面"一个查询两个面一致"（filterFlatEvents单一真源；filter
+  // 未携带/未生效=恒等，既有扁平列表形态零变化——回归钉）。
+  const flatFiltered = filterFlatEvents(displayEvents, carriedTreeFilter)
+  const flatFilterActive = flatFiltered.active
 
   // ── Render ─────────────────────────────────────────────────
 
@@ -1233,12 +1241,28 @@ export function TrajectoryClient() {
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {displayEvents.map((ev, idx) => (
+                {/* 扁平面携带过滤条（未携带/未生效=渲染null，既有形态零变化） */}
+                <FlatFilterBar
+                  filter={carriedTreeFilter}
+                  fromSearch={flatFilterActive}
+                  matchCount={flatFiltered.matchCount}
+                  total={flatFiltered.total}
+                  onClearAll={() => setCarriedTreeFilter(null)}
+                />
+                {flatFiltered.visible.length === 0 ? (
+                  <div style={{
+                    textAlign: "center", padding: 40, color: "hsl(var(--muted-foreground))",
+                  }}>
+                    <Activity size={32} style={{ opacity: 0.3, marginBottom: 8 }} />
+                    <p style={{ fontSize: 14 }}>{t("trajectory.noMatchingEvents")}</p>
+                  </div>
+                ) : flatFiltered.visible.map(({ event: ev, idx }) => (
                   <EventCard
                     key={ev.id || idx}
                     event={ev}
                     idx={replayMode ? replayIdx : idx}
                     total={replayMode ? events.length : displayEvents.length}
+                    highlightQuery={flatFilterActive ? (carriedTreeFilter?.query || "") : ""}
                   />
                 ))}
               </div>

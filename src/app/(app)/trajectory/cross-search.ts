@@ -15,7 +15,12 @@
 // initialFilter携带）——从搜索结果"打开会话"钻进span树时命中行高亮/
 // 未命中兄弟剪掉，两个搜索面（扁平分组×树内）对同一查询一致。
 
-import type { TreeFilter } from "./span-tree"
+import {
+  filterIsActive,
+  nodeMatches,
+  type FilterableEvent,
+  type TreeFilter,
+} from "./span-tree"
 
 export interface CrossSearchQueryInput {
   query: string
@@ -114,6 +119,45 @@ export function treeFilterFromSearch({
     errorsOnly: false,
     statuses: status ? new Set([status]) : new Set<string>(),
   }
+}
+
+/**
+ * 扁平事件列表的携带过滤（搜索→钻取在**无trace树会话/列表视图**同样生效
+ * ——2026-10-05 02:18轮遗留#2"携带过滤无处生效"销账）。
+ *
+ * 语义与树面一致（"一个查询两个面一致"）：
+ * - filter未携带/未生效=**恒等**（visible=全量带原始序号，既有扁平列表形态
+ *   零变化——回归钉）
+ * - 生效=只留命中事件（树面"未命中兄弟剪掉"的扁平同款），idx=**原始序号**
+ *   不重排（EventCard编号与未过滤形态一致，可回溯会话内位置）
+ * - 匹配判定吃span-tree.nodeMatches单一真源（文本×类型×errorsOnly×status
+ *   四条件AND，不复制匹配逻辑防双实现漂移）
+ * - active=过滤是否实际生效（调用方据此显隐过滤条/来源chip/命中高亮——
+ *   不从matchCount<total推算（全命中时会假性失效），"指标不许说谎"）
+ */
+export interface FlatFilterResult<T> {
+  /** 过滤实际生效（filter携带且有条件——与filterIsActive同口径） */
+  active: boolean
+  /** 可见事件+原始序号（生效=命中子集；未生效=全量） */
+  visible: Array<{ event: T; idx: number }>
+  /** 命中条数（未生效=total） */
+  matchCount: number
+  /** 全部事件数（不从visible推算——"total推算说谎"纪律） */
+  total: number
+}
+
+export function filterFlatEvents<T extends FilterableEvent>(
+  events: T[],
+  filter: TreeFilter | null | undefined,
+): FlatFilterResult<T> {
+  const list = events || []
+  const total = list.length
+  const active = !!filter && filterIsActive(filter)
+  const visible: Array<{ event: T; idx: number }> = []
+  list.forEach((event, idx) => {
+    if (!active || nodeMatches(event, filter as TreeFilter)) visible.push({ event, idx })
+  })
+  return { active, visible, matchCount: visible.length, total }
 }
 
 /**

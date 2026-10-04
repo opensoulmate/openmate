@@ -178,12 +178,25 @@ export interface TreeFilter {
 }
 
 /** 节点status归一（缺省/空串→"ok"，与errorsOnly判定同口径） */
-function nodeStatus(node: SpanNode): string {
+function nodeStatus(node: FilterableEvent): string {
   return node.status || "ok"
 }
 
+/**
+ * 过滤可判定的最小事件形状——SpanNode与扁平TrajectoryEvent都结构兼容
+ * （搜索→钻取"整合"的**扁平面**（无trace树会话/列表视图）复用nodeMatches
+ * 单一真源做命中判定，不复制匹配逻辑防双实现漂移——cross-search.
+ * filterFlatEvents消费）。
+ */
+export interface FilterableEvent {
+  event_type: string
+  content: string
+  agent_id?: string
+  status?: string
+}
+
 /** 节点是否命中过滤条件（文本×类型×错误×status四条件AND） */
-export function nodeMatches(node: SpanNode, filter: TreeFilter): boolean {
+export function nodeMatches(node: FilterableEvent, filter: TreeFilter): boolean {
   const q = (filter.query || "").trim().toLowerCase()
   if (q) {
     const hay = `${node.event_type || ""}\n${node.content || ""}\n${node.agent_id || ""}\n${node.status || ""}`.toLowerCase()

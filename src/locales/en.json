@@ -3434,6 +3434,7 @@
     "openSession": "Open session",
     "fromSearch": "From search",
     "fromSearchHint": "Filter carried from cross-session search — click \"All\" to clear",
+    "flatMatches": "{{match}} matched / {{total}} total",
     "loadingAnalytics": "Loading analytics...",
     "tok": "tok",
     "justNow": "just now",

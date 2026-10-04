@@ -39,6 +39,9 @@ try {
     return origResolve.call(this, request, ...args);
   };
 
+  // cross-search.js运行时value-import './span-tree'（filterFlatEvents吃
+  // nodeMatches单一真源）——span-tree.js须一并编译进outDir
+  compile('src/app/(app)/trajectory/span-tree.ts', 'trajectory/span-tree.js');
   const csFile = compile('src/app/(app)/trajectory/cross-search.ts', 'trajectory/cross-search.js');
   const {
     buildSearchQueryString,
