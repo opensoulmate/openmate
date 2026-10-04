@@ -4634,3 +4634,37 @@
 5. 残余遗留观察项照旧：分页offset稳定性（可改keyset）、learned_skills source列（测试marker字符串识别）、gene_loop测试侧隔离fixture、FAIL记录不分trivial、relay round级需引擎侧自报、LLM_FALLBACK_CHAIN未配置（402环境项）、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步、model_gateway凭据映射表、engine.py死代码清理候选、MCP重连真实Server验证、attach跨turn共享、RESUMED后同turn多episode单记录、⚠️线索窗启发式残余/❌结果侧整token旧语义/read_turn遗留#1#2、分类名chip三语本地化。
 6. cron环境约束实录：/tmp/stage_mine.py与sibling同名冲突风险→本轮改用/tmp/stage_mine_replay_1004.py唯一命名（写/tmp脚本前先cp改名防兄弟轮互踩）。
 7. 第7步gene skill上报✅：skill_id=`skill_569cf47c5fca`（event=ADD+success_rate=1.0，tool_sequence=read_file→terminal→search_files→patch→write_file→terminal→terminal），已入gene技能库供find_relevant检索复用。
+
+## [2026-10-04 16:52 CST] 技能库分页offset→keyset游标——活表翻页不重不漏（多轮挂账"分页offset稳定性（可改keyset）"销账，P1进化链可见性/数据正确性）
+**目标**：GET /api/gene/skill的limit/offset分页面对**活表**（gene学习链每回合可落新技能、record_usage改last_used_at排序键）——"加载更多"用offset=已加载条数翻页，翻页间隙的插入把后续页整体下推=重复行，删除把后续页上提=漏行；排序键并列（同秒created_at）时行序本身不确定=页边界抖动。多轮dev-reports"残余遗留观察项"持续挂账的"分页offset稳定性（可改keyset）"本轮销账。
+**调研来源**：SUMMARY P0-8后台作业队列agno job_queue/CAS幂等同门的"游标锚定优于位置偏移"工程常识+行业keyset/cursor分页标准（Twitter GraphQL cursor、Khoj记忆CRUD枚举面同门——用户"看全自己的技能库"不许重不漏）；游标浮点repr往返参照本库encode/decode单一真源惯例（07:35轮"库存盘点自己说谎"真值纪律延伸：has_more=limit+1探底页真值，不再offset+len<total推算）。
+**改动文件**（opensoul `1401a9db` 3文件+373/-13；openmate `b5e35a61` 3文件+134/-6；全增量old_string/new_string）：
+- `src/gene/skill_learner.py`（+93/-13）：encode_cursor/decode_cursor（:92/:101）、_ACTIVITY_SQL排序键单一真源、list_skills加after=keyset模式+skill_id终裁tiebreak、list_skills_page（:851）
+- `src/api/gene.py`（+30/-13）：/skill加cursor参数（畸形→400）、next_cursor回填（offset模也可中途切游标模）
+- `tests/test_gene_skill_keyset.py`（+263，新）：20断言
+- `src/app/(app)/gene/skill-list-url.ts`（+17，新）：skillsListUrl纯函数（span-tree.ts同例）
+- `src/app/(app)/gene/gene-client.tsx`（+18/-6）：fetchSkills(cursor)+skillCursor state+加载更多游标续页+空游标禁点
+- `render-test-gene-keyset.cjs`（+105，新）：15断言（含transpile临时产物自清理）
+**改动内容**：
+1. **游标编解码**：游标=排序键三元组(activity_at, created_at, skill_id)不透明串"act:created:id"；浮点用repr最短往返（%.6f截断会让页边界行比较值与库中真实值错位=边界行重/漏——往返精度是keyset正确性地基）；id段split(":",2)取rest（含冒号id不破解码）；畸形游标ValueError→API 400。
+2. **keyset查询**：list_skills加after参数（(activity<c)∨(=c∧created<c2)∨(=c∧=c2∧id<id3)三段边界），ORDER BY与WHERE边界共用_ACTIVITY_SQL单一表达式（两边各写CASE会漂移出"页边界与序不一致"）；排序键加skill_id DESC终裁tiebreak（纯created_at并列=页边界抖动源）。
+3. **list_skills_page**：limit+1探底has_more页真值（07:35轮"total推算说谎"同病同解）+next_cursor=末行encode_cursor；offset模兼容保留+next_cursor回填（curl/老消费者不破）。
+4. **前端**：skillsListUrl纯函数（首屏cursor=null无参续页encodeURIComponent/category过滤，零offset）；skillCursor state吃后端next_cursor单一真源；加载更多从fetchSkills(skills.length,true)改游标续页+disabled={!skillCursor}（部署错位时防追加首屏=重复行）。
+5. **已知极限如实记账**：翻页间隙被record_usage激活的**未显示行**前移越过游标→本批不可见（语义="它升到顶部了"，刷新首屏可见）——测试test_sort_key_drift_skip_is_documented_semantics钉住此语义不许静默漂移；比offset的确定性重/漏面小得多。
+**接线位置**（grep证据，文件:行号）：
+- 后端链：`skill_learner.py:92 encode_cursor`/`:101 decode_cursor`/`:825 decode_cursor(after)`（WHERE边界）/`:851 list_skills_page`/`:866 encode_cursor(page[-1])`→`api/gene.py:8 import`/`:376 skill_learner.list_skills_page(...)`（cursor模真实调用）/`:386 encode_cursor(skills[-1])`（offset模回填）——GET /api/gene/skill真实消息路径
+- 前端链：`skill-list-url.ts:14 skillsListUrl`→`gene-client.tsx:12 import`/`:283 fetch(skillsListUrl(apiBase, cursor, skillCategory))`（fetchSkills真实fetch）/`:624 onClick={() => fetchSkills(skillCursor, true)}`/`:625 disabled={skillLoadingMore || !skillCursor}`/`:296 setSkillCursor(data.next_cursor…)`
+- 部署bundle实证：`.next/static/chunks`含`next_cursor`（10dxsy0i5esa0.js）+`cursor=` URL串（3 chunks）——新契约已进产物
+**验证结果**：
+- 完整性✅：opensoul `git diff --cached --stat`=3文件+373/-13、openmate=3文件+134/-6与commit逐行吻合；openmate工作区sibling共存（settings-client/locales×3/systemic_test_results.json非本轮），只暂存我的3文件（gene-client.tsx的18行diff逐hunk核对100%是我的）；opensoul照旧留既存rbac_policy.csv不入commit。
+- 集成✅：grep链如上（编解码→SQL边界→API cursor模→前端fetch/按钮→bundle）。
+- 测试✅：新`test_gene_skill_keyset.py` **20 passed**（游标repr往返/含冒号id/畸形6形态、全量遍历25行4页不重不漏、翻页间隙插入不移位删除不漏、9行并列键确定序两遍同序、排序键漂移极限语义钉、category×keyset、has_more页真值、API cursor遍历/400/offset兼容+游标回填中途切换）；既有gene套test_gene_skill_list+test_gene_skill_pagination **23 passed**零回归；**opensoul全量2413 passed**（176s）；`render-test-gene-keyset.cjs` **15/15 ALL PASS**（URL形状5面+offset反模式归零2钉+接线钉6面+2回归反钉）；`npm run build` exit=0。
+- live E2E✅（生产库126技能）：keyset全量遍历4页/126行==total不重不漏、末页游标空；畸形游标→400 `bad cursor: malformed cursor`；offset=10页+游标续页106行零重叠（中途切模）；general分类78行×cursor遍历==total不重不漏。
+**服务重启**：`systemctl --user restart opensoul.service`→/api/gene/health 200；`systemctl --user restart openmate-web.service`→/gene 200（新build已部署）；acp-proxy零改动无需重启。
+**commit**：opensoul `1401a9db` + openmate `b5e35a61`。
+**遗留问题**：
+1. **排序键漂移极限**（docstring+测试显式钉住）：翻页间隙被record_usage激活的未显示行前移越过游标本批不可见——语义上"升到顶部"，若用户反馈"加载更多时新激活的技能凭空消失"，需加"首屏顶部新增行提示条"或翻页快照模式。
+2. ⚠️前端视觉走查受登录墙（cron无凭据，同前例）——用户登录后Gene→技能库tab点几次"加载更多"看翻页观感。
+3. 前端未做fetch翻页的React层render-test（组件monolith+effects，SSR不可达加载更多态）——本轮以skillsListUrl纯函数render-test+bundle接线字符串+live E2E三角覆盖；若后续抽SkillsPanel子组件可补交互render-test。
+4. 残余遗留观察项照旧：⚠️线索窗启发式残余/❌结果侧整token旧语义/read_turn遗留#1#2、learned_skills source列（测试marker字符串识别）、gene_loop测试侧隔离fixture、relay round级需引擎侧自报、两消费者近重复文件去重、树内搜索与扁平搜索整合、跨session搜索、LLM_FALLBACK_CHAIN未配置（402环境项）、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步、model_gateway凭据映射表、engine.py死代码清理候选、MCP重连真实Server验证、attach跨turn共享、RESUMED后同turn多episode单记录、分类名chip三语本地化。
+5. cron环境约束实录：pytest --timeout=120参数不存在（无pytest-timeout插件）→裸跑+terminal background轮询；gene-client.tsx本轮无sibling共文件（直接git add整文件）比hunk拆分省事——**改前先git status看该文件diff归属**可省/skip拆分脚本；render-test-gene-keyset.cjs已加transpile临时目录自清理（.gene-keyset-*不再留垃圾，存量.ask-card-*/.span-tree-*等是前轮同病，待收拾）。
