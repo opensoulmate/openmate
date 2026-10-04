@@ -15,6 +15,8 @@ const Module = require('module');
 
 const ROOT = __dirname;
 const outDir = fs.mkdtempSync(path.join(ROOT, '.tab-tree-'));
+// 临时产物自清理（render-test-gene-keyset同款纪律：测试tmpdir不留垃圾）
+process.on('exit', () => { try { fs.rmSync(outDir, { recursive: true, force: true }); } catch {} });
 
 function compile(relSrc, relOut) {
   const src = fs.readFileSync(path.join(ROOT, relSrc), 'utf8');
