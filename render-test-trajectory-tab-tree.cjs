@@ -59,6 +59,8 @@ compile('src/app/(app)/trajectory/span-tree-view.tsx', 'trajectory/span-tree-vie
 // 跨会话搜索共享模块（2026-10-04）：tab的新import同款真实解析，缺编译=require抛MODULE_NOT_FOUND
 compile('src/app/(app)/trajectory/cross-search.ts', 'trajectory/cross-search.js');
 compile('src/app/(app)/trajectory/cross-search-view.tsx', 'trajectory/cross-search-view.js');
+// 共享展示组件单一真源（2026-10-05共享化去重）：tab的新import同款真实解析
+compile('src/app/(app)/trajectory/trajectory-shared.tsx', 'trajectory/trajectory-shared.js');
 const tabFile = compile('src/app/(app)/system/tabs/trajectory-tab.tsx', 'system/tabs/trajectory-tab.js');
 
 const { formatDuration, formatTokens } = require(treeFile);
@@ -92,6 +94,8 @@ async function main() {
     '①tab的../../trajectory/span-tree-view导入解析到真实编译模块（require.cache实锤）');
   assert(cached.some(k => k === path.resolve(treeFile)),
     '①tab的../../trajectory/span-tree导入解析到真实编译模块（require.cache实锤）');
+  assert(cached.some(k => k === path.resolve(path.join(outDir, 'trajectory', 'trajectory-shared.js'))),
+    '①tab的../../trajectory/trajectory-shared导入解析到真实编译模块（require.cache实锤）');
 
   // ── ② format单一真源（本地副本已删+行为回归钉）──
   assert(!/function formatDuration/.test(tabSrc) && !/function formatTokens/.test(tabSrc),

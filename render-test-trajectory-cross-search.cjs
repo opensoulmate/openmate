@@ -110,8 +110,8 @@ try {
       `${label}: doSearch吃buildSearchQueryString`);
     assert(src.includes('groupEventsBySession(searchResults)'), `${label}: 分组吃groupEventsBySession`);
     assert(src.includes('/api/trajectory/search/sessions?'), `${label}: fetch分组端点`);
-    assert(src.includes('<StatusFilterChips value={status} onChange={onStatusChange} />'),
-      `${label}: SearchBar挂StatusFilterChips`);
+    assert(/from "[^"]*trajectory-shared"/.test(src) && src.includes('<SearchBar'),
+      `${label}: SearchBar经trajectory-shared import（共享化单一真源）`);
     assert(src.includes('<SessionGroupHeader'), `${label}: 搜索结果挂SessionGroupHeader`);
     assert(src.includes('onOpen={sid =>') &&
       src.includes('selectSession(sid, searchCriteria ? treeFilterFromSearch(searchCriteria) : null)'),
@@ -121,6 +121,10 @@ try {
   }
 
   // cross-search-view组件面
+  // SearchBar共享化（2026-10-05）后StatusFilterChips挂载点迁入trajectory-shared单一真源
+  const sharedSrc = fs.readFileSync(path.join(ROOT, 'src/app/(app)/trajectory/trajectory-shared.tsx'), 'utf8');
+  assert(sharedSrc.includes('<StatusFilterChips value={status} onChange={onStatusChange} />'),
+    'trajectory-shared: SearchBar挂StatusFilterChips（SearchBar共享化后单一真源）');
   const viewSrc = fs.readFileSync(path.join(ROOT, 'src/app/(app)/trajectory/cross-search-view.tsx'), 'utf8');
   assert(viewSrc.includes('export function StatusFilterChips'), 'cross-search-view: StatusFilterChips导出');
   assert(viewSrc.includes('export function SessionGroupHeader'), 'cross-search-view: SessionGroupHeader导出');

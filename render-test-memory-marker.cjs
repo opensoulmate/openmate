@@ -7,6 +7,8 @@ const os = require('os');
 
 const SRC = path.join(__dirname, 'src/components/memory-marker-badge.tsx');
 const outDir = fs.mkdtempSync(path.join(__dirname, '.mmb-render-'));
+// 临时产物自清理（统一纪律：失败早退也不留tmpdir垃圾）
+process.on('exit', () => { try { fs.rmSync(outDir, { recursive: true, force: true }); } catch {} });
 const src = fs.readFileSync(SRC, 'utf8');
 const { outputText } = ts.transpileModule(src, {
   compilerOptions: {

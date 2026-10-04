@@ -61,6 +61,7 @@ try {
   const treeSrc = fs.readFileSync(path.join(ROOT, 'src/app/(app)/trajectory/span-tree.ts'), 'utf8');
   const csSrc = fs.readFileSync(path.join(ROOT, 'src/app/(app)/trajectory/cross-search.ts'), 'utf8');
   const csvSrc = fs.readFileSync(path.join(ROOT, 'src/app/(app)/trajectory/cross-search-view.tsx'), 'utf8');
+  const sharedSrc = fs.readFileSync(path.join(ROOT, 'src/app/(app)/trajectory/trajectory-shared.tsx'), 'utf8');
   const trajSrc = fs.readFileSync(path.join(ROOT, 'src/app/(app)/trajectory/trajectory-client.tsx'), 'utf8');
   const tabSrc = fs.readFileSync(path.join(ROOT, 'src/app/(app)/system/tabs/trajectory-tab.tsx'), 'utf8');
 
@@ -212,12 +213,12 @@ try {
         `④${name}：渲染吃filtered.visible（原始序号idx透传）`);
       assert(src.includes('highlightQuery={flatFilterActive ? (carriedTreeFilter?.query || "") : ""}'),
         `④${name}：命中高亮只在过滤生效时开（无携带=原文）`);
-      assert(src.includes('highlightQuery?: string') && src.includes('<MatchedText text={event.content} query={highlightQuery} />'),
-        `④${name}：EventCard高亮接线（MatchedText消费）`);
+      assert(/from "[^"]*trajectory-shared"/.test(src) && src.includes('<EventCard'),
+        `④${name}：EventCard经trajectory-shared import（SearchBar/EventCard共享化单一真源）`);
       assert(src.includes('filterFlatEvents, groupEventsBySession'),
         `④${name}：filterFlatEvents经cross-search import（无本地副本）`);
-      assert(src.includes('FlatFilterBar, MatchedText }'),
-        `④${name}：FlatFilterBar/MatchedText经cross-search-view import`);
+      assert(src.includes('FlatFilterBar }'),
+        `④${name}：FlatFilterBar经cross-search-view import`);
       // 旧扁平直渲形态归零（携带过滤不生效的旧接线不许残留）
       assert(!src.includes('{displayEvents.map((ev, idx) => ('),
         `④${name}：旧displayEvents直渲归零（扁平分支改吃filterFlatEvents）`);
@@ -228,6 +229,11 @@ try {
       assert(src.includes('selectSession(sid, searchCriteria ? treeFilterFromSearch(searchCriteria) : null)'),
         `④${name}：搜索组"打开会话"携带快照条件照旧`);
     }
+    // EventCard高亮接线随共享化迁入trajectory-shared单一真源（消费面判据逐字不变）
+    assert(sharedSrc.includes('highlightQuery?: string') && sharedSrc.includes('<MatchedText text={event.content} query={highlightQuery} />'),
+      '④trajectory-shared：EventCard高亮接线（MatchedText消费）');
+    assert(/import \{[^}]*MatchedText[^}]*\} from "\.\/cross-search-view"/.test(sharedSrc),
+      '④trajectory-shared：MatchedText经cross-search-view import（无本地副本）');
 
     // ── ⑤ i18n键三语 + en零CJK ──
     for (const [ns, k] of [['trajectory', 'flatMatches']]) {

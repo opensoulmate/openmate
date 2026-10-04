@@ -5,7 +5,7 @@
 // subtree rollup（折叠子树显示整棵子树事件/token/耗时）。
 // 纯逻辑=single source './span-tree'（无React可独立测试）；图标/配色由
 // trajectory-client以getEventIcon/getEventColor props注入（单一真源仍在
-// trajectory-client的EVENT_ICONS/EVENT_COLORS，本组件不复制映射表）。
+// trajectory-shared的EVENT_ICONS/EVENT_COLORS，本组件不复制映射表）。
 
 import { useEffect, useRef, useState } from "react"
 import type { ElementType } from "react"

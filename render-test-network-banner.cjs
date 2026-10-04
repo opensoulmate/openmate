@@ -10,6 +10,8 @@ const Module = require('module');
 
 const ROOT = __dirname;
 const outDir = fs.mkdtempSync(path.join(ROOT, '.nw-banner-'));
+// 临时产物自清理（统一纪律：失败早退也不留tmpdir垃圾）
+process.on('exit', () => { try { fs.rmSync(outDir, { recursive: true, force: true }); } catch {} });
 
 function compile(relSrc, relOut) {
   const src = fs.readFileSync(path.join(ROOT, relSrc), 'utf8');
