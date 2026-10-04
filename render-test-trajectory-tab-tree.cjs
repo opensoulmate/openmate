@@ -96,8 +96,8 @@ async function main() {
   // ── ② format单一真源（本地副本已删+行为回归钉）──
   assert(!/function formatDuration/.test(tabSrc) && !/function formatTokens/.test(tabSrc),
     '②trajectory-tab本地format定义已删（单一真源=span-tree.ts）');
-  assert(tabSrc.includes('formatDuration, formatTokens, type SpanNode } from "../../trajectory/span-tree"'),
-    '②trajectory-tab从span-tree import format（迁移接线）');
+  assert(tabSrc.includes('formatDuration, formatTokens, type SpanNode, type TreeFilter } from "../../trajectory/span-tree"'),
+    '②trajectory-tab从span-tree import format（迁移接线；TreeFilter类型同源）');
   // 行为：tab经同一模块实例取到的format输出逐字（6档回归钉）
   assert(formatDuration(500) === '500ms' && formatDuration(1500) === '1.5s' && formatDuration(90000) === '2m 30s',
     '②formatDuration 3档输出逐字（tab消费的单一真源实例）');

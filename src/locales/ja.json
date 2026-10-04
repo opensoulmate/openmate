@@ -3435,6 +3435,8 @@
     "sessionMatches": "{{count}}件の一致",
     "matchSessions": "{{count}}セッションが一致",
     "openSession": "セッションを開く",
+    "fromSearch": "検索から",
+    "fromSearchHint": "クロスセッション検索から引き継がれたフィルター——「すべて」で解除",
     "loadingAnalytics": "分析データを読み込み中...",
     "tok": "トークン",
     "justNow": "たった今",

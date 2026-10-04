@@ -3432,6 +3432,8 @@
     "sessionMatches": "{{count}} matches",
     "matchSessions": "{{count}} sessions matched",
     "openSession": "Open session",
+    "fromSearch": "From search",
+    "fromSearchHint": "Filter carried from cross-session search — click \"All\" to clear",
     "loadingAnalytics": "Loading analytics...",
     "tok": "tok",
     "justNow": "just now",

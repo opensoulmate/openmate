@@ -167,9 +167,22 @@ export interface TreeFilter {
   types?: Set<string>
   /** true=只看status≠ok的错误/异常节点 */
   errorsOnly?: boolean
+  /**
+   * status精确机器值白名单（空/缺省=全部）——跨会话搜索status过滤钻取进树
+   * （"整合"携带面）。与errorsOnly有意不对称：errorsOnly=status≠ok**放宽**档，
+   * statuses={'error'}只认机器值error恰一档（warn/timeout等不冒充error——
+   * "未知不猜/不冒充"纪律）。节点status缺省/空按"ok"归一后匹配
+   * （与errorsOnly同口径）。
+   */
+  statuses?: Set<string>
 }
 
-/** 节点是否命中过滤条件（文本×类型×错误三条件AND） */
+/** 节点status归一（缺省/空串→"ok"，与errorsOnly判定同口径） */
+function nodeStatus(node: SpanNode): string {
+  return node.status || "ok"
+}
+
+/** 节点是否命中过滤条件（文本×类型×错误×status四条件AND） */
 export function nodeMatches(node: SpanNode, filter: TreeFilter): boolean {
   const q = (filter.query || "").trim().toLowerCase()
   if (q) {
@@ -177,8 +190,44 @@ export function nodeMatches(node: SpanNode, filter: TreeFilter): boolean {
     if (!hay.includes(q)) return false
   }
   if (filter.types && filter.types.size > 0 && !filter.types.has(node.event_type)) return false
-  if (filter.errorsOnly && (node.status || "ok") === "ok") return false
+  if (filter.errorsOnly && nodeStatus(node) === "ok") return false
+  if (filter.statuses && filter.statuses.size > 0 && !filter.statuses.has(nodeStatus(node))) return false
   return true
+}
+
+/**
+ * 过滤条件是否生效（"全部"chip激活态/摘要行显隐的单一真源——
+ * SpanTreeBody与工具栏共用，禁止两处各算各的漂移）。
+ */
+export function filterIsActive(filter: TreeFilter): boolean {
+  return (
+    (filter.query || "").trim() !== "" ||
+    (filter.types?.size ?? 0) > 0 ||
+    !!filter.errorsOnly ||
+    (filter.statuses?.size ?? 0) > 0
+  )
+}
+
+/** Set相等（顺序无关）——sameFilter用 */
+function sameSet(a?: Set<string>, b?: Set<string>): boolean {
+  const sa = a || new Set<string>()
+  const sb = b || new Set<string>()
+  if (sa.size !== sb.size) return false
+  for (const v of sa) if (!sb.has(v)) return false
+  return true
+}
+
+/**
+ * 两过滤条件是否相同（"来自搜索"来源chip显隐：当前过滤态仍等于钻取
+ * 携带的初始态=来源可见；用户一改动即消失，不冒充"还来自搜索"）。
+ */
+export function sameFilter(a: TreeFilter, b: TreeFilter): boolean {
+  return (
+    (a.query || "").trim() === (b.query || "").trim() &&
+    sameSet(a.types, b.types) &&
+    sameSet(a.statuses, b.statuses) &&
+    !!a.errorsOnly === !!b.errorsOnly
+  )
 }
 
 /**

@@ -11,6 +11,7 @@ const Module = require('module');
 
 const ROOT = __dirname;
 const outDir = fs.mkdtempSync(path.join(ROOT, '.cross-search-'));
+process.on('exit', () => { try { fs.rmSync(outDir, { recursive: true, force: true }); } catch {} });
 
 try {
   function compile(relSrc, relOut) {
@@ -109,7 +110,10 @@ try {
     assert(src.includes('<StatusFilterChips value={status} onChange={onStatusChange} />'),
       `${label}: SearchBar挂StatusFilterChips`);
     assert(src.includes('<SessionGroupHeader'), `${label}: 搜索结果挂SessionGroupHeader`);
-    assert(src.includes('onOpen={selectSession}'), `${label}: 组头打开会话接selectSession`);
+    assert(src.includes('onOpen={sid =>') &&
+      src.includes('selectSession(sid, searchCriteria ? treeFilterFromSearch(searchCriteria) : null)'),
+      `${label}: 组头打开会话接selectSession并携带搜索条件（搜索→树钻取整合）`);
+    assert(!src.includes('onOpen={selectSession}'), `${label}: 旧裸selectSession直连归零（携带面接线钉）`);
     assert(!src.includes('params.set("q"'), `${label}: q=反模式归零（回归钉）`);
   }
 

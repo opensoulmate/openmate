@@ -14,9 +14,10 @@ import {
 } from "lucide-react"
 import { SpanTreeView } from "../../trajectory/span-tree-view"
 // 展示格式化+SpanNode类型=span-tree单一真源（本地副本已删，防双实现漂移）
-import { formatDuration, formatTokens, type SpanNode } from "../../trajectory/span-tree"
+import { formatDuration, formatTokens, type SpanNode, type TreeFilter } from "../../trajectory/span-tree"
 import {
-  buildSearchQueryString, groupEventsBySession, type ServerSessionMatch,
+  buildSearchQueryString, groupEventsBySession, treeFilterFromSearch,
+  type CrossSearchQueryInput, type ServerSessionMatch,
 } from "../../trajectory/cross-search"
 import { StatusFilterChips, SessionGroupHeader } from "../../trajectory/cross-search-view"
 
@@ -565,6 +566,11 @@ export function TrajectoryTab() {
   // 跨会话搜索状态（2026-10-04）：status过滤 + /search/sessions分组元数据
   const [searchStatus, setSearchStatus] = useState("")
   const [searchGroupMeta, setSearchGroupMeta] = useState<Record<string, ServerSessionMatch>>({})
+  // 搜索→树钻取携带面（2026-10-05"树内搜索与扁平搜索整合"）：doSearch快照
+  // 的搜索条件（结果是快照条件产的，钻取过滤面不许跟未搜索的新输入走）+
+  // 携带到SpanTreeView的initialFilter（列表入口打开会话=null不过滤）
+  const [searchCriteria, setSearchCriteria] = useState<CrossSearchQueryInput | null>(null)
+  const [carriedTreeFilter, setCarriedTreeFilter] = useState<TreeFilter | null>(null)
 
   // Replay state
   const [replayIdx, setReplayIdx] = useState(0)
@@ -663,12 +669,15 @@ export function TrajectoryTab() {
     if (!query.trim() && selectedTypes.size === 0 && !searchStatus) {
       setSearchResults(null)
       setSearchGroupMeta({})
+      setSearchCriteria(null)
       setView("list")
       return
     }
     try {
       // 参数名钉死在buildSearchQueryString（P0回归钉：曾误传q=→文本搜索哑火）
       const qs = buildSearchQueryString({ query, selectedTypes, status: searchStatus })
+      // 快照搜索条件（钻取携带面）：结果=这批条件产的，后续输入框改动不追溯
+      setSearchCriteria({ query, selectedTypes: new Set(selectedTypes), status: searchStatus })
       const [evR, grpR] = await Promise.all([
         fetch(`${apiBase}/api/trajectory/search?${qs}`),
         fetch(`${apiBase}/api/trajectory/search/sessions?${qs}`),
@@ -698,13 +707,16 @@ export function TrajectoryTab() {
 
   // ── Session Selection ──────────────────────────────────────
 
-  const selectSession = useCallback((id: string) => {
+  // carry=搜索→树钻取携带的过滤条件（treeFilterFromSearch适配）；列表/侧栏
+  // 入口不传=null→树不过滤（既有形态逐字不变）
+  const selectSession = useCallback((id: string, carry: TreeFilter | null = null) => {
     setSelectedSession(id)
     setView("detail")
     setSessionListOpen(false)
     setReplayMode(false)
     setReplayPlaying(false)
     setReplayIdx(0)
+    setCarriedTreeFilter(carry)
     setTraceRoots(null)  // 清上一棵树（防切换会话闪现旧树）
     fetchEvents(id)
     fetchTrace(id)
@@ -1177,6 +1189,7 @@ export function TrajectoryTab() {
                 key={selectedSession}
                 roots={traceRoots}
                 revealedIds={revealedSpanIds}
+                initialFilter={carriedTreeFilter}
                 getEventColor={getEventColor}
                 getEventIcon={getEventIcon}
               />
@@ -1197,7 +1210,11 @@ export function TrajectoryTab() {
                       sessionId={g.session_id}
                       visibleCount={g.visible_count}
                       meta={searchGroupMeta[g.session_id] || null}
-                      onOpen={selectSession}
+                      onOpen={sid =>
+                        // 搜索→树钻取"整合"：携带快照搜索条件进树（命中高亮/
+                        // 未命中兄弟剪掉），两个搜索面对同一查询一致
+                        selectSession(sid, searchCriteria ? treeFilterFromSearch(searchCriteria) : null)
+                      }
                     />
                     <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
                       {g.events.map((ev, idx) => (

@@ -12,6 +12,7 @@ const Module = require('module');
 
 const ROOT = __dirname;
 const outDir = fs.mkdtempSync(path.join(ROOT, '.span-tree-search-'));
+process.on('exit', () => { try { fs.rmSync(outDir, { recursive: true, force: true }); } catch {} });
 
 function compile(relSrc, relOut) {
   const src = fs.readFileSync(path.join(ROOT, relSrc), 'utf8');
@@ -31,6 +32,8 @@ function compile(relSrc, relOut) {
 }
 
 const treeFile = compile('src/app/(app)/trajectory/span-tree.ts', 'trajectory/span-tree.js');
+// span-tree-view现import ./cross-search（statusLabelKey单一真源）——须先编译同目录产物
+compile('src/app/(app)/trajectory/cross-search.ts', 'trajectory/cross-search.js');
 const viewFile = compile('src/app/(app)/trajectory/span-tree-view.tsx', 'trajectory/span-tree-view.js');
 const {
   filterTree, nodeMatches, matchIds, expandAllIds, filteredRollup,

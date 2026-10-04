@@ -9,6 +9,13 @@
 // 跨session搜索（"哪个session有error的tool_call"）：groupEventsBySession把扁平
 // 命中按会话分组（组序=最近命中降序），分组计数优先吃后端/search/sessions的
 // GROUP BY真值（不从截断的事件列表推算——"total推算说谎"纪律）。
+//
+// 搜索→树钻取整合（2026-10-05，"树内搜索与扁平搜索整合"销账）：
+// treeFilterFromSearch把搜索条件适配成树内TreeFilter（SpanTreeView
+// initialFilter携带）——从搜索结果"打开会话"钻进span树时命中行高亮/
+// 未命中兄弟剪掉，两个搜索面（扁平分组×树内）对同一查询一致。
+
+import type { TreeFilter } from "./span-tree"
 
 export interface CrossSearchQueryInput {
   query: string
@@ -85,6 +92,29 @@ export interface ServerSessionMatch {
 }
 
 export const SEARCH_STATUS_OPTIONS = ["", "error", "ok"] as const
+
+/**
+ * 跨会话搜索条件 → 树内TreeFilter（搜索→树钻取"整合"的携带适配器）。
+ *
+ * 语义（精确不放宽）：status是**精确机器值**——status='error'钻进树后
+ * statuses={'error'}只认error恰一档，**不**映射成errorsOnly（那是status≠ok
+ * 的放宽档，warn/timeout会冒充error命中——"未知不猜/不冒充"纪律）；
+ * status=''不携带status过滤。types保留全部勾选（搜索侧event_type单选是
+ * URL约束，树侧白名单本就支持多选）。errorsOnly恒false（树里的错误chip
+ * 是独立用户动作，不替用户预设）。
+ */
+export function treeFilterFromSearch({
+  query,
+  selectedTypes,
+  status,
+}: CrossSearchQueryInput): TreeFilter {
+  return {
+    query: (query || "").trim(),
+    types: new Set(Array.from(selectedTypes)),
+    errorsOnly: false,
+    statuses: status ? new Set([status]) : new Set<string>(),
+  }
+}
 
 /**
  * 状态过滤chip的i18n key；未映射状态返回null→调用方直出机器原值

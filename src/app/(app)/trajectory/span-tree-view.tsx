@@ -7,7 +7,7 @@
 // trajectory-client以getEventIcon/getEventColor props注入（单一真源仍在
 // trajectory-client的EVENT_ICONS/EVENT_COLORS，本组件不复制映射表）。
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import type { ElementType } from "react"
 import { ChevronRight, ChevronDown, Crosshair, Layers, Search, X } from "lucide-react"
 import { useTranslation } from "react-i18next"
@@ -32,7 +32,10 @@ import {
   splitMatch,
   clipToIds,
   countSpans,
+  filterIsActive,
+  sameFilter,
 } from "./span-tree"
+import { statusLabelKey } from "./cross-search"
 
 export interface SpanTreeViewProps {
   roots: SpanNode[]
@@ -40,32 +43,67 @@ export interface SpanTreeViewProps {
   getEventIcon: (type: string) => ElementType
   /** 回放渐进揭示：已揭示事件id集（null/缺省=全部揭示）——树随回放进度生长 */
   revealedIds?: Set<string> | null
+  /**
+   * 初始过滤条件（搜索→树钻取携带面，2026-10-05"整合"销账）：从跨会话
+   * 搜索结果"打开会话"钻进树时预填query/types/statuses——命中高亮+未命中
+   * 兄弟剪掉+自动展开，两个搜索面对同一查询一致。null/缺省=不过滤
+   * （列表入口打开会话的既有形态逐字不变）。roots变化重置到本初始态
+   * （非清空——携带的搜索条件随会话重载恢复）。
+   */
+  initialFilter?: TreeFilter | null
 }
 
-export function SpanTreeView({ roots, getEventColor, getEventIcon, revealedIds = null }: SpanTreeViewProps) {
+/** 初始过滤态→三份组件state（useState初始化与roots重置共用，禁双份漂移） */
+function filterToState(filter: TreeFilter | null | undefined): {
+  query: string
+  types: Set<string>
+  errorsOnly: boolean
+  statuses: Set<string>
+} {
+  return {
+    query: (filter?.query || "").trim(),
+    types: new Set(filter?.types || []),
+    errorsOnly: !!filter?.errorsOnly,
+    statuses: new Set(filter?.statuses || []),
+  }
+}
+
+export function SpanTreeView({ roots, getEventColor, getEventIcon, revealedIds = null, initialFilter = null }: SpanTreeViewProps) {
   const { t } = useTranslation()
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => defaultExpandedIds(roots))
   const [focusId, setFocusId] = useState<string | null>(null)
-  // 树内搜索/过滤（06:30轮遗留#4）：query×类型白名单×errorsOnly
-  const [query, setQuery] = useState("")
-  const [typeFilter, setTypeFilter] = useState<Set<string>>(() => new Set<string>())
-  const [errorsOnly, setErrorsOnly] = useState(false)
+  // 树内搜索/过滤（06:30轮遗留#4）：query×类型白名单×errorsOnly×status精确值
+  const init = filterToState(initialFilter)
+  const [query, setQuery] = useState(init.query)
+  const [typeFilter, setTypeFilter] = useState<Set<string>>(() => init.types)
+  const [errorsOnly, setErrorsOnly] = useState(init.errorsOnly)
+  const [statusFilter, setStatusFilter] = useState<Set<string>>(() => init.statuses)
 
-  // roots变化（切换会话/重新拉取）=重置展开/聚焦/搜索（不残留上一棵树状态）
+  // roots变化（切换会话/重新拉取）=重置展开/聚焦/搜索到初始过滤态
+  // （携带的搜索条件随会话重载恢复；无携带=清空，既有行为逐字不变）。
+  // initialFilter走ref不进deps：调用方内联构造新引用也不会触发重置风暴
+  // （重置只随roots变化发生，与旧deps=[roots]行为同节奏）
+  const initialFilterRef = useRef(initialFilter)
+  initialFilterRef.current = initialFilter
   useEffect(() => {
     setExpandedIds(defaultExpandedIds(roots))
     setFocusId(null)
-    setQuery("")
-    setTypeFilter(new Set<string>())
-    setErrorsOnly(false)
+    const s = filterToState(initialFilterRef.current)
+    setQuery(s.query)
+    setTypeFilter(s.types)
+    setErrorsOnly(s.errorsOnly)
+    setStatusFilter(s.statuses)
   }, [roots])
 
   const focusNode = focusId ? findNode(roots, focusId) : null
   const viewRoots = focusNode ? [focusNode] : roots
   const crumbs = focusNode ? breadcrumbPath(roots, focusNode.id) : []
-  const filter: TreeFilter = { query: query.trim(), types: typeFilter, errorsOnly }
+  const filter: TreeFilter = { query: query.trim(), types: typeFilter, errorsOnly, statuses: statusFilter }
   const typeChips = eventTypeCounts(roots)
   const errorCount = countErrors(roots)
+  // "来自搜索"来源chip：当前过滤态仍=钻取携带的初始态才亮（用户一改动即
+  // 消失，不冒充"还来自搜索"——sameFilter单一真源）
+  const fromSearch = !!initialFilter && filterIsActive(filter) && sameFilter(filter, initialFilter)
   const toggleType = (type: string) =>
     setTypeFilter(prev => {
       const next = new Set(prev)
@@ -73,7 +111,9 @@ export function SpanTreeView({ roots, getEventColor, getEventIcon, revealedIds =
       else next.add(type)
       return next
     })
-  const clearFilters = () => { setQuery(""); setTypeFilter(new Set<string>()); setErrorsOnly(false) }
+  const clearFilters = () => {
+    setQuery(""); setTypeFilter(new Set<string>()); setErrorsOnly(false); setStatusFilter(new Set<string>())
+  }
 
   return (
     <div>
@@ -105,11 +145,45 @@ export function SpanTreeView({ roots, getEventColor, getEventIcon, revealedIds =
             <X size={12} />
           </button>
         )}
+        {/* "来自搜索"来源chip（钻取携带面可见性）：当前过滤态仍=搜索携带的
+            初始态才亮，用户一改动即消失；点"全部"可整体清除 */}
+        {fromSearch && (
+          <span
+            title={t("trajectory.fromSearchHint")}
+            style={{
+              fontSize: 10, padding: "2px 8px", borderRadius: 999,
+              border: "1px dashed hsl(var(--primary))",
+              background: "hsl(var(--primary) / 0.08)",
+              color: "hsl(var(--primary))", fontWeight: 600,
+              display: "flex", alignItems: "center", gap: 4, lineHeight: 1.6,
+              whiteSpace: "nowrap",
+            }}
+          >
+            <Search size={10} />
+            {t("trajectory.fromSearch")}
+          </span>
+        )}
         <FilterChip
           label={t("common.all")}
-          active={typeFilter.size === 0 && !errorsOnly}
+          active={typeFilter.size === 0 && !errorsOnly && statusFilter.size === 0}
           onClick={clearFilters}
         />
+        {/* status精确值chip（搜索携带面）：点掉即解除该status过滤；不提供
+            树内新增入口——status过滤的入口在搜索框（两面分工明确） */}
+        {Array.from(statusFilter).sort().map(s => (
+          <FilterChip
+            key={s}
+            label={t(statusLabelKey(s) ?? s)}
+            active
+            onClick={() =>
+              setStatusFilter(prev => {
+                const next = new Set(prev)
+                next.delete(s)
+                return next
+              })
+            }
+          />
+        ))}
         {typeChips.map(c => (
           <FilterChip
             key={c.type}
@@ -238,7 +312,8 @@ export function SpanTreeBody({
 }: SpanTreeBodyProps) {
   const { t } = useTranslation()
   const q = (filter.query || "").trim()
-  const filterActive = q !== "" || (filter.types?.size ?? 0) > 0 || !!filter.errorsOnly
+  // filterIsActive=过滤生效判定单一真源（工具栏"全部"chip激活态同源）
+  const filterActive = filterIsActive(filter)
   const clipActive = revealedIds != null
   const baseRoots = clipActive ? clipToIds(roots, revealedIds) : roots
   const filteredRoots = filterActive ? filterTree(baseRoots, filter) : baseRoots
@@ -249,6 +324,10 @@ export function SpanTreeBody({
   const filterLabels = [
     ...(filter.types && filter.types.size > 0 ? [...filter.types].sort() : []),
     ...(filter.errorsOnly ? [t("common.error")] : []),
+    // status精确值条件也进摘要（"生效条件可见"——钻取携带的status不静默）
+    ...(filter.statuses && filter.statuses.size > 0
+      ? [...filter.statuses].sort().map(s => t(statusLabelKey(s) ?? s))
+      : []),
   ]
 
   return (
