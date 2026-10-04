@@ -30,15 +30,19 @@ import {
   eventTypeCounts,
   countErrors,
   splitMatch,
+  clipToIds,
+  countSpans,
 } from "./span-tree"
 
 export interface SpanTreeViewProps {
   roots: SpanNode[]
   getEventColor: (type: string) => string
   getEventIcon: (type: string) => ElementType
+  /** 回放渐进揭示：已揭示事件id集（null/缺省=全部揭示）——树随回放进度生长 */
+  revealedIds?: Set<string> | null
 }
 
-export function SpanTreeView({ roots, getEventColor, getEventIcon }: SpanTreeViewProps) {
+export function SpanTreeView({ roots, getEventColor, getEventIcon, revealedIds = null }: SpanTreeViewProps) {
   const { t } = useTranslation()
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => defaultExpandedIds(roots))
   const [focusId, setFocusId] = useState<string | null>(null)
@@ -172,6 +176,7 @@ export function SpanTreeView({ roots, getEventColor, getEventIcon }: SpanTreeVie
       <SpanTreeBody
         roots={viewRoots}
         filter={filter}
+        revealedIds={revealedIds}
         expandedIds={expandedIds}
         onToggle={id => setExpandedIds(prev => toggleExpanded(prev, id))}
         onFocus={setFocusId}
@@ -212,6 +217,8 @@ export interface SpanTreeBodyProps {
   /** 聚焦后的视图根（SpanTreeView传viewRoots） */
   roots: SpanNode[]
   filter: TreeFilter
+  /** 回放渐进揭示id集（null/缺省=全部揭示） */
+  revealedIds?: Set<string> | null
   expandedIds: Set<string>
   onToggle: (id: string) => void
   onFocus: (id: string) => void
@@ -222,17 +229,21 @@ export interface SpanTreeBodyProps {
 /**
  * 树行渲染体（无自身状态=可SSR直测）：搜索/过滤/高亮全在内。
  * 过滤语义=filterTree剪树（命中+祖先上下文）+自动全展开+命中行高亮；
- * 过滤态Σrollup用filteredRollup（对剪后子树求和），非过滤态用服务端
- * subtree_*（单一真源）。
+ * 回放语义=clipToIds按已揭示id集渐进揭示（同族祖先上下文保留，Σrollup
+ * 同过滤态对可见子树重算——subtree_*是全树汇总，裁过之后是假数）；
+ * 非过滤/非回放态Σrollup用服务端subtree_*（单一真源）。
  */
 export function SpanTreeBody({
-  roots, filter, expandedIds, onToggle, onFocus, getEventColor, getEventIcon,
+  roots, filter, revealedIds = null, expandedIds, onToggle, onFocus, getEventColor, getEventIcon,
 }: SpanTreeBodyProps) {
   const { t } = useTranslation()
   const q = (filter.query || "").trim()
   const filterActive = q !== "" || (filter.types?.size ?? 0) > 0 || !!filter.errorsOnly
-  const filteredRoots = filterActive ? filterTree(roots, filter) : roots
-  const effExpanded = filterActive ? expandAllIds(filteredRoots) : expandedIds
+  const clipActive = revealedIds != null
+  const baseRoots = clipActive ? clipToIds(roots, revealedIds) : roots
+  const filteredRoots = filterActive ? filterTree(baseRoots, filter) : baseRoots
+  // 回放态同样自动全展开（渐进生长的全是已发生路径，不做折叠残影）
+  const effExpanded = filterActive || clipActive ? expandAllIds(filteredRoots) : expandedIds
   const rows: SpanTreeRow[] = flattenVisible(filteredRoots, effExpanded)
   const hits = filterActive ? matchIds(filteredRoots, filter) : new Set<string>()
   const filterLabels = [
@@ -242,13 +253,20 @@ export function SpanTreeBody({
 
   return (
     <div>
-      {/* 过滤结果摘要（结果数/生效条件——过滤态可见性声明） */}
-      {filterActive && (
+      {/* 过滤/回放结果摘要（结果数/生效条件——可见性声明） */}
+      {(filterActive || clipActive) && (
         <div style={{
           padding: "2px 10px", marginBottom: 6, fontSize: 11,
           color: "hsl(var(--muted-foreground))",
           display: "flex", gap: 10, flexWrap: "wrap",
         }}>
+          {clipActive && (
+            <span>{t("trajectory.replayRevealed", {
+              shown: countSpans(filteredRoots),
+              total: countSpans(roots),
+              defaultValue: "回放中：已揭示 {{shown}}/{{total}} 个span",
+            })}</span>
+          )}
           {q !== "" && <span>{t("trajectory.resultsFor", { count: hits.size, query: q })}</span>}
           {filterLabels.length > 0 && (
             <span>{t("trajectory.filtered", { types: filterLabels.join(", ") })}</span>
@@ -268,7 +286,7 @@ export function SpanTreeBody({
             <SpanTreeRowView
               key={row.node.id}
               row={row}
-              filterActive={filterActive}
+              filterActive={filterActive || clipActive}
               hit={hits.has(row.node.id)}
               query={q}
               getEventColor={getEventColor}
@@ -299,8 +317,8 @@ function SpanTreeRowView({
   const { node, depth, hasChildren, expanded } = row
   const color = getEventColor(node.event_type)
   const Icon = getEventIcon(node.event_type)
-  // 过滤态Σ=对剪后子树重算（subtree_*是全树汇总，剪过之后是假数）；
-  // 非过滤态=服务端subtree_*单一真源。
+  // 过滤/回放态Σ=对裁后子树重算（subtree_*是全树汇总，裁过之后是假数）；
+  // 非过滤/非回放态=服务端subtree_*单一真源（filterActive在此含回放裁剪态）。
   const rollup = filterActive ? filteredRollup(node) : subtreeRollup(node)
   const preview = (node.content || "").replace(/\s+/g, " ").trim().slice(0, 120)
   const segments = splitMatch(preview, query)

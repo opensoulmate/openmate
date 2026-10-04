@@ -291,3 +291,39 @@ export function splitMatch(text: string, query: string): Array<{ text: string; h
   if (pos < (text || "").length) out.push({ text: (text || "").slice(pos), hit: false })
   return out.length > 0 ? out : [{ text: text || "", hit: false }]
 }
+
+// ── 回放渐进揭示（2026-10-04，"回放与树互斥"销账）────────────────────────
+// 回放与树协同：回放进度（events[0..replayIdx]）→已揭示事件id集→树按执行序
+// 渐进揭示（未来的span不出现=与扁平回放 events.slice 同语义）。裁剪语义与
+// filterTree同族：id∈ids的节点保留+其祖先上下文保留（子树已揭示但父行不在
+// ids时——fork/import数据可能出现——父行仍作上下文保留），未揭示子孙剪掉；
+// 不改原树（React state友好）。
+
+/**
+ * 按已揭示id集裁剪树（回放渐进揭示）。
+ * 保留：id∈ids 的节点 + 其祖先上下文行；剪掉：未揭示且无已揭示子孙的子树。
+ * 返回新树（浅拷贝节点、children=裁后数组），**不改原树**。
+ */
+export function clipToIds(roots: SpanNode[], ids: Set<string>): SpanNode[] {
+  const out: SpanNode[] = []
+  for (const node of roots || []) {
+    const keptChildren = clipToIds(node.children || [], ids)
+    if (ids.has(node.id) || keptChildren.length > 0) {
+      out.push({ ...node, children: keptChildren })
+    }
+  }
+  return out
+}
+
+/** 树内span总数（回放"已揭示 X / Y"的Y；与clipToIds同一遍历口径） */
+export function countSpans(roots: SpanNode[]): number {
+  let n = 0
+  const walk = (nodes: SpanNode[]) => {
+    for (const node of nodes || []) {
+      n += 1
+      walk(node.children || [])
+    }
+  }
+  walk(roots || [])
+  return n
+}

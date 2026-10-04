@@ -221,8 +221,10 @@ async function main() {
   assert(trajSrc.includes('<SpanTreeView') && trajSrc.includes('getEventColor={getEventColor}') &&
     trajSrc.includes('getEventIcon={getEventIcon}'),
     '⑤SpanTreeView挂载+图标/配色props注入（映射表单一真源=trajectory-client）');
-  assert(trajSrc.includes('treeMode && !replayMode && traceRoots'),
-    '⑤树渲染条件含回放互斥+数据在场守卫');
+  assert(trajSrc.includes('treeMode && traceRoots') && !trajSrc.includes('treeMode && !replayMode'),
+    '⑤树渲染条件=数据在场守卫+回放互斥已解除（回放×树协同）');
+  assert(trajSrc.includes('revealedIds={revealedSpanIds}') && trajSrc.includes('const revealedSpanIds = replayMode'),
+    '⑤回放渐进揭示接线：revealedSpanIds计算→revealedIds prop消费');
   assert(trajSrc.includes('setTreeMode(!treeMode)'),
     '⑤工具栏树/列表切换接线');
   assert(viewSrc.includes('from "./span-tree"') && viewSrc.includes('flattenVisible(') &&

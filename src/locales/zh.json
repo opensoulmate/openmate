@@ -3422,7 +3422,8 @@
     "allSpans": "全部 Span",
     "treeView": "Span树",
     "listView": "列表",
-    "treeHint": "点击行下钻聚焦子树，点击面包屑返回上层"
+    "treeHint": "点击行下钻聚焦子树，点击面包屑返回上层",
+    "replayRevealed": "回放中：已揭示 {{shown}}/{{total}} 个span"
   },
   "diagnostics": {
     "title": "系统诊断",

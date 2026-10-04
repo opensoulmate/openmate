@@ -110,13 +110,17 @@ async function main() {
     '③selectSession消费fetchTrace（真实数据路径+依赖数组接线）');
   assert(tabSrc.includes('setTraceRoots(null)'),
     '③selectSession清上一棵树（防切换会话闪现旧树）');
-  assert(tabSrc.includes('view === "detail" && treeMode && !replayMode && traceRoots && traceRoots.length > 0'),
-    '③树渲染条件=detail+treeMode+回放互斥+数据在场守卫（与trajectory-client同款）');
+  assert(tabSrc.includes('view === "detail" && treeMode && traceRoots && traceRoots.length > 0') &&
+    !tabSrc.includes('treeMode && !replayMode'),
+    '③树渲染条件=detail+treeMode+数据在场守卫（回放×树协同：互斥已解除）');
   assert(tabSrc.includes('<SpanTreeView') && tabSrc.includes('getEventColor={getEventColor}') &&
     tabSrc.includes('getEventIcon={getEventIcon}') && tabSrc.includes('key={selectedSession}'),
     '③SpanTreeView挂载+图标/配色props注入+key随会话重置');
-  assert(/onClick=\{\(\) => \{ setReplayMode\(false\); setReplayPlaying\(false\); setTreeMode\(!treeMode\) \}\}/.test(tabSrc),
-    '③切换按钮接线+切树关回放（互斥在同一onClick，字符串逐字）');
+  assert(tabSrc.includes('revealedIds={revealedSpanIds}') && tabSrc.includes('const revealedSpanIds = replayMode'),
+    '③回放渐进揭示接线：revealedSpanIds计算→revealedIds prop消费');
+  assert(/onClick=\{\(\) => \{ setTreeMode\(!treeMode\) \}\}/.test(tabSrc) &&
+    !/setReplayMode\(false\); setReplayPlaying\(false\); setTreeMode/.test(tabSrc),
+    '③切换按钮接线=纯视图切换（切树不再关回放，字符串逐字）');
   assert(/const \[treeMode, setTreeMode\] = useState\(true\)/.test(tabSrc) &&
     /const \[traceRoots, setTraceRoots\] = useState<SpanNode\[\] \| null>\(null\)/.test(tabSrc),
     '③treeMode默认开（观察面优先）+traceRoots状态定义在场');

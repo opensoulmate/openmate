@@ -3420,7 +3420,8 @@
     "allSpans": "すべてのSpan",
     "treeView": "Spanツリー",
     "listView": "リスト",
-    "treeHint": "行をクリックしてサブツリーにドリルダウン、パンくずで上層に戻る"
+    "treeHint": "行をクリックしてサブツリーにドリルダウン、パンくずで上層に戻る",
+    "replayRevealed": "リプレイ中：{{shown}}/{{total}} スパンを表示"
   },
   "diagnostics": {
     "title": "システム診断",

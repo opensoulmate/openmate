@@ -3417,7 +3417,8 @@
     "allSpans": "All spans",
     "treeView": "Span tree",
     "listView": "List",
-    "treeHint": "Click a row to drill into its subtree; click a breadcrumb to go back"
+    "treeHint": "Click a row to drill into its subtree; click a breadcrumb to go back",
+    "replayRevealed": "Replaying: {{shown}}/{{total}} spans revealed"
   },
   "diagnostics": {
     "title": "System Diagnostics",

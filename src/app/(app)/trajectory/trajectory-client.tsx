@@ -731,6 +731,13 @@ export function TrajectoryClient() {
   const displayEvents = view === "search" && searchResults ? searchResults :
     replayMode ? events.slice(0, replayIdx + 1) : events
 
+  // 回放×树协同（2026-10-04，"回放与树互斥"销账）：已揭示事件id集=
+  // events[0..replayIdx]，SpanTreeView按此渐进揭示（与扁平回放的
+  // events.slice同语义——同一进度两种视图各吃各的渲染面）
+  const revealedSpanIds = replayMode
+    ? new Set(events.slice(0, replayIdx + 1).map(ev => String(ev.id)))
+    : null
+
   // ── Render ─────────────────────────────────────────────────
 
   return (
@@ -1065,9 +1072,10 @@ export function TrajectoryClient() {
                   <GitBranch size={12} /> {forking ? t("trajectory.forking") : t("trajectory.fork")}
                 </button>
                 {/* span树/列表切换（Warp orchestration树，2026-10-02 P1）——
-                    切树关回放（两种检视模式互斥，回放吃扁平事件序） */}
+                    回放×树协同（2026-10-04）：切换视图不再打断回放，
+                    树随回放进度渐进揭示 */}
                 <button
-                  onClick={() => { setReplayMode(false); setReplayPlaying(false); setTreeMode(!treeMode) }}
+                  onClick={() => { setTreeMode(!treeMode) }}
                   style={{
                     padding: "5px 12px", borderRadius: 6, fontSize: 12,
                     border: `1px solid ${treeMode ? "hsl(var(--primary))" : "hsl(var(--border))"}`,
@@ -1123,12 +1131,14 @@ export function TrajectoryClient() {
               </div>
             )}
 
-            {/* Events — span树优先（treeMode且trace数据在场且非回放/搜索），
-                否则原有扁平事件列表逐字不变 */}
-            {view === "detail" && treeMode && !replayMode && traceRoots && traceRoots.length > 0 ? (
+            {/* Events — span树优先（treeMode且trace数据在场），回放中=树随
+                回放进度渐进揭示（revealedIds=已揭示事件id集）；搜索视图仍走
+                扁平搜索结果，否则原有扁平事件列表逐字不变 */}
+            {view === "detail" && treeMode && traceRoots && traceRoots.length > 0 ? (
               <SpanTreeView
                 key={selectedSession}
                 roots={traceRoots}
+                revealedIds={revealedSpanIds}
                 getEventColor={getEventColor}
                 getEventIcon={getEventIcon}
               />
