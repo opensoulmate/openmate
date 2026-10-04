@@ -4668,3 +4668,36 @@
 3. 前端未做fetch翻页的React层render-test（组件monolith+effects，SSR不可达加载更多态）——本轮以skillsListUrl纯函数render-test+bundle接线字符串+live E2E三角覆盖；若后续抽SkillsPanel子组件可补交互render-test。
 4. 残余遗留观察项照旧：⚠️线索窗启发式残余/❌结果侧整token旧语义/read_turn遗留#1#2、learned_skills source列（测试marker字符串识别）、gene_loop测试侧隔离fixture、relay round级需引擎侧自报、两消费者近重复文件去重、树内搜索与扁平搜索整合、跨session搜索、LLM_FALLBACK_CHAIN未配置（402环境项）、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步、model_gateway凭据映射表、engine.py死代码清理候选、MCP重连真实Server验证、attach跨turn共享、RESUMED后同turn多episode单记录、分类名chip三语本地化。
 5. cron环境约束实录：pytest --timeout=120参数不存在（无pytest-timeout插件）→裸跑+terminal background轮询；gene-client.tsx本轮无sibling共文件（直接git add整文件）比hunk拆分省事——**改前先git status看该文件diff归属**可省/skip拆分脚本；render-test-gene-keyset.cjs已加transpile临时目录自清理（.gene-keyset-*不再留垃圾，存量.ask-card-*/.span-tree-*等是前轮同病，待收拾）。
+
+## [2026-10-04 19:13 CST] learned_skills.source来源列——测试垃圾清理从"marker字符串猜名字"升级为schema级provenance精确打击（多轮挂账"learned_skills source列（测试marker字符串识别）"销账，P1数据正确性/进化链可审计）
+**目标**：销账自17:01轮遗留#2起连续7+轮挂账的"learned_skills source列（测试marker字符串识别）"——测试/E2E垃圾清理此前靠名字marker字符串模式匹配+人工核对（wire解码测试-/遥测接线测试-/wireE2E/e2e-*等），无schema级来源标记=清理永远是启发式、永远可能误伤/漏删（17:01轮清理28行测试技能就是"模式匹配+逐行人工核对"的苦活）。learned_skills行只有source_session（测试行还不填），"这行是被谁写入的"在schema层根本不存在。
+**调研来源**：evolution-engine-patterns.md §1.2 mem0记忆历史/审计表（"基因/skill每次被修改都写审计记录，'这条策略是被谁、因为哪次失败、从什么改成什么'全程可追溯"）+§1.1失败可见/禁静默（来源不许猜：猜不出就记unknown，不冒充）；SUMMARY P0-5/P0-7"指标不许说谎"同门——来源列说谎（拿名字猜来源）=清理决策建立在猜测上；§七"测试名即安全声明"方法论反向：**测试垃圾的身份该由写入方声明（source='test'），不该由清理方猜名字**。
+**改动文件**（opensoul `caf944a7`，4文件+576/-10，全增量old_string/new_string）：
+- `src/gene/skill_learner.py`（+117/-10）：SKILL_SOURCES/SOURCE_UNKNOWN/PURGEABLE_SOURCES常量（:93-97）、Skill.source字段（:150）、schema迁移（:201-211）、purge_by_source（:418）、STATE_FIELDS+source（:474）、_apply_state（:582）、extract_from_execution签名/校验/粘性（:656-810）、审计快照（:741/:821）、list/find_relevant归一（:948/:1029）
+- `src/gene/seed_standard_skills.py`（+7/-2）：INSERT加source列落'seed'
+- `src/api/gene.py`（+44/-1）：SkillExtractRequest.source、SkillPurgeRequest、source校验400、extract回显source、POST /skill/purge-source端点
+- `tests/test_gene_skill_source.py`（+315，新）：23断言
+**改动内容**：
+1. **source列+迁移**：learned_skills加source列（extract=生产学习链缺省/seed=标准技能种子/test=测试脚本**显式**声明）；存量库_init_db幂等迁移（PRAGMA查列→ALTER ADD→空值回填unknown）——**存量行不猜来源**，unknown≠test，purge永不误删存量真实学习行（生产库127行实测全unknown）。
+2. **来源粘性fail-closed双向**（UPDATE分支）：真实行被test触碰→保留原来源（真实行不许降级成可整批清的test）；test行被真实提炼触碰→升级extract（技能族已被真实学习链确认，purge不再收走）——两个方向都不会让"真实学习"被整批清理误伤。
+3. **purge_by_source清理端**：只清PURGEABLE_SOURCES（test测试垃圾/seed可重播种）+这些技能的孤儿skill_audit一并收拾（"skill_id not in learned_skills删审计行"的既有清理模式收进单一入口）；extract硬拒绝（真实学习行必须逐条走delete_skill留DELETE审计，mem0 §1.2可追溯红线）；整批purge不写DELETE审计（artifact清理≠进化变更，不把清理噪声灌回账本）。
+4. **回滚面保真**：source进STATE_FIELDS（revert diff/恢复面带来源），delete→restore无损恢复source；旧审计快照（source列上线前形状）没记录的字段保留当前值（既有legacy语义逐字不变）；ADD/UPDATE/DELETE审计old/new快照全带source。
+5. **wire边界**：extract的非法source→ValueError（API 400），不落"猜出来的来源"；/skill/purge-source非法/extract来源→400（端点+方法双层guard）。
+**接线位置**（grep证据，文件:行号）：
+- 写入链：`api/gene.py:329 source=req.source`→`skill_learner.py:655 extract_from_execution(source=)`→`:660 SKILL_SOURCES校验`→`:741/:775 INSERT/UPDATE带source`（粘性`:783-786 effective_source`）；`seed_standard_skills.py:78 source='seed'`
+- 清理链：`api/gene.py:487 POST /skill/purge-source`→`:497 PURGEABLE_SOURCES校验`→`skill_learner.py:418 purge_by_source`→`:447-452 DELETE learned_skills+skill_audit`
+- 读出链：`skill_learner.py:948/:1029 source口径归一`→`api/gene.py GET /skill`/`POST /skill/recommend`真实响应；回滚链`skill_learner.py:474 STATE_FIELDS`→`:582 _apply_state`
+- live实测即接线证据（生产:8090）：extract带source='test'→200回显`source:'test'`；GET /skill 127+1行可见test行；purge→`deleted_skills=1, deleted_audit=1`；bad source→400 `bad source: 'wire解码测试-乱写'`；purge extract→400 `purge refused`
+**验证结果**：
+- 完整性✅：`git diff --stat`=4文件+261/-11（+新测试315行=commit 576/-10），逐hunk核对100%为本轮改动；config/rbac_policy.csv照旧为环境既有sibling改动不入commit（git add白名单4文件）；`ast.parse`三文件语法OK。
+- 集成✅：grep链如上（API→extract/purge→SQL→读出/回滚面）；live E2E五连（见上）全符合预期。
+- 测试✅：新`test_gene_skill_source.py` **23 passed**（默认/显式/非法source、粘性双向+双test、存量库迁移+幂等+unknown不猜、legacy快照回滚source保留、delete→restore保真、revert diff带source、purge只清test+孤儿审计/硬拒extract与unknown/空purge零计数、seed落'seed'可重播、列表/recommend透出、API六面）；gene套件（11文件）**112 passed**零回归；**opensoul全量2436 passed**（152.9s，=2413基线+23新测精确吻合，邻居零回归）。
+- live E2E✅（生产库127行）：迁移实测127行全unknown（不猜来源）；test行写入/可见/purge精确清（1技能+1审计）后复归127行全unknown、零残留（audit尾部纯真实ADD记录）。
+**服务重启**：`systemctl --user restart opensoul.service`→/api/gene/health 200（total_skills=127）；acp-proxy/openmate前端零改动无需重启/build。
+**commit**：opensoul `caf944a7`。
+**遗留问题**：
+1. **前端未展示source列**（gene技能库tab只显示source_session）——需加i18n key（locales×3当前有sibling未提交改动，混hunk风险），下轮等locales干净后补chip/列展示。
+2. **存量127行source=unknown无法追溯真实来源**（列上线前没记，不猜）——历史E2E垃圾已在17:01轮清完，现存行按"技能仍存在则禁删"口径都是真实学习/种子行，风险低；若要细分可跑一次性脚本按seed的skill_id前缀`std_`回填seed（seed行id是`std_`+hash，天然可辨），但那又是"按名字猜"，仅作可选项记录。
+3. **live E2E脚本（e2e_skill_usage_receipt.py等）尚未改传source='test'**——API字段已就绪，脚本侧下次跑时带上即可享受精确清理。
+4. 残余遗留观察项照旧：⚠️线索窗启发式残余/❌结果侧整token旧语义/read_turn遗留#1首行窗口残余/#2标题线索词边界、gene_loop测试侧隔离fixture、relay round级需引擎侧自报、两消费者近重复文件去重、树内搜索与扁平搜索整合、跨session搜索、LLM_FALLBACK_CHAIN未配置（402环境项）、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步、model_gateway凭据映射表、engine.py死代码清理候选、MCP重连真实Server验证、attach跨turn共享、RESUMED后同turn多episode单记录、分类名chip三语本地化。
+5. cron环境约束实录：patch工具对sibling并发编辑的告警是**误报**（该文件git diff核对只含本人hunk时可无视，但每次必须git diff复核）；`process(wait)`超时被钳到180s——全量pytest（150s+）用background+wait即可。
