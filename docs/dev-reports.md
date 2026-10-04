@@ -4598,3 +4598,39 @@
 4. 残余遗留观察项照旧：⚠️线索窗启发式残余/❌结果侧整token旧语义/read_turn遗留#1#2、分页offset稳定性（可改keyset）、learned_skills source列、gene_loop测试侧隔离fixture、relay round级需引擎侧自报、两消费者近重复文件去重、树内搜索与扁平搜索整合、回放与树互斥、跨session搜索、LLM_FALLBACK_CHAIN未配置（402环境项）、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步、model_gateway凭据映射表、engine.py死代码清理候选、MCP重连真实Server验证、attach跨turn共享、RESUMED后同turn多episode单记录。
 5. cron环境约束实录：patch工具对skill_learner.py/api/gene.py报"sibling subagent改过"警告——git diff核实为**误报**（工作区仅本轮改动+既存rbac_policy.csv），已核对无夹带；全量pytest走terminal background+process wait轮询（173s跑完）稳定。
 6. 第7步gene skill上报✅：skill_id=`skill_44b30e4dd1f8`（event=ADD+success_rate=1.0，tool_sequence=skill_view→read_file→search_files→terminal→patch→write_file→process），已入gene技能库供find_relevant检索复用。
+
+## [2026-10-04 17:05 CST] 回放×树协同——span树与回放互斥解除，回放进度驱动树渐进揭示（"回放与树互斥"多轮挂账销账，P1可观测性）
+**目标**：trajectory观察面的两个检视模式互斥（代码注释原话"切树关回放（两种检视模式互斥，回放吃扁平事件序）"）——span树（treeMode默认开=观察面优先，"我都不知道他们在干嘛"的主视图）与回放（"看它一步步怎么干的"）不可兼得：切树按钮强杀回放（setReplayMode(false)在同一onClick）、树渲染条件硬排除replayMode（treeMode && !replayMode && traceRoots），回放时用户被迫退回扁平列表。多轮dev-reports遗留观察项"回放与树互斥"正是此缺口。
+**调研来源**：SUMMARY P0-4可观测性（langfuse Trace→Observation嵌套span模型+Warp 4x录屏回放/daytona会话录制回放——"回放"在行业参照里本就是按时间序重演执行过程，树是其结构面，两者同源不互斥）；渐进揭示语义沿用本页既有扁平回放events.slice(0, replayIdx+1)同一进度源；祖先上下文保留沿用本组件filterTree既有语义（06:30轮树内搜索确立的剪树哲学）。
+**改动文件**（openmate commit `882f90e8`，10文件+343/-30，全增量old_string/new_string）：
+- `src/app/(app)/trajectory/span-tree.ts`（+36/-0）：`clipToIds`/`countSpans`纯函数
+- `src/app/(app)/trajectory/span-tree-view.tsx`（+29/-11）：revealedIds prop贯穿SpanTreeView→SpanTreeBody+回放摘要行+Σrollup裁剪态重算
+- `src/app/(app)/trajectory/trajectory-client.tsx`（+15/-5）：revealedSpanIds接线+互斥解除
+- `src/app/(app)/system/tabs/trajectory-tab.tsx`（+15/-5）：第二消费者同款接线
+- `src/locales/{zh,en,ja}.json`（各+2/-1）：trajectory.replayRevealed三语
+- `render-test-span-tree-replay.cjs`（+230，新文件）：32断言
+- `render-test-span-tree.cjs`（+4/-2）+`render-test-trajectory-tab-tree.cjs`（+8/-4）：互斥pin反转为协同pin
+**改动内容**：
+1. **clipToIds纯函数**（span-tree.ts:307）：按已揭示事件id集裁剪树——id∈ids保留+祖先上下文保留（fork/import数据父行不在ids时仍作上下文行，与filterTree同族语义）、未揭示子孙剪掉、不改原树（浅拷贝children）；countSpans（:319）=全树span数（"已揭示X/Y"的Y）。
+2. **回放渐进揭示**：已揭示id集=events[0..replayIdx].map(id)（与扁平回放events.slice同一进度源——同一进度两种视图各吃各的渲染面）；SpanTreeView新revealedIds prop（null/缺省=全揭示，回放退出即回全树）；裁剪态自动全展开+Σrollup用filteredRollup对裁后子树重算（subtree_*是全树汇总=裁后假数，与过滤态同款守卫）+摘要行"回放中：已揭示 X/Y 个span"（i18n key=trajectory.replayRevealed三语）。
+3. **互斥解除**（双消费者）：切树按钮从`setReplayMode(false); setReplayPlaying(false); setTreeMode(!treeMode)`改为纯`setTreeMode(!treeMode)`（切换视图不再打断回放）；树渲染条件从`treeMode && !replayMode && traceRoots`改为`treeMode && traceRoots`+revealedIds={revealedSpanIds}。两消费者trajectory-client+system tab逐字同款（"两消费者近重复文件"去重遗留照旧，本轮双侧同改是止血）。
+**接线位置**（grep证据，文件:行号）：
+- 纯函数定义：`span-tree.ts:307 clipToIds`/`:319 countSpans`
+- 组件消费：`span-tree-view.tsx:33-34 import`/`:243 clipToIds(roots, revealedIds)`/`:265-266 countSpans×2`（摘要行插值）
+- 双消费者真实渲染路径：`trajectory-client.tsx:737 const revealedSpanIds`（events.slice(0, replayIdx+1).map→id集）→`:1141 revealedIds={revealedSpanIds}`（SpanTreeView挂载点）；`trajectory-tab.tsx:737`→`:1139`同款
+- 互斥解除接线：`trajectory-client.tsx:1078 onClick={() => { setTreeMode(!treeMode) }}`/`trajectory-tab.tsx:1073`同款（grep `setReplayMode(false); setReplayPlaying(false); setTreeMode` =0命中）
+**验证结果**：
+- 完整性✅：git diff --cached --numstat=10文件+343/-30与commit stat逐行吻合；locales三文件与sibling共文件（sibling的~44行settings hunk），`/tmp/stage_mine_replay_1004.py`按hunk拆分`git apply --cached`只暂存我的replayRevealed hunk各+2/-1（SKIP sibling hunk留工作区，KEEP/SKIP逐hunk打印核对）——连续三轮实证可用。
+- 集成✅：grep链如上（纯函数→组件→双消费者渲染路径→onClick）；**部署bundle接线字符串实证**：`.next/static/chunks`含`replayRevealed`（3 chunks）+`revealedIds`（3+ chunks）——新prop/新i18n key已进产物。
+- 测试✅：`render-test-span-tree-replay.cjs` **32 passed**（clipToIds渐进揭示/祖先上下文/空集/未知id/不改原树children引用、countSpans、filteredRollup裁后重算vs subtree_*假数守卫、SSR回放未来span不渲染+摘要行"已揭示3/7"、revealedIds缺省/null回全树、clip→filter链式、三语key+en零CJK、双消费者接线钉）；**既有4套span系render-test全ALL PASS**（span-tree/search/trajectory-tab-tree互斥pin反转为协同pin后过+search套回归）；**其余6套render-test ALL PASS**（ask-user/memory-marker/network-banner/secret-i18n/secret-redaction/user-message，零回归）；`npm run build`通过（/trajectory /system在产物，TypeScript检查含全部tsx改动）。注：新测试首跑2 FAIL为**测试侧断言写错**（缺省态期望深层sub直出，实际默认展开深度<2折叠sub=既有缺省形态）——修正测试断言而非改代码，改后全绿。
+- 前端✅：bundle chunk grep如上。⚠️视觉走查受登录墙（cron无凭据不登录，前例同）——回放中树的渐进生长观感（摘要行位置/自动全展开形态）待用户登录后到Trajectory→选会话→回放→点Span树按钮看一眼。
+**服务重启**：`systemctl --user restart openmate-web.service`→/trajectory 200+/system 200+active（新build已部署）；opensoul/acp-proxy零改动无需重启。
+**commit**：openmate `882f90e8`。
+**遗留问题**：
+1. ⚠️前端视觉走查受登录墙未人工过目（同前例）——用户登录后看回放×树协同观感。
+2. **两消费者近重复文件去重照旧**（trajectory-client.tsx与system/tabs/trajectory-tab.tsx ~1160行近重复）——本轮双侧同款patch是止血；合并为单一共享组件是独立重构轮（改动面大，须单独测试钉）。
+3. **回放态自动全展开压掉用户折叠态**（与过滤态同款取舍：渐进生长的全是已发生路径不做折叠残影）——若用户反馈"想边回放边手动折叠"，需改为"只自动展开新揭示行的祖先链"。
+4. "树内搜索与扁平搜索整合"残留：树内搜索（TreeFilter）与页级搜索框（view=search扁平）仍是两个入口，页级搜索×树视图的整合未做（本轮搜索视图维持扁平不变）；"跨session搜索"照旧未做。
+5. 残余遗留观察项照旧：分页offset稳定性（可改keyset）、learned_skills source列（测试marker字符串识别）、gene_loop测试侧隔离fixture、FAIL记录不分trivial、relay round级需引擎侧自报、LLM_FALLBACK_CHAIN未配置（402环境项）、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步、model_gateway凭据映射表、engine.py死代码清理候选、MCP重连真实Server验证、attach跨turn共享、RESUMED后同turn多episode单记录、⚠️线索窗启发式残余/❌结果侧整token旧语义/read_turn遗留#1#2、分类名chip三语本地化。
+6. cron环境约束实录：/tmp/stage_mine.py与sibling同名冲突风险→本轮改用/tmp/stage_mine_replay_1004.py唯一命名（写/tmp脚本前先cp改名防兄弟轮互踩）。
+7. 第7步gene skill上报✅：skill_id=`skill_569cf47c5fca`（event=ADD+success_rate=1.0，tool_sequence=read_file→terminal→search_files→patch→write_file→terminal→terminal），已入gene技能库供find_relevant检索复用。
