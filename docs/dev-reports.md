@@ -4538,3 +4538,33 @@
 4. 残余遗留观察项照旧：learned_skills source列（测试marker字符串识别）、gene_loop测试侧隔离fixture、FAIL记录不分trivial、relay round级需引擎侧自报、两消费者近重复文件去重、树内搜索与扁平搜索整合、回放与树互斥、跨session搜索、LLM_FALLBACK_CHAIN未配置（402环境项）、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步、model_gateway凭据映射表、engine.py死代码清理候选、MCP重连真实Server验证、attach跨turn共享、RESUMED后同turn多episode单记录、read_turn遗留#1首行窗口残余/#2标题线索词边界/#3⚠️警告≠❌失败细分。
 5. cron环境约束实录：含`$()`/sed管道的inline命令被guard拦（blocked-scripts）→改search_files/read_file工具或写/tmp脚本执行；locales共文件hunk拆分暂存（`/tmp/stage_mine.py`）连续两轮实证可用；**先跑完全量测试再重启服务**（本轮照做，2388全绿无httpx.ConnectError假失败）。
 6. 第7步gene skill上报✅：skill_id=`skill_566e8c6022e4`（event=ADD，tool_sequence=read_file→terminal→search_files→patch→write_file→terminal），已入gene技能库供find_relevant检索复用（上报后live total=123计数自增如实）。
+
+## [2026-10-04 09:56 CST] ⚠️警告≠❌失败细分——result_ok/turn_outcome降级告警误判收敛+机器⚠️失败模板漏判堵上（read_turn遗留#3销账，P1指标正确性）
+**目标**：`read_turn.result_ok`行首token判定把「⚠️」与「❌」同列为失败token（`_LINE_START_FAIL_TOKENS = ("⚠️", "❌")`）——**降级告警被误判成失败**（00:12轮显式记账的遗留#3原文："如'⚠️ 3个文件被跳过，其余成功'仍判失败——降级告警≠成功的细分留待后续"）：工具审计success指标说谎、成功的结果被结果缓存拒收（read_file/list_files/search_files缓存准入）、记忆工具行误标error（error=整段结果进记忆=污染）；且与同文件顶部注释"日志首行有⚠️=假失败"的声明**长期自相矛盾（说了≠做了）**。反向漏判同轮一并堵上：turn_outcome_success此前对「⚠️ wakeup调度不可用: …」「⚠️ 文件不存在: …」类**机器失败模板判假成功**（usage回执记success+语义缓存收失败回复+失败回合进技能提取门）。
+**调研来源**：SUMMARY P0-5"指标不许说谎"+P0-4"失败必须可见"（mem0 §1.1）双向对齐；机器模板逐一grep核实分型——**失败面**=soulmate_agent.py:2452-2533（`⚠️ Sense API错误(...)`/`⚠️ 文件不存在: …`/`⚠️ Sense感知工具不可用: …`/`⚠️ 进化引擎不可用: …`/`⚠️ schedule_wakeup被拒绝(...)`/`⚠️ wakeup调度不可用: …`）、:3017会话失效；**告警面**=env_sensor.py:122/:125（`⚠️ 可用内存不足/磁盘空间不足`）、cost_tracker.py:155（`⚠️ Daily budget exceeded`）、permissions.py:221（`⚠️ 操作 X 需要用户确认`）——同emoji两义，必须按"失败线索"细分而非整token。判法哲学沿用本仓库既定结构化标记路线（认机器模板共性词+短窗，不认子串包含）。
+**改动文件**（openmate commit `e9e59326`，5文件+124/-28，全增量old_string/new_string）：
+- `acp-proxy/agent/read_turn.py`（+35/-1）：`warn_line_is_failure`单一真源 + `_LINE_START_FAIL_TOKENS`收敛为仅❌ + `WARN_FAIL_CUE_WINDOW=24`失败线索窗 + result_ok接线
+- `acp-proxy/agent/trajectory_recorder.py`（+6/-1）：turn_outcome_success逐行接warn_line_is_failure（补机器⚠️失败模板漏判）
+- `acp-proxy/tests/test_read_turn.py`（+38）：TestWarnVsFailTokens 4测
+- `acp-proxy/tests/test_turn_outcome.py`（+19）：TestWarnLineOutcome 2测
+- `acp-proxy/systemic_test_results.json`：本轮systemic重跑产物（沿b3743f64先例入库）
+**改动内容**：
+1. **⚠️/❌分型判定**：❌=本仓库失败模板专用emoji（edit_safety「❌ 文件 …失败」等），照旧整token判失败；⚠️=告警emoji，只在emoji后24字符窗内命中失败线索（不可用/不存在/已失效/被拒绝/被拦截/错误/失败/异常/超时(后接CJK不误伤)/error/failed/unavailable/denied）才判失败——「⚠️ 3个文件被跳过，其余成功」「⚠️ WARNING: disk 90%」「⚠️ 可用内存不足」「⚠️ 操作 X 需要用户确认」判成功。线索窗=24字符（机器失败模板线索距emoji最远~16字符「⚠️ schedule_wakeup被拒绝(」）；窗外失败字样=正文引用不判（防日志/文档引用误伤，与首行窗口同哲学）。
+2. **turn_outcome补漏**：逐行接warn_line_is_failure——「⚠️ …不可用: …」类机器失败告警行此前漏判假成功（`_TURN_FAILURE_PREFIX_RES`要求「错误/失败+冒号」接不住「不可用/不存在/被拒绝」族），现失败必须可见。
+3. **单一真源**：warn_line_is_failure只在read_turn.py实现一份，result_ok与turn_outcome_success共用（trajectory_recorder已import is_heading_prefix同款路线）——禁止双实现漂移。❌设计不对称显式记账：回合侧❌只认「❌…失败:」模板不整token（清单/对比表里的❌符号不能误伤），结果侧首行❌照旧整token判失败（保留旧语义，本轮只细分⚠️）。
+**接线位置**（grep证据，文件:行号）：
+- 定义：`agent/read_turn.py:152 warn_line_is_failure`/`:137 _LINE_START_FAIL_TOKENS`/`:143 WARN_FAIL_CUE_WINDOW`；调用点：`agent/read_turn.py:195 result_ok内`（工具结果判定）、`agent/trajectory_recorder.py:34 import`+`:118 turn_outcome_success内`（回合判定）
+- 真实运行路径消费（既有接线不动，语义经单一真源生效）：`soulmate_agent.py:2555/2596 record_tool(ok=result_ok(...))`（记忆工具行）、`:2611 工具审计success=result_ok`、`:2614 结果缓存准入`、`:2780 usage回执turn_outcome_success`、`:3913 语义缓存准入`、`:4004 记忆observation结局`
+**验证结果**：
+- 完整性✅：`git diff --numstat` 4源文件=+35/-1、+6/-1、+38/-0、+19/-0逐行吻合（sibling的settings-client.tsx/locales三文件显式未入commit，git add白名单）；4个py文件ast.parse OK。
+- 集成✅：grep链如上（warn_line_is_failure定义→result_ok:195+turn_outcome_success:118两个消费点→soulmate_agent 6个真实运行路径消费点）；**live新旧对照实锤**（/tmp/warn_fail_live_check.py调部署同源代码，9/9 ALL PASS）：①`result_ok("⚠️ 3个文件被跳过，其余成功")=True`（旧=False误伤→销）②`result_ok("⚠️ 可用内存不足: 0.5GB")=True`（旧=False）③`turn_outcome_success("⚠️ 文件不存在: /tmp/x.py")=False`（旧=True漏判→销）④`turn_outcome_success("⚠️ wakeup调度不可用: conn refused")=False`（旧=True漏判）⑤`result_ok("⚠️ Sense API错误(500): upstream")=False`（机器失败模板不放行）⑥`result_ok("❌ 3个文件被跳过")=False`（❌照旧）⑦正常结果/正文引用不受影响。
+- 测试✅：tests/test_read_turn.py+test_turn_outcome.py **94 passed**（定向）；**acp-proxy全量tests/ 1602 passed 0 failed**（662s，1596基线+6新精确吻合）；`systemic_test.py` **29/29 passed**（跨模块协同面：read_turn×trajectory_recorder×soulmate_agent真实路径不受影响）。
+**服务重启**：`systemctl --user restart acp-proxy-a.service acp-proxy-b.service`→:8092/:8095 health均200（改动已进运行进程）；opensoul零改动无需重启；前端零改动无需build。
+**commit**：openmate `e9e59326`。
+**遗留问题**：
+1. **⚠️线索窗启发式残余（显式记账）**：窗内失败线索的正常文本会误判（如「⚠️ 注意：错误率统计见下表」头部24字符含"错误"→判失败）——与「错误: …」行首regex同族固有极限，观察中无真实形态命中；若命中再收紧为"线索词+尾随冒号/括号"形态（代价：「⚠️ 不可用」无冒号裸形态需另行兜底）。
+2. **❌结果侧整token=失败保留旧语义**（「❌ 3个文件被跳过，其余成功」结果侧仍判失败）——本轮只细分⚠️；若真实出现❌降级告警形态再按同款线索窗细分❌。
+3. **read_turn遗留#1首行窗口残余/#2标题线索词边界**照旧挂账（多行结果第2行起失败不判=真实模板均首行报出；「比较失败:」类两用词标题优先取舍）。
+4. 残余遗留观察项照旧：前端未接category过滤控件（技能库API已支持category参数）、分页offset稳定性（可改keyset）、learned_skills source列（测试marker字符串识别）、gene_loop测试侧隔离fixture、relay round级需引擎侧自报、两消费者近重复文件去重、树内搜索与扁平搜索整合、回放与树互斥、跨session搜索、LLM_FALLBACK_CHAIN未配置（402环境项）、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步、model_gateway凭据映射表、engine.py死代码清理候选、MCP重连真实Server验证、attach跨turn共享、RESUMED后同turn多episode单记录。
+5. cron环境约束实录：全量pytest前台420s超时被掐→terminal background+process wait轮询（662s跑完）；live验证脚本写/tmp文件执行（/tmp/warn_fail_live_check.py）稳定可用。
+6. 第7步gene skill上报✅：skill_id=`skill_f6117507cbca`（event=ADD+success_rate=1.0，tool_sequence=read_file→search_files→terminal→patch→write_file→terminal→process），已入gene技能库供find_relevant检索复用。
