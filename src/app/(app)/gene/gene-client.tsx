@@ -9,6 +9,7 @@ import {
   Download, Upload, CopyPlus, History, RotateCcw, RefreshCw,
 } from "lucide-react"
 import { PageLayout } from '@/components/page-layout';
+import { skillsListUrl } from "./skill-list-url"
 
 interface Template {
   template_id: string
@@ -119,6 +120,9 @@ export function GeneClient() {
   const [skillTotal, setSkillTotal] = useState(0)
   const [skillHasMore, setSkillHasMore] = useState(false)
   const [skillLoadingMore, setSkillLoadingMore] = useState(false)
+  // keyset翻页游标（GET /skill的next_cursor单一真源）——"加载更多"锚定上一页末行
+  // 的排序键，页边界不随翻页间隙的增删移位（offset=skills.length曾重复/漏行）。
+  const [skillCursor, setSkillCursor] = useState<string | null>(null)
   // 分类过滤（GET /skill的categories facet单一真源）——chip选项集+全局计数从后端
   // facet渲染，不从分页rows推断（limit截断会漏分类=指标说谎）；skillCategory=""=全部
   const [skillCategory, setSkillCategory] = useState("")
@@ -271,13 +275,13 @@ export function GeneClient() {
 
   // ── 技能库（learned_skills）：库存盘点+审计历史+回滚 ──────────────
 
-  const fetchSkills = useCallback(async (offset = 0, append = false) => {
+  const fetchSkills = useCallback(async (cursor: string | null = null, append = false) => {
     if (append) setSkillLoadingMore(true)
     else setSkillsLoading(true)
     try {
-      // category过滤接线（遗留"前端未接category过滤控件"销账）：""=全部不带参
-      const catParam = skillCategory ? `&category=${encodeURIComponent(skillCategory)}` : ""
-      const res = await fetch(`${apiBase}/api/gene/skill?limit=100&offset=${offset}${catParam}`)
+      // keyset翻页（"分页offset稳定性"销账）：cursor=null=首屏；append=带上一页末行
+      // 游标续页——页边界不随翻页间隙的增删移位（offset=已加载条数曾重复/漏行）
+      const res = await fetch(skillsListUrl(apiBase, cursor, skillCategory))
       const data = await res.json()
       const rows: LearnedSkill[] = data.skills || []
       setSkills(prev => (append ? [...prev, ...rows] : rows))
@@ -285,6 +289,8 @@ export function GeneClient() {
       // 选了分类后=该分类真实总数（随过滤变，facet不变——标准faceted-search语义）
       setSkillTotal(typeof data.total === "number" ? data.total : rows.length)
       setSkillHasMore(Boolean(data.has_more))
+      // 游标=后端next_cursor单一真源；无下一页=null（加载更多按钮随之隐藏）
+      setSkillCursor(typeof data.next_cursor === "string" && data.next_cursor ? data.next_cursor : null)
       // 分类facet=全局分布单一真源（chip选项集+计数），过滤/分页/刷新均随之漂移
       if (Array.isArray(data.categories)) setSkillCategories(data.categories)
       if (Array.isArray(data.revertible_events) && data.revertible_events.length > 0) {
@@ -613,8 +619,8 @@ export function GeneClient() {
               ))}
               {skillHasMore && (
                 <button
-                  onClick={() => fetchSkills(skills.length, true)}
-                  disabled={skillLoadingMore}
+                  onClick={() => fetchSkills(skillCursor, true)}
+                  disabled={skillLoadingMore || !skillCursor}
                   className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium bg-muted/30 text-muted-foreground hover:bg-muted/50 transition-all disabled:opacity-50"
                 >
                   {skillLoadingMore && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
