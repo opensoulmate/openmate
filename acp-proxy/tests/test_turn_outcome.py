@@ -135,6 +135,25 @@ class TestHeadingFalsePositives:
 
 
 # ════════════════════════════════════════════════════════════════
+# ①-ter ⚠️警告≠❌失败细分（00:12轮遗留#3回合侧同源）
+# ════════════════════════════════════════════════════════════════
+
+class TestWarnLineOutcome:
+    def test_warn_failure_line_is_failure(self):
+        # 「⚠️ …不可用: …」类机器失败告警行=失败必须可见（此前漏判=假成功
+        # →usage回执记success+语义缓存收失败回复）
+        for text in ("⚠️ wakeup调度不可用: conn refused",
+                     "任务中止。\n⚠️ 文件不存在: /tmp/x.py"):
+            assert not turn_outcome_success(text), text
+
+    def test_warn_degraded_warning_is_success(self):
+        # 降级告警/信息提示≠失败
+        for text in ("⚠️ 3个文件被跳过，其余成功",
+                     "任务完成。\n⚠️ WARNING: disk 90%"):
+            assert turn_outcome_success(text), text
+
+
+# ════════════════════════════════════════════════════════════════
 # ② _report_skill_usage 回执载荷（真实调用点）
 # ════════════════════════════════════════════════════════════════
 

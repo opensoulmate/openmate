@@ -167,6 +167,44 @@ class TestResultOk:
 
 
 # ════════════════════════════════════════════════════════════════
+# 2-bis ⚠️警告≠❌失败细分（00:12轮遗留#3销账）
+# ════════════════════════════════════════════════════════════════
+
+class TestWarnVsFailTokens:
+    def test_degraded_warning_lines_ok(self):
+        # 降级告警/信息提示≠失败（此前⚠️一律判失败=工具审计success指标说谎
+        # +成功读取不进结果缓存+记忆工具行误标error）
+        for text in ("⚠️ 3个文件被跳过，其余成功",
+                     "⚠️ WARNING: disk usage at 90%",
+                     "⚠️ 可用内存不足: 0.5GB",                # env_sensor.py:122
+                     "⚠️ 磁盘空间不足: 2GB",                  # env_sensor.py:125
+                     "⚠️ Daily budget exceeded: $5.0 > $1.0",  # cost_tracker.py:155
+                     "⚠️ 操作 write_file 需要用户确认",       # permissions.py:221
+                     "⚠️ 超时重试策略见下文"):
+            assert result_ok(text), text
+
+    def test_machine_fail_templates_still_fail(self):
+        # ⚠️机器失败模板照旧判失败（soulmate_agent.py:2452-2533等逐一grep核实）
+        for text in ("⚠️ wakeup调度不可用: conn refused",
+                     "⚠️ Sense感知工具不可用: timeout",
+                     "⚠️ 进化引擎不可用: conn reset",
+                     "⚠️ 文件不存在: /tmp/x.py",
+                     "⚠️ Sense API错误(500): upstream",
+                     "⚠️ schedule_wakeup被拒绝(402): quota",
+                     "⚠️ 会话已失效：该会话在服务端不存在",
+                     "⚠️ 不可用"):
+            assert not result_ok(text), text
+
+    def test_fail_emoji_unconditional(self):
+        # ❌=失败模板专用emoji，整token判失败（不走⚠️线索细分）
+        assert not result_ok("❌ 3个文件被跳过，其余成功")
+
+    def test_warn_cue_beyond_window_is_ok(self):
+        # 窗外失败字样=正文内容不判（防日志/文档引用误伤，与首行窗口同哲学）
+        assert result_ok("⚠️ " + "x" * 30 + " 错误: 只是引用")
+
+
+# ════════════════════════════════════════════════════════════════
 # 3. diff_line_stats（readTurn快照diff行级统计）
 # ════════════════════════════════════════════════════════════════
 

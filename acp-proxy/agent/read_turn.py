@@ -123,7 +123,39 @@ def is_heading_prefix(prefix: str) -> bool:
 # `…80字符路径…` 写入失败」漏成假成功）。残余面（显式记账）：多行结果第2行
 # 起的失败报出不判（真实模板均首行报错）；首行内容恰为「错误: …」形态的文件
 # 内容不可分辨（文本启发式固有极限，与turn_outcome同款残余）。
-_LINE_START_FAIL_TOKENS = ("⚠️", "❌")
+#
+# ⚠️警告≠❌失败细分（00:12轮遗留#3销账）：❌是本仓库失败模板专用emoji
+# （edit_safety「❌ 文件 …失败」等），照旧整token判失败；⚠️是**告警**emoji
+# （降级告警/信息提示同样用它），只在emoji后短窗内命中失败线索（机器失败
+# 模板共性词）才判失败——「⚠️ wakeup调度不可用: …」「⚠️ 文件不存在: …」
+# 判失败；「⚠️ 3个文件被跳过，其余成功」「⚠️ WARNING: disk 90%」「⚠️ 可用
+# 内存不足」判成功（此前一律判失败→工具审计success指标说谎+成功读取不进
+# 结果缓存+记忆工具行误标error，与本块顶部"⚠️=假失败"声明长期自相矛盾）。
+# 模板逐一grep核实：失败面=soulmate_agent.py:2452-2533 wakeup/sense分支、
+# :3017会话失效；告警面=env_sensor.py:122/:125、cost_tracker.py:155、
+# permissions.py:221。
+_LINE_START_FAIL_TOKENS = ("❌",)
+
+# ⚠️后失败线索窗（字符）：机器失败模板线索距emoji最远~16字符（「⚠️
+# schedule_wakeup被拒绝(」）；窗外出现失败字样=正文内容不判（防日志/文档
+# 引用误伤，与首行窗口同哲学）。「超时」沿用下方超时regex同款负向断言
+# （后接CJK=「超时时间/超时重试」类正常词不误伤）。
+WARN_FAIL_CUE_WINDOW = 24
+_WARN_FAIL_CUE_RES = re.compile(
+    r"不可用|不存在|已失效|被拒绝|被拦截|错误|失败|异常"
+    r"|超时(?![\u4e00-\u9fff])"
+    r"|error|failed|unavailable|denied",
+    re.I,
+)
+
+
+def warn_line_is_failure(line: str) -> bool:
+    """⚠️行首告警行=机器失败？（⚠️警告≠❌失败细分单一真源——result_ok与
+    trajectory_recorder.turn_outcome_success共用，禁止双实现漂移）。"""
+    s = str(line or "").lstrip()
+    if not s.startswith("⚠️"):
+        return False
+    return bool(_WARN_FAIL_CUE_RES.search(s[2:2 + WARN_FAIL_CUE_WINDOW]))
 
 _RESULT_FAIL_MARKERS = (
     "[被拦截",
@@ -159,6 +191,8 @@ def result_ok(result) -> bool:
     if not first_line:
         return True
     if first_line.startswith(_LINE_START_FAIL_TOKENS):
+        return False
+    if warn_line_is_failure(first_line):
         return False
     if any(m in first_line for m in _RESULT_FAIL_MARKERS):
         return False

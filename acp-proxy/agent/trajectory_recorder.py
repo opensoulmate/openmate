@@ -31,7 +31,7 @@ import time
 
 import httpx
 
-from agent.read_turn import is_heading_prefix
+from agent.read_turn import is_heading_prefix, warn_line_is_failure
 
 logger = logging.getLogger("acp-proxy.trajectory-recorder")
 
@@ -99,6 +99,9 @@ def turn_outcome_success(response_text: str) -> bool:
     否则只认上列结构化失败标记（行首前缀/固定格式）。
     小节标题误伤面已收敛：行首「常见错误：…」「典型失败：…」类标题经
     read_turn.is_heading_prefix过滤，不再判失败（此前正是残余误伤面）。
+    ⚠️告警细分（00:12轮遗留#3回合侧同源）：「⚠️ …不可用: …」类机器失败
+    告警行=失败必须可见（此前漏判假成功）；「⚠️ 3个文件被跳过」类降级告警
+    ≠失败——判法走read_turn.warn_line_is_failure单一真源。
     反向残余：模型用自然语言改述失败（如"我没有权限访问"）——文本启发式
     的固有极限。
     """
@@ -112,6 +115,8 @@ def turn_outcome_success(response_text: str) -> bool:
             if m.groups() and is_heading_prefix(m.group(1)):
                 continue  # 「常见错误：」类小节标题≠失败汇报
             return False
+    if any(warn_line_is_failure(line) for line in text.splitlines()):
+        return False  # 「⚠️ …不可用: …」类机器失败告警行=失败
     return not any(p.search(text) for p in _TURN_FAILURE_RES)
 
 
