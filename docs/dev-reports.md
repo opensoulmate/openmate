@@ -5040,3 +5040,32 @@
 5. evo-test-/stress_test/systemic-test前缀排除先例在session_importer.DEFAULT_EXCLUDE_PREFIXES（字符串前缀）——本轮坚持schema标记不做猜测，如后续要会话列表过滤可复用该前缀清单（查询侧展示过滤，不是数据判定）。
 6. cron环境约束实录：`curl | python3 -m json.tool`管道被安全扫描BLOCKED（改`-o`落盘再解析）；`&`后台符被terminal拒绝（改background=true）。
 7. 第7步gene skill上报✅ skill_id=`skill_d216f060894a`（success=true，source=extract，tool_sequence=todo→read_file→search_files→terminal→patch→write_file），已入gene技能库供find_relevant检索复用。
+
+## [2026-10-05 22:45] /ws/chat legacy桥并入session_source provenance——探针会话不再污染生产experiences（20:35轮遗留#2销账，P1进化链数据正确性）
+**目标**：治理 ws_chat.py legacy桥写入路径逃逸provenance通道——`_store_agent_message`直插agent_messages无metadata列，/ws/chat agent_proxy路径的落库行不带session_source，ExperienceCollector测试会话门对它完全失明。实锤损害：52个evo-test-*探针会话共73行未标记，其中11条assistant行已派生假experiences（"ping"→pong、"nihao"、"你好"、"你在干嘛呢"等完整探针对话）污染生产经验链。20:35轮遗留#2明确方向："下轮把ws_chat写入路径并入session_source标记（或给run_integration_tests的会话声明test出身）"——本轮两条全落地。
+**调研来源**：jobs.source provenance轮同款哲学（"只认schema标记，清理责任在产生侧"）+ 20:35轮会话级provenance产生侧标记（soulmate_agent._bind_session_source/_merge_session_meta先例——本轮把同一机制延伸到legacy桥）+ soulmate `_load_messages_from_db`历史行恢复（跨进程重启标记沿用）。
+**改动文件**：openmate `acp-proxy/ws_chat.py`（增量3处：_session_sources注册表+_bind_session_source/_resolve_session_source两个helper、_store_agent_message加metadata列probe+merge+INSERT、chat_websocket真实路径接线）、`acp-proxy/integration_test.py`（探针消息声明`_meta:{"source":"test"}`）、`acp-proxy/tests/test_ws_chat_session_source.py`（新增18用例）。
+**改动内容**：
+1. **产生侧标注协议**：/ws/chat消息负载声明`_meta: {"source": "test"}`（ACP session/new `_meta.source`同款约定，顶层`source`兼容kwargs派发形态）→`_bind_session_source`绑定会话出身；未声明零绑定零变化（真实用户对话metadata=NULL行为逐字节保持）。
+2. **落库行携带**：`_store_agent_message`加metadata列probe+ALTER幂等迁移（parent_message_id既有模式同款）；会话出身并入`metadata.session_source`——soulmate `_merge_session_meta`同款merge语义（已有键全保留、坏JSON原文保全raw_metadata绝不静默丢）。
+3. **会话级语义+跨重启恢复**：任一消息声明→会话内后续所有行携带（与collector"任一行标记即整会话生效"对称）；`_resolve_session_source`内存绑定→历史行metadata恢复（进程重启重连标记不丢，`_load_messages_from_db`同款）。
+4. **探针侧声明**：`integration_test._test_ws_send_receive`的test_message加`"_meta": {"source": "test"}`——evo-test-*探针会话从产生侧自报test出身（run_integration_tests→evolution_v2两条调用链自动继承）。
+5. **一次性存量清账**（/tmp/ws_chat_probe_cleanup_20261005.py，先断言后写盘——首轮运行因勘察手数错误63≠73触发SKIP保护拒写，修正后过）：73行evo-test-*回填`{"session_source":"test"}`（integration_test.py:107生产者确定性前缀的取证式识别，长期机制是产生侧标记而非此脚本）+ 删除其派生的11条假experiences（不删行只删经验——历史行改写标记防再采集复活，20:35轮同款）。
+**接线位置**（grep证据，文件:行号）：
+- 写入链：`ws_chat.py:703 _bind_session_source(agent_session_id, data)`（chat_websocket agent_proxy分支真实路径，`:651/:660/:676`三处_store_agent_message调用点上游）→`ws_chat.py:126 _resolve_session_source(db, session_id)`（`_store_agent_message`体内）→`ws_chat.py:63 _session_sources`注册表+`:77 _resolve_session_source`历史行恢复。
+- 产生链：`integration_test.py:143 "_meta": {"source": "test"}`（`_test_ws_send_receive`的test_message）→ 走真实WS `/ws/chat` → 上述写入链。
+- 消费链（既有不变）：opensoul `experience_collector.py:99 _row_session_source`读`metadata.session_source`→`:365 skipped_test`门。
+- 接线钉测试防脱线：`test_chat_websocket_calls_bind_on_real_path`/`test_store_message_resolves_and_stamps`/`test_integration_probe_declares_test_origin`三静态断言。
+**验证结果**：
+- 完整性✅：`git show c49b09a5 --stat`=3 files changed, 329 insertions(+), 3 deletions(-)（ws_chat.py+74/-3、integration_test.py+4、新测试+251）；3个Python文件AST parse全过；diff逐hunk过目全为本轮（systemic_test_results.json/settings-client.tsx/locales×3/tsbuildinfo/e2e_probe2.py/e2e_trajectory_wiring.py等sibling/生成物照旧不入commit）。
+- 集成✅：grep链如上（`grep -rn "_bind_session_source\|_resolve_session_source\|_session_sources" --include="*.py"`命中ws_chat.py:63/66/74/77/81/98/126/703真实运行时路径，无死代码）；**live全链路实证**（真实ws:8092→chat_websocket→_store_agent_message→opensoul.db）：①声明组（integration_test真实探针代码含本轮新`_meta`声明）→落库行metadata=`{"session_source": "test"}`✅②对照组（同路径无声明）→metadata=NULL零变化✅③POST /api/brain/evolve采集`messages.skipped_test=83`=75个evo-test-*行（73回填+2新生，对照组行后置补标）+8个om-*行（20:35轮存量）逐数吻合✅④假经验出清后`experiences`中evo-test-*派生=0（删11条回读归零）✅⑤POST /api/brain/learn→`removed_unbacked=0`（11条被删经验无存活pattern派生，规则3零误伤——10条pattern行全为真实会话背书）。
+- 测试✅：新`tests/test_ws_chat_session_source.py` **18/18 PASS**（迁移×2：metadata列probe+parent回归；标记×7：零声明NULL/`_meta.source`全行携带/顶层source兼容/会话级跨消息/跨重启DB恢复/会话隔离/非test出身照标；merge×3：既有键保留/坏JSON raw_metadata/未绑定passthrough；契约×3：空负载不绑定/`_meta`优先/collector键名单一真源钉；接线×3静态钉）；邻居回归`test_message_tree_wiring.py`+`test_session_source_marking.py` 24/24零回归；**acp-proxy全量1633 passed**（基线1615+18新，694.9s零回归，1 warning为既有TestResult收集告警）。
+**服务重启**：`systemctl --user restart acp-proxy-a.service`→active→`/health` 200 `{"status":"ok"}`（agent_activity/tool_output/token_attribution/context_budget/wakeup_executor/wakeup_relay观测键全在）；opensoul未改动未重启（collector消费侧metadata.session_source契约为既有实现）。
+**commit**：openmate `c49b09a5`。
+**遗留问题**：
+1. **om-*探针会话存量污染（新勘察，下轮优先）**：msg:1193-1205等≥7条experiences派生自未标记的e2e探针对话（"e2e-usagereceipt-* 请只回复两个字：好的"×2、"请用terminal工具执行 echo trajectory-e2e-1002"×2、"rounds-e2e"×1、"简单回答：1+1等于几？"×2——产生于provenance机制之前的e2e脚本会话）+16条"[LLM错误: LLM API error 402"失败经验。产生侧：e2e_ws_calibration/e2e_skill_usage_receipt已于20:35轮声明`_meta`（未来自清），但存量om-*行无标记、会话id为引擎生成不可按名识别——需内容取证式一次性标记（同本轮evo-test-*清账手法）或给其余e2e_*探针脚本补声明。本轮未动（不扩scope，如实挂账）。
+2. **live测试写生产库照旧**（挂账#4同源新证据）：acp-proxy全量pytest期间live用例经真实ws:8092又写了evo-test-*行（本轮73行中含此前测试run的积累）——will_client隔离路线逐个收编照旧。另：本轮清理脚本首轮的断言保护恰好拦下一次计数漂移（勘察手数63实为73），"先断言后写盘"再次自证价值。
+3. **8787 Agent Engine无systemd托管**（20:35轮遗留#1照旧）：本轮实证8787在监听但LLM API 402大面积失败（探针只得thinking无回复）——engine可用性与402配额问题待用户拍板/排查。
+4. FAIL记录不分trivial照旧（23:55轮挂账）；残余遗留观察项照旧：⚠️线索窗启发式残余/❌结果侧整token旧语义/read_turn遗留#1首行窗口残余/#2标题线索词边界、gene_loop测试侧隔离fixture、relay round级需引擎侧自报、LLM_FALLBACK_CHAIN未配置（402环境项）、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步、model_gateway凭据映射表、engine.py死代码清理候选、MCP重连真实Server验证、attach跨turn共享、RESUMED后同turn多episode单记录、主组件~730行近重复（TrajectoryPanel壳）。
+5. cron环境约束实录：`pytest | tail`管道exit_code失真照旧（本次输出含真实失败提示按FAILED处理，去管道重跑取真值）；全量acp-proxy suite约11.5分钟超terminal前台420s上限——**长测试套件一律background=true跑再poll**（本轮两次180s wait窗口收尾）；`curl -o`落盘再python3解析照旧。
+6. 第7步gene skill上报：见下（执行后回填skill_id）。
