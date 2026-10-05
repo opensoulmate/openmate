@@ -132,12 +132,16 @@ async def _test_ws_send_receive(session_id: str = None) -> dict:
     try:
         async with websockets.connect(ws_url, open_timeout=WS_CONNECT_TIMEOUT) as ws:
             # 使用agent_proxy模式走soulmate Agent Engine（比hermes CLI快）
+            # _meta.source=会话级provenance产生侧标注（jobs.source同款）：本探针
+            # 会话test出身，/ws/chat落库行metadata带session_source='test'，
+            # ExperienceCollector据此跳过——测试会话不再污染生产experiences
             test_message = {
                 "type": "message",
                 "text": "ping",
                 "mode": "agent_proxy",
                 "session_id": session_id,
                 "agent_id": "soulmate",
+                "_meta": {"source": "test"},
             }
             await ws.send(json.dumps(test_message))
 

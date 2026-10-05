@@ -55,12 +55,62 @@ def _create_or_get_agent_session(agent_id: str, session_id: str | None = None) -
         db.close()
 
 
-def _store_agent_message(session_id: str, role: str, content: str):
+# 会话级provenance（jobs.source同款"产生侧标注"）：session_id→source。/ws/chat
+# 消息负载声明 `_meta: {"source": "test"}`（ACP session/new _meta.source同款约定），
+# 会话内所有落库行的metadata带session_source——ExperienceCollector据此跳过测试
+# 会话（opensoul src/learn/experience_collector.py），测试探针不再污染生产
+# experiences/learned_patterns。未声明的会话零标记零变化（真实用户对话行为不变）。
+_session_sources: dict[str, str] = {}
+
+
+def _bind_session_source(session_id: str, payload: dict | None) -> None:
+    """从消息负载绑定会话出身（产生侧标注，只认schema标记不猜名字/内容）。
+
+    `_meta.source`（ACP约定）优先，顶层`source`兼容（kwargs派发形态）；无声明不绑定。
+    """
+    meta = (payload or {}).get("_meta") or {}
+    source = meta.get("source") or (payload or {}).get("source")
+    if source:
+        _session_sources[session_id] = str(source)
+
+
+def _resolve_session_source(db: sqlite3.Connection, session_id: str) -> str | None:
+    """会话出身：内存绑定 → 历史行恢复（soulmate _load_messages_from_db同款——
+    进程重启后重连同一会话标记沿用不丢）。任一历史行带session_source即整会话
+    生效（ExperienceCollector同款会话级语义，与行序无关）。"""
+    source = _session_sources.get(session_id)
+    if source:
+        return source
+    try:
+        rows = db.execute(
+            "SELECT metadata FROM agent_messages WHERE session_id = ? AND metadata IS NOT NULL",
+            (session_id,),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return None  # 老库无metadata列：无标记可恢复
+    for row in rows:
+        try:
+            meta = json.loads(row["metadata"])
+        except (ValueError, TypeError):
+            continue  # 坏JSON不猜
+        if isinstance(meta, dict) and meta.get("session_source"):
+            source = str(meta["session_source"])
+            _session_sources[session_id] = source
+            return source
+    return None
+
+
+def _store_agent_message(session_id: str, role: str, content: str, metadata: str | None = None):
     """Store a message in an agent session.
 
     P0-10消息树parentId（open-webui chat_fork + pi追加树）：parent_message_id=
     会话内上一条消息id（线性追加=树的主干），前端/接口据此重建消息树与fork分支。
     缺列时probe+ALTER幂等迁移（attachments列既有模式同款）。
+
+    会话级provenance（jobs.source同款"产生侧标注"）：会话出身并入
+    metadata.session_source（soulmate _merge_session_meta同款——已有键全保留、
+    坏JSON原文保全在raw_metadata下）；未出身会话metadata原样返回（零标记零变化）。
+    metadata列probe+ALTER幂等迁移同款。
     """
     db = _get_agent_db()
     try:
@@ -69,14 +119,28 @@ def _store_agent_message(session_id: str, role: str, content: str):
             db.execute("SELECT parent_message_id FROM agent_messages LIMIT 1")
         except sqlite3.OperationalError:
             db.execute("ALTER TABLE agent_messages ADD COLUMN parent_message_id INTEGER")
+        try:
+            db.execute("SELECT metadata FROM agent_messages LIMIT 1")
+        except sqlite3.OperationalError:
+            db.execute("ALTER TABLE agent_messages ADD COLUMN metadata TEXT")
+        source = _resolve_session_source(db, session_id)
+        if source:
+            try:
+                meta = json.loads(metadata) if metadata else {}
+                if not isinstance(meta, dict):
+                    raise ValueError("metadata非JSON对象")
+            except (ValueError, TypeError):
+                meta = {"raw_metadata": metadata}
+            meta["session_source"] = source
+            metadata = json.dumps(meta, ensure_ascii=False)
         last = db.execute(
             "SELECT id FROM agent_messages WHERE session_id = ? ORDER BY id DESC LIMIT 1",
             (session_id,),
         ).fetchone()
         parent_id = last["id"] if last else None
         db.execute(
-            "INSERT INTO agent_messages (session_id, role, content, timestamp, parent_message_id) VALUES (?, ?, ?, ?, ?)",
-            (session_id, role, content, now, parent_id),
+            "INSERT INTO agent_messages (session_id, role, content, timestamp, parent_message_id, metadata) VALUES (?, ?, ?, ?, ?, ?)",
+            (session_id, role, content, now, parent_id, metadata),
         )
         db.execute(
             "UPDATE agent_sessions SET last_activity_at = ?, message_count = message_count + 1 WHERE id = ?",
@@ -633,6 +697,10 @@ async def chat_websocket(websocket: WebSocket):
                     if mode == "agent_proxy" and agent_id:
                         # Create or get agent session for persistence
                         agent_session_id = _create_or_get_agent_session(agent_id, session_id)
+                        # 会话级provenance产生侧标注（jobs.source同款）：负载声明
+                        # `_meta: {"source": "test"}` → 会话出身绑定，落库行metadata
+                        # 带session_source，ExperienceCollector据此跳过测试会话
+                        _bind_session_source(agent_session_id, data)
                         # Handle file attachments — save to temp and append path to text
                         if file_attachments:
                             import tempfile, base64 as b64mod, os
