@@ -1,7 +1,12 @@
 """Soulmate会话稳定性测试 — 同一会话100轮对话
 
 测试路径: WebSocket → /ws/acp → proxy → stdio → Soulmate Agent Engine
-协议: ACP JSON-RPC 2.0 (initialize → newSession → prompt×100)
+协议: ACP JSON-RPC 2.0 (initialize → session/new → session/prompt×100)
+
+会话级provenance（jobs.source同款产生侧标注）：session/new 声明
+`_meta {"source": "test"}`——落库行metadata带session_source，ExperienceCollector
+整会话跳过，100轮稳定性探针不再污染生产experiences/learned_patterns。
+轮数可用环境变量 STABILITY_ROUNDS 覆盖（smoke验证用 STABILITY_ROUNDS=1）。
 
 记录每轮: success/fail, latency, response_len, error_type, chunk_count
 """
@@ -11,12 +16,13 @@ import os
 import time
 import sys
 import httpx
+import jwt as pyjwt
 import websockets
 
 PROXY_URL = "http://127.0.0.1:8092"
 OPENVSOUL_URL = "http://127.0.0.1:8090"
 WS_URL = "ws://127.0.0.1:8092/ws/acp"
-NUM_ROUNDS = 100
+NUM_ROUNDS = int(os.environ.get("STABILITY_ROUNDS", "100"))
 PROMPT_TIMEOUT = 120  # seconds per prompt
 
 # Test prompts — varied to exercise different code paths
@@ -66,6 +72,9 @@ async def get_token():
     return ""
 
 
+JWT_SECRET = "change-me-in-production"  # opensoul/.env JWT_SECRET（ws_acp同源读取，e2e_*探针同款）
+
+
 async def send_prompt_and_wait(ws, prompt_id: int, text: str, session_id: str) -> dict:
     """Send one prompt and wait for the full response. Returns result dict."""
     start = time.monotonic()
@@ -84,9 +93,9 @@ async def send_prompt_and_wait(ws, prompt_id: int, text: str, session_id: str) -
     prompt_msg = {
         "jsonrpc": "2.0",
         "id": prompt_id + 100,  # unique id per round
-        "method": "prompt",
+        "method": "session/prompt",
         "params": {
-            "session_id": session_id,
+            "sessionId": session_id,
             "prompt": [{"type": "text", "text": text}],
         },
     }
@@ -178,7 +187,12 @@ async def run_test():
     if token:
         print(f"  token: {token[:30]}...")
     else:
-        print("  ⚠️ 未获取到token，尝试无认证连接")
+        # 登录端点不可用→自签JWT（ws_acp按opensoul/.env JWT_SECRET校验；
+        # 裸连会被鉴权层断连——2026-10-06冒烟实锤，e2e_*探针同款自签）
+        token = pyjwt.encode({"sub": "stability-test"}, JWT_SECRET, algorithm="HS256")
+        if isinstance(token, bytes):
+            token = token.decode()
+        print("  ⚠️ 未获取到登录token，改用自签JWT")
 
     # Step 2: Connect WebSocket
     print("\n[2/4] 连接WebSocket /ws/acp...")
@@ -195,7 +209,9 @@ async def run_test():
         init_msg = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": 1}}
         await ws.send(json.dumps(init_msg))
 
-        session_msg = {"jsonrpc": "2.0", "id": 2, "method": "newSession", "params": {"cwd": "/", "agent_id": "soulmate"}}
+        session_msg = {"jsonrpc": "2.0", "id": 2, "method": "session/new",
+                       "params": {"cwd": "/", "mcpServers": [], "agent_id": "soulmate",
+                                  "_meta": {"source": "test"}}}
         await ws.send(json.dumps(session_msg))
 
         # Read responses
@@ -240,7 +256,9 @@ async def run_test():
                     ws = await websockets.connect(uri, ping_timeout=60, max_size=10*1024*1024)
                     # Re-initialize
                     await ws.send(json.dumps(init_msg))
-                    await ws.send(json.dumps({"jsonrpc": "2.0", "id": 2, "method": "newSession", "params": {"cwd": "/", "agent_id": "soulmate"}}))
+                    await ws.send(json.dumps({"jsonrpc": "2.0", "id": 2, "method": "session/new",
+                                              "params": {"cwd": "/", "mcpServers": [], "agent_id": "soulmate",
+                                                         "_meta": {"source": "test"}}}))
                     for _ in range(10):
                         resp = await asyncio.wait_for(ws.recv(), timeout=30)
                         msg = json.loads(resp)
