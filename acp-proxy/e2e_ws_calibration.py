@@ -62,7 +62,11 @@ async def main():
         await ws.send(json.dumps({
             "jsonrpc": "2.0", "id": 2, "method": "session/new",
             "params": {"cwd": os.environ.get("USER_HOME", "/home/climbing"), "mcpServers": [],
-                       "agent_id": "soulmate"},
+                       "agent_id": "soulmate",
+                       # 会话级provenance（jobs.source同款产生侧标注）：测试探针会话
+                       # 显式声明出身，ExperienceCollector据此不产经验——探针不再污染
+                       # 生产learned_patterns（"请回复ok两个字即可"治理轮）
+                       "_meta": {"source": "test"}},
         }))
         deadline = time.time() + 60
         while time.time() < deadline and acp_sid is None:

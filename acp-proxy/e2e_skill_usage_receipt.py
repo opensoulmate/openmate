@@ -151,7 +151,8 @@ async def main() -> int:
             check("initialize握手", bool((r.get("result") or {}).get("protocolVersion")),
                   f"agentInfo={(r.get('result') or {}).get('agentInfo')}")
             r = await rpc(ws, "session/new",
-                          {"cwd": "/", "mcpServers": [], "agent_id": "soulmate"},
+                          {"cwd": "/", "mcpServers": [], "agent_id": "soulmate",
+                           "_meta": {"source": "test"}},
                           rid=2, timeout=60)
             sid = (r.get("result") or {}).get("session_id") or (r.get("result") or {}).get("sessionId") or ""
             check("session/new soulmate路由", bool(sid), f"acp_sid={sid}")

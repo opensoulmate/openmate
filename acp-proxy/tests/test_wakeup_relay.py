@@ -451,8 +451,12 @@ class TestWiring:
         assert 'payload["wakeup_relay"] = relay_stats()' in src
 
     def test_save_message_merges_origin(self):
+        # 合并入口改名_merge_session_meta（turn_origin+session_source两标记同列并入），
+        # 接线钉随迁：_save_message仍必须走合并入口，且两个标记键都在合并逻辑里
         src = self._src("agent/soulmate_agent.py")
-        assert "metadata = self._merge_turn_origin(session_id, metadata)" in src
+        assert "metadata = self._merge_session_meta(session_id, metadata)" in src
+        assert 'meta["turn_origin"] = origin' in src
+        assert 'meta["session_source"] = source' in src
 
 
 # ════════════════════════════════════════════════════════════════

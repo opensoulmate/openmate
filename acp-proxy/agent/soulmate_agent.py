@@ -163,6 +163,11 @@ class SoulMateAgent:
         # 前端（跨proxy实例可见性，dev-reports 11:11遗留#3），普通回合行不标记
         # （子进程自己流式推送，relay不推防重复）
         self._turn_origin: dict[str, str] = {}
+        # 会话级provenance（jobs.source同款"产生侧标注"）：session_id→source，
+        # new_session经 _meta.source 绑定（如"test"）；会话内所有落库行的metadata
+        # 带session_source——ExperienceCollector据此跳过测试会话，测试探针不再
+        # 污染生产experiences/learned_patterns（见src/learn/experience_collector.py）
+        self._session_sources: dict[str, str] = {}
         # 自动检测项目根目录：agent/ 在 acp-proxy/ 下，acp-proxy/ 在项目根目录下
         self._project_root = str(Path(__file__).resolve().parent.parent.parent)
         self._opensoul_root = Path(os.environ.get("OPENSOUL_ROOT", "/home/climbing/opensoul"))
@@ -351,15 +356,30 @@ class SoulMateAgent:
         """回合结束清除出身标记（窗口外落库行不带标记）"""
         self._turn_origin.pop(session_id, None)
 
-    def _merge_turn_origin(self, session_id: str, metadata: str | None) -> str | None:
-        """把回合出身并入metadata JSON（kilocode #9同一metadata列）。
+    def _bind_session_source(self, session_id: str, field_meta: dict | None, kwargs: dict) -> None:
+        """绑定会话级provenance（产生侧标注，jobs.source同款哲学）。
 
-        - 无标记窗口：metadata原样返回（普通回合行为零变化）；
-        - 已有metadata（记忆marker/cache_replay等）：解析后并入turn_origin键，
+        来源=ACP标准 _meta 扩展字段的 source 键（acp router把_meta键展开为
+        kwargs，两种派发形态都覆盖）。只认显式声明：未声明=普通会话行为零变化，
+        采集侧不做名字/内容猜测——测试垃圾的清理责任在产生侧标记。
+        """
+        source = (field_meta or {}).get("source") or kwargs.get("source")
+        if source:
+            self._session_sources[session_id] = str(source)
+
+    def _merge_session_meta(self, session_id: str, metadata: str | None) -> str | None:
+        """把会话级provenance与回合出身并入metadata JSON（kilocode #9同一metadata列）。
+
+        - session_source：会话出身（如"test"，new_session绑定）——会话内所有
+          落库行携带，ExperienceCollector据此跳过测试会话；
+        - turn_origin：回合出身（如"wakeup"），wakeup_relay实时推送识别依据；
+        - 无标记：metadata原样返回（普通会话普通回合行为零变化）；
+        - 已有metadata（记忆marker/cache_replay等）：解析后并入provenance键，
           原键全部保留；
         - 原metadata不可解析：原文保全在raw_metadata下，绝不静默丢数据。"""
         origin = (getattr(self, "_turn_origin", None) or {}).get(session_id)
-        if not origin:
+        source = (getattr(self, "_session_sources", None) or {}).get(session_id)
+        if not origin and not source:
             return metadata
         try:
             meta = json.loads(metadata) if metadata else {}
@@ -367,7 +387,10 @@ class SoulMateAgent:
                 raise ValueError("metadata非JSON对象")
         except (ValueError, TypeError):
             meta = {"raw_metadata": metadata}
-        meta["turn_origin"] = origin
+        if origin:
+            meta["turn_origin"] = origin
+        if source:
+            meta["session_source"] = source
         return json.dumps(meta, ensure_ascii=False)
 
     def _save_message(
@@ -400,9 +423,10 @@ class SoulMateAgent:
                 db.execute("SELECT metadata FROM agent_messages LIMIT 1")
             except sqlite3.OperationalError:
                 db.execute("ALTER TABLE agent_messages ADD COLUMN metadata TEXT")
-            # 回合出身标记并入metadata（wakeup_relay实时推送面识别唤醒回合行的依据；
-            # 无标记窗口行为零变化，见_merge_turn_origin）
-            metadata = self._merge_turn_origin(session_id, metadata)
+            # 会话级provenance+回合出身标记并入metadata（wakeup_relay实时推送面
+            # 识别唤醒回合行的依据；ExperienceCollector识别测试会话的依据；
+            # 无标记行为零变化，见_merge_session_meta）
+            metadata = self._merge_session_meta(session_id, metadata)
             _last_row = db.execute(
                 "SELECT id FROM agent_messages WHERE session_id = ? ORDER BY id DESC LIMIT 1",
                 (session_id,),
@@ -479,11 +503,32 @@ class SoulMateAgent:
         """
         try:
             db = self._get_db()
-            rows = db.execute(
-                "SELECT role, content FROM agent_messages WHERE session_id = ? ORDER BY id",
-                (session_id,),
-            ).fetchall()
+            try:
+                rows = db.execute(
+                    "SELECT role, content, metadata FROM agent_messages WHERE session_id = ? ORDER BY id",
+                    (session_id,),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                # 老库无metadata列：provenance恢复走不了，历史消息照常加载
+                rows = db.execute(
+                    "SELECT role, content FROM agent_messages WHERE session_id = ? ORDER BY id",
+                    (session_id,),
+                ).fetchall()
             messages = [{"role": r["role"], "content": r["content"]} for r in rows]
+            # 会话级provenance恢复（进程重启后new_session重连也要继续标记）：
+            # 任一历史行带session_source → 会话出身沿用（jobs.source"产生侧标注"
+            # 的持久化面；无标记会话不设置，行为零变化）
+            for r in rows:
+                raw = r["metadata"] if "metadata" in r.keys() else None
+                if not raw:
+                    continue
+                try:
+                    meta = json.loads(raw)
+                except (ValueError, TypeError):
+                    continue
+                if isinstance(meta, dict) and meta.get("session_source"):
+                    self._session_sources[session_id] = str(meta["session_source"])
+                    break
             # 切分支摘要上下文注入（opensoul src/trajectory/branch_summary.py写入，
             # 同库同表：fork自动生成 / POST /api/sessions/{id}/branch-summaries）
             try:
@@ -2946,6 +2991,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
         if session_id:
             if session_id in self.sessions:
                 logger.info(f"Reconnect (memory): {session_id}")
+                self._bind_session_source(session_id, field_meta, kwargs)
                 return acp.NewSessionResponse(session_id=session_id)
             if self._session_exists_in_db(session_id):
                 # 从 DB 加载历史消息到内存
@@ -2959,6 +3005,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
                 }
                 logger.info(f"Reconnect (DB): {session_id}, loaded {len(messages)} messages")
                 self._session_cwds[session_id] = cwd
+                self._bind_session_source(session_id, field_meta, kwargs)
                 return acp.NewSessionResponse(session_id=session_id)
         sid = f"om-{uuid.uuid4().hex[:12]}"
         self.sessions[sid] = {
@@ -2970,6 +3017,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
         }
         logger.info(f"New session: {sid}, cwd={cwd}")
         self._session_cwds[sid] = cwd
+        self._bind_session_source(sid, field_meta, kwargs)
         return acp.NewSessionResponse(session_id=sid)
 
     async def prompt(
