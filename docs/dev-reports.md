@@ -5069,3 +5069,4 @@
 4. FAIL记录不分trivial照旧（23:55轮挂账）；残余遗留观察项照旧：⚠️线索窗启发式残余/❌结果侧整token旧语义/read_turn遗留#1首行窗口残余/#2标题线索词边界、gene_loop测试侧隔离fixture、relay round级需引擎侧自报、LLM_FALLBACK_CHAIN未配置（402环境项）、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步、model_gateway凭据映射表、engine.py死代码清理候选、MCP重连真实Server验证、attach跨turn共享、RESUMED后同turn多episode单记录、主组件~730行近重复（TrajectoryPanel壳）。
 5. cron环境约束实录：`pytest | tail`管道exit_code失真照旧（本次输出含真实失败提示按FAILED处理，去管道重跑取真值）；全量acp-proxy suite约11.5分钟超terminal前台420s上限——**长测试套件一律background=true跑再poll**（本轮两次180s wait窗口收尾）；`curl -o`落盘再python3解析照旧。
 6. 第7步gene skill上报：见下（执行后回填skill_id）。
+第7步回填：gene skill上报✅ skill_id=`skill_6693e6910a74`（success=true，source=extract，tool_sequence=skill_view→read_file→search_files→terminal→patch→write_file→process），已入gene技能库供find_relevant检索复用。
