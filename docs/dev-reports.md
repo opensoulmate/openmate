@@ -5102,3 +5102,35 @@
 7. cron环境约束实录：`curl | python3`管道照旧规避（`-o`落盘再解析）；dev-reports.md照旧write_file写/tmp片段+cat>>回帖（patch不碰长文件）。
 8. 第7步gene skill上报：见下（执行后回填skill_id）。
 第7步回填：gene skill上报✅ skill_id=`skill_5a2e3a91060e`（success=true，source=extract，tool_sequence=todo→read_file→search_files→terminal→patch→write_file），已入gene技能库供find_relevant检索复用。
+
+## [2026-10-06 03:27] 运行时RBAC策略迁出git——测试注册不再弄脏生产策略文件（多轮"sibling既存脏文件config/rbac_policy.csv"挂账销账，P0数据正确性/repo卫生）
+**目标**：git跟踪的 `config/rbac_policy.csv`（casbin RBAC策略=运行时状态落在git目录）被测试注册流量持续写脏——tests/test_user.py走live :8090注册→服务进程 `add_role`→`_save_policy` 写回该文件，每次全量测试追加3行 `g, testuser_<8hex>, user` 类测试产物行，历史积 **294行**（文件319行里294行是测试产物，相对HEAD另有127行未提交脏diff），git工作区永久脏、多轮dev-reports只能写"sibling既存脏文件显式排除"。这是继 jobs.source provenance（1093行测试垃圾）、learned_patterns噪声治理、探针session_source标记之后**同一污染家族的最后一块**：产生侧写路径把测试产物写进了git跟踪文件。
+**调研来源**：本仓库2026-10-03测试隔离轮 gene_client 先例（"测试绝不写生产库"——gene API从live改进程内tmp隔离）同族哲学；SUMMARY P0-3 kilocode skill供应链"origin钉死+原子swap"（种子模板=只读origin，运行态副本可写、永不写回origin）；2026-10-05 jobs.source provenance轮"清理责任在产生侧，只认schema级标记"（测试行剔除用严格命名模式判定，不靠模糊匹配）。
+**改动文件**（opensoul commit `10c422ee`，3文件+213/-172，全增量old_string/new_string）：
+- `src/services/permission.py`（+60/-4）：运行时策略路径解析 `_resolve_policy_path`（env `OPENSOUL_RBAC_POLICY_PATH` 覆盖>数据目录 `~/.hermes/opensoul/rbac_policy.csv`）+ 播种 `_seed_runtime_policy`（模板只读、缺失时复制并剔除测试行）+ 产生侧清理 `_is_test_user`（`^(testuser|logintest|metest)_[0-9a-f]{8}$` 单一真源）在 `_save_policy` 落盘前内存+落盘双剔
+- `tests/test_rbac_policy_hygiene.py`（新增153行10用例）：种子卫生钉/路径解析钉/播种剔除钉（含脏模板用例+不误杀用例）/保存剔除钉（含存量剔除用例）/live注册端到端钉
+- `config/rbac_policy.csv`（-168行相对HEAD）：存量清账294测试行（断言后写盘），保留25真实行（14条p权限行+admin/climbing/admin2/hermes/testagent/testuser/cronbot/devagent/test2/test/autobot——无8hex后缀的test类名字按"不误杀"保留）
+**改动内容**：
+1. **运行时状态迁出git**：策略文件运行期读写 `~/.hermes/opensoul/rbac_policy.csv`（与其他运行态资产 ~/.hermes/opensoul/{gene,hippo,immune,...} 同根）；`config/rbac_policy.csv` 降级为**只读种子模板**——运行期任何add_role/remove_role/save只写数据目录副本，git工作区永不再被注册流量弄脏。env `OPENSOUL_RBAC_POLICY_PATH` 可覆盖路径（测试/多实例隔离用）。
+2. **种子播种**：运行时文件缺失时从模板复制（`get_enforcer` 里构造Enforcer前播种，缺文件构造会炸的顺序坑规避）；播种时剔除测试产物行——即使模板将来再脏，播下去的也是干净内容。
+3. **产生侧清理**：`_save_policy` 落盘前扫描grouping行，命中测试命名模式的 `remove_grouping_policy` 后再save——测试用户角色不进内存不落盘（test_user.py的register/login/me全走JWT不依赖角色行，行为无损）；非测试命名（如 `testuser_special`）照常持久化（不误杀钉）。
+4. **设计取舍显式记账**：用户名恰为 `testuser_<8hex>` 形态的真实用户将拿不到持久角色——命名模式与tests/test_user.py生成器强绑定，碰撞概率可忽略；若未来注册放开该命名再收紧为"来源标记"式（同session_source路线）。
+**接线位置**（grep证据，文件:行号）：
+- 定义：`src/services/permission.py:15 _RUNTIME_POLICY_ENV`/`:19 _TEST_USER_RE`/`:24 _is_test_user`/`:29 _resolve_policy_path`/`:37 _seed_runtime_policy`
+- 唯一构造点接线：`permission.py:65-66 get_enforcer内 _resolve_policy_path()→_seed_runtime_policy()→Enforcer(model, policy_path)`（check_permission/add_role/remove_role/add_policy/remove_policy/get_user_roles/get_all_* 全部经get_enforcer）
+- 真实写路径：`src/api/user.py:39 add_role(data.username, "user")`（register）→`permission.py:78 add_role`→`:82 _save_policy`（剔除+save）；`src/api/permission.py:58 add_role`（admin分角色）同链
+- router挂载（既有不动）：main.py /api/user + /api/permission，live curl `/api/user/health`+`/api/permission/health` 200实证
+**验证结果**：
+- 完整性✅：`git diff --cached --numstat`=permission.py +60/-4、tests +153/-0、rbac_policy.csv +0/-168 与commit stat逐行吻合；2个py文件ast.parse OK；残留符号扫描 `_policy_path` 旧名零引用。
+- 集成✅：调用链grep如上；**live写路径实锤**（/tmp/rbac_live_check_20261006.py）：register 200→git种子模板字节级不变✅→运行时文件25行播种内容✅→测试行零残留✅→`g, climbing, user` 等真实行在✅→login 200/me 200（角色剔除不影响认证）✅；**seed与runtime逐行diff一致**（25行内容零丢失，wc -24/25差异=行尾换行符）。
+- 测试✅：`tests/test_rbac_policy_hygiene.py` **10/10 PASS**（含live端到端钉）；定向 `test_rbac_policy_hygiene+test_permission+test_user` **21 passed**；**opensoul全量tests/ 2536 passed 0 failed**（168s，含本轮10新用例=2536−10；最近一次全量记账为10-04 14:20轮2391，其后各轮增量累计——本轮零失败为唯一硬结论）；`systemic_test.py` **29/29 passed**（跨模块协同面：opensoul↔acp-proxy全链无回归，混合负载含perm端点）。
+- 存量清账live实证✅：清账脚本断言保护全过（剔除面全部命中测试模式/保留面零测试行/climbing等真实行在/剔294>200 sanity/留25<40 sanity）后写盘 `dropped=294 kept=25`。
+**服务重启**：`systemctl --user restart opensoul.service`→/api/system/health+ /api/permission/health+ /api/user/health 均200（新策略路径已进运行进程，首轮register即播种 ~/.hermes/opensoul/rbac_policy.csv）；acp-proxy零改动无需重启；前端零改动无需build。opensoul `git status` **全清**（此前永久脏的config/rbac_policy.csv挂账销掉）。
+**commit**：opensoul `10c422ee`。
+**遗留问题**：
+1. **测试注册仍写运行时策略的Postgres用户行**（~/.hermes/opensoul/rbac_policy.csv 不再收测试行，但users表照旧收testuser_*账号）——live测试架构（client=:8090）固有，全面测试隔离（进程内app+tmp库）是独立专项轮，本轮不扩面。
+2. **运行时策略文件仍是文件级持久化**：并发写无锁（casbin save_policy全量覆盖）——当前单进程opensoul无碍；若未来多实例需换DB adapter。
+3. **测试用户名命名模式若变更**（test_user.py改生成器）会绕过剔除——`test_rbac_policy_hygiene.py::test_test_user_role_never_persisted` 用同款生成器（uuid.hex[:8]），生成器一改该钉即红灯提醒同步regex，属自防御设计。
+4. FAIL记录不分trivial照旧；test_job_retry_backoff等live测试写生产库挂账照旧；8787 Agent Engine无systemd托管照旧（LLM 402环境项照旧）。
+5. 残余遗留观察项照旧：⚠️线索窗启发式残余/❌结果侧整token旧语义/read_turn遗留#1首行窗口残余/#2标题线索词边界、gene_loop测试侧隔离fixture、relay round级需引擎侧自报、LLM_FALLBACK_CHAIN未配置（402环境项）、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步、model_gateway凭据映射表、engine.py死代码清理候选、MCP重连真实Server验证、attach跨turn共享、RESUMED后同turn多episode单记录、主组件~730行近重复（TrajectoryPanel壳）。
+6. cron环境约束实录：dev-reports.md照旧write_file写/tmp片段+cat>>回帖（patch不碰长文件）；systemic_test_results.json生成物照旧不入commit。
