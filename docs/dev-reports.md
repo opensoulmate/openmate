@@ -4977,3 +4977,32 @@
 6. cron环境约束实录：patch工具对含空行的old_string两次不中（真实文件空行位置与脑补不一致）——改小步patch+先read_file核对行号再下手；`curl | python3`管道照旧规避（curl -o落/tmp再解析）。
 7. 第7步gene skill上报：见下（执行后回填skill_id）。
 第7步回填：gene skill上报✅ skill_id=`skill_e01d5a46e58b`（success=true，source=extract，tool_sequence=read_file→search_files→terminal→patch→write_file），已入gene技能库供find_relevant检索复用。
+
+## [2026-10-05 17:30] 系统注入回合turn_origin provenance——唤醒注解不再冒充用户意图进策略模式（多轮挂账"learned_patterns系统注入注释型intent仍准入"销账，P1进化链数据正确性）
+**目标**：治理 learned_patterns.strategy 的 "schedulewakeup 到点唤醒 系统自动回合 非用户消息"（confidence=1.0，样本8）噪声——它是 wakeup_executor 的唤醒注解不是用户话术，给它推荐patch策略语义荒谬。上轮（15:00 intent准入gatekeeper轮）遗留#1明确方向："从产生侧标注（类似jobs.source provenance），不靠字符串猜"，本轮落地。
+**调研来源**：jobs.source provenance轮同款哲学（"只认schema标记，清理责任在产生侧"）+ LobeChat gatekeeper单一真源（上轮已建admit_intent）。产生侧标记**已存在但无人消费**：acp-proxy `SoulMateAgent._merge_turn_origin`（soulmate_agent.py:354-371）把 `wakeup_executor.set_turn_origin` 窗口的回合出身写进 `agent_messages.metadata.turn_origin`（wakeup_relay.py:58 `is_wakeup_meta`只用于前端推送）——本轮把它接进进化数据链。
+**改动文件**：opensoul `src/learn/long_term.py`（+41/-4）、`src/learn/experience_collector.py`（+75/-15）、`tests/test_system_turn_intent.py`（新增14用例）。
+**改动内容**：
+1. **gatekeeper单一真源**：`is_system_turn_intent()`（long_term.py:176）两条确定性判据——①结构化provenance key `system_turn:{origin}`前缀（collector对系统回合的落库约定，background_job:{name}同款）；②唤醒契约自述文本（WAKEUP_PROMPT_MARKER"系统自动回合"+"非用户消息"同现或"schedulewakeup"+"到点唤醒"同现——只认契约短语，单短语不命中防误杀"用户消息很多的会话统计"类话术）。`admit_intent`新增原因码`system_turn`（:238）。
+2. **collector消费产生侧标记**：`_user_turn_origin()`（experience_collector.py:80）主信号=用户行`metadata.turn_origin`（未来无契约文本的系统回合同样拦截），回退=契约文本识别（turn_origin标记之前的存量行）；`_collect_from_messages`对系统回合的assistant产物落`intent_summary="system_turn:{origin}"`+`metadata.turn_origin`+`metadata.intent_raw`原文保全（mem0：稳定键≠丢原文），stats新增`system_turns`计数；老库无metadata列查询自动回退（OperationalError fail-safe）。**outcome照常采集**——系统回合的失败信号对进化分析仍是真实事实。
+3. **三面自动接线**（admit_intent单一真源的复利）：提取侧skipped按原因码计数、存量自愈prune删旧噪声pattern行、查询侧返回空——零新增接线点。
+**接线位置**（grep证据，文件:行号）：
+- 消费链：`src/api/brain.py:319 extract_patterns()`（POST /api/brain/learn）→`long_term.py` `_prune_inadmissible_patterns`/`_extract_strategy_patterns`内`admit_intent(...)`→`:238 is_system_turn_intent`；`brain.py:330 get_recommendations`→`admit_intent`同一门。
+- 产生链：`experience_collector.py:40 import`、`:340 _user_turn_origin(row, first_line)`（_collect_from_messages真实循环）、`:96`契约文本回退、`:361 intent = f"system_turn:{origin}"`。`_collect_from_messages`由`collect()`(:500)调用（brain.py /evolve与job_handlers learn.collect_experiences的采集入口）。
+- 接线静态测试钉死：`test_admit_wired_in_all_three_surfaces`断言提取/prune/查询三函数体内都有`admit_intent(`。
+**验证结果**：
+- 完整性✅：`git show 6b54fcfc --stat`=3 files changed, 436 insertions(+), 14 deletions(-)（long_term.py+41/-4、experience_collector.py+75/-15、新测试+320）；AST parse过；config/rbac_policy.csv sibling照旧不入commit。
+- 集成✅：调用链grep如上；live实证见下E2E。
+- 测试✅：新`tests/test_system_turn_intent.py` **14/14 PASS**（判定×3：契约原文/归一key/短式/结构化key全拦+正常话术不误杀+单短语不误火；准入×2：原因码system_turn+正常intent回归+查询侧拒绝；采集×5：turn_origin主信号（无契约文本的未来系统回合）/存量契约文本回退/正常回合零变化/老库无metadata列回退/系统回合outcome照常真实；提取×2：skipped.system_turn计数6+不进pattern/存量自愈删两种形态旧行+failure行不误伤；接线静态×1）；邻居套件`test_learn_pattern_admission.py` 19/19零回归；**opensoul全量2512 passed**（基线2498+14新，174.9s，零回归）。
+- live E2E三连✅：改前`learned_patterns` 12行含`strategy|schedulewakeup 到点唤醒 系统自动回合 非用户消息|8|1.0`→重启后`POST /api/brain/learn` 200回`{"pruned":{"scanned":11,"removed_inadmissible":1,...},"strategy":{"considered":17,"admitted":10,"skipped":{...,"system_turn":8,...}}}`——removed_inadmissible=1精确销掉该行、skipped.system_turn=8与8条存量污染经验逐数吻合（msg:1173/1176/1178/1180/1182/1184/1186/1189）；表11行逐行核对schedulewakeup行消失、其余（background_job/eval_case/失败行）无误伤；`GET /api/brain/recommendations?intent=<唤醒marker>`→`{"recommendations":[]}`；**幂等二跑**pruned `{removed_inadmissible:0}` patterns恒11；正常话术回归`?intent=帮我查看当前目录`→命中"查看当前目录"模式（写/查对称未破坏）。
+**服务重启**：`systemctl --user restart opensoul.service`→active→`POST /api/brain/learn` 200+`GET /api/brain/recommendations` 200；acp-proxy未改动未重启。
+**commit**：opensoul `6b54fcfc`。
+**遗留问题**：
+1. **8条存量经验行保留raw marker intent**（source_ref幂等不重写）：功能上无害（gatekeeper契约文本回退全拦，live实证skipped.system_turn=8），仅形态不统一——新行落`system_turn:wakeup`、旧行留原文。若要形态统一需按metadata.intent_raw回填迁移，暂不值得（mem0：历史行不改写）。
+2. **"请回复ok两个字即可"×3照旧准入**（上轮保守边界）：live再确认它是live探针测试会话的用户消息（om-5a0c56faa274等live-*会话）——本质是**测试会话污染生产experiences**（与jobs.source同类问题但发生在agent_messages侧），根治方向=会话级provenance标记（类似jobs.source），不是字符串猜测，下轮可评估。
+3. **FAIL记录不分trivial照旧**（23:55轮挂账）：等真实数据形态。
+4. **test_job_retry_backoff等live测试仍写生产库**（挂账照旧）：下轮按will_client隔离路线逐个收编。
+5. 残余遗留观察项照旧：⚠️线索窗启发式残余/❌结果侧整token旧语义/read_turn遗留#1首行窗口残余/#2标题线索词边界、gene_loop测试侧隔离fixture、relay round级需引擎侧自报、LLM_FALLBACK_CHAIN未配置（402环境项）、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步、model_gateway凭据映射表、engine.py死代码清理候选、MCP重连真实Server验证、attach跨turn共享、RESUMED后同turn多episode单记录、主组件~730行近重复（TrajectoryPanel壳）。
+6. cron环境约束实录：内联`$(...)`命令替换照旧hardline BLOCKED（拆两步查database_url再sqlite3）；write_file写`eval_db_path=""`被管道转义成`eval_db_path="="")`两处SyntaxError（lint当场暴露+patch修复——新教训：**write_file后必看lint输出，引号参数逐处核对**）；`pytest | tail`管道exit_code失真照旧（改直跑）。
+7. 第7步gene skill上报：见下（执行后回填skill_id）。
+第7步回填：gene skill上报✅ skill_id=`skill_567e8bd44f36`（success=true，source=extract，tool_sequence=read_file→search_files→terminal→patch→write_file），已入gene技能库供find_relevant检索复用。
