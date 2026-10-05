@@ -5070,3 +5070,34 @@
 5. cron环境约束实录：`pytest | tail`管道exit_code失真照旧（本次输出含真实失败提示按FAILED处理，去管道重跑取真值）；全量acp-proxy suite约11.5分钟超terminal前台420s上限——**长测试套件一律background=true跑再poll**（本轮两次180s wait窗口收尾）；`curl -o`落盘再python3解析照旧。
 6. 第7步gene skill上报：见下（执行后回填skill_id）。
 第7步回填：gene skill上报✅ skill_id=`skill_6693e6910a74`（success=true，source=extract，tool_sequence=skill_view→read_file→search_files→terminal→patch→write_file→process），已入gene技能库供find_relevant检索复用。
+
+## [2026-10-06 01:10] 探针产生侧provenance补齐+协议方法名修复+存量清账——om-*探针会话污染销账（22:45轮遗留#1+#3，P1进化链数据正确性）
+**目标**：销22:45轮遗留#1"om-*探针会话存量污染（下轮优先）"——msg:1193-1205等探针对话派生的假experiences（"e2e-usagereceipt- 请只回复两个字：好的"类）+遗留#3（e2e_trajectory_wiring.py/e2e_probe2.py未跟踪探针）。产生侧根因：唯一存活的未声明soulmate写路径探针 stability_test_100.py 无 `_meta.source` 声明，且发现更严重的P1 bug——它用的 legacy 方法名 `newSession`/`prompt` 在 acp SDK MessageRouter 上是 method_not_found 死路径（`mcpServers` 必填字段也缺），**声明搭在死路径上=没接线**，脚本本身就跑不通。
+**调研来源**：jobs.source provenance轮同款哲学（"只认schema标记，清理责任在产生侧"）+ 20:35/22:45轮会话级provenance机制（soulmate_agent._bind_session_source/_merge_session_meta、ws_chat._bind_session_source既有实现，本轮只补齐覆盖面不重建机制）+ "写了≠接线了"铁律驱动对声明落点做live实跑验证（由此揪出死方法名bug）。
+**改动文件**：openmate `acp-proxy/stability_test_100.py`（+32/-7：协议方法名修复+provenance声明+自签JWT回退+STABILITY_ROUNDS环境变量）、`acp-proxy/tests/test_probe_provenance_coverage.py`（新增125行7用例）、`acp-proxy/e2e_trajectory_wiring.py`+`acp-proxy/e2e_probe2.py`（未跟踪探针入库，销遗留#3）；一次性清账脚本 `/tmp/om_probe_cleanup_20261006.py`（不入repo）。
+**改动内容**：
+1. **协议修复（P1 bug）**：`newSession`→`session/new`、`prompt`→`session/prompt`（`session_id`→`sessionId`别名对齐PromptRequest schema）、补 `mcpServers: []` 必填字段（两处含断线重连路径）。依据：acp SDK `agent/router.py:60 route_request(AGENT_METHODS["session_new"]...)` 只注册现名，legacy名=死方法。
+2. **产生侧声明**：两处 session/new 调用携带 `_meta {"source": "test"}`（e2e_trajectory_wiring.py同款约定）——落库行metadata.session_source，ExperienceCollector整会话跳过。
+3. **登录回退**：get_token失败改自签JWT（opensoul/.env JWT_SECRET，e2e_*探针同款）——冒烟实锤裸连被ws_acp鉴权层1000断连。
+4. **防复发机制**：`test_probe_provenance_coverage.py` 7断言——①走真实soulmate写路径（session/new agent_id=soulmate 或 /ws/chat agent_proxy）的探针必须声明test出身 ②豁免清单显式封口（hermes路由/a2a 5文件，集合不一致即红灯=新增豁免强制评审）③声明必须走`_meta`载体 ④废弃ACP方法名（newSession/prompt）全局禁止 ⑤stability修复回归钉 ⑥soulmate绑定机制在场钉 ⑦扫描面防呆。
+5. **一次性存量清账**（先断言后写盘）：12个硬证据探针会话（e2e_trajectory_wiring原文"echo trajectory-e2e-1002"×2、"echo rounds-e2e"、e2e-usagereceipt-*×2、e2e_echo_*、prov_e2e_target、turnlifecycletest*、live测试自述×2、probe历史消息、spill-e2e-*）40行回填`session_source=test`（既有键全保留merge）+ 删除其派生19条假experiences（含孤儿exp:842 e2e-branch-backup-*，源消息已被message_tree测试删除）。
+**接线位置**（grep证据，文件:行号）：
+- 产生链：`stability_test_100.py:212-214`（session/new+_meta，主路径）、`:259-261`（重连路径）、`:96`（session/prompt）→ ws_acp路由 → `soulmate_agent.py:2994/:3008 _bind_session_source`（new_session三路径）→ `:429 _merge_session_meta`（`_save_message`:435唯一落库点）→ agent_messages.metadata.session_source。
+- 消费链（既有不变）：`experience_collector.py:99 _row_session_source`→`:365 skipped_test`门。
+- 覆盖钉：`grep -rn '"source": "test"' --include="*.py"` 命中 integration_test.py:144/e2e_ws_calibration.py:69/e2e_skill_usage_receipt.py:155/e2e_trajectory_wiring.py:71/stability_test_100.py:214/261（全部真实会话创建调用点）。
+**验证结果**：
+- 完整性✅：`git show 73fe5e70 --stat`=4 files changed, 471 insertions(+), 7 deletions(-)；4个Python文件AST parse过；diff逐hunk过目全为本轮（systemic_test_results.json/settings-client.tsx/locales×3/tsbuildinfo/docs html等sibling/生成物照旧不入commit）。
+- 集成✅：调用链grep如上；**live冒烟实跑**（真实脚本 `STABILITY_ROUNDS=1 python3 stability_test_100.py`）：修复前=ConnectionClosedOK裸连被断（0轮）；修复后=session/new建会话 `om-6b753d519655` 成功+1轮对话完成，**落库行 `{"session_source": "test"}` 两行实锤**（产生侧标记端到端：脚本→ws_acp→SoulMateAgent→agent_messages.metadata）。
+- 测试✅：新`tests/test_probe_provenance_coverage.py` **7/7 PASS**；邻居套件 `test_session_source_marking.py`+`test_ws_chat_session_source.py`+新测试 **38/38 PASS** 零回归。
+- 存量清账live实证✅：清账脚本断言保护全过后写盘 `marked_rows=40 deleted_experiences=19`（12会话逐会话行数打印核对）；`POST /api/brain/evolve` 采集 `messages.skipped_test=125`（=83旧+40清账+2冒烟，逐数吻合）、`experiences_total=613`（=632−19）；probe派生经验查询归零（trajectory-e2e/usagereceipt/rounds-e2e/turnlifecycle/ScheduleWakeup全0）；`POST /api/brain/learn` patterns恒10、`removed_unbacked=0`（probe单例从未形成pattern行，规则3零误伤）、skipped.phatic 15→14（被删19条中含1条寒暄探针经验）；**幂等二跑**pruned全0、patterns恒10。
+**服务重启**：本轮改动面=探针脚本+测试+DB数据（无服务代码）→ 不重启；复验 `opensoul.service`/`acp-proxy-a.service` active + `/api/system/health ok` + `/health ok`。
+**commit**：openmate `73fe5e70`。
+**遗留问题**：
+1. **内容存疑会话保守不标**（不误杀优先）：`om-be526a40a14c`（"用一句话介绍你自己"，exp:1270）、`om-f9e978a7f662`/`om-bf71a413ddb6`（"1+1等于几"，exp:249/290）无硬探针证据（可能是用户快测），未标未删；若后续证实是探针再按同手法取证清账。
+2. **"你好"类存量探针经验照旧**（早前round挂账"experiences级扩大清理面待评估"）：phatic门已挡其进pattern，维持不扩面。
+3. **stability_test_http.py盲区显式化**：/acp/send→hermes路由当前不写agent_messages（豁免），但该脚本docstring自称"Soulmate ACP subprocess"过时误导；若proxy路由将来改回soulmate会静默污染（豁免清单已显式记录该风险）。
+4. **stability_test_results.json生成物**：冒烟产生（655B），未跟踪不入commit（生成物惯例）。
+5. FAIL记录不分trivial照旧；test_job_retry_backoff等live测试写生产库挂账照旧；8787 Agent Engine无systemd托管照旧（本轮LLM 402仍现：冒烟回合回复体是402错误文本，脚本按chunk长度计成功——成功判定未识别LLM错误文本，观察项）。
+6. 残余遗留观察项照旧：⚠️线索窗启发式残余/❌结果侧整token旧语义/read_turn遗留#1首行窗口残余/#2标题线索词边界、gene_loop测试侧隔离fixture、relay round级需引擎侧自报、LLM_FALLBACK_CHAIN未配置（402环境项）、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步、model_gateway凭据映射表、engine.py死代码清理候选、MCP重连真实Server验证、attach跨turn共享、RESUMED后同turn多episode单记录、主组件~730行近重复（TrajectoryPanel壳）。
+7. cron环境约束实录：`curl | python3`管道照旧规避（`-o`落盘再解析）；dev-reports.md照旧write_file写/tmp片段+cat>>回帖（patch不碰长文件）。
+8. 第7步gene skill上报：见下（执行后回填skill_id）。
