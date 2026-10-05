@@ -190,7 +190,7 @@ async def s3_jobqueue_stress(client: httpx.AsyncClient):
         for i in range(10):
             task = client.post(
                 f"{OPENVSOUL}/api/will/jobs/submit",
-                json={"name": "test_job", "params": {"index": i}, "timeout_s": 30},
+                json={"name": "test_job", "params": {"index": i}, "timeout_s": 30, "source": "test"},
                 timeout=5,
             )
             submit_tasks.append(task)
@@ -232,7 +232,7 @@ async def s3_jobqueue_stress(client: httpx.AsyncClient):
         # Submit a job then try to cancel it
         resp = await client.post(
             f"{OPENVSOUL}/api/will/jobs/submit",
-            json={"name": "test_cancel", "params": {}, "timeout_s": 60},
+            json={"name": "test_cancel", "params": {}, "timeout_s": 60, "source": "test"},
             timeout=5,
         )
         job_id = resp.json().get("job_id", "")
@@ -474,7 +474,7 @@ async def s6_multi_service_load(client: httpx.AsyncClient):
     mixed_tasks = [
         safe_call(client.get, f"{OPENVSOUL}/api/chat/health", timeout=5),
         safe_call(client.post, f"{OPENVSOUL}/api/will/jobs/submit",
-                  json={"name": "stress_test", "params": {}}, timeout=5),
+                  json={"name": "stress_test", "params": {}, "source": "test"}, timeout=5),
         safe_call(client.post, f"{OPENVSOUL}/api/immune/permission/check",
                   json={"tool_name": "read_file", "tool_input": {"path": "/etc/hostname"}}, timeout=5),
         safe_call(client.post, f"{ACPPROXY}/acp/send",
@@ -524,6 +524,35 @@ async def run_system_tests():
                 await suite_func(client)
         except Exception as suite_exc:
             print(f"  ⚠️ {suite_func.__name__} crashed: {type(suite_func).__name__}: {suite_exc}")
+    
+    # S3/S6自清理：本轮提交的测试作业清走，不留垃圾进生产job_queue.db→
+    # 经验/进化链（learned_skills.source同款哲学：产生侧负责自清）。
+    # ① provenance精确清（source='test'）：先探openapi确认服务端支持——老服务端
+    #    只有零过滤purge（=DELETE全表footgun），绝不能盲调；探测不过跳过并明示。
+    # ② 自有保留名清（name_pattern带WHERE，老服务端也安全）：兜未来漏标回流。
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            purged_total = 0
+            spec = (await client.get(f"{OPENVSOUL}/openapi.json", timeout=5)).json()
+            params = (
+                spec.get("paths", {})
+                .get("/api/will/jobs/purge", {})
+                .get("post", {})
+                .get("parameters", [])
+            )
+            if any(p.get("name") == "source" for p in params):
+                resp = await client.post(f"{OPENVSOUL}/api/will/jobs/purge?source=test", timeout=10)
+                purged_total += (resp.json() or {}).get("purged", 0) if resp.status_code == 200 else 0
+            else:
+                print("\n  测试作业自清理: 服务端不支持source过滤（旧版），跳过provenance清")
+            for name in ("test_job", "test_cancel", "stress_test"):
+                resp = await client.post(
+                    f"{OPENVSOUL}/api/will/jobs/purge?name_pattern={name}", timeout=10
+                )
+                purged_total += (resp.json() or {}).get("purged", 0) if resp.status_code == 200 else 0
+            print(f"\n  测试作业自清理: 共清 {purged_total} 行（provenance+自有保留名）")
+    except Exception as cleanup_exc:
+        print(f"\n  测试作业自清理失败（不影响测试结果）: {cleanup_exc}")
     
     # Summary
     total = len(results)
