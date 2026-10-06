@@ -5252,3 +5252,36 @@
 7. cron环境约束实录：全量套件background=true+process wait（172.4s>180s wait clamp边缘，poll兜底）照旧；dev-reports.md照旧write_file写/tmp片段+cat>>回帖；systemic_test_results.json生成物照旧不入commit；长grep命令行触发BLOCKED改search_files替代。
 8. 第7步gene skill上报：见下（执行后回填skill_id）。
 第7步回填：gene skill上报✅ skill_id=`skill_52bf088d5d70`（success=true，source=extract，success_rate=1.0，tool_sequence=read_file→terminal→search_files→patch→write_file→terminal），已入gene技能库供find_relevant检索复用。
+
+## [2026-10-06 13:30 CST] heredity/brain进化API测试面收编轮——TestEvolutionAPI迁heredity_client隔离面+evolution.db假提案清账（10:54轮遗留#1"W2持续污染源test_evolution_loop TestEvolutionAPI"销账，P0数据正确性）
+**目标**：按10:54轮指定的下轮第1目标收编 test_evolution_loop TestEvolutionAPI——live :8090 heredity提案/审批/apply用例每次全量跑写穿生产 `~/.hermes/opensoul/evolution/evolution.db`。实测污染比挂账更重：**86条api指纹假提案（43条api_test_agent被approved，'假提案被审批'污染进化链语义）+43条'no evidence proposal'假提案+136条假触发器记录（api_storm_err/different_err）+136条TRIGGERED假账本行+breaker残留（测试曾把生产熔断器打开过）**；且 /api/brain/evolve 每调用新建 `EvolutionEngine()` 直写生产（与heredity单例双引擎并存）——test_evolution_loop与test_error_normalization两处live调用皆写穿。
+**调研来源**：gene_client隔离路线（2026-10-03"测试面=真实router代码，数据面=隔离"）+ will_client四层数据面 + user_client三层换tmp+schema保真（10:54轮）+ test_user_test_isolation五面防复发钉结构 + b04f5be7提案生命周期去重钉（清账兼容性要求）+ SUMMARY P0-4可观测性（生产进化库只剩真实提案，"没有进化啊"的度量前提）。
+**改动文件**（opensoul commit `06042659`，5文件+411/-35，全增量old_string/new_string）：`src/api/brain.py`（+8/-2：evolve共享单例接线）、`tests/conftest.py`（+62：heredity_client隔离面）、`tests/test_evolution_loop.py`（110行改动：TestEvolutionAPI 9用例迁移+行为钉升级）、`tests/test_error_normalization.py`（±10：evolve回归钉迁隔离面）、`tests/test_heredity_test_isolation.py`（新增7防复发钉）；一次性清账脚本 `/tmp/evo_test_pollution_cleanup_20261006.py`+`/tmp/evo_ledger_cleanup_20261006.py`（不入repo，清账前备份 `/tmp/evolution.db.bak_20261006`）。
+**改动内容**：
+1. **src/api/brain.py单例接线（本轮唯一src改动）**：evolve端点 `engine = EvolutionEngine()` 每调用自建引擎 → `from src.api.heredity import evolution_engine as engine`（late import，will/job_handlers.py:34同款）——生产侧单一管线（与/api/heredity/evolution/*共享状态视图），测试侧heredity_api.evolution_engine换tmp后本端点跟着走（此前换不掉→写穿生产）。
+2. **heredity_client隔离面（conftest单一真源）**：真实heredity+brain两个router挂进进程内app（镜像src/main.py:570前缀），数据面三层换tmp——①evolution.db：heredity_api.evolution_engine→tmp EvolutionEngine；②opensoul主库：settings.database_url→tmp（SelfEvolution.experiences读/evolution_log写+ExperienceCollector.experiences写全部落tmp，collector默认db_path与SQLitePool同源解析自动跟随）；③db_pool→tmp SQLitePool（lifespan startup connect）。采集源只读豁免：job_queue.db/eval_loop.db只开SELECT，experiences写入面全落tmp。
+3. **TestEvolutionAPI迁移**：9用例写面全迁heredity_client（`_declare_via_api`形参改hc）；live只留 `test_health_includes_evolution_stats` 1条GET只读冒烟（部署证明）。`test_brain_evolve_feeds_pipeline` 升级为行为钉：种子3条同根因失败经验→SelfEvolution.failure_avoidance真实发现→brain/evolve声明提案（断言declared_proposals非空+status=pending+提案落tmp库），非只验key存在。test_error_normalization的 `test_evolve_endpoint_still_healthy` 同迁（同族污染源）。
+4. **新7钉（test_heredity_test_isolation.py）**：①隔离面声明→审批→rollback→触发器全链后生产三表计数不变+行只落tmp（核心不变量）②brain/evolve经共享单例落tmp管线+生产零写入（单例接线运行时证明）③接线钉（engine/db_pool/database_url确为tmp实例防脱线自比）④⑤静态钉（进化写用例必须走heredity_client；test_evolution_loop.py只许1条live用例且禁POST——含helper层）⑥⑦泄漏探测器×2（生产api指纹假提案恒0/触发器指纹恒0，**双侧覆盖evolution_triggers表+evolution_ledger的TRIGGERED账本行**）。
+5. **存量清账（先断言后写盘，两段式，v1锚点全过后才写）**：断言面198提案/555账本/137触发器/self_evo 64/live_agent 1/x_err 1/api_fp 86/no_evid 43/breaker 1 全match→写盘 **提案-129（86 api指纹+43 no-evidence）/账本-301/触发器-136/快照-43/breaker复位**；补刀段断言254/137/136/1全match→**TRIGGERED假账本行-136**。写后复核：proposals 69（self_evolution 65含cron_smoke、agent 3条live探针、live_agent 1）、ledger 118、triggers 1（x_err）、api_fp=0。保留面不误杀：3条'agent'手动live探针（live no-evidence/LIVE E2E EVOLUTION/live protected）+live_agent+x_err+5条self_evolution pending均人工过目后保留（记忆价值>面板噪声，soulmate探针同款判例）。
+**接线位置**（grep证据，文件:行号）：
+- 单例接线：`src/api/brain.py:375 from src.api.heredity import evolution_engine as engine`（evolve端点运行时调用——两个brain/evolve钉证明提案落tmp非死代码）。
+- fixture定义：`tests/conftest.py:218 def heredity_client` → 消费点 `test_evolution_loop.py`（29处：9用例）、`test_error_normalization.py:477`、`test_heredity_test_isolation.py`（18处）。
+- 泄漏探测器/不变量：`test_heredity_test_isolation.py:41 _prod_evo_counts`→`:137/:181`消费；`:49 _prod_api_fingerprint_rows`→`:231`；`:59 _prod_trigger_fingerprint_rows`→`:238`。
+- 静态钉：`test_heredity_test_isolation.py:190/:213`（AST扫描真实.post()调用点）。
+**验证结果**：
+- 完整性✅：`git show 06042659 --stat`=5 files changed, 411 insertions(+), 35 deletions(-)；5个py文件ast.parse全过；sibling既存脏文件 `src/api/ai_groups.py`+96与 `src/api/ws_chat.py`+39（他轮在途工作）照旧不入commit。
+- 集成✅：grep链如上（单例接线点/fixture定义/54处消费/3组钉全有调用点无死代码）；**隔离面live实证**：TestEvolutionAPI全链在真实router代码跑通且生产三表计数前后不变；brain/evolve种子→发现→提案全链落tmp（若单例未接线，`test_brain_evolve_declares_to_shared_singleton`的"生产零写入"断言会红灯）。
+- 测试✅：定向 `test_evolution_loop+test_heredity_test_isolation` **66/66 PASS**、`test_error_normalization+test_user_test_isolation` **45/45 PASS**、隔离钉单独复跑 **7/7 PASS**；**opensoul全量 tests/ 2565 passed 0 failed**（185.05s，基线2558+7新钉逐数吻合，含b04f5be7提案生命周期去重钉无回归=清账兼容）；`systemic_test.py` **29/29 passed**（跨模块面无回归）。
+- 清账live实证✅：两段断言面全过后写盘（deleted提案129+账本301+TRIGGERED 136+触发器136+快照43+breaker复位），写后复核api_fp=0/trig_fp=0；**全量2565用例跑完后外部复验生产库假行仍为0**（泄漏探测器全量运行中绿灯+跑后独立复验双确认）。
+**服务重启**：`systemctl --user restart opensoul.service`（src/api/brain.py改动）→ `/api/system/health` 200 + `/api/heredity/health` 200 + `/api/heredity/evolution/stats` 返回干净画像（69提案/118账本/1触发器/breaker closed——清账后语义自证）；前端零改动无需build；acp-proxy未改动但systemic_test照跑29/29。
+**commit**：opensoul `06042659`。
+**遗留问题**：
+1. **brain/evolve采集源仍只读打开生产job_queue.db/eval_loop.db**（SELECT-only，experiences写入面全落tmp，零生产写入已证）——若要彻底无生产接触需给ExperienceCollector加显式源路径注入参数（brain端点现无传参入口），下轮候选。
+2. test_error_normalization其余live段（brain/feedback写cron_smoke_*键+teardown自清）照旧W1观察项；test_mcp_grants/memory_echo_guard/sandbox_isolation W1自清族照旧——若出现"跑挂中途"残留，参照本轮泄漏探测器给各族补"恒0"钉。
+3. **self_evolution:default 5条pending提案基于测试作业失败模式**（test_job 910次/test_cancel/stage_test 91次等，产生于jobs.source='test'采集门上线前的历史experiences）——产生侧已防新增，存量5条保守保留（人工可retire）；"没有进化啊"的度量前提下轮可评估这批假模式对提案面板的噪声影响。
+4. 3条'agent' live探针+live_agent+x_err保留（不误杀优先，soulmate探针同款判例）——若用户希望面板再干净可手动DELETE。
+5. 泄漏探测器在测试进程硬崩溃时可能漏报时序（users轮同款观察项，下轮红灯即信号）。
+6. FAIL记录不分trivial照旧；8787 Agent Engine无systemd托管照旧（LLM 402环境项照旧）；`src/api/ai_groups.py`/`src/api/ws_chat.py` sibling在途工作照旧不入commit。
+7. 残余遗留观察项照旧：⚠️线索窗启发式残余/❌结果侧整token旧语义/read_turn遗留#1首行窗口残余/#2标题线索词边界、gene_loop测试侧隔离fixture、relay round级需引擎侧自报、LLM_FALLBACK_CHAIN未配置（402环境项）、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步、model_gateway凭据映射表、engine.py死代码清理候选、MCP重连真实Server验证、attach跨turn共享、RESUMED后同turn多episode单记录、主组件~730行近重复（TrajectoryPanel壳）。
+8. cron环境约束实录：execute_code在cron被BLOCKED（本轮两次踩中改write_file+/tmp脚本+terminal）；`pytest | tail`管道exit_code失真照旧（本轮systemic_test用了tail——exit_code以tail为准的失真风险照旧记录）；全量套件background=true+process wait（185s>180s clamp，poll兜底第二次wait取到终值）照旧；dev-reports.md照旧write_file写/tmp片段+cat>>回帖；systemic_test_results.json生成物照旧不入commit。
+9. 第7步gene skill上报：见下（执行后回填skill_id）。
