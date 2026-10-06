@@ -5380,3 +5380,37 @@
 6. 残余遗留观察项照旧：⚠️线索窗启发式残余/❌结果侧整token旧语义/read_turn遗留#1首行窗口残余/#2标题线索词边界、gene_loop测试侧隔离fixture、relay round级需引擎侧自报、两消费者近重复文件去重（TrajectoryPanel壳~730行）、树内搜索与扁平搜索整合、回放与树互斥、跨session搜索、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步、model_gateway凭据映射表、engine.py死代码清理候选、MCP重连真实Server验证、attach跨turn共享、RESUMED后同turn多episode单记录。
 7. cron环境约束实录：execute_code在cron被BLOCKED照旧（本轮全程read_file/patch/terminal/search_files）；全量套件171s走background+process wait（wait被clamp 180s一次取到终值）照旧；dev-reports.md照旧write_file写/tmp片段+cat>>回帖；systemic_test_results.json生成物照旧不入commit。
 8. 第7步gene skill上报✅ skill_id=`skill_372b35d8f43b`（success=true，source=extract，success_rate=1.0，tool_sequence=read_file→search_files→patch→write_file→terminal），已入gene技能库供find_relevant检索复用。
+
+## [2026-10-06 23:55 CST] OpenCapture端到端复活——captures表schema漂移自愈+/stats PG方言残留修复+失败不再谎报ok（21:22轮遗留#2"Capture health check failed: no such column: capture_type"销账，P0 bug修复+可观测性）
+**目标**：销21:22轮遗留#2（明确标注"修复另开一轮"）。生产data/opensoul.db的captures是旧版漂移schema（id TEXT PRIMARY KEY/type/metadata/created_at TEXT，与capture.py权威DDL的id INTEGER AUTOINCREMENT/capture_type等7列不兼容），`CREATE TABLE IF NOT EXISTS`对已存在的旧表是no-op→每个引用capture_type的查询恒报"no such column: capture_type"——浏览器扩展采集写入（POST /page、/selection恒500）、列表过滤、统计整体不可用。且health把异常吞成`status:"ok"+note:"table not yet initialized"`对外谎报健康（dashboard /api/health/all也把它计为ok），/stats还残留PG方言`EXTRACT(EPOCH FROM NOW() - INTERVAL '24 hours')`（SQLite必炸）→整个响应被except吞成全0（total/pages/selections算完也一起丢）。live实证（修复前）：`/api/capture/health`返回`{"status":"ok",...,"note":"table not yet initialized"}`、`/stats`全0。
+**调研来源**：21:22轮遗留#2日志定位（上轮日志修复后来源首次可定位到src.api.capture——日志可见性提升的直接产出）；SUMMARY P0-4可观测性+mem0 §1.1"失败/状态必须可见"+AIHawk"截断必须显式标记"（失败不许伪装成成功——health谎报ok正是反例）；schema自愈沿用仓库内既有范式`src/database/postgres.py SQLitePool._ensure_schema`（"PRAGMA table_info探测→缺失才补，幂等可重复执行……出现新的no column named错误时在此登记"）；隔离测试面沿用user_client/heredity_client"测试面=真实代码，数据面=隔离"路线。
+**改动文件**（opensoul commit `9372fce3`，4文件+483/-28，全增量old_string/new_string）：`src/api/capture.py`（+184/-14：schema自愈+_stats方言修复+失败可见）、`tests/conftest.py`（+54：capture_client隔离fixture）、`tests/test_capture.py`（+26/-8：写用例收编隔离面+只读冒烟收紧）、`tests/test_capture_schema_drift.py`（新增247行，11钉）。
+**改动内容**：
+1. **`_ensure_table`升级幂等schema guard+漂移自愈（核心）**：PRAGMA table_info探测列集→①旧系漂移（缺capture_type）走`_migrate_legacy_captures`整表重建：DROP残留→ALTER RENAME备份→建新表→旧行按列映射回收→清备份（type→capture_type空值标'legacy'、metadata→description原文保留、TEXT时间→epoch秒typeof守卫、id不迁移自增重排——**数据不丢**）；②新系缺列走`_COLUMN_FIXES`逐列ALTER（9列，与_SCHEMA_FIXES同范式）；③崩溃续跑：重建中途断电残留captures_legacy_backup→新表为空才补回收（防二次复制重复行）再清场。迁移完成journal留痕（INFO已可达journal，上轮修复的直接红利）。
+2. **/stats PG方言残留修复**：`EXTRACT(EPOCH FROM NOW() - INTERVAL '24 hours')`→参数绑定`WHERE created_at > $1`（time.time()-86400，方言无关，适配器$1→?照常转换）。
+3. **失败不再谎报ok**：health/stats的except分支从`status:"ok"`+note/全0改为HTTP 503+`status:"degraded"`+`error`可见——dashboard /api/health/all按status_code判定会如实显示error（此前谎报健康）；`_ensure_table`纳入stats的try（此前守卫在try外，异常直接炸成未处理500）。
+4. **测试面收编（修复本身制造的新污染源提前堵住）**：此前tests/test_capture.py走live :8090的POST /page写用例因恒500**从没写进去过**；schema修复后live写用例会开始往生产captures表写测试行——写用例（test_page_with_url）收编进capture_client隔离面；只读冒烟（health/stats）收紧断言（note/error必须不存在、total_captures必须是真实字段）。
+5. **capture_client隔离fixture**（conftest，user_client/heredity_client同款路线）：tmp capture.db**以生产旧版漂移schema原样开局**（2026-10-06 sqlite3 .schema captures实测DDL复刻）——每个用例天然演练_migrate_legacy_captures自愈路径；测试面=真实router/迁移代码，数据面=tmp SQLitePool（真实SQL适配层全程不变）；app.state.capture_client_db暴露tmp库路径。
+6. **新11钉**：①旧行保留映射（type/content/metadata/user_id映射+id重排int+备份清场）②写路径复活（POST /page 200 captured）③去重语义不破坏（duplicate）④selection写路径⑤24h窗口（2天前的行不计recent_24h）⑥幂等（3次请求不重复不炸）⑦新建库直建新schema⑧崩溃续跑（备份表残留+新表空→补回收rescued+清场）⑨health失败503+degraded+error⑩stats失败503同契约⑪接线钉（main.py include_router捕获+_ensure_table≥8处在端点必经路径）。
+**接线位置**（grep证据，文件:行号）：
+- 自愈入口定义：`src/api/capture.py:150 def _ensure_table` → 迁移分支`:168 await _migrate_legacy_captures(cols)`（定义`:126`）→ 行映射`:132 _migration_select_sql`（定义`:95`）→ 列探测`:166/:175 _table_columns`（定义`:89`）→ 缺列ALTER`:170 _COLUMN_FIXES`（定义`:73`）。
+- 运行时必经路径：`_ensure_table()`在全部9个端点入口调用（capture.py:207 health/:248 stats/:296/:347/:397/:427/:437/:447）——真实请求路径非死代码。
+- router接线：`src/main.py:20 from src.api.capture import router as capture_router` → `:674 app.include_router(capture_router, prefix="/api/capture")`。
+- 测试消费：`tests/conftest.py:287 def capture_client` → `tests/test_capture.py:50`+`tests/test_capture_schema_drift.py` 11钉（fixture app.state.capture_client_db断言数据面隔离）。
+- 行为证据（最强）：live POST /api/capture/page 200 captured→list返回capture_type='page'→DELETE 200→表计数回0（自清理冒烟，生产净零污染）。
+**验证结果**：
+- 完整性✅：`git show 9372fce3 --stat`=4 files changed, 483 insertions(+), 28 deletions(-)；4个py文件ast.parse全过；本轮无sibling脏文件（git status仅本轮4文件）。
+- 集成✅：grep链如上（定义→9端点必经→main.py router挂载→测试消费）；**live实证**：重启后生产captures表schema已迁移为新DDL（sqlite3 .schema实锤）；journal可见迁移自报`INFO src.api.capture: captures schema migrated from legacy drift (old columns=['id','user_id','type','content','metadata','created_at'], rows preserved=0)`（23:41:58，启动后首个请求即触发）；冒烟闭环POST 200→list 1行→DELETE 200→COUNT(*)=0。
+- 测试✅：定向`test_capture.py+test_capture_schema_drift.py`**20/20 PASS**（9 live冒烟+11新钉）；**opensoul全量 tests/ 2591 passed 0 failed**（158.74s，基线2580+11新钉逐数吻合）；`systemic_test.py`**29/29 passed**（跨模块面无回归）。
+- 修复前/后对照✅：修复前live `/api/capture/health`=200+`"status":"ok"`+`"note":"table not yet initialized"`谎报、`/stats`全0（PG方言炸被吞）；修复后health=200真实计数无note、stats=真实计数、写路径200 captured。
+**服务重启**：`systemctl --user restart opensoul.service`（src/api/capture.py改动）→ `/api/capture/health` 200 + `/api/capture/stats` 200 + `/api/system/health` 200；journal迁移自报可见（21:22轮日志修复的下游证据）；前端零改动无需build；acp-proxy未改动但systemic_test照跑29/29。
+**commit**：opensoul `9372fce3`。
+**遗留问题**：
+1. **残余观察项照旧**：21:22轮遗留#1（某客户端WebSocket /ws?token=... 403每30s重连，ws认证面）本轮未做（需先定位是哪个客户端用失效token）；19:05轮遗留#1（systemic_test S2偶发120s超时）本轮未复现（29/29）；15:56轮遗留长尾（test_error_normalization W1观察项、泄漏探测器硬崩溃漏报、learn.collect_experiences作业参数透传等）照旧挂账。
+2. capture.py其余端点（/page /list /{id}等）`_ensure_table`在try外——DB故障时炸未处理500（FastAPI默认行为，失败可见但非优雅503）；与health/stats的503契约不完全一致，低优先统一。
+3. `promote_to_knowledge`写knowledge/tags表未经隔离测试（涉及跨表+meili索引，异轮专项）；前端capture-client.tsx对503的degraded展示只是0值填充（未显示error文案），UI增强候选。
+4. 漂移旧表来源仍未定位（全home grep无任何代码创建旧版captures表——疑似早期实验/外部进程遗留，0行无写入者；若未来发现外部写入者需重新评估重建策略对其影响）。
+5. 8787 Agent Engine无systemd托管照旧；LLM_FALLBACK_CHAIN未配置（402环境项）照旧。
+6. 残余遗留观察项照旧：⚠️线索窗启发式残余/❌结果侧整token旧语义/read_turn遗留#1首行窗口残余/#2标题线索词边界、gene_loop测试侧隔离fixture、relay round级需引擎侧自报、两消费者近重复文件去重（TrajectoryPanel壳~730行）、树内搜索与扁平搜索整合、回放与树互斥、跨session搜索、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步、model_gateway凭据映射表、engine.py死代码清理候选、MCP重连真实Server验证、attach跨turn共享、RESUMED后同turn多episode单记录。
+7. cron环境约束实录：execute_code在cron被BLOCKED照旧（本轮全程read_file/search_files/patch/write_file/terminal/skill_view）；全量套件159s走background=true+process wait（wait被clamp 180s一次取到终值）照旧；`pytest | tail`管道exit_code失真风险照旧（本轮全量套件用了tail——exit_code以2591 passed行实证为准）；dev-reports.md照旧write_file写/tmp片段+cat>>回帖；systemic_test_results.json生成物照旧不入commit。
+8. 第7步gene skill上报：见下（执行后回填skill_id）。
