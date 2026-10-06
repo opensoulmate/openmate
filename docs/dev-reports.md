@@ -5201,3 +5201,54 @@
 7. cron环境约束实录：`pytest | tail`管道exit_code失真照旧（本次两次踩中按FAILED处理去管道重跑）；全量套件background=true+process wait照旧（wait被clamp到180s，本次165s内完成刚好够）；dev-reports.md照旧write_file写/tmp片段+cat>>回帖；systemic_test_results.json生成物照旧不入commit。
 8. 第7步gene skill上报：见下（执行后回填skill_id）。
 第7步回填：gene skill上报✅ skill_id=`skill_1b93e9fe3c93`（success=true，source=extract，success_rate=1.0，tool_sequence=todo→read_file→search_files→terminal→write_file→patch），已入gene技能库供find_relevant检索复用。
+
+## [2026-10-06 10:54 CST] live测试普查轮——测试注册写生产users表收编（user_client隔离面+自清+泄漏探测器，03:27遗留#1残余"测试注册写生产users表"多轮挂账销账，P0数据正确性）
+**目标**：按08:35轮指定的下轮对象完成"tests/内pytest.mark.live分布普查+全live面逐个判定是否写生产"，并收编普查揪出的头号污染源——tests/test_user.py走live :8090注册→生产 `data/opensoul.db` users表积 **173/179行测试账号**（97%，每次全量跑+3行testuser_/logintest_/metest_，无删除端点永不自清）。这是jobs.source/learned_patterns/session_source/RBAC策略之后同一污染家族的收编：**产生侧写路径把测试产物写进生产库**，也是03:27轮遗留#1"全面测试隔离（进程内app+tmp库）是独立专项轮"的延续。
+**调研来源**：gene_client隔离路线（2026-10-03测试隔离轮"测试面=真实router代码，数据面=隔离"）+ will_client四层数据面（06:03/08:35轮）+ test_mcp_grants"自带teardown零残留"先例 + 03:27轮RBAC `OPENSOUL_RBAC_POLICY_PATH` env隔离钩子（本轮直接消费该钩子）+ SUMMARY P0-4可观测性（生产库只剩真实数据才可信）。
+**普查判定表**（本轮指定交付物，tests/内全部live面逐个判定）：
+
+| 家族/文件 | live面 | 写生产? | 判定 |
+|---|---|---|---|
+| test_user.py | :8090注册/登录 | **W2持续污染**（users表173行） | **本轮收编**（迁user_client，health留守只读冒烟） |
+| test_rbac_policy_hygiene.py live钉 | :8090注册 | W1写+本轮补自清 | 保留live（部署证明需真实服务面）+finally自清，净写入恒0 |
+| test_evolution_loop.py TestEvolutionAPI | :8090 heredity提案/审批/apply | **W2持续污染**（evolution.db 195提案中**84条api-test假提案**+84假ledger行） | **下轮第1目标**（heredity隔离面——will_client已证EvolutionEngine可tmp化） |
+| test_job_queue_wiring/test_job_retry_backoff | :8090 jobs | 已收编（06:03轮will_client） | ✅只读live冒烟留守 |
+| test_wakeup/test_wakeup_overview | :8090 wakeup | 已收编（08:35轮source='test'+purge） | ✅13钉防复发 |
+| test_a2a.py | :8090 tasks/send | 零持久化（纯内存task_manager，08:35轮勘察） | 免收编 |
+| test_will_checkpoint.py | :8090 ckpt | 零残留（finally DELETE有效，08:35轮勘察） | 免收编 |
+| test_error_normalization.py live段 | :8090 feedback | W1写cron_smoke_*键+teardown清理 | 可接受（自清），观察项 |
+| test_mcp_grants.py live段 | :8090 grants | W1写+自带_cleanup | 可接受（自清） |
+| test_memory_echo_guard.py | :8090 ltm | W1写+hard_delete清理 | 可接受（自清） |
+| test_sandbox_isolation.py TestApi | :8090 sandboxes | W1建删沙箱+finally delete | 可接受（自清） |
+| test_gene_*四文件live段 | :8090 gene只读 | 零写（写面全走gene_client隔离） | ✅只读接线守卫 |
+| test_search/test_deermem_tags等其余 | 422验证路径/纯内容串 | 零写 | 免收编（"8090"为巧合命中） |
+
+**改动文件**（opensoul commit `2d55648d`，4文件+314/-32，全增量old_string/new_string）：`tests/conftest.py`（+71：user_client共享fixture）、`tests/test_user.py`（+49/-32：5写/认证用例迁隔离面+health只读冒烟留守）、`tests/test_rbac_policy_hygiene.py`（+45/-12：live部署证明钉自清）、`tests/test_user_test_isolation.py`（新增7钉）；一次性清账脚本 `/tmp/users_test_pollution_cleanup_20261006.py`（不入repo）。
+**改动内容**：
+1. **user_client隔离面（conftest单一真源）**：真实user router挂进进程内app（镜像main.py:539 /api/user前缀），数据面两层换tmp——①users表：`settings.database_url`→tmp users.db + `auth.db_pool`换新SQLitePool（startup lifespan connect，真实SQL适配层/bcrypt/JWT全程不变）；②RBAC策略：env `OPENSOUL_RBAC_POLICY_PATH`→tmp策略文件+`permission._enforcer`单例复位（register的add_role副作用落tmp）。**schema保真**：users表DDL运行时从生产库sqlite_master只读镜像（永不漂移），生产库缺失退回内联DDL。
+2. **test_user.py迁移**：5个写/认证用例（register/login×2/me×2）迁user_client；`test_register_and_login`断言从"in (200,400)模糊态"收紧为"==200"（隔离面数据面确定性，原400分支是live重复注册的迁就）；`TestUserHealth::test_health`留守live只读冒烟（router挂载守卫，零写入）。
+3. **rbac live部署证明钉自清**：`_purge_test_user_row`（严格 `permission._is_test_user` 断言后删，非测试命名拒绝删除防误杀；FK级联顺带走test账号knowledge子行），finally调用（mcp_grants"自带teardown零残留"同款）——全tests唯一保留的live注册写用例净写入恒0。
+4. **新7钉**：隔离面注册后生产users计数不变+行只落tmp库（核心不变量）/注册→登录→me真实router全链保真/add_role副作用落tmp策略且生产运行时策略零接触/db_pool与database_url换tmp接线钉/静态钉×2（`/api/user/register`真实.post调用点必须走user_client、唯一豁免=自清的rbac钉；test_user.py只许一条live只读冒烟）/**生产users表测试命名行恒0泄漏探测器**（任何live写者漏自清即红灯）。
+5. **存量清账（先断言后写盘，v1拒写自证）**：v1断言锚点"climbing必须在保留面"拦下误写——climbing只在RBAC策略不在users表（断言面A-E第一次执行即拒写零损毁），锚点修正为users表真实账号（admin/hermes/autobot）后写盘 **deleted=173 kept=6**（admin/default/test/admin2/hermes/autobot人工逐行过目，'test'无8hex后缀按不误杀保留）；knowledge级联0行（测试账号无知识子行），写后复核 total=6/test-pattern=0。
+**接线位置**（grep证据，文件:行号）：
+- fixture定义：`tests/conftest.py:148 def user_client` → 消费点 `test_user.py:23/42/70/81/92`（5用例）+ `test_user_test_isolation.py` 4用例（隔离面钉）。
+- 自清：`test_rbac_policy_hygiene.py:163 def _purge_test_user_row` → 调用点 `:160`（finally内）。
+- 泄漏探测器/不变量：`test_user_test_isolation.py:36 _prod_test_pattern_rows`（:30 `_PROD_DB_PATH`收集期固化）→ 消费 `:46/:58/:180`。
+- 静态钉：`test_user_test_isolation.py:128/:166`（AST扫描真实.post调用点+live冒烟计数）。
+**验证结果**：
+- 完整性✅：`git show 2d55648d --stat`=4 files changed, 314 insertions(+), 32 deletions(-)；4个py文件ast.parse全过；diff逐hunk过目全为本轮（sibling既存脏文件 `src/api/ai_groups.py`+96/"task_execution_events执行过程可视化"与 `src/api/ws_chat.py`+39/on_event回调——他轮在途工作照旧不入commit）。⚠️patch工具一度警告test_rbac_policy_hygiene.py被sibling改过，diff复核该文件增量全为本轮零覆盖。
+- 集成✅：grep链如上（fixture定义/5消费点/自清/泄漏探测器全有调用点无死代码）；**live实证三连**：①迁移后test_user.py跑完生产users表test-pattern计数 173→173不变（隔离面零穿透）②全量2558用例跑完生产表 **0/6**（含rbac live钉自清闭环+泄漏探测器绿灯）③health端点 `/api/user/health` 200（真实服务面router挂载不受影响）。
+- 测试✅：新钉+迁移面+rbac卫生 **23/23 PASS**；**opensoul全量 tests/ 2558 passed 0 failed**（172.4s，基线2551+7新钉逐数吻合）；`systemic_test.py` **29/29 passed**（跨模块面无回归）；钉自身缺陷两次红灯被抓住后修复（fixture把settings换成tmp后"生产路径"解析变tmp自比、静态扫描命中自身比较字面量——修法：收集期固化 `_PROD_DB_PATH` + 只认真实 `.post()` 调用点），红灯→修复→绿灯全程留痕。
+- 存量清账live实证✅：断言面A-E（v1拒写1次）全过后写盘 deleted=173 kept=6，写后复核 total=6/test-pattern=0/knowledge 254零误伤。
+**服务重启**：零src改动（纯测试侧）运行服务不受影响——未重启；`/api/system/health` 200 `{'status': 'ok'}` + `/api/user/health` 200 UserSystem 实证服务正常；前端零改动无需build。
+**commit**：opensoul `2d55648d`。
+**遗留问题**：
+1. **test_evolution_loop TestEvolutionAPI=W2持续污染源（下轮第1目标）**：live :8090 heredity提案/审批/apply用例每次全量跑写生产 `~/.hermes/opensoul/evolution/evolution.db`——实测195提案中**84条api-test指纹假提案（含approved状态）**+84条假ledger行，正污染进化链语义（"假提案被approved"比jobs假经验更毒）。收编路线现成：will_client已证EvolutionEngine可tmp化（monkeypatch heredity_api.evolution_engine），补heredity路由挂载即可；已approved假提案需一次性清账（注意与b04f5be7提案生命周期去重钉的判定兼容）。
+2. test_error_normalization/mcp_grants/memory_echo_guard/sandbox_isolation四家族W1写+自清照旧（净0但存在瞬时污染窗口）——若未来出现"跑挂中途"残留，参照本轮泄漏探测器给各族补"恒0"钉。
+3. 清账脚本v1断言锚点climbing不在users表被拦（先断言后写盘第四次自证价值）——锚点集（admin/hermes/autobot）与users表真实账号强绑定，若未来删除真实账号需同步脚本（一次性脚本，不入repo，影响仅本次）。
+4. 泄漏探测器在测试进程硬崩溃时可能漏报时序（崩溃残留的行要等下轮红灯）——设计如此（下轮红灯即信号），观察项。
+5. FAIL记录不分trivial照旧；8787 Agent Engine无systemd托管照旧（LLM 402环境项照旧）；`src/api/ai_groups.py`/`src/api/ws_chat.py` sibling在途工作照旧不入commit。
+6. 残余遗留观察项照旧：⚠️线索窗启发式残余/❌结果侧整token旧语义/read_turn遗留#1首行窗口残余/#2标题线索词边界、gene_loop测试侧隔离fixture、relay round级需引擎侧自报、LLM_FALLBACK_CHAIN未配置（402环境项）、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步、model_gateway凭据映射表、engine.py死代码清理候选、MCP重连真实Server验证、attach跨turn共享、RESUMED后同turn多episode单记录、主组件~730行近重复（TrajectoryPanel壳）。
+7. cron环境约束实录：全量套件background=true+process wait（172.4s>180s wait clamp边缘，poll兜底）照旧；dev-reports.md照旧write_file写/tmp片段+cat>>回帖；systemic_test_results.json生成物照旧不入commit；长grep命令行触发BLOCKED改search_files替代。
+8. 第7步gene skill上报：见下（执行后回填skill_id）。
+第7步回填：gene skill上报✅ skill_id=`skill_52bf088d5d70`（success=true，source=extract，success_rate=1.0，tool_sequence=read_file→terminal→search_files→patch→write_file→terminal），已入gene技能库供find_relevant检索复用。
