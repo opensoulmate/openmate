@@ -5317,3 +5317,66 @@
 4. cron环境约束实录：execute_code在cron被BLOCKED照旧（本轮全程用read_file/patch/terminal）；全量套件171s走terminal前台600s预算一次取到终值；dev-reports.md照旧write_file写/tmp片段+cat>>回帖；systemic_test_results.json生成物照旧不入commit（openmate工作区的settings-client.tsx/locales等sibling在途改动照旧不动）。
 5. 第7步gene skill上报：见下（执行后回填skill_id）。
 第7步回填：gene skill上报✅ skill_id=`skill_e51b836a1ed7`（success=true，source=extract，success_rate=1.0，tool_sequence=read_file→terminal→patch→write_file），已入gene技能库供find_relevant检索复用。
+
+## [2026-10-06 19:05 CST] 进化提案stale pending退役接线到运行时周期清扫——48h TTL契约与声明流量解耦（15:56轮遗留#2"self_evolution:default 5条假模式pending提案"销账，P0数据正确性/可观测性）
+**目标**：retire_stale_pending（0b5e0372进化预算自愈三件套的agno stale回收）只挂在 declare_intent 声明路径做惰性清扫——**声明一停清扫就停**。生产实证：2026-10-04 23:48批量立案后 SelfEvolution 因数据面干净不再产生新发现（也就不再声明），5条假模式pending（test_job 910次/test_cancel 91次/stress_test 91次测试噪声 + 2条9月已修复bug模式）滞留pending面板至今（13:30轮遗留#3指定"下轮可评估这批假模式对提案面板的噪声影响"）。"没有进化啊"的度量前提=面板只显示真实待审提案，48h TTL契约必须与声明流量解耦。
+**调研来源**：agno job_queue stale回收（0b5e0372既有机制的接线补齐——"写了≠接线了"）+ kilocode BackgroundJob续段语义 + SUMMARY P0-4可观测性（周期任务必须自报）+ claude-code noop自报范式（空转也自报）+ 13:30轮heredity_client隔离面monkeypatch契约（sweep走全局单例即测试可换数据面）。
+**改动文件**（opensoul commit `a5fba099`，3文件+252/-2，全增量old_string/new_string）：`src/api/heredity.py`（+57/-2：sweep_stale_proposals清扫入口+_retention_state心跳+evolution_stats暴露retention块）、`src/main.py`（+42：_evolution_retention_loop后台任务+lifespan接线+shutdown cancel）、`tests/test_heredity_test_isolation.py`（+158：TestEvolutionRetentionRuntimeWiring 4钉）。
+**改动内容**：
+1. **sweep_stale_proposals()（heredity.py:520，清扫入口）**：包一层 `evolution_engine.store.retire_stale_pending(evolution_engine.pending_ttl_s)`——失败不抛出只记返回值error（retention是后台维护绝不反噬调用方，mem0 §1.1失败必须可见）；走模块全局单例（13:30轮heredity_client隔离面 monkeypatch `heredity_api.evolution_engine` 即换数据面，测试零生产接触）。
+2. **_retention_state面板心跳（heredity.py:20）**：sweeps/last_sweep_at/last_sweep_retired/last_sweep_error四字段，每次清扫更新；evolution_stats（:512-514）返回 `{**get_stats(), "retention": ...}`。为什么走面板不走日志：**journal实测app级INFO被无handler的root logger丢弃（只有WARNING+经lastResort可见）**——周期任务空转必须自报（claude-code noop自报范式+用户极度重视可观测性），心跳进stats面板用户不用翻日志就知道retention活着。
+3. **_evolution_retention_loop（main.py:156）**：启动后20s首扫（开机即清账）+每3600s一扫（TTL=48h，小时级精度足够）；lifespan `create_task`接线（:350）+shutdown cancel（:357）。
+4. **4新钉（test_heredity_test_isolation.py:342 TestEvolutionRetentionRuntimeWiring）**：①行为钉（超龄pending→rejected+reject_reason=stale_pending_expired+账本REJECTED actor=retention、新鲜pending不误杀、生产三表计数不变、心跳进stats面板）②失败可见钉（store抛异常→返回值error+心跳last_sweep_error记录，不抛出）③静态接线钉（main.py定义+_evolution_retention_loop的create_task真实调用点+循环体内调用sweep非死代码）④sweep入口钉（heredity.py定义+retire_stale_pending调用+走全局evolution_engine单例）。
+5. **存量清账（经review正规通道，账本可见非SQL手术）**：5条假模式pending经 `POST /api/heredity/evolution/proposals/{id}/review` reject（reviewer=noise_governance，reject_reason逐条注明证据：3条test_*作业噪声注明"仅pytest产生+来源experiences已清账+13:30轮判定假模式"，2条已修复bug注明"末次失败2026-09-12/09-15超7天新鲜度窗（b04f5be7判定对已修复bug）"）。rejected+reviewed_by非空=人类裁决终态，find_decided_echo 7天冷却期内同digest禁重提。**pending 5→0、pending_budget_remaining 15→20/20、pending_stale 0、账本REJECTED 63→68**。若不用review通道，这5条要到今晚23:48（满48h TTL）才会被清扫——选择即时治理。
+**接线位置**（grep证据，文件:行号）：
+- 清扫入口定义：`src/api/heredity.py:520 def sweep_stale_proposals` → 内部调用 `retire_stale_pending`（:542/:547两分支）+ 心跳写 `:544/:548`；心跳暴露 `:514 evolution_stats` 返回retention块（定义`:20 _retention_state`）。
+- 运行时调用点：`src/main.py:171 from src.api.heredity import sweep_stale_proposals` → `:177 result = sweep_stale_proposals()`（循环体内）；循环定义`:156`、lifespan接线`:350 retention_task = asyncio.create_task(_evolution_retention_loop())`、`:357 retention_task.cancel()`。
+- 消费点（面板）：`GET /api/heredity/evolution/stats` → retention块（live curl实证）。
+- 测试钉消费：`tests/test_heredity_test_isolation.py:351/:424/:442/:477`。
+**验证结果**：
+- 完整性✅：`git show a5fba099 --stat`=3 files changed, 252 insertions(+), 2 deletions(-)；3个py文件ast.parse全过；sibling既存脏文件`src/api/ai_groups.py`+96与`src/api/ws_chat.py`+39（他轮在途工作）照旧不入commit（git add按文件显式指定）。
+- 集成✅：grep链如上（定义→main.py循环体内调用→lifespan create_task→stats面板消费，无死代码）；**live实证**：重启后35s curl `/api/heredity/evolution/stats` 返回 `"retention":{"sweeps":1,"last_sweep_at":1791284128.1654508,"last_sweep_retired":0,"last_sweep_error":""}`（=2026-10-06 18:55:28，启动20s首扫真实跑过——运行时接线非死代码）；5条清账经真实HTTP review端点落库，ledger查证5行 `REJECTED|noise_governance|noise_retired: ...` 齐全。
+- 测试✅：定向`test_heredity_test_isolation+test_evolution_loop+test_evolution_proposal_lifecycle`**92/92 PASS**（含4新钉）；**opensoul全量 tests/ 2573 passed 0 failed**（175.74s，基线2569+4新钉逐数吻合）；`systemic_test.py`复跑**29/29 passed**（⚠️首次跑28/29：S2"ACP工具执行链路"120s超时空detail——LLM时延抖动非逻辑失败，立即复跑29/29，如实记录）。
+- 存量清账实证✅：review响应5条全 `"status":"rejected"`+reject_reason逐条证据落库；清账后stats画像 pending=0/budget 20/20/REJECTED 68（63+5）语义自洽。
+**服务重启**：`systemctl --user restart opensoul.service`（两次：主改动后+心跳可观测补丁后）→ `/api/system/health` 200 + `/api/heredity/health` 200 + `/api/heredity/evolution/stats` 200含retention心跳；前端零改动无需build；acp-proxy未改动但systemic_test照跑（28/29超时抖动→复跑29/29）。
+**commit**：opensoul `a5fba099`。
+**遗留问题**：
+1. **systemic_test S2"ACP工具执行链路"偶发120s超时**（本轮首次跑红灯复跑绿灯）——120s预算对LLM全链路偏紧，属acp-proxy侧systemic_test.py的超时参数问题（非本轮改动所致，全程与ACP路径零接触）；若复现可把该用例timeout提到180s或给LLM调用加确定性mock分层。
+2. **app级INFO日志在journal不可见（root logger无handler，只有WARNING+经lastResort输出）**——本轮用心跳进stats面板绕开，但其余模块的logger.info同样在丢（如Auto-bootstrap result用户从未见过）；根治=main.py加logging.basicConfig或给uvicorn挂handler，属全局日志面改动需评估对2573用例的caplog影响，下轮候选。
+3. **retention清扫与declare路径的retire_stale_pending双写同一store**——幂等（UPDATE by status+created_at条件，重复清扫零副作用），但未来若加并发worker需注意SQLite写锁（现状单进程无碍）。
+4. 5条清账reviewer=noise_governance为机器裁决名（非真人）——reject_reason逐条证据可审计，若用户想复核可看 `/api/heredity/evolution/ledger`；若用户认为该retire应等真人，可从ledger追溯（proposal行保留未删）。
+5. 15:56轮遗留#2其余项照旧挂账：test_error_normalization其余live段W1观察项、泄漏探测器硬崩溃漏报时序、FAIL记录不分trivial、⚠️线索窗残余等长尾清单照旧；15:56轮遗留#1（learn.collect_experiences作业参数透传）本轮未做（低优先观察需求照旧）。
+6. FAIL记录不分trivial照旧；8787 Agent Engine无systemd托管照旧（LLM 402环境项照旧）；`src/api/ai_groups.py`/`src/api/ws_chat.py` sibling在途工作照旧不入commit。
+7. 残余遗留观察项照旧：⚠️线索窗启发式残余/❌结果侧整token旧语义/read_turn遗留#1首行窗口残余/#2标题线索词边界、gene_loop测试侧隔离fixture、relay round级需引擎侧自报、两消费者近重复文件去重（TrajectoryPanel壳~730行）、树内搜索与扁平搜索整合、回放与树互斥、跨session搜索、LLM_FALLBACK_CHAIN未配置（402环境项）、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步、model_gateway凭据映射表、engine.py死代码清理候选、MCP重连真实Server验证、attach跨turn共享、RESUMED后同turn多episode单记录。
+8. cron环境约束实录：`curl | python3`管道被tirith拦（schemeless_to_sink）→改`curl -o`落盘+grep读回（本轮5条review全走-o通道稳定）；全量套件175s走terminal前台600s预算一次取到终值；dev-reports.md照旧write_file写/tmp片段+cat>>回帖；systemic_test_results.json生成物照旧不入commit。
+9. 第7步gene skill上报：见下（执行后回填skill_id）。
+第7步回填：gene skill上报✅ skill_id=`skill_57b2f4dd4bd7`（success=true，source=extract，success_rate=1.0，tool_sequence=search_files→read_file→terminal→patch→write_file），已入gene技能库供find_relevant检索复用。
+
+## [2026-10-06 21:22 CST] app级INFO日志到达journal——根logger挂handler根治INFO整体丢弃（19:05轮遗留#2"app级INFO日志在journal不可见"销账，P0可观测性）
+**目标**：根治19:05轮journal实测的日志黑洞——uvicorn只配置自己的loggers（propagate=no），src模块 `logging.getLogger(__name__)`（144处）传播到无handler的root：logging.lastResort**丢弃INFO**且WARNING+只剩裸消息（无级别/无模块名）。实证："Auto-bootstrap result"用户从未见过、19:05轮的"[evolution-retention] sweep done"noop自报在journal里从未出现（当时只能绕道stats心跳）；WARNING如"Capture health check failed"在journal里连级别和模块名都没有，无法定位来源。用户极度重视可观测性（"我都不知道他们在干嘛"）——日志是运行证据的主通道。
+**调研来源**：19:05轮遗留#2明确标注"根治=main.py加logging.basicConfig或给uvicorn挂handler……下轮候选"；claude-code noop自报范式（空转也自报——本轮让该自报真正可见）；mem0 §1.1"失败/状态必须可见"；SUMMARY P0-4可观测性。
+**改动文件**（opensoul commit `79931c56`，2文件+177/-0，全增量old_string/new_string）：`src/main.py`（+44：import sys + configure_app_logging()+模块级守卫调用）、`tests/test_app_logging_config.py`（新增133行，7钉）。
+**改动内容**：
+1. **configure_app_logging()（src/main.py:108）**：root无handler时挂 `StreamHandler(sys.stdout)`（systemd StandardOutput=journal收走），格式 `"%(levelname)s %(name)s: %(message)s"`——INFO+全量进journal且带级别/模块名，lastResort裸消息问题一并根治；幂等（已有handler不重复挂）；root.level>INFO时补设INFO；httpx/httpcore/urllib3/sqlalchemy/openai等10个第三方噪声logger压WARNING。
+2. **模块级守卫调用（src/main.py:147-148）**：`if "pytest" not in sys.modules: configure_app_logging()`——uvicorn `src.main:app` 导入即生效；pytest下跳过避免2573用例的测试输出被INFO污染（caplog行为不受影响，实测124用例零破坏）。
+3. **为什么压httpx到WARNING**：intelligence循环+metrics探针每分钟20+次内网httpx请求，httpx默认INFO"HTTP Request:..."每请求一条会淹没journal（实测降噪后3分钟httpx零行）。
+**接线位置**（grep证据，文件:行号）：
+- 定义：`src/main.py:108 def configure_app_logging` → 模块级调用 `src/main.py:148 configure_app_logging()`（uvicorn启动导入src.main必经——`ExecStart=python -m uvicorn src.main:app`）。
+- 测试消费：`tests/test_app_logging_config.py:18 from src.main import configure_app_logging` → `:44/:52/:53/:62/:71/:86`（6处调用）。
+- 静态接线钉：`test_app_logging_config.py:92 test_main_module_level_call_site`（AST扫模块级调用点）；**运行时接线钉** `:103 test_clean_interpreter_import_configures_root`（干净解释器import src.main后断言root handler就位+INFO放行+httpx降噪）。
+**验证结果**：
+- 完整性✅：`git show 79931c56 --stat`=2 files changed, 177 insertions(+)；2个py文件ast.parse全过；sibling既存脏文件`src/api/ai_groups.py`+96与`src/api/ws_chat.py`+39（他轮在途工作）照旧不入commit（git add按文件显式指定）。
+- 集成✅：grep链如上（定义→模块级调用→6处测试消费，无死代码）；**live实证（最强）**：重启后journal出现此前从未可见的INFO流水——`INFO src.plugin_loader: Loaded 7 plugins`、`INFO src.vital.collector: MetricsCollector started`、`INFO opensoul.job_queue: JobQueue started: 3 workers`、`INFO src.services.meili_indexer: meili reindex: 278 docs queued`、`INFO src.gland.router: Registered provider=openai...`、`INFO src.main: [evolution-retention] sweep done: retired=0 in 0ms`（19:05轮的noop自报首次真实进journal）；WARNING同步升级为带级别+模块名（`WARNING src.database.qdrant: ...`/`WARNING src.api.llm: ...`/`WARNING src.api.capture: ...` vs 旧裸消息）。
+- 测试✅：新钉 `test_app_logging_config.py` **7/7 PASS**；caplog敏感面（memory_model/gene_skill_audit/template_write_guard/memory_redact/local_backup_probe）**124/124 PASS**（root handler改动零破坏）；**opensoul全量 tests/ 2580 passed 0 failed**（171.64s，基线2573+7新钉逐数吻合）；`systemic_test.py`**29/29 passed**（跨模块面无回归）。
+- 降噪实证✅：重启后3分钟 httpx/HTTP Request **0行**（探针每分钟20+请求被压住），非access日志仅11行（周期WARNING+ws 403重连，均为存量语义）——INFO可见性提升与journal不泛洪两头都成立。
+**服务重启**：`systemctl --user restart opensoul.service`（src/main.py改动）→ `/api/system/health` 200 `{'status': 'ok'}` + `/api/heredity/health` 200（registry 28组件）；启动20s后journal可见retention首扫自报（运行时证据链闭环）；前端零改动无需build；acp-proxy未改动但systemic_test照跑29/29。
+**commit**：opensoul `79931c56`。
+**遗留问题**：
+1. **某客户端WebSocket /ws?token=... 403每30s重连一次**（journal可见，非本轮引入）——token被拒的客户端在持续重试，产生周期性403日志；属ws认证面问题，下轮候选（先定位是哪个客户端在用失效token）。
+2. `WARNING src.api.capture: Capture health check failed: no such column: capture_type`周期报错照旧（capture表schema缺列——既有bug，本轮日志修好后其来源首次可定位到 `src.api.capture`，修复另开一轮）。
+3. 19:05轮遗留#1（systemic_test S2"ACP工具执行链路"偶发120s超时）本轮未复现（29/29）——超时参数偏紧的账照旧挂，复现即调180s。
+4. 15:56轮遗留#2其余长尾照旧挂账：test_error_normalization其余live段W1观察项、泄漏探测器硬崩溃漏报时序、FAIL记录不分trivial、learn.collect_experiences作业参数透传（低优先）等。
+5. 8787 Agent Engine无systemd托管照旧；LLM_FALLBACK_CHAIN未配置（402环境项）照旧；`src/api/ai_groups.py`/`src/api/ws_chat.py` sibling在途工作照旧不入commit。
+6. 残余遗留观察项照旧：⚠️线索窗启发式残余/❌结果侧整token旧语义/read_turn遗留#1首行窗口残余/#2标题线索词边界、gene_loop测试侧隔离fixture、relay round级需引擎侧自报、两消费者近重复文件去重（TrajectoryPanel壳~730行）、树内搜索与扁平搜索整合、回放与树互斥、跨session搜索、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步、model_gateway凭据映射表、engine.py死代码清理候选、MCP重连真实Server验证、attach跨turn共享、RESUMED后同turn多episode单记录。
+7. cron环境约束实录：execute_code在cron被BLOCKED照旧（本轮全程read_file/patch/terminal/search_files）；全量套件171s走background+process wait（wait被clamp 180s一次取到终值）照旧；dev-reports.md照旧write_file写/tmp片段+cat>>回帖；systemic_test_results.json生成物照旧不入commit。
+8. 第7步gene skill上报：见下（执行后回填skill_id）。
