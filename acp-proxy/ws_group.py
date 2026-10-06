@@ -279,6 +279,95 @@ async def _safe_send(ws: WebSocket, data: dict) -> bool:
 
 
 # ============================================================
+# 任务执行事件尾随广播 — task_progress 实时推送
+# ============================================================
+
+# 尾随后台任务全局引用（防 GC），事件游标记录已广播的最大事件 id
+_task_tail_task: asyncio.Task | None = None
+_task_event_cursor: int | None = None
+_TASK_EVENT_POLL_INTERVAL = 1.0
+
+
+def _init_task_event_cursor() -> int:
+    """初始化事件游标为当前表最大 id，避免重放历史事件"""
+    global _task_event_cursor
+    try:
+        db = _get_db()
+        try:
+            row = db.execute(
+                "SELECT MAX(id) AS max_id FROM task_execution_events"
+            ).fetchone()
+            _task_event_cursor = int(row["max_id"] or 0)
+        finally:
+            db.close()
+    except sqlite3.OperationalError:
+        # 表可能尚未创建 — 从 0 开始
+        _task_event_cursor = 0
+    except Exception as e:
+        logger.warning(f"[task_progress] 初始化事件游标失败: {e}")
+        _task_event_cursor = 0
+    return _task_event_cursor
+
+
+async def _tail_task_events():
+    """尾随 task_execution_events 表，把新事件实时广播到对应群组房间
+
+    每 1.0 秒查询一次 id 大于游标的新事件，逐条以 type=task_progress
+    广播到该事件所属群组的房间。仅在有房间连接时才查询。
+    """
+    global _task_event_cursor
+    if _task_event_cursor is None:
+        _init_task_event_cursor()
+    logger.info(f"[task_progress] 事件尾随任务已启动，游标={_task_event_cursor}")
+    while True:
+        try:
+            await asyncio.sleep(_TASK_EVENT_POLL_INTERVAL)
+            # 无房间连接时跳过本轮查询，省资源
+            if not _group_rooms:
+                continue
+            cursor = _task_event_cursor or 0
+            db = _get_db()
+            try:
+                rows = db.execute(
+                    "SELECT * FROM task_execution_events "
+                    "WHERE id > ? ORDER BY id LIMIT 200",
+                    (cursor,),
+                ).fetchall()
+            finally:
+                db.close()
+            for row in rows:
+                _task_event_cursor = int(row["id"])
+                await _broadcast(row["group_id"], {
+                    "type": "task_progress",
+                    "data": {
+                        "event_id": row["id"],
+                        "task_id": row["task_id"],
+                        "agent_id": row["agent_id"],
+                        "event_type": row["event_type"],
+                        "content": row["content"],
+                        "created_at": row["created_at"],
+                    },
+                })
+        except sqlite3.OperationalError as e:
+            # 表可能暂时不存在 — 静默跳过不崩
+            if "no such table" not in str(e):
+                logger.warning(f"[task_progress] 查询事件失败: {e}")
+        except asyncio.CancelledError:
+            logger.info("[task_progress] 事件尾随任务已取消")
+            raise
+        except Exception as e:
+            logger.warning(f"[task_progress] 事件尾随异常: {e}")
+
+
+def _ensure_task_tail_running():
+    """惰性启动事件尾随任务（已在运行则跳过）"""
+    global _task_tail_task
+    if _task_tail_task is None or _task_tail_task.done():
+        _task_tail_task = asyncio.create_task(_tail_task_events())
+        logger.info("[task_progress] 已创建事件尾随后台任务")
+
+
+# ============================================================
 # 获取在线用户列表 — 用于 join/leave 通知
 # ============================================================
 
@@ -345,6 +434,9 @@ async def group_websocket(websocket: WebSocket, group_id: str):
         f"[连接] 用户 {user_id_str} 加入群组 {group_id}，"
         f"房间当前 {len(room)} 人"
     )
+
+    # 惰性启动任务执行事件尾随广播（首次建房时启动）
+    _ensure_task_tail_running()
 
     # 发送连接成功确认给当前客户端
     await _safe_send(websocket, {
