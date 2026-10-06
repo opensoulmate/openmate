@@ -1,12 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Bot, FileText, Image as ImageIcon, Globe, Download, Trash2,
   ChevronDown, ChevronRight, Clock, User,
+  ListChecks, Activity, RotateCcw, Loader2, RefreshCw, X,
 } from 'lucide-react';
-import { useAIGroupsStore } from '@/stores/ai-groups-store';
+import { useAIGroupsStore, type AITask, type AISubTask, type TaskEvent } from '@/stores/ai-groups-store';
 
 const ROLE_ICONS: Record<string, any> = { advisor: Bot, executor: Bot, verifier: Bot, human: User };
 
@@ -36,6 +37,9 @@ export function AIGroupsWorkspace() {
   const selectedGroup = useAIGroupsStore((s) => s.selectedGroup);
   const messages = useAIGroupsStore((s) => s.messages);
   const [expandedFile, setExpandedFile] = useState<string | null>(null);
+  const tasks = useAIGroupsStore((s) => s.tasks);
+  // 工作台顶部面板切换：任务卡（默认）/ 文件
+  const [panelTab, setPanelTab] = useState<'tasks' | 'files'>('tasks');
 
   // Extract files/outputs from messages — tasks with results become files
   const groupFiles: GroupFile[] = [];
@@ -89,7 +93,37 @@ export function AIGroupsWorkspace() {
         </div>
       </div>
 
+      {/* 面板切换：任务卡 / 文件 */}
+      <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border">
+        <button
+          onClick={() => setPanelTab('tasks')}
+          className={`flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-full transition-colors ${
+            panelTab === 'tasks'
+              ? 'bg-primary text-primary-foreground'
+              : 'bg-muted hover:bg-muted/80 text-muted-foreground'
+          }`}
+        >
+          <ListChecks className="w-3 h-3" />
+          任务 ({tasks.length})
+        </button>
+        <button
+          onClick={() => setPanelTab('files')}
+          className={`flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-full transition-colors ${
+            panelTab === 'files'
+              ? 'bg-primary text-primary-foreground'
+              : 'bg-muted hover:bg-muted/80 text-muted-foreground'
+          }`}
+        >
+          <FileText className="w-3 h-3" />
+          文件 ({groupFiles.length})
+        </button>
+      </div>
+
+      {/* 任务卡列表（含子任务重试 + 执行过程时间线） */}
+      {panelTab === 'tasks' && <AIGroupsTaskBoard />}
+
       {/* File list */}
+      {panelTab === 'files' && (
       <div className="flex-1 overflow-y-auto">
         {groupFiles.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-40 text-muted-foreground">
@@ -174,6 +208,314 @@ export function AIGroupsWorkspace() {
           </div>
         )}
       </div>
+      )}
+    </div>
+  );
+}
+
+/* ====================================================================
+ * 任务执行过程可视化 — 任务卡列表（位于工作台「任务」标签页）
+ * 任务卡 → 子任务行（规划/执行/验证/审查，各带重试按钮）+ 执行过程时间线
+ * ==================================================================== */
+
+/** 子任务/主任务状态徽章配置 */
+const TASK_STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
+  pending: { label: '待执行', color: 'text-muted-foreground', bg: 'bg-muted' },
+  executing: { label: '执行中', color: 'text-sky-400', bg: 'bg-sky-500/20' },
+  scored: { label: '已评分', color: 'text-violet-400', bg: 'bg-violet-500/20' },
+  completed: { label: '已完成', color: 'text-green-400', bg: 'bg-green-500/20' },
+  failed: { label: '失败', color: 'text-red-400', bg: 'bg-red-500/20' },
+};
+
+/** 执行过程事件类型徽章配置：started=蓝 output=灰 stderr=橙 finished=绿 failed=红 scored=紫 retry=黄 */
+const EVENT_TYPE_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
+  started: { label: '开始', color: 'text-sky-400', bg: 'bg-sky-500/20' },
+  output: { label: '输出', color: 'text-muted-foreground', bg: 'bg-muted' },
+  stderr: { label: '错误输出', color: 'text-orange-400', bg: 'bg-orange-500/20' },
+  finished: { label: '完成', color: 'text-green-400', bg: 'bg-green-500/20' },
+  failed: { label: '失败', color: 'text-red-400', bg: 'bg-red-500/20' },
+  scored: { label: '评分', color: 'text-violet-400', bg: 'bg-violet-500/20' },
+  retry: { label: '重试', color: 'text-amber-400', bg: 'bg-amber-500/20' },
+};
+
+/** 从子任务 goal 前缀提取阶段名（规划/执行/验证/审查） */
+function getSubtaskStage(goal: string): string {
+  const m = (goal || '').match(/^(规划|执行|验证|审查|评分)[：:]/);
+  return m ? m[1] : '子任务';
+}
+
+/** 任务卡列表：含子任务级重试按钮 + 执行过程时间线面板 */
+function AIGroupsTaskBoard() {
+  const tasks = useAIGroupsStore((s) => s.tasks);
+  const tasksLoading = useAIGroupsStore((s) => s.tasksLoading);
+  const fetchTasks = useAIGroupsStore((s) => s.fetchTasks);
+
+  return (
+    <div className="flex-1 overflow-y-auto">
+      {/* 刷新行 */}
+      <div className="flex items-center justify-between px-3 py-1.5">
+        <span className="text-[10px] text-muted-foreground">任务卡 · 子任务可单独重跑</span>
+        <button
+          onClick={() => fetchTasks()}
+          title="刷新任务列表"
+          className="p-1 rounded hover:bg-muted text-muted-foreground transition-colors"
+        >
+          {tasksLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+        </button>
+      </div>
+      {tasksLoading && tasks.length === 0 ? (
+        <div className="flex items-center justify-center py-10">
+          <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+        </div>
+      ) : tasks.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-10 text-muted-foreground">
+          <ListChecks className="w-8 h-8 mb-2 opacity-40" />
+          <p className="text-xs">暂无任务</p>
+          <p className="text-[10px] mt-1">发起讨论后任务卡将显示在这里</p>
+        </div>
+      ) : (
+        <div className="space-y-0.5">
+          {tasks.map((task) => (
+            <TaskCard key={task.id} task={task} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 单个任务卡：卡头可展开子任务行，可打开「执行过程」时间线 */
+function TaskCard({ task }: { task: AITask }) {
+  const [expanded, setExpanded] = useState(true);
+  const timelineTaskId = useAIGroupsStore((s) => s.timelineTaskId);
+  const openTaskTimeline = useAIGroupsStore((s) => s.openTaskTimeline);
+  const closeTaskTimeline = useAIGroupsStore((s) => s.closeTaskTimeline);
+
+  const statusCfg = TASK_STATUS_CONFIG[task.status] || TASK_STATUS_CONFIG.pending;
+  // 时间线面板归属判定：主任务 id 或其任一子任务 id
+  const isTimelineOpen =
+    timelineTaskId === task.id || (task.subtasks || []).some((st) => st.id === timelineTaskId);
+  const toggleTimeline = () => {
+    if (isTimelineOpen) closeTaskTimeline();
+    else openTaskTimeline(task.id);
+  };
+
+  return (
+    <div className="border-b border-border/30">
+      {/* 任务卡头 */}
+      <div
+        className="flex items-start gap-2 px-3 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <div className="w-7 h-7 rounded bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+          <ListChecks className="w-3.5 h-3.5 text-primary" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-medium break-words">{task.goal}</p>
+          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+            <span className={`text-[10px] px-1.5 py-0.5 rounded ${statusCfg.bg} ${statusCfg.color}`}>
+              {statusCfg.label}
+            </span>
+            {typeof task.quality_score === 'number' && task.quality_score > 0 && (
+              <span className="text-[10px] text-muted-foreground">质量 {task.quality_score.toFixed(1)}</span>
+            )}
+            <span className="text-[10px] text-muted-foreground">
+              {(task.subtasks || []).length} 个子任务
+            </span>
+            {task.created_at && (
+              <span className="text-[10px] text-muted-foreground">
+                {new Date(task.created_at).toLocaleString('zh-CN', { hour12: false })}
+              </span>
+            )}
+          </div>
+        </div>
+        {/* 执行过程开关 */}
+        <button
+          onClick={(e) => { e.stopPropagation(); toggleTimeline(); }}
+          title="执行过程"
+          className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] transition-colors shrink-0 ${
+            isTimelineOpen
+              ? 'bg-primary/20 text-primary'
+              : 'bg-muted hover:bg-muted/80 text-muted-foreground'
+          }`}
+        >
+          <Activity className="w-3 h-3" />
+          执行过程
+        </button>
+        {expanded ? (
+          <ChevronDown className="w-3.5 h-3.5 text-muted-foreground shrink-0 mt-1" />
+        ) : (
+          <ChevronRight className="w-3.5 h-3.5 text-muted-foreground shrink-0 mt-1" />
+        )}
+      </div>
+
+      {/* 子任务行 + 主任务时间线 */}
+      {expanded && (
+        <div className="px-3 pb-3 space-y-1">
+          {(task.subtasks || []).length === 0 ? (
+            <p className="text-[10px] text-muted-foreground px-1">暂无子任务</p>
+          ) : (
+            (task.subtasks || []).map((st) => <SubtaskRow key={st.id} subtask={st} />)
+          )}
+          {timelineTaskId === task.id && <TaskExecutionTimeline targetLabel="主任务" />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 子任务行（规划/执行/验证/审查）：状态徽章 + 执行过程按钮 + 重试按钮 */
+function SubtaskRow({ subtask }: { subtask: AISubTask }) {
+  const retryingTasks = useAIGroupsStore((s) => s.retryingTasks);
+  const retryTask = useAIGroupsStore((s) => s.retryTask);
+  const timelineTaskId = useAIGroupsStore((s) => s.timelineTaskId);
+  const openTaskTimeline = useAIGroupsStore((s) => s.openTaskTimeline);
+  const closeTaskTimeline = useAIGroupsStore((s) => s.closeTaskTimeline);
+
+  const statusCfg = TASK_STATUS_CONFIG[subtask.status] || TASK_STATUS_CONFIG.pending;
+  const stage = getSubtaskStage(subtask.goal);
+  const retrying = !!retryingTasks[subtask.id];
+  const isTimelineOpen = timelineTaskId === subtask.id;
+
+  return (
+    <div className="rounded-lg border border-border/50 bg-muted/20">
+      <div className="flex items-center gap-2 px-2.5 py-2">
+        {/* 阶段标签（规划/执行/验证/审查） */}
+        <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary shrink-0">
+          {stage}
+        </span>
+        <div className="flex-1 min-w-0">
+          <p className="text-[11px] text-muted-foreground truncate">{subtask.goal}</p>
+          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+            <span className={`text-[10px] px-1.5 py-0.5 rounded ${statusCfg.bg} ${statusCfg.color}`}>
+              {statusCfg.label}
+            </span>
+            {subtask.assigned_agent_id && (
+              <span className="text-[10px] text-muted-foreground">{subtask.assigned_agent_id}</span>
+            )}
+            {typeof subtask.quality_score === 'number' && subtask.quality_score > 0 && (
+              <span className="text-[10px] text-muted-foreground">质量 {subtask.quality_score.toFixed(1)}</span>
+            )}
+          </div>
+        </div>
+        {/* 执行过程按钮（该子任务自己的时间线） */}
+        <button
+          onClick={() => (isTimelineOpen ? closeTaskTimeline() : openTaskTimeline(subtask.id))}
+          title="执行过程"
+          className={`p-1.5 rounded transition-colors shrink-0 ${
+            isTimelineOpen ? 'bg-primary/20 text-primary' : 'hover:bg-muted text-muted-foreground'
+          }`}
+        >
+          <Activity className="w-3 h-3" />
+        </button>
+        {/* 重试按钮：单独重跑该任务行 */}
+        <button
+          onClick={() => retryTask(subtask.id, subtask.assigned_agent_id || 'soulmate')}
+          disabled={retrying}
+          title="重试该任务行"
+          className="flex items-center gap-1 px-2 py-1 rounded text-[10px] text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 disabled:opacity-50 transition-colors shrink-0"
+        >
+          {retrying ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
+          {retrying ? '重试中…' : '重试'}
+        </button>
+      </div>
+      {/* 子任务的执行过程时间线 */}
+      {isTimelineOpen && (
+        <div className="px-2.5 pb-2.5">
+          <TaskExecutionTimeline targetLabel={`${stage}子任务`} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 执行过程时间线面板：历史事件 + WebSocket task_progress 实时追加 */
+function TaskExecutionTimeline({ targetLabel }: { targetLabel: string }) {
+  const timelineTaskId = useAIGroupsStore((s) => s.timelineTaskId);
+  const timelineEvents = useAIGroupsStore((s) => s.timelineEvents);
+  const timelineLoading = useAIGroupsStore((s) => s.timelineLoading);
+  const openTaskTimeline = useAIGroupsStore((s) => s.openTaskTimeline);
+  const closeTaskTimeline = useAIGroupsStore((s) => s.closeTaskTimeline);
+  const wsConnected = useAIGroupsStore((s) => s.wsConnected);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  // 新事件到达时自动滚动到底部
+  useEffect(() => {
+    listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
+  }, [timelineEvents]);
+
+  return (
+    <div className="rounded-lg border border-border bg-muted/20 overflow-hidden">
+      {/* 时间线面板头 */}
+      <div className="flex items-center gap-1.5 px-2.5 py-2 border-b border-border/50">
+        <Activity className="w-3.5 h-3.5 text-primary" />
+        <span className="text-[11px] font-medium">执行过程</span>
+        <span className="text-[10px] text-muted-foreground">— {targetLabel}</span>
+        {/* 实时连接指示 */}
+        {wsConnected && (
+          <span className="flex items-center gap-1 text-[10px] text-green-500">
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-green-500"></span>
+            </span>
+            实时
+          </span>
+        )}
+        <div className="flex-1" />
+        {/* 刷新历史事件 */}
+        <button
+          onClick={() => timelineTaskId && openTaskTimeline(timelineTaskId)}
+          title="刷新"
+          className="p-1 rounded hover:bg-muted text-muted-foreground transition-colors"
+        >
+          <RefreshCw className="w-3 h-3" />
+        </button>
+        {/* 关闭面板 */}
+        <button
+          onClick={closeTaskTimeline}
+          title="关闭"
+          className="p-1 rounded hover:bg-muted text-muted-foreground transition-colors"
+        >
+          <X className="w-3 h-3" />
+        </button>
+      </div>
+      {/* 事件流 */}
+      <div ref={listRef} className="max-h-64 overflow-y-auto">
+        {timelineLoading ? (
+          <div className="flex items-center justify-center py-6">
+            <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+          </div>
+        ) : timelineEvents.length === 0 ? (
+          <div className="py-6 text-center">
+            <p className="text-[10px] text-muted-foreground">暂无执行事件，等待 agent 开始执行…</p>
+          </div>
+        ) : (
+          timelineEvents.map((ev) => <TimelineEventRow key={String(ev.id)} event={ev} />)
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** 单条时间线事件行：时间 + 事件类型徽章 + 内容（output/stderr 用小字号灰底 monospace） */
+function TimelineEventRow({ event }: { event: TaskEvent }) {
+  const cfg = EVENT_TYPE_CONFIG[event.event_type] || EVENT_TYPE_CONFIG.output;
+  const isCodeLine = event.event_type === 'output' || event.event_type === 'stderr';
+  const time = new Date(event.created_at).toLocaleTimeString('zh-CN', { hour12: false });
+  return (
+    <div className="px-2.5 py-1.5 border-b border-border/30 last:border-b-0">
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span className="text-[10px] text-muted-foreground font-mono">{time}</span>
+        <span className={`text-[10px] px-1.5 py-0.5 rounded ${cfg.bg} ${cfg.color}`}>{cfg.label}</span>
+        {event.agent_id && <span className="text-[10px] text-muted-foreground">{event.agent_id}</span>}
+      </div>
+      {event.content && (isCodeLine ? (
+        <pre className="mt-1 text-[10px] font-mono text-muted-foreground bg-muted/60 rounded p-2 whitespace-pre-wrap break-words max-h-40 overflow-y-auto">
+          {event.content}
+        </pre>
+      ) : (
+        <p className="mt-1 text-[11px] whitespace-pre-wrap break-words">{event.content}</p>
+      ))}
     </div>
   );
 }

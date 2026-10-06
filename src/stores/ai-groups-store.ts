@@ -80,6 +80,37 @@ export interface TaskReview {
   discussion_messages: DiscussionMessage[];
 }
 
+// ── 任务执行过程可视化（任务卡 / 子任务 / 时间线事件） ─────────────
+
+/** 子任务行（规划/执行/验证/审查） */
+export interface AISubTask {
+  id: string;
+  group_id: string;
+  parent_task_id: string | null;
+  goal: string;
+  status: 'pending' | 'executing' | 'scored' | 'completed' | 'failed' | string;
+  assigned_agent_id?: string;
+  result?: string;
+  quality_score?: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+/** 主任务（含子任务行） */
+export interface AITask extends AISubTask {
+  subtasks: AISubTask[];
+}
+
+/** 执行过程时间线事件 */
+export interface TaskEvent {
+  id: number | string;
+  task_id: string;
+  agent_id?: string;
+  event_type: 'started' | 'output' | 'stderr' | 'finished' | 'failed' | 'scored' | 'retry' | string;
+  content: string;
+  created_at: string;
+}
+
 // ── Helpers ──────────────────────────────────────────────────────
 
 function authHeaders(): Record<string, string> {
@@ -144,6 +175,14 @@ interface AIGroupsState {
   scoreCapability: string;
   scorerAgentId: string;
 
+  // 任务执行过程可视化（任务卡 / 子任务重试 / 时间线）
+  tasks: AITask[];                          // 主任务列表（含子任务行）
+  tasksLoading: boolean;                    // 任务列表加载中
+  retryingTasks: Record<string, boolean>;   // 正在重试的任务行 id → true
+  timelineTaskId: string | null;            // 当前查看执行过程的任务行 id
+  timelineEvents: TaskEvent[];              // 当前时间线事件（历史 + 实时追加）
+  timelineLoading: boolean;                 // 时间线历史加载中
+
   // ── Actions ──────────────────────────────────────────────────────
 
   setGroups: (groups: AIGroup[]) => void;
@@ -175,6 +214,13 @@ interface AIGroupsState {
   setScoreReason: (reason: string) => void;
   setScoreCapability: (capability: string) => void;
   setScorerAgentId: (id: string) => void;
+
+  // 任务执行过程 actions
+  fetchTasks: () => Promise<void>;                                  // 拉取主任务列表（含子任务）
+  retryTask: (taskId: string, agentId?: string) => Promise<void>;   // 重跑单个任务行（主任务/子任务）
+  openTaskTimeline: (taskId: string) => Promise<void>;              // 打开执行过程时间线（拉历史事件）
+  closeTaskTimeline: () => void;                                    // 关闭执行过程时间线
+  handleTaskProgress: (data: any) => void;                          // WS task_progress → 追加时间线事件
 
   // WebSocket 连接管理 actions
   connectGroupWS: (groupId: string) => void;         // 建立群组 WS 连接
@@ -232,6 +278,14 @@ export const useAIGroupsStore = create<AIGroupsState>((set, get) => ({
   scoreReason: '',
   scoreCapability: '',
   scorerAgentId: '',
+
+  // 任务执行过程可视化
+  tasks: [],
+  tasksLoading: false,
+  retryingTasks: {},
+  timelineTaskId: null,
+  timelineEvents: [],
+  timelineLoading: false,
 
   // Simple setters
   setGroups: (groups) => set({ groups }),
@@ -366,6 +420,13 @@ export const useAIGroupsStore = create<AIGroupsState>((set, get) => ({
               timestamp: new Date(data.timestamp || Date.now()),
             };
             get().addMessage(taskMsg);
+            break;
+          }
+
+          // 任务执行过程事件（时间线实时追加）
+          // 格式：{ type: 'task_progress', data: { event_id, task_id, agent_id, event_type, content, created_at } }
+          case 'task_progress': {
+            get().handleTaskProgress(data);
             break;
           }
 
@@ -527,7 +588,7 @@ export const useAIGroupsStore = create<AIGroupsState>((set, get) => ({
   },
 
   selectGroup: async (group: AIGroup) => {
-    set({ selectedGroup: group, messages: [] });
+    set({ selectedGroup: group, messages: [], tasks: [], timelineTaskId: null, timelineEvents: [] });
     try {
       const res = await fetch(`${getApiBaseUrl()}/api/ai-groups/${group.id}`, { headers: authHeaders() });
       const data = await res.json();
@@ -556,6 +617,9 @@ export const useAIGroupsStore = create<AIGroupsState>((set, get) => ({
 
       // 建立该群组的 WebSocket 实时连接
       get().connectGroupWS(group.id);
+
+      // 拉取任务卡列表（含子任务行）
+      get().fetchTasks();
     } catch (e) { console.error(e); }
   },
 
@@ -671,5 +735,113 @@ export const useAIGroupsStore = create<AIGroupsState>((set, get) => ({
       console.error('Failed to fetch agent profile:', e);
     }
     set({ loadingProfile: null });
+  },
+
+  // ── 任务执行过程可视化 ──────────────────────────────────────────
+
+  /**
+   * 拉取当前群组的任务卡列表（含子任务行）
+   * GET /api/ai-groups/{gid}/tasks
+   */
+  fetchTasks: async () => {
+    const { selectedGroup } = get();
+    if (!selectedGroup) return;
+    set({ tasksLoading: true });
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/api/ai-groups/${selectedGroup.id}/tasks`, { headers: authHeaders() });
+      const data = await res.json();
+      set({ tasks: Array.isArray(data) ? data : (data?.tasks || []) });
+    } catch (e) {
+      console.error('[AIGroups] 拉取任务列表失败:', e);
+    } finally {
+      set({ tasksLoading: false });
+    }
+  },
+
+  /**
+   * 重跑单个任务行（主任务或子任务均可）
+   * POST /api/ai-groups/{gid}/tasks/{task_id}/retry  body: { agent_id }
+   * @param taskId 任务行 id（子任务 id 或主任务 id）
+   * @param agentId 执行的 agent，默认子任务 assigned_agent_id 或 'soulmate'
+   */
+  retryTask: async (taskId: string, agentId?: string) => {
+    const { selectedGroup, retryingTasks } = get();
+    if (!selectedGroup || retryingTasks[taskId]) return;
+    set({ retryingTasks: { ...retryingTasks, [taskId]: true } });
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/api/ai-groups/${selectedGroup.id}/tasks/${taskId}/retry`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ agent_id: agentId || 'soulmate' }),
+      });
+      if (!res.ok) console.error('[AIGroups] 重试失败:', res.status, await res.text().catch(() => ''));
+    } catch (e) {
+      console.error('[AIGroups] 重试请求异常:', e);
+    } finally {
+      set((s) => {
+        const next = { ...s.retryingTasks };
+        delete next[taskId];
+        return { retryingTasks: next };
+      });
+      // 完成后刷新任务列表
+      await get().fetchTasks();
+    }
+  },
+
+  /**
+   * 打开执行过程时间线面板：拉取该任务行的历史事件
+   * GET /api/ai-groups/{gid}/tasks/{task_id}/events?after_id=0
+   * @param taskId 任务行 id（子任务 id 或主任务 id）
+   */
+  openTaskTimeline: async (taskId: string) => {
+    const { selectedGroup } = get();
+    if (!selectedGroup) return;
+    set({ timelineTaskId: taskId, timelineEvents: [], timelineLoading: true });
+    try {
+      const res = await fetch(
+        `${getApiBaseUrl()}/api/ai-groups/${selectedGroup.id}/tasks/${taskId}/events?after_id=0`,
+        { headers: authHeaders() },
+      );
+      const data = await res.json();
+      set({ timelineEvents: data?.events || [] });
+    } catch (e) {
+      console.error('[AIGroups] 拉取执行过程事件失败:', e);
+    } finally {
+      set({ timelineLoading: false });
+    }
+  },
+
+  /** 关闭执行过程时间线面板 */
+  closeTaskTimeline: () => {
+    set({ timelineTaskId: null, timelineEvents: [], timelineLoading: false });
+  },
+
+  /**
+   * WebSocket task_progress 消息 → 追加到当前查看任务的时间线
+   * data: { event_id, task_id, agent_id, event_type, content, created_at }
+   * 按 task_id 匹配当前查看的任务行；主任务时间线同时接收其子任务行的事件
+   */
+  handleTaskProgress: (data: any) => {
+    if (!data || !data.task_id) return;
+    const { timelineTaskId, tasks } = get();
+    if (!timelineTaskId) return;
+    // 按 task_id 匹配：查看主任务时也接收其子任务事件
+    const viewedTask = tasks.find((t) => t.id === timelineTaskId);
+    const isSubtaskOfViewed = !!viewedTask && (viewedTask.subtasks || []).some((st) => st.id === data.task_id);
+    if (data.task_id !== timelineTaskId && !isSubtaskOfViewed) return;
+    const ev: TaskEvent = {
+      id: data.event_id ?? data.id ?? `ws-ev-${Date.now()}`,
+      task_id: data.task_id,
+      agent_id: data.agent_id,
+      event_type: data.event_type || 'output',
+      content: data.content ?? '',
+      created_at: data.created_at || new Date().toISOString(),
+    };
+    set((s) => ({
+      // 历史事件与实时事件可能重叠，按 id 去重
+      timelineEvents: s.timelineEvents.some((e) => String(e.id) === String(ev.id))
+        ? s.timelineEvents
+        : [...s.timelineEvents, ev],
+    }));
   },
 }));
