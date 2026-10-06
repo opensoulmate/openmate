@@ -5286,3 +5286,34 @@
 8. cron环境约束实录：execute_code在cron被BLOCKED（本轮两次踩中改write_file+/tmp脚本+terminal）；`pytest | tail`管道exit_code失真照旧（本轮systemic_test用了tail——exit_code以tail为准的失真风险照旧记录）；全量套件background=true+process wait（185s>180s clamp，poll兜底第二次wait取到终值）照旧；dev-reports.md照旧write_file写/tmp片段+cat>>回帖；systemic_test_results.json生成物照旧不入commit。
 9. 第7步gene skill上报：见下（执行后回填skill_id）。
 第7步回填：gene skill上报✅ skill_id=`skill_8a92de4c0192`（success=true，source=extract，success_rate=1.0，tool_sequence=read_file→search_files→terminal→patch→write_file→terminal），已入gene技能库供find_relevant检索复用。
+
+## [2026-10-06 15:56 CST] 采集源三级解析注入——brain/evolve测试面零生产接触（13:30轮遗留#1"采集源仍只读打开生产job_queue.db/eval_loop.db"销账，P0数据正确性/测试隔离）
+**目标**：销heredity测试隔离轮遗留#1（明确标注"下轮候选"）——ExperienceCollector采集源（~/opensoul/data/job_queue.db、~/.hermes/opensoul/benchmark/eval_loop.db）硬编码生产路径，brain/evolve与learn.collect_experiences两个调用点无换源入口，heredity_client隔离面"采集源只读豁免"仍接触生产。且存在历史陷阱：构造参数传空串会fallback到生产路径（test_session_provenance._collect老注释实录"空串会fallback到生产job_queue.db！"，测试被迫传no_such_*.db不存在路径绕开）。
+**调研来源**：13:30轮heredity_client"数据面三层换tmp"路线（gene_client/will_client/user_client同款"测试面=真实代码，数据面=隔离"）扩展第四层；conftest"collector默认db_path与SQLitePool同源解析settings.database_url，自动跟随"的"配置即数据面"范式照此延伸到采集源；SUMMARY P0-4/P0-5（进化数据纯净是"没有进化啊"度量前提）。
+**改动文件**（opensoul commit `4af96dd1`，7文件+158/-10，全增量old_string/new_string）：`src/config.py`（+7：2个注入配置项）、`src/learn/experience_collector.py`（+52/-8：_resolve_source_path三级解析+构造器改造+禁用可观测）、`src/api/brain.py`（+3：接线注释）、`tests/conftest.py`（+11/-2：heredity_client第四层数据面+docstring）、`tests/test_heredity_test_isolation.py`（+82：TestCollectorSourceInjection 3钉+接线钉扩展）、`tests/test_experience_collector.py`（+10：空串禁用钉）、`tests/test_session_provenance.py`（±3：过时注释修正）。
+**改动内容**：
+1. **experience_collector._resolve_source_path三级解析（核心）**：①显式构造参数（含`""`=显式禁用——**修复空串fallback生产路径的历史陷阱**，不改测试调用方）→ ②settings注入（`settings.experience_job_db_path/experience_eval_db_path`）→ ③内置默认生产路径（生产部署零配置不变）。参数语义：None=缺省走解析链，`""`=禁用零接触，路径=显式指定。
+2. **src/config.py**：Settings新增`experience_job_db_path: str | None = None`/`experience_eval_db_path: str | None = None`（None=内置默认、""=禁用、路径=显式）——brain/evolve端点无HTTP传参入口（不应让HTTP调用方指定任意DB路径），测试/多实例部署经配置换源，与database_url同款"配置即数据面"。
+3. **禁用可观测**：`_collect_from_jobs`/`_collect_from_eval`区分"`""`→note='source disabled'"与"路径不存在→note='... missing'"（零接触在evolve响应里可见，mem0 §1.1失败/状态必须可见）。
+4. **conftest heredity_client第四层数据面**：`monkeypatch settings.experience_job_db_path/experience_eval_db_path = ""`（显式禁用）——测试面零生产接触（此前只读SELECT仍接触生产），fixture docstring同步更新（撤销"采集源只读豁免"旧契约）。
+5. **4新钉**：①test_resolution_chain（三级解析全链：内置默认/settings注入/显式覆盖/空串禁用，双源各4断言）②test_heredity_client_sources_disabled（隔离面默认禁用，evolve响应note='source disabled'）③test_brain_evolve_collects_from_injected_source（**运行时接线钉**：settings注入种子tmp job_queue.db→POST /api/brain/evolve→jobs.written≥1且source_ref='job:jw1'经验落tmp主库——若三级解析没接线brain端点仍走硬编码生产源，此钉红灯）④test_disabled_source_no_production_fallback（collector家钉：空串禁用+collect响应note）。
+6. **存量兼容**：全部既有调用方零改动——test_session_provenance传no_such_*.db不存在路径（行为不变）、test_error_normalization传显式tmp路径（不变）、test_system_turn_intent传空串但只调_collect_from_messages/ensure_schema（旧语义下空串曾扫描生产源只读，新语义=禁用，语义修正）；test_experience_collector._collector全传显式路径（不变）。test_experience_collector.TestWiring对brain.py构造表达式的静态钉（`ExperienceCollector(tenant_id=tenant_id, agent_id=agent_id).collect()`）刻意不破坏——注入在collector内部发生，调用方表达式原样。
+**接线位置**（grep证据，文件:行号）：
+- 解析器定义+消费：`src/learn/experience_collector.py:178 def _resolve_source_path` → `:221/:226`（构造器内job_db_path/eval_db_path解析——**每个collector实例必经**）。
+- 运行时调用点：`src/api/brain.py:361 ExperienceCollector(tenant_id=tenant_id, agent_id=agent_id).collect()`（/api/brain/evolve HTTP路径）+ `src/will/job_handlers.py:91`（learn.collect_experiences后台作业）——两处均无显式路径→走settings层（生产默认不变）。
+- settings注入点：`tests/conftest.py:260/:261 monkeypatch.setattr(settings, "experience_job_db_path"...)`（隔离面第四层）；配置定义`src/config.py:12/:13`。
+- 行为证据：test_brain_evolve_collects_from_injected_source证明注入路径真实喂到HTTP端点运行时（非死代码）。
+**验证结果**：
+- 完整性✅：`git show 4af96dd1 --stat`=7 files changed, 158 insertions(+), 10 deletions(-)；7个py文件ast.parse全过；sibling既存脏文件`src/api/ai_groups.py`+96与`src/api/ws_chat.py`+39（他轮在途工作）照旧不入commit。
+- 集成✅：grep链如上（解析器→构造器→两个运行时调用点→conftest注入点，无死代码）；接线钉③live实证（种子tmp源经settings→brain/evolve→经验落tmp主库）。
+- 测试✅：定向`test_experience_collector+test_session_provenance+test_error_normalization+test_system_turn_intent+test_heredity_test_isolation`**117/117 PASS**、`test_evolution_loop`**59/59 PASS**；**opensoul全量tests/ 2569 passed 0 failed**（171.40s，基线2565+4新钉逐数吻合）；`systemic_test.py`**29/29 passed**（跨模块面无回归）。
+- 生产行为不变✅：settings默认None→内置生产路径，live /api/heredity/evolution/stats画像与重启前一致（5 pending/63 rejected，清账后语义延续）。
+**服务重启**：`systemctl --user restart opensoul.service`（src/config.py+experience_collector.py+brain.py改动）→ `/api/system/health` 200 + `/api/heredity/health` 200 + `/api/heredity/evolution/stats` 200正常画像；前端零改动无需build；acp-proxy未改动但systemic_test照跑29/29。
+**commit**：opensoul `4af96dd1`。
+**遗留问题**：
+1. `src/will/job_handlers.py` learn.collect_experiences handler暂未暴露job_db_path/eval_db_path作业参数透传（现经settings层换源已可用；如需per-job指定源再加2行params.get透传）——低优先，观察需求。
+2. 13:30轮遗留#2/#3/#4/#5/#7照旧挂账：test_error_normalization其余live段W1观察项、self_evolution:default 5条假模式pending提案（产生侧已防新增，存量保守保留）、泄漏探测器硬崩溃漏报时序、FAIL记录trivial、⚠️线索窗残余等长尾清单照旧。
+3. 8787 Agent Engine无systemd托管照旧；LLM_FALLBACK_CHAIN未配置（402环境项）照旧；`src/api/ai_groups.py`/`src/api/ws_chat.py` sibling在途工作照旧不入commit。
+4. cron环境约束实录：execute_code在cron被BLOCKED照旧（本轮全程用read_file/patch/terminal）；全量套件171s走terminal前台600s预算一次取到终值；dev-reports.md照旧write_file写/tmp片段+cat>>回帖；systemic_test_results.json生成物照旧不入commit（openmate工作区的settings-client.tsx/locales等sibling在途改动照旧不动）。
+5. 第7步gene skill上报：见下（执行后回填skill_id）。
+第7步回填：gene skill上报✅ skill_id=`skill_e51b836a1ed7`（success=true，source=extract，success_rate=1.0，tool_sequence=read_file→terminal→patch→write_file），已入gene技能库供find_relevant检索复用。
