@@ -94,6 +94,13 @@ export interface AISubTask {
   quality_score?: number;
   created_at?: string;
   updated_at?: string;
+  /** 预估执行耗时（秒，来自后端 /tasks 接口） */
+  estimated_low_s?: number;
+  estimated_high_s?: number;
+  /** 卡死检测：执行中且 >600 秒零事件 */
+  stalled?: boolean;
+  /** 最近一次执行事件时间（卡死检测依据） */
+  last_event_at?: string;
 }
 
 /** 主任务（含子任务行） */

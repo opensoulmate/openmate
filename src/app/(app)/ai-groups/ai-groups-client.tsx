@@ -4,10 +4,11 @@ import { useTranslation } from 'react-i18next';
 import { getApiBaseUrl, getToken } from '@/lib/api-client';
 import { useSidebar } from '@/components/ui/sidebar';
 import { useAppStore } from '@/stores/app-store';
-import { AIGroupsWorkspace } from '@/components/ai-groups-workspace';
+import { AIGroupsWorkspace, AIGroupsTaskBoard } from '@/components/ai-groups-workspace';
 import {
   Users, Send, Bot, Shield, Zap, User, Loader2,
   MessageSquare, AtSign,
+  ListChecks,
   Star,
   MessageCircle, Hand, FileText, Lightbulb,
   Target,
@@ -58,6 +59,7 @@ export default function AIGroupsPage() {
   const groups = useAIGroupsStore((s) => s.groups);
   const selectedGroup = useAIGroupsStore((s) => s.selectedGroup);
   const messages = useAIGroupsStore((s) => s.messages);
+  const tasks = useAIGroupsStore((s) => s.tasks);
   const sendingMessage = useAIGroupsStore((s) => s.sendingMessage);
   const selectedTarget = useAIGroupsStore((s) => s.selectedTarget);
   const setSelectedTarget = useAIGroupsStore((s) => s.setSelectedTarget);
@@ -83,6 +85,8 @@ export default function AIGroupsPage() {
 
   /* ========== 本地 UI 状态 ========== */
   const [showGroupPanel, setShowGroupPanel] = useState(false);
+  // 任务看板常驻面板（Paperclip 看板式）：桌面端消息流右侧常驻，移动端全屏切换
+  const [tasksPanelOpen, setTasksPanelOpen] = useState(true);
   const [input, setInput] = useState('');
   const [showMention, setShowMention] = useState(false);
   const [mentionFilter, setMentionFilter] = useState('');
@@ -105,6 +109,11 @@ export default function AIGroupsPage() {
       setShowGroupPanel(false);
     }
   }, [sidebarOpen, rightPanelOpen, isMobile, showGroupPanel]);
+
+  /* ========== 副作用：移动端默认收起任务看板（移动端看板为全屏切换） ========== */
+  useEffect(() => {
+    if (isMobile) setTasksPanelOpen(false);
+  }, [isMobile]);
 
   /* ========== 副作用：消息列表自动滚动到底部 ========== */
   useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }); }, [messages]);
@@ -321,6 +330,16 @@ export default function AIGroupsPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {/* 任务看板开关（桌面端右侧常驻面板 / 移动端全屏任务视图） */}
+          {selectedGroup && (
+            <button onClick={(e) => { e.stopPropagation(); setTasksPanelOpen(v => !v); if (isMobile) setShowGroupPanel(false); }}
+              className={`shrink-0 flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-muted/50 active:bg-muted transition-colors touch-manipulation ${tasksPanelOpen ? 'text-primary' : 'text-muted-foreground'}`}
+              aria-label="Toggle Task Board"
+              title="任务看板">
+              <ListChecks className="w-4 h-4" />
+              <span className="text-[10px] font-medium">{tasks.length}</span>
+            </button>
+          )}
           {/* 群组管理按钮 */}
           {selectedGroup && (
             <button onClick={(e) => { e.stopPropagation(); setShowGroupPanel(true); if (isMobile) setRightPanelOpen(false); }}
@@ -339,6 +358,10 @@ export default function AIGroupsPage() {
       </div>
 
       {/* ===== 消息列表区域 ===== */}
+      {/* ===== 主区域：消息流 + 任务看板常驻（Paperclip 看板式） ===== */}
+      <div className="flex flex-1 min-h-0">
+      {/* 消息流列：移动端任务看板打开时隐藏 */}
+      <div className={`flex flex-1 min-w-0 flex-col ${isMobile && tasksPanelOpen ? 'hidden' : ''}`}>
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 lg:px-6 py-4 space-y-4">
         {/* 未选择群组时的空状态 */}
         {!selectedGroup && (
@@ -604,6 +627,24 @@ export default function AIGroupsPage() {
           </div>
         </div>
       )}
+      </div>
+      {/* ===== 任务看板常驻面板：桌面端消息流右侧常驻，移动端全屏 ===== */}
+      {tasksPanelOpen && selectedGroup && (
+        <aside className={`flex flex-col min-h-0 bg-card ${isMobile ? 'flex-1 w-full' : 'w-[340px] shrink-0 border-l border-border'}`}>
+          <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border shrink-0">
+            <ListChecks className="w-3.5 h-3.5 text-primary" />
+            <span className="text-xs font-medium">任务看板</span>
+            <span className="text-[10px] text-muted-foreground">{tasks.length} 个任务</span>
+            <div className="flex-1" />
+            <button onClick={() => setTasksPanelOpen(false)} title="收起任务看板"
+              className="p-1 rounded hover:bg-muted text-muted-foreground transition-colors">
+              <XIcon className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <AIGroupsTaskBoard />
+        </aside>
+      )}
+      </div>
 
       {/* ===== Agent 成员管理面板 ===== */}
       {isMobile ? (

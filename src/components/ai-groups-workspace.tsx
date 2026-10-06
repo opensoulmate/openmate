@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import {
   Bot, FileText, Image as ImageIcon, Globe, Download, Trash2,
   ChevronDown, ChevronRight, Clock, User,
-  ListChecks, Activity, RotateCcw, Loader2, RefreshCw, X,
+  ListChecks, Activity, RotateCcw, Loader2, RefreshCw, X, AlertTriangle,
 } from 'lucide-react';
 import { useAIGroupsStore, type AITask, type AISubTask, type TaskEvent } from '@/stores/ai-groups-store';
 
@@ -245,7 +245,7 @@ function getSubtaskStage(goal: string): string {
 }
 
 /** 任务卡列表：含子任务级重试按钮 + 执行过程时间线面板 */
-function AIGroupsTaskBoard() {
+export function AIGroupsTaskBoard() {
   const tasks = useAIGroupsStore((s) => s.tasks);
   const tasksLoading = useAIGroupsStore((s) => s.tasksLoading);
   const fetchTasks = useAIGroupsStore((s) => s.fetchTasks);
@@ -302,6 +302,13 @@ function TaskCard({ task }: { task: AITask }) {
 
   return (
     <div className="border-b border-border/30">
+      {/* 卡死黄条：执行中但 >10 分钟无事件，仅提醒不杀任务 */}
+      {task.stalled && (
+        <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/15 text-amber-500 text-[10px] border-b border-amber-500/20">
+          <AlertTriangle className="w-3 h-3 shrink-0" />
+          疑似卡死（10分钟无事件）
+        </div>
+      )}
       {/* 任务卡头 */}
       <div
         className="flex items-start gap-2 px-3 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors"
@@ -322,6 +329,12 @@ function TaskCard({ task }: { task: AITask }) {
             <span className="text-[10px] text-muted-foreground">
               {(task.subtasks || []).length} 个子任务
             </span>
+            {(typeof task.estimated_low_s === 'number' || typeof task.estimated_high_s === 'number') && (
+              <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+                <Clock className="w-2.5 h-2.5" />
+                预估 {Math.round(task.estimated_low_s ?? 0)}~{Math.round(task.estimated_high_s ?? 0)}秒
+              </span>
+            )}
             {task.created_at && (
               <span className="text-[10px] text-muted-foreground">
                 {new Date(task.created_at).toLocaleString('zh-CN', { hour12: false })}
@@ -376,9 +389,13 @@ function SubtaskRow({ subtask }: { subtask: AISubTask }) {
   const stage = getSubtaskStage(subtask.goal);
   const retrying = !!retryingTasks[subtask.id];
   const isTimelineOpen = timelineTaskId === subtask.id;
+  // 失败态：红色高亮 + 一键重试主按钮
+  const isFailed = subtask.status === 'failed';
 
   return (
-    <div className="rounded-lg border border-border/50 bg-muted/20">
+    <div className={`rounded-lg border transition-colors ${
+      isFailed ? 'border-red-500/60 bg-red-500/10' : 'border-border/50 bg-muted/20'
+    }`}>
       <div className="flex items-center gap-2 px-2.5 py-2">
         {/* 阶段标签（规划/执行/验证/审查） */}
         <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary shrink-0">
@@ -412,11 +429,15 @@ function SubtaskRow({ subtask }: { subtask: AISubTask }) {
         <button
           onClick={() => retryTask(subtask.id, subtask.assigned_agent_id || 'soulmate')}
           disabled={retrying}
-          title="重试该任务行"
-          className="flex items-center gap-1 px-2 py-1 rounded text-[10px] text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 disabled:opacity-50 transition-colors shrink-0"
+          title={isFailed ? '一键重试该失败子任务' : '重试该任务行'}
+          className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] disabled:opacity-50 transition-colors shrink-0 ${
+            isFailed
+              ? 'bg-red-500 text-white hover:bg-red-600 font-medium shadow-sm'
+              : 'text-amber-400 bg-amber-500/10 hover:bg-amber-500/20'
+          }`}
         >
           {retrying ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
-          {retrying ? '重试中…' : '重试'}
+          {retrying ? '重试中…' : isFailed ? '一键重试' : '重试'}
         </button>
       </div>
       {/* 子任务的执行过程时间线 */}
@@ -439,9 +460,14 @@ function TaskExecutionTimeline({ targetLabel }: { targetLabel: string }) {
   const wsConnected = useAIGroupsStore((s) => s.wsConnected);
   const listRef = useRef<HTMLDivElement>(null);
 
+  // 滚动到底部（新事件到达 / 打字机增量时调用）
+  const scrollToBottom = () => {
+    listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
+  };
+
   // 新事件到达时自动滚动到底部
   useEffect(() => {
-    listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
+    scrollToBottom();
   }, [timelineEvents]);
 
   return (
@@ -490,18 +516,54 @@ function TaskExecutionTimeline({ targetLabel }: { targetLabel: string }) {
             <p className="text-[10px] text-muted-foreground">暂无执行事件，等待 agent 开始执行…</p>
           </div>
         ) : (
-          timelineEvents.map((ev) => <TimelineEventRow key={String(ev.id)} event={ev} />)
+          timelineEvents.map((ev, idx) => (
+            <TimelineEventRow
+              key={String(ev.id)}
+              event={ev}
+              isLatest={idx === timelineEvents.length - 1}
+              onGrow={scrollToBottom}
+            />
+          ))
         )}
       </div>
     </div>
   );
 }
 
+/**
+ * 打字机效果：逐段揭示文本（仅最新一条事件启用，模拟实时流式输出）
+ * @param text 完整文本
+ * @param enabled 是否启用打字机动画（最新事件启用，历史事件完整显示）
+ * @param onTick 每次揭示增量时回调（用于自动滚动到底部）
+ */
+function useTypewriter(text: string, enabled: boolean, onTick?: () => void) {
+  const [len, setLen] = useState(enabled ? 0 : text.length);
+  useEffect(() => {
+    if (!enabled || !text) { setLen(text.length); return; }
+    setLen(0);
+    const total = text.length;
+    const step = Math.max(1, Math.ceil(total / 30)); // 约 30 帧揭示完
+    let i = 0;
+    const timer = window.setInterval(() => {
+      i = Math.min(total, i + step);
+      setLen(i);
+      onTick?.();
+      if (i >= total) window.clearInterval(timer);
+    }, 30);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [text, enabled]);
+  return len;
+}
+
 /** 单条时间线事件行：时间 + 事件类型徽章 + 内容（output/stderr 用小字号灰底 monospace） */
-function TimelineEventRow({ event }: { event: TaskEvent }) {
+function TimelineEventRow({ event, isLatest, onGrow }: { event: TaskEvent; isLatest?: boolean; onGrow?: () => void }) {
   const cfg = EVENT_TYPE_CONFIG[event.event_type] || EVENT_TYPE_CONFIG.output;
   const isCodeLine = event.event_type === 'output' || event.event_type === 'stderr';
   const time = new Date(event.created_at).toLocaleTimeString('zh-CN', { hour12: false });
+  // 最新事件打字机逐段揭示，历史事件直接完整显示
+  const shownLen = useTypewriter(event.content || '', !!isLatest, onGrow);
+  const shown = (event.content || '').slice(0, shownLen);
   return (
     <div className="px-2.5 py-1.5 border-b border-border/30 last:border-b-0">
       <div className="flex items-center gap-1.5 flex-wrap">
@@ -509,12 +571,12 @@ function TimelineEventRow({ event }: { event: TaskEvent }) {
         <span className={`text-[10px] px-1.5 py-0.5 rounded ${cfg.bg} ${cfg.color}`}>{cfg.label}</span>
         {event.agent_id && <span className="text-[10px] text-muted-foreground">{event.agent_id}</span>}
       </div>
-      {event.content && (isCodeLine ? (
+      {shown && (isCodeLine ? (
         <pre className="mt-1 text-[10px] font-mono text-muted-foreground bg-muted/60 rounded p-2 whitespace-pre-wrap break-words max-h-40 overflow-y-auto">
-          {event.content}
+          {shown}
         </pre>
       ) : (
-        <p className="mt-1 text-[11px] whitespace-pre-wrap break-words">{event.content}</p>
+        <p className="mt-1 text-[11px] whitespace-pre-wrap break-words">{shown}</p>
       ))}
     </div>
   );
