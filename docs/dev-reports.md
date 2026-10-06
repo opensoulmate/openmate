@@ -5285,3 +5285,4 @@
 7. 残余遗留观察项照旧：⚠️线索窗启发式残余/❌结果侧整token旧语义/read_turn遗留#1首行窗口残余/#2标题线索词边界、gene_loop测试侧隔离fixture、relay round级需引擎侧自报、LLM_FALLBACK_CHAIN未配置（402环境项）、环境变量密钥外发误伤面、污点分析近似、双侧镜像人工同步、model_gateway凭据映射表、engine.py死代码清理候选、MCP重连真实Server验证、attach跨turn共享、RESUMED后同turn多episode单记录、主组件~730行近重复（TrajectoryPanel壳）。
 8. cron环境约束实录：execute_code在cron被BLOCKED（本轮两次踩中改write_file+/tmp脚本+terminal）；`pytest | tail`管道exit_code失真照旧（本轮systemic_test用了tail——exit_code以tail为准的失真风险照旧记录）；全量套件background=true+process wait（185s>180s clamp，poll兜底第二次wait取到终值）照旧；dev-reports.md照旧write_file写/tmp片段+cat>>回帖；systemic_test_results.json生成物照旧不入commit。
 9. 第7步gene skill上报：见下（执行后回填skill_id）。
+第7步回填：gene skill上报✅ skill_id=`skill_8a92de4c0192`（success=true，source=extract，success_rate=1.0，tool_sequence=read_file→search_files→terminal→patch→write_file→terminal），已入gene技能库供find_relevant检索复用。
