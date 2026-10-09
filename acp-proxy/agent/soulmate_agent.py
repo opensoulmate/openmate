@@ -157,6 +157,8 @@ class SoulMateAgent:
     def __init__(self, llm_engine: LLMEngine):
         self.llm_engine = llm_engine
         self.sessions: dict[str, dict] = {}  # session_id -> session state
+        # 客户端键→真实会话id映射：同一 client key 重复 session/new 时幂等复用（防双开会话）
+        self._client_aliases: dict[str, str] = {}
         self._client = None  # AgentSideConnection，由 on_connect 设置
         # 回合出身标记（wakeup_relay实时推送面）：session_id→origin，set/clear窗口内
         # 落库的行在metadata里带turn_origin——唤醒回合行据此被识别并实时推给正连着的
@@ -3007,7 +3009,57 @@ You can send files to the user natively: to deliver a file, write a brief confir
                 self._session_cwds[session_id] = cwd
                 self._bind_session_source(session_id, field_meta, kwargs)
                 return acp.NewSessionResponse(session_id=session_id)
+        # 客户端键幂等：同键重复 session/new（双连接/重连竞态）复用已建会话，不再新建。
+        # soulmate为每条WS连接独立子进程，内存映射跨不过连接——落session_tags持久去重。
+        if session_id:
+            mapped = self._client_aliases.get(session_id)
+            if not mapped:
+                try:
+                    dbc = self._get_db()
+                    row = dbc.execute(
+                        "SELECT session_id FROM session_tags WHERE tag_name=? LIMIT 1",
+                        (f"client-key:{session_id}",),
+                    ).fetchone()
+                    dbc.close()
+                    mapped = row[0] if row else None
+                except Exception as e:
+                    logger.warning(f"alias lookup failed: {e}")
+                    mapped = None
+            if mapped and (mapped in self.sessions or self._session_exists_in_db(mapped)):
+                logger.info(f"Reconnect (alias): {session_id} -> {mapped}")
+                self._client_aliases[session_id] = mapped
+                self._bind_session_source(mapped, field_meta, kwargs)
+                return acp.NewSessionResponse(session_id=mapped)
+            if mapped:
+                # tag命中即复用：新会话行是懒注册（首条消息才落agent_sessions），
+                # 不能以_session_exists_in_db为准——同键第二次握手直接接回同一会话
+                logger.info(f"Reconnect (alias, lazy): {session_id} -> {mapped}")
+                self._client_aliases[session_id] = mapped
+                if mapped not in self.sessions:
+                    messages = self._load_messages_from_db(mapped) if self._session_exists_in_db(mapped) else []
+                    self.sessions[mapped] = {
+                        "session_id": mapped,
+                        "cwd": cwd,
+                        "messages": messages,
+                        "created_at": time.time(),
+                        "state": "active",
+                    }
+                    self._session_cwds[mapped] = cwd
+                self._bind_session_source(mapped, field_meta, kwargs)
+                return acp.NewSessionResponse(session_id=mapped)
         sid = f"om-{uuid.uuid4().hex[:12]}"
+        if session_id:
+            self._client_aliases[session_id] = sid
+            try:
+                dbc = self._get_db()
+                dbc.execute(
+                    "INSERT OR IGNORE INTO session_tags (session_id, tag_name) VALUES (?, ?)",
+                    (sid, f"client-key:{session_id}"),
+                )
+                dbc.commit()
+                dbc.close()
+            except Exception as e:
+                logger.warning(f"alias persist failed: {e}")
         self.sessions[sid] = {
             "session_id": sid,
             "cwd": cwd,

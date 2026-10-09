@@ -587,9 +587,9 @@ function useAcpWebSocket(params: {
     const performHandshake = async (ws: WebSocket) => {
       try {
         await sendRpcRequest(ws, 'initialize', { protocolVersion: 1 });
-        // 优先使用已有的ACP session ID（重连时避免创建重复会话）
+        // 优先使用已有的ACP session ID（重连时避免创建重复会话）；temp键也带上，服务端按键幂等去重
         const existingAcpSid = state.acpSessionId || (sessionId.startsWith('temp-') ? undefined : sessionId);
-        const result = await sendRpcRequest(ws, 'session/new', { cwd: '/', mcpServers: [], agent_id: agentId, _meta: existingAcpSid ? { session_id: existingAcpSid } : {} }) as { session_id?: string; sessionId?: string };
+        const result = await sendRpcRequest(ws, 'session/new', { cwd: '/', mcpServers: [], agent_id: agentId, _meta: { session_id: existingAcpSid || sessionId } }) as { session_id?: string; sessionId?: string };
         const acpSid = result?.session_id || result?.sessionId;
         if (acpSid) {
           state.acpSessionId = acpSid;
@@ -632,6 +632,11 @@ function useAcpWebSocket(params: {
 
     const connect = () => {
       if (state.unmounted) return;
+      // 防双开：同一会话已有活跃 WS 时不重复连接（双连接会触发两次 session/new → 双开会话）
+      const existingWs = wsMapRef.current.get(sessionId);
+      if (existingWs && (existingWs.readyState === WebSocket.OPEN || existingWs.readyState === WebSocket.CONNECTING)) {
+        return;
+      }
       const currentToken = getToken();
       if (!currentToken) {
         console.warn('[ACP] 无token，跳转登录页');
