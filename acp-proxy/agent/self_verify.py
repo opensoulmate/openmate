@@ -13,20 +13,28 @@
 - 提取/核对全确定性，不调用LLM——省token、可复现、测试稳定
 - 启发式三态诚实呈现，不谎报"全部完成"；证据不足宁可标 uncertain
 - 会话收口只在"多需求项 或 有未覆盖项"时推送自检结论，闲聊零打扰
+
+验证明细（v2）：verify 结束后逐项输出 item_text / evidence_snippets /
+verdict / reason，汇总含 met/uncertain/unmet/blocking 计数，
+blocking>0 时输出 ❌阻塞项 / ⚠️警告项 / ✅通过项 三块明细。
 """
 from __future__ import annotations
 
+import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
+
+logger = logging.getLogger(__name__)
 
 # 短于该长度且无枚举结构的消息视为闲聊，不做自验
 _MIN_TASK_LEN = 20
 
-# 需求项提取：枚举标记（1. / 1) / （1）/ 1、/ ① / - / *）后接内容；
+# 需求项提取：枚举标记（1. / 1) / （1）/ 1、/ ① / - / * / 第一· / 一、）后接内容；
 # 标记前需是行首或分隔标点/空白（防"2026.10"类误切：标记后紧跟数字的不认）
 _MARKER_RE = re.compile(
     r"(?:^|[\s：:，,。；;、（(])"
-    r"(?:[（(]?\d{1,2}[）)、．.]|[①②③④⑤⑥⑦⑧⑨⑩]|[-*•])(?!\d)\s*"
+    r"(?:[（(]?\d{1,2}[）)、．.]|[①②③④⑤⑥⑦⑧⑨⑩]|[-*•])"
+    r"(?:[（(]?\d{1,2}[）)、．.]|[①②③④⑤⑥⑦⑧⑨⑩]|[-*•])"
 )
 
 # 顺序连接词：首先/其次/然后/最后/另外/还要… 作为拆分点（整词切分，保留全部片段）
@@ -52,6 +60,151 @@ _STOP_CHARS = set(
     "的了请帮我你我要把和与等再就都也很吗呢吧啊呀一下进行做搞对给到在是"
     "为及或跟让被从将该这那个些什么怎么然后还有并且如果可以需要"
 )
+
+# 证据片段最大长度
+_EVIDENCE_SNIPPET_MAX = 200
+
+
+# ---------------------------------------------------------------------------
+# v2 验证明细数据结构
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class RequirementDetail:
+    """单条需求的验证明细（供日志/调试输出）。"""
+
+    item_text: str
+    evidence_snippets: list[str] = field(default_factory=list)
+    verdict: str = "unmet"          # met / uncertain / unmet
+    reason: str = ""
+    token_overlap: float = 0.0      # token 重叠率（0~1）
+    tool_evidence: bool = False     # 是否有工具调用证据
+
+    def clipped_snippets(self) -> list[str]:
+        return [
+            s[:_EVIDENCE_SNIPPET_MAX] if len(s) > _EVIDENCE_SNIPPET_MAX else s
+            for s in self.evidence_snippets
+        ]
+
+
+@dataclass
+class VerifyReport:
+    """汇总验证报告。"""
+
+    details: list[RequirementDetail] = field(default_factory=list)
+
+    @property
+    def total(self) -> int:
+        return len(self.details)
+
+    @property
+    def met_count(self) -> int:
+        return sum(1 for d in self.details if d.verdict == "met")
+
+    @property
+    def uncertain_count(self) -> int:
+        return sum(1 for d in self.details if d.verdict == "uncertain")
+
+    @property
+    def unmet_count(self) -> int:
+        return sum(1 for d in self.details if d.verdict == "unmet")
+
+    @property
+    def blocking_count(self) -> int:
+        """blocking = unmet 数量（未覆盖项是阻塞项）。"""
+        return self.unmet_count
+
+
+def _clip_evidence(text: str) -> str:
+    """截取证据片段至 200 字符。"""
+    return text[:_EVIDENCE_SNIPPET_MAX] if len(text) > _EVIDENCE_SNIPPET_MAX else text
+
+
+def _extract_evidence_snippets(
+    item_text: str, *corpora: str, max_snippets: int = 5
+) -> list[str]:
+    """从回复/工具调用文本中抽取与需求项相关的原文片段（确定性，不含LLM）。"""
+    item_toks = _tokens(item_text)
+    if not item_toks:
+        return []
+    snippets: list[str] = []
+    seen: set[str] = set()
+    for corpus in corpora:
+        if not corpus:
+            continue
+        # 按句/分段搜索相关片段
+        for seg in re.split(r"[；;。\n]+", corpus):
+            seg = seg.strip()
+            if len(seg) < 4:
+                continue
+            seg_toks = _tokens(seg)
+            overlap = item_toks & seg_toks
+            if not overlap:
+                continue
+            snippet = _clip_evidence(seg)
+            if snippet not in seen:
+                seen.add(snippet)
+                snippets.append(snippet)
+                if len(snippets) >= max_snippets:
+                    return snippets
+    return snippets
+
+
+def _format_detail(detail: RequirementDetail) -> str:
+    """格式化单条验证明细为多行文本。"""
+    lines = [
+        f"  item_text : {detail.item_text}",
+        f"  verdict   : {detail.verdict}",
+        f"  reason    : {detail.reason}",
+        f"  overlap   : {detail.token_overlap:.2f}  tool_evidence={detail.tool_evidence}",
+    ]
+    if detail.evidence_snippets:
+        lines.append("  evidence  :")
+        for i, sn in enumerate(detail.clipped_snippets(), 1):
+            lines.append(f"    [{i}] {sn}")
+    else:
+        lines.append("  evidence  : (无)")
+    return "\n".join(lines)
+
+
+def log_verify_report(report: VerifyReport) -> None:
+    """输出完整验证明细日志（逐项 + 汇总 + 分类明细块）。"""
+    if report.total == 0:
+        logger.info("[self-verify] 无可验证需求项，跳过自验")
+        return
+
+    # 逐项明细
+    for idx, d in enumerate(report.details, 1):
+        logger.info(
+            "[self-verify] #%d/%d\n%s", idx, report.total, _format_detail(d)
+        )
+
+    # 汇总
+    summary = (
+        f"[self-verify] 汇总: 总需求数={report.total}  "
+        f"met={report.met_count}  uncertain={report.uncertain_count}  "
+        f"unmet={report.unmet_count}  blocking={report.blocking_count}"
+    )
+    logger.info(summary)
+
+    # 分类明细块
+    if report.blocking_count > 0:
+        _log_block("❌ 阻塞项", [d for d in report.details if d.verdict == "unmet"])
+    if report.uncertain_count > 0:
+        _log_block("⚠️ 警告项", [d for d in report.details if d.verdict == "uncertain"])
+    if report.met_count > 0:
+        _log_block("✅ 通过项", [d for d in report.details if d.verdict == "met"])
+
+
+def _log_block(title: str, details: list[RequirementDetail]) -> None:
+    """输出分类明细块（阻塞/警告/通过）。"""
+    logger.info("[self-verify] %s (%d 项)", title, len(details))
+    for idx, d in enumerate(details, 1):
+        logger.info(
+            "[self-verify]   %s #%d  %s | reason: %s",
+            title, idx, d.item_text[:80], d.reason,
+        )
 
 
 def _tokens(text: str) -> set[str]:
