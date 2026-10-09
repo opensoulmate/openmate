@@ -1226,6 +1226,31 @@ class SoulMateAgent:
                     current_agent_id=getattr(self, "_agent_id", "soulmate"),
                     foreign_read_approved=_foreign_ok,
                 )
+            # 认知记忆类工具（路线图 1.1/1.4）：批内同样可用——工具stub由
+            # _active_tool_names 自动生成，无handler会落到MCP路由误报，故显式接线。
+            if func_name in ("memory_read", "memory_write", "memory_append"):
+                if func_name == "memory_read":
+                    return self._persistent_memory.read(
+                        offset=func_args.get("offset", 1),
+                        limit=func_args.get("limit", 200),
+                    )
+                if func_name == "memory_write":
+                    _ok, _cm_msg = self._persistent_memory.write(func_args.get("content", ""))
+                    return _cm_msg
+                _ok, _cm_msg = self._persistent_memory.append(func_args.get("entry", ""))
+                return _cm_msg
+            if func_name in ("profile_record", "profile_read"):
+                if func_name == "profile_record":
+                    _p_ev = str(func_args.get("evidence", "") or "").strip()
+                    _ok, _cm_msg = self._pref_learner.record_fact(
+                        fact_type=func_args.get("fact_type", ""),
+                        key=func_args.get("key", ""),
+                        value=func_args.get("value", ""),
+                        evidence=[_p_ev] if _p_ev else [],
+                    )
+                    return _cm_msg
+                return self._pref_learner.get_profile_summary(
+                    fact_type=func_args.get("fact_type", ""))
             # kilocode #19 MCP resource三件套：批内同样可用（与主循环同款注入安全层）
             if func_name in MCP_RESOURCE_TOOL_NAMES:
                 return await self._call_mcp_resource_tool(func_name, func_args)
@@ -1345,6 +1370,7 @@ ACP代理目录: {cwd}/acp-proxy（后端 Python 代码在此）
 - execute_code: 执行 Python 代码，code 参数必填
 - batch_execute: Code Mode批量执行，script 参数必填——Python脚本，会话内工具函数可直接调用（如 read_file(path=...), terminal(command=...)），最终结果赋给 result 变量。≥3次独立工具调用时优先使用；每次内层工具调用仍逐条过权限审核
 - memory_read / memory_write / memory_append: 持久记忆MEMORY.md（跨会话、人类可读）的读取/整体改写/追加条目。需要跨会话记住的重要事实、用户明确的偏好、经验教训，用 memory_append 记录；查看用 memory_read；整理重写用 memory_write
+- profile_record / profile_read: 用户画像（偏好/环境事实/身份，跨会话自动注入系统提示）。用户告知或纠正偏好、环境事实（操作系统/机器/常用工具/部署位置）、身份（角色/技能水平）→ 立即 profile_record 显式记录（fact_type=preference/environment/identity）；需要了解用户背景时用 profile_read
 
 You can send files to the user natively: to deliver a file, write a brief confirmation message (e.g. "文件已发送，请查收"), then include MEDIA:/absolute/path/to/file on a new line. The gateway extracts the tag, strips it, and sends the file as a download card. Always write some text before the MEDIA: tag — never output a bare MEDIA: tag alone. Use search_files first if you don't know the exact path. Do NOT paste file contents into chat."""
 
@@ -1371,12 +1397,12 @@ You can send files to the user natively: to deliver a file, write a brief confir
                     source="skill_manager.search", tokens=estimate_tokens(skill_body),
                 ))
 
-        # 注入用户偏好
+        # 注入用户画像（路线图 1.4：偏好/环境事实/身份，UserPreferenceLearner存储）
         pref_context = self._pref_learner.get_context_prompt()
         if pref_context:
-            system_prompt += f"\n\n## 用户偏好（请遵守）\n{pref_context}\n"
+            system_prompt += f"\n\n## 用户画像（偏好/环境事实/身份，请遵守）\n{pref_context}\n"
             attr_items.append(ContextItem(
-                kind=KIND_PREFERENCE, name="user_preferences", source="pref_learner",
+                kind=KIND_PREFERENCE, name="user_profile", source="pref_learner",
                 tokens=estimate_tokens(pref_context),
             ))
 
@@ -1807,6 +1833,47 @@ You can send files to the user natively: to deliver a file, write a brief confir
             },
         }]
         builtin_tools.extend(memory_tools)
+
+        # ── 用户画像工具（路线图 1.4）────────────────────────────
+        # 偏好/环境事实/身份独立存储（UserPreferenceLearner），每次会话注入系统提示。
+        profile_tools = [{
+            "type": "function",
+            "function": {
+                "name": "profile_record",
+                "description": (
+                    "记录一条用户画像事实（跨会话持久，自动注入后续每次会话的系统提示）。"
+                    "fact_type=preference（偏好：风格/语言/工作习惯）/ environment（环境事实："
+                    "操作系统/机器/常用工具/部署位置）/ identity（身份：角色/技能水平）。"
+                    "用户明确告知或纠正你时立即记录；同一 key 再次记录会更新旧值，不产生重复。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "fact_type": {"type": "string", "enum": ["preference", "environment", "identity"], "description": "事实类型"},
+                        "key": {"type": "string", "description": "主题词（如：操作系统/响应风格/常用语言）"},
+                        "value": {"type": "string", "description": "事实内容（如：Arch Linux / 简洁 / Python）"},
+                        "evidence": {"type": "string", "description": "依据（用户原话片段，可选）"},
+                    },
+                    "required": ["fact_type", "key", "value"],
+                },
+            },
+        }, {
+            "type": "function",
+            "function": {
+                "name": "profile_read",
+                "description": (
+                    "读取用户画像（已记录的偏好/环境事实/身份），按类型分组返回，含置信度。"
+                    "需要了解用户背景（他的系统/工具/习惯/角色）时使用。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "fact_type": {"type": "string", "enum": ["preference", "environment", "identity"], "description": "只看某类型（可选，缺省全部）"},
+                    },
+                },
+            },
+        }]
+        builtin_tools.extend(profile_tools)
 
         # 添加进化引擎工具（支持直接对象或HTTP API两种模式）
         evolution_tools = []
@@ -2724,6 +2791,24 @@ You can send files to the user natively: to deliver a file, write a brief confir
                                 else:  # memory_append
                                     _ok, result = self._persistent_memory.append(
                                         func_args.get("entry", ""))
+                            except Exception as e:
+                                te = self._tool_error_handler.handle_error(
+                                    session_id, func_name, e, func_args)
+                                result = te.to_model_message()
+                        elif func_name in ("profile_record", "profile_read"):
+                            # ── 用户画像（路线图 1.4：偏好/环境事实/身份）──
+                            try:
+                                if func_name == "profile_record":
+                                    _p_ev = str(func_args.get("evidence", "") or "").strip()
+                                    _ok, result = self._pref_learner.record_fact(
+                                        fact_type=func_args.get("fact_type", ""),
+                                        key=func_args.get("key", ""),
+                                        value=func_args.get("value", ""),
+                                        evidence=[_p_ev] if _p_ev else [],
+                                    )
+                                else:
+                                    result = self._pref_learner.get_profile_summary(
+                                        fact_type=func_args.get("fact_type", ""))
                             except Exception as e:
                                 te = self._tool_error_handler.handle_error(
                                     session_id, func_name, e, func_args)
