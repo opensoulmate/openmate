@@ -36,7 +36,7 @@
 - **周边设施**：ToolRegistry(registry.db) / TokenAnalyzer(usage.db) / PromptManager(templates.db) / AgentCheckpointManager / HealthChecker / IntentClassifier / HotConfigManager / event_bus / agent_tracer / SchemaDoctor
 
 ### 缺口（vs 路线图）
-- **1.1 缺**：MEMORY.md 型人类可读持久记忆（显式读/写/追加工具 + 注入）——现有全是SQLite黑盒，无文件型记忆工具
+- ~~1.1 缺~~ **1.1 已补（周期#2）**：MEMORY.md 型持久记忆（agent/persistent_memory.py + memory_read/write/append 三工具 + 系统提示注入）；遗留：batch_execute code-mode 内层工具面尚未含 memory 工具
 - **1.3 半缺**：consolidator/try_learn_skill 已有自动沉淀，但无"可复用经验"去重审计 → 对标实测后补
 - **2.1-2.3 缺**：计划-执行-验证（对照原始需求逐条自验）、失败自动换路径（现仅重试1次同路）、多文件改动拆步+逐步提交
 - **3.x 缺**：cron 引擎（schedule_wakeup 只是延迟唤醒，非 schedule+执行+日志的任务调度）；定时汇报/监控告警缺
@@ -48,7 +48,7 @@
 ## 阶段规划（每阶段内拆成 15 分钟可完成的切片）
 
 ### 阶段1 · 记忆与知识（优先级最高——agent 的"长期大脑"）
-- [ ] 1.1 MEMORY.md 型持久记忆：读/写/追加工具 + 跨会话加载进系统提示
+- [x] 1.1 MEMORY.md 型持久记忆：读/写/追加工具 + 跨会话加载进系统提示（7cb4e532）
 - [ ] 1.2 会话历史检索：按关键词查过往会话（SQLite sessions/messages）
 - [ ] 1.3 记忆自动沉淀：任务完成后把"可复用经验"写入记忆（带去重）
 - [ ] 1.4 用户画像：偏好/环境事实独立存储，每次会话注入
@@ -92,3 +92,4 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 ## 周期日志
 [2026-10-09 19:00] 周期#0 | 路线图建立+cron流水线上线 | ✅ | (本文档创建) | 首个自动周期15分钟后启动
 [2026-10-10 01:20] 周期#1 | 阶段0盘点：核实21工具/3记忆引擎/三层技能机制+缺口图；清理soulmate_agent.py损坏WIP（截断import`AgentCheckpointMan`+`return clsager`致ImportError，且属用户已否决的防双开守卫类，diff留证docs/devlog/2026-10-10-broken-idempotent-guard-wip.patch后还原HEAD，import实测恢复） | ⚠️ | 1ea328ce | 附带实测tests/test_skill_standard_layer.py 34 passed；下周期做1.1 MEMORY.md型持久记忆
+[2026-10-10 01:38] 周期#2 | 1.1 MEMORY.md型持久记忆：新增agent/persistent_memory.py（atomic_write+SOULMATE_MEMORY_PATH覆盖）+memory_read/write/append三工具进builtin_tools与主dispatch+系统提示"持久记忆"段注入（KIND_MEMORY归因，超长显式截断） | ✅ | 7cb4e532 | tests/test_persistent_memory.py 15/15过+既有回归89过（memory_echo/marker/plan_tool_ledger/sandbox_policy）+env覆盖烟测真实输出验证；遗留：code-mode内层工具面未含memory工具（后续切片补）；下周期做1.2会话历史检索对标实测
