@@ -74,6 +74,7 @@ from agent.dynamic_prompt import DynamicPromptBuilder
 from agent.memory_retrieval import MemoryRetrievalEngine
 from agent.persistent_memory import PersistentMemory
 from agent.experience_sink import ExperienceSink
+from agent.self_verify import SelfVerifier
 from agent.tool_cache import ToolResultCache
 from agent.tool_auditor import ToolAuditor
 from agent.smart_retry import SmartRetryManager
@@ -244,6 +245,8 @@ class SoulMateAgent:
         self._experience_sink = ExperienceSink(
             persistent_memory=self._persistent_memory
         )
+        # 需求自验器（路线图 2.1，计划-执行-验证循环的验证环节）
+        self._self_verifier = SelfVerifier()
         # 技能学习器
         self._skill_learner = SkillLearner()
         # 可观测性管理器
@@ -4348,6 +4351,56 @@ You can send files to the user natively: to deliver a file, write a brief confir
 
         except Exception as e:
             logger.debug(f"[p2-post] 后置处理失败(非致命): {e}")
+
+        # ── 路线图 2.1 计划-执行-验证循环：对照原始需求逐条自验 ──────
+        # 验证环节收口在MEDIA提取之前——补做产出若含MEDIA标签也能被网关处理。
+        # 确定性核对（不走LLM）；未覆盖项→补做1轮（上限防失控，细粒度失败恢复属2.2）
+        # →复检；结论只在"多需求项或有未覆盖项"时推送（闲聊零打扰）。
+        try:
+            verify_report = self._self_verifier.verify(user_text, full_response, tool_calls_log)
+        except Exception as e:
+            logger.debug(f"[self-verify] 自检失败(非致命): {e}")
+            verify_report = None
+        if verify_report and verify_report.items:
+            missing = verify_report.missing_requirements()
+            _remediated = False
+            if missing and (tool_calls_log or len(user_text) >= 40):
+                logger.info(f"[self-verify] {len(missing)}项未覆盖，执行补做(上限1轮): {missing}")
+                try:
+                    fix_prompt = self._self_verifier.build_remediation_prompt(missing)
+                    fix_messages = messages + [
+                        {"role": "assistant", "content": full_response[:2000]},
+                        {"role": "user", "content": fix_prompt},
+                    ]
+                    fix_resp, fix_tools = await self._run_llm_with_tools(
+                        fix_messages, session_id,
+                        matched_skills=matched_skills, user_text=user_text,
+                    )
+                    if fix_resp:
+                        full_response = full_response + "\n\n" + fix_resp
+                    if fix_tools:
+                        tool_calls_log.extend(fix_tools)
+                    verify_report = self._self_verifier.verify(
+                        user_text, full_response, tool_calls_log)
+                    _remediated = True
+                except Exception as e:
+                    logger.warning(f"[self-verify] 补做失败(保留原回复): {e}")
+            # 可观测：多需求任务或有缺口时推送自检结论（单条且已覆盖只记日志）
+            if verify_report and verify_report.items and (
+                not verify_report.ok or len(verify_report.items) >= 2
+            ):
+                report_text = self._self_verifier.format_report(verify_report)
+                if _remediated:
+                    report_text += "\n（未覆盖项已补做1轮并复检）"
+                if self._client is not None:
+                    await self._client.session_update(
+                        session_id=session_id,
+                        update=acp.update_agent_message_text(report_text),
+                    )
+            logger.info(
+                f"[self-verify] items={len(verify_report.items)}, "
+                f"coverage={verify_report.coverage}, missing={missing}, remediated={_remediated}"
+            )
 
         # ── 网关后处理：提取MEDIA标签、校验路径、下发文件 ──────
         media_paths = re.findall(r"MEDIA:([\w\-\/\.]+)", full_response)
