@@ -73,6 +73,7 @@ from utils import network_state  # turn级park合并：turn.open/close驱动park
 from agent.dynamic_prompt import DynamicPromptBuilder
 from agent.memory_retrieval import MemoryRetrievalEngine
 from agent.persistent_memory import PersistentMemory
+from agent.experience_sink import ExperienceSink
 from agent.tool_cache import ToolResultCache
 from agent.tool_auditor import ToolAuditor
 from agent.smart_retry import SmartRetryManager
@@ -239,6 +240,10 @@ class SoulMateAgent:
         self._memory_consolidator = MemoryConsolidator()
         # MEMORY.md 型人类可读持久记忆（路线图 1.1）
         self._persistent_memory = PersistentMemory()
+        # 可复用经验沉淀器（路线图 1.3，带去重审计）
+        self._experience_sink = ExperienceSink(
+            persistent_memory=self._persistent_memory
+        )
         # 技能学习器
         self._skill_learner = SkillLearner()
         # 可观测性管理器
@@ -4241,6 +4246,17 @@ You can send files to the user natively: to deliver a file, write a brief confir
             )
         except Exception as e:
             logger.debug(f"Auto-learn skipped: {e}")
+
+        # ── 可复用经验沉淀（路线图 1.3，带去重审计）────────
+        try:
+            self._experience_sink.record_experience(
+                user_text=user_text,
+                assistant_response=full_response,
+                tool_calls=tool_calls_log,
+                session_id=session_id,
+            )
+        except Exception as e:
+            logger.debug(f"Experience sink skipped: {e}")
 
         # ── 进化引擎观察 ──────────────────────────────────
         if self._evolution_engine:
