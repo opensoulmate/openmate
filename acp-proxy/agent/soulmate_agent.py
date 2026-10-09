@@ -72,6 +72,7 @@ from agent import turn_lifecycle
 from utils import network_state  # turn级park合并：turn.open/close驱动park预算
 from agent.dynamic_prompt import DynamicPromptBuilder
 from agent.memory_retrieval import MemoryRetrievalEngine
+from agent.persistent_memory import PersistentMemory
 from agent.tool_cache import ToolResultCache
 from agent.tool_auditor import ToolAuditor
 from agent.smart_retry import SmartRetryManager
@@ -236,6 +237,8 @@ class SoulMateAgent:
         self._reflection_engine = ReflectionEngine()
         # 记忆整合器
         self._memory_consolidator = MemoryConsolidator()
+        # MEMORY.md 型人类可读持久记忆（路线图 1.1）
+        self._persistent_memory = PersistentMemory()
         # 技能学习器
         self._skill_learner = SkillLearner()
         # 可观测性管理器
@@ -1336,6 +1339,7 @@ ACP代理目录: {cwd}/acp-proxy（后端 Python 代码在此）
 - terminal: 执行命令，command 参数必填
 - execute_code: 执行 Python 代码，code 参数必填
 - batch_execute: Code Mode批量执行，script 参数必填——Python脚本，会话内工具函数可直接调用（如 read_file(path=...), terminal(command=...)），最终结果赋给 result 变量。≥3次独立工具调用时优先使用；每次内层工具调用仍逐条过权限审核
+- memory_read / memory_write / memory_append: 持久记忆MEMORY.md（跨会话、人类可读）的读取/整体改写/追加条目。需要跨会话记住的重要事实、用户明确的偏好、经验教训，用 memory_append 记录；查看用 memory_read；整理重写用 memory_write
 
 You can send files to the user natively: to deliver a file, write a brief confirmation message (e.g. "文件已发送，请查收"), then include MEDIA:/absolute/path/to/file on a new line. The gateway extracts the tag, strips it, and sends the file as a download card. Always write some text before the MEDIA: tag — never output a bare MEDIA: tag alone. Use search_files first if you don't know the exact path. Do NOT paste file contents into chat."""
 
@@ -1370,6 +1374,18 @@ You can send files to the user natively: to deliver a file, write a brief confir
                 kind=KIND_PREFERENCE, name="user_preferences", source="pref_learner",
                 tokens=estimate_tokens(pref_context),
             ))
+
+        # 注入 MEMORY.md 型人类可读持久记忆（路线图 1.1，跨会话加载）
+        try:
+            mem_md = self._persistent_memory.load_prompt_section()
+            if mem_md:
+                system_prompt += f"\n\n## 持久记忆（MEMORY.md，跨会话，可用 memory_read/memory_write/memory_append 维护）\n{mem_md}\n"
+                attr_items.append(ContextItem(
+                    kind=KIND_MEMORY, name="MEMORY.md", source="persistent_memory",
+                    tokens=estimate_tokens(mem_md),
+                ))
+        except Exception as e:
+            logger.debug(f"[persistent_memory] load error: {e}")
 
         # 注入反思改进建议
         improvement_ctx = self._reflection_engine.get_improvement_context(session_id)
@@ -1731,6 +1747,61 @@ You can send files to the user natively: to deliver a file, write a brief confir
             },
         }
         builtin_tools.append(wakeup_tool)
+
+        # ── MEMORY.md 型持久记忆工具（路线图 1.1）──────────────────
+        # 文件型人类可读持久记忆的读/写/追加；内容同时注入系统提示（跨会话加载）。
+        memory_tools = [{
+            "type": "function",
+            "function": {
+                "name": "memory_read",
+                "description": (
+                    "读取持久记忆 MEMORY.md（跨会话、人类可读的长期记忆文件）。"
+                    "查看已记住的内容、确认某条记忆是否已记录时使用。带行号返回。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "offset": {"type": "integer", "description": "起始行号（从1开始）", "default": 1},
+                        "limit": {"type": "integer", "description": "最大读取行数", "default": 200},
+                    },
+                },
+            },
+        }, {
+            "type": "function",
+            "function": {
+                "name": "memory_append",
+                "description": (
+                    "向持久记忆 MEMORY.md 追加一条记忆（自动带时间戳，保留既有内容）。"
+                    "需要跨会话记住的重要事实、用户明确的偏好/纠正、经验教训时使用。"
+                    "每条一句话说清事实本身（含关键值/路径/结论），不要写流水账。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "entry": {"type": "string", "description": "要记住的一条内容（单条事实）"},
+                    },
+                    "required": ["entry"],
+                },
+            },
+        }, {
+            "type": "function",
+            "function": {
+                "name": "memory_write",
+                "description": (
+                    "整体改写持久记忆 MEMORY.md（覆盖模式）。仅用于整理/重构记忆"
+                    "（如去重、分类、压缩过长记忆）；日常新增用 memory_append。"
+                    "写入前先 memory_read 读取现有内容，改写必须保留仍有价值的记忆。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "content": {"type": "string", "description": "改写后的完整记忆内容（Markdown）"},
+                    },
+                    "required": ["content"],
+                },
+            },
+        }]
+        builtin_tools.extend(memory_tools)
 
         # 添加进化引擎工具（支持直接对象或HTTP API两种模式）
         evolution_tools = []
@@ -2634,6 +2705,24 @@ You can send files to the user natively: to deliver a file, write a brief confir
                                     )
                             except Exception as _wu_err:
                                 result = f"⚠️ wakeup调度不可用: {_wu_err}"
+                        elif func_name in ("memory_read", "memory_write", "memory_append"):
+                            # ── MEMORY.md 型持久记忆（路线图 1.1）────────────
+                            try:
+                                if func_name == "memory_read":
+                                    result = self._persistent_memory.read(
+                                        offset=func_args.get("offset", 1),
+                                        limit=func_args.get("limit", 200),
+                                    )
+                                elif func_name == "memory_write":
+                                    _ok, result = self._persistent_memory.write(
+                                        func_args.get("content", ""))
+                                else:  # memory_append
+                                    _ok, result = self._persistent_memory.append(
+                                        func_args.get("entry", ""))
+                            except Exception as e:
+                                te = self._tool_error_handler.handle_error(
+                                    session_id, func_name, e, func_args)
+                                result = te.to_model_message()
                         elif func_name == "batch_execute":
                             # ── P1 Code Mode工具批量化（goose code_execution+kilocode
                             # code-mode两方定案）：N次工具调用批成1个脚本执行。内层每次
