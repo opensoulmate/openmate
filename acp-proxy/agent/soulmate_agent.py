@@ -133,6 +133,7 @@ from agent.permissions import ToolPolicy
 from agent.permission_gate import PermissionGate
 from agent.permission_provenance import PermissionProvenanceRecorder, build_provenance
 from agent.tool_errors import ToolError, ToolErrorHandler
+from agent.failure_recovery import FailureRecoveryManager
 from agent.writer_fence import SessionWriterFence, WriteAction
 from agent.steering import (
     ABORT_MESSAGE,
@@ -309,6 +310,7 @@ class SoulMateAgent:
         self._schema_doctor = SchemaDoctor(db_path=':memory:')
         # 工具错误处理器（分类+doom loop检测）
         self._tool_error_handler = ToolErrorHandler()
+        self._failure_recovery = FailureRecoveryManager()
         # ── P0-4/P1: 插话队列 + 活动可观测（goose peek三指标 + claude-code noop自报）──
         self._steering = SteeringQueue()                     # Khoj interrupt_queue + goose Steer
         self._activity_store = ActivityStore()               # SQLite持久化，HTTP peek端点跨进程读
@@ -2928,6 +2930,18 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             result = await self._call_mcp_resource_tool(func_name, func_args)
                         else:
                             result = await self._call_mcp_tool(func_name, func_args)
+
+                        # ── 2.2 失败恢复（路线图2.2）：工具失败自动重试同路1次→
+                        # 换路径1次（最多2次），仍失败则带失败原因+已尝试轨迹回注；
+                        # 每次失败原因写JSONL日志（data/tool_failure_log.jsonl）。
+                        # 安全边界：仅幂等只读工具自动重放，写类工具只记录+提示，
+                        # 防副作用翻倍；重放走 _code_mode_tool_call（二次过权限门禁）──
+                        if not result_ok(result):
+                            result = await self._failure_recovery.recover(
+                                session_id, func_name, func_args, str(result),
+                                exec_fn=lambda _tn, _ta: self._code_mode_tool_call(
+                                    session_id, _tn, _ta, cwd),
+                            )
                         tool_results.append({
                             "tool_call_id": tc["id"],
                             "role": "tool",
