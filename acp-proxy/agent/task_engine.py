@@ -375,6 +375,37 @@ class TaskPlanner:
             logger.warning(f"[plan] LLM planning failed: {e}, treating as simple task")
             data = {"needs_planning": False, "reason": "规划失败，作为简单任务处理", "subtasks": []}
 
+        # 2.3 复杂任务分解器：多文件改动目标 → 确定性拆步（不赌LLM规划质量，
+        # 多文件改动是最容易"步骤越权/漏文件"的形态）。拆解失败静默回退LLM计划。
+        try:
+            from agent.task_decomposer import TaskDecomposer
+            _decomposer = TaskDecomposer()
+            if _decomposer.is_multi_file_change(goal):
+                dsteps = _decomposer.decompose(goal, session_id)
+                mf_subtasks = [
+                    SubTask(
+                        id=s.id,
+                        description=s.description,
+                        tool_hint=s.tool_hint,
+                        depends_on=list(s.depends_on),
+                    )
+                    for s in dsteps
+                ]
+                mf_plan = TaskPlan(
+                    id=f"plan-{uuid.uuid4().hex[:8]}",
+                    session_id=session_id,
+                    goal=goal,
+                    subtasks=mf_subtasks,
+                )
+                self.store.save_plan(mf_plan)
+                logger.info(
+                    f"[plan] multi-file decomposition: {len(mf_subtasks)} steps "
+                    f"for goal: {goal[:50]}"
+                )
+                return mf_plan
+        except Exception as e:
+            logger.warning(f"[plan] task_decomposer failed, fallback to LLM plan: {e}")
+
         if not data.get("needs_planning") or not data.get("subtasks"):
             # 简单任务，不需要规划
             plan = TaskPlan(

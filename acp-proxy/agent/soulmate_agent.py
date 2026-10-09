@@ -910,6 +910,35 @@ class SoulMateAgent:
             logger.error(f"MCP resource tool error: {e}", exc_info=True)
             return f"[MCP resource调用异常] {e}"
 
+    async def _commit_step_changes(self, step, idx: int, session_id: str) -> None:
+        """2.3 逐步提交：多文件改动任务的步骤成功后，把该步目标文件的改动单独 commit。
+
+        只对步骤描述里明确点名的文件生效（TaskDecomposer.extract_target_files
+        确定性抽取）；commit_step 只 `git add -- <指定文件>`、无变更 noop、
+        路径越界拒绝，绝不 push。失败只记日志，绝不阻塞任务主链路。
+        """
+        try:
+            from agent.task_decomposer import TaskDecomposer
+            dec = getattr(self, "_task_decomposer", None)
+            if dec is None:
+                dec = TaskDecomposer()
+                self._task_decomposer = dec
+            files = dec.extract_target_files(getattr(step, "description", "") or "")
+            if not files:
+                return
+            msg = dec.step_commit_message(step.description, idx)
+            res = dec.commit_step(str(self._project_root), files, msg)
+            logger.info(f"[task] step_commit step{idx + 1}: {res}")
+            if self._client is not None and res.get("action") == "committed":
+                await self._client.session_update(
+                    session_id=session_id,
+                    update=acp.update_agent_message_text(
+                        f"📦 步骤{idx + 1}已提交: {res.get('sha', '')}（{files[0]}）\n"
+                    ),
+                )
+        except Exception as e:
+            logger.warning(f"[task] step_commit step{idx + 1} 失败(不阻塞): {e}")
+
     async def _llm_plan_call(self, messages: list[dict]) -> str:
         """轻量 LLM 调用，只返回文本（不带工具），用于规划和自省"""
         return await self.llm_engine.chat(messages)
@@ -4209,6 +4238,8 @@ You can send files to the user natively: to deliver a file, write a brief confir
 
                 if reflection.get("passed"):
                     step.status = StepStatus.SUCCESS
+                    # 2.3 逐步提交：多文件改动任务，步骤成功即提交该步目标文件
+                    await self._commit_step_changes(step, idx, session_id)
                     all_results.append(f"✅ 步骤{idx+1}: {step.description}\n   结果: {step.result[:200]}")
                     logger.info(f"[task] Step {idx+1} passed: {reflection.get('summary', '')}")
                     self._task_planner.store.save_plan(plan)
@@ -4261,6 +4292,8 @@ You can send files to the user natively: to deliver a file, write a brief confir
                     step.error_type = retry_reflection.get("error_type", "") or ""
                     if retry_reflection.get("passed"):
                         step.status = StepStatus.SUCCESS
+                        # 2.3 逐步提交：重试成功的步骤同样逐步提交
+                        await self._commit_step_changes(step, idx, session_id)
                         all_results.append(f"✅ 步骤{idx+1}(重试): {step.description}\n   结果: {step.result[:200]}")
                     else:
                         step.status = StepStatus.FAILED
