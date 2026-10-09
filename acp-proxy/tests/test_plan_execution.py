@@ -28,6 +28,7 @@ import httpx
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from agent.soulmate_agent import SoulMateAgent
+from agent.multi_file_plan import MultiFileSplitter, StepCommitter
 from agent.task_engine import (
     SelfReflector,
     StepStatus,
@@ -182,6 +183,9 @@ def build_env(tmp_path, monkeypatch, steps, llm_scripts, llm_call_responses,
     # 真实任务规划链：TaskPlanner（replan走LLM脚本）+ TaskStore(tmp sqlite)
     agent._task_planner = TaskPlanner(llm_call_fn=ScriptedLLM(llm_call_responses))
     agent._self_reflector = SelfReflector(llm_call_fn=ScriptedLLM([]))
+    # 2.3 复杂任务分解器（build_env绕过__init__手工搭agent，需补新组件）
+    agent._multi_file_splitter = MultiFileSplitter()
+    agent._step_committer = StepCommitter(log_dir=str(tmp_path / "logs"))
 
     plan = TaskPlan(id="plan-t1", session_id="s1", goal="总目标", subtasks=[
         SubTask(id=sid, description=desc) for sid, desc in steps

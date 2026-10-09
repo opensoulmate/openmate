@@ -55,6 +55,7 @@ from agent.loop_guard import LoopGuard
 from agent.code_mode import CodeModeExecutor
 from agent.sandbox_policy import SandboxPolicy  # kilocode supplement3 #15 网络受限工具面收缩
 from agent.output_guard import SecretStreamRedactor, redact_secrets  # P0 输出侧护栏：流式密钥脱敏（Warp secret_redaction）
+from agent.multi_file_plan import MultiFileSplitter, StepCommitter  # 2.3 复杂任务分解器：多文件拆步+逐步提交
 from agent.infection_guard import InfectionGate  # P0 输出侧护栏：注入审计门（agent-zero _infection_check三态verdict）
 from agent.read_turn import DIFF_MAX_BYTES, TurnReadView, render_trace, result_ok
 from agent.mcp_resources import (
@@ -197,6 +198,9 @@ class SoulMateAgent:
         from agent.task_engine import TaskPlanner, SelfReflector
         self._task_planner = TaskPlanner(llm_call_fn=self._llm_plan_call)
         self._self_reflector = SelfReflector(llm_call_fn=self._llm_plan_call)
+        # 2.3 复杂任务分解器：多文件拆步 + 逐步提交
+        self._multi_file_splitter = MultiFileSplitter()
+        self._step_committer = StepCommitter()
         # 任务状态管理器（独立状态机，规则+LLM兜底）
         self._task_state_manager = TaskStateManager(db_path=str(self._db_path))
         # 架构增强系统 — 整合所有P0组件（98个Agent调研结论）
@@ -441,6 +445,24 @@ class SoulMateAgent:
                     sess["_progress_id"] = pid
         except Exception as e:
             logger.warning(f"[progress] 增量落库失败: {e}")
+
+    async def _commit_step_changes(self, session_id: str, idx: int, step, tool_calls: list) -> None:
+        """2.3 逐步提交：本步骤触碰的文件以独立 commit 入库（只 add 触碰文件，本地 commit 不 push）。"""
+        try:
+            files = self._step_committer.files_touched(tool_calls)
+            if not files:
+                return
+            res = self._step_committer.commit_step(
+                self._project_root, idx + 1, step.description, files, session_id=session_id)
+            if self._client is not None and res.get("committed"):
+                names = ", ".join(Path(f).name for f in res.get("files", []))
+                await self._client.session_update(
+                    session_id=session_id,
+                    update=acp.update_agent_message_text(
+                        f"📦 已提交步骤{idx+1}改动: {names}（{str(res.get('sha', ''))[:8]}）\n"),
+                )
+        except Exception as e:
+            logger.warning(f"[commit] 步骤提交失败(非致命): {e}")
 
     def _save_message_final(self, session_id: str, text: str, metadata: str | None = None) -> None:
         """最终回复落库：若存在增量落库行则原地接管（更新为完整内容，避免重复行），否则正常插入。"""
@@ -4017,6 +4039,15 @@ You can send files to the user natively: to deliver a file, write a brief confir
         plan = await self._task_planner.plan(user_text, session_id)
         tool_calls_log = []  # 初始化，两条路径都会用到
 
+        # 2.3 复杂任务分解器：多文件改动自动拆步——LLM 规划器判"简单"但目标点名 ≥2 个
+        # 文件时，确定性按文件拆步（一文件一步）走 plan 执行循环，随后逐步提交。
+        if self._multi_file_splitter.should_split(user_text, plan):
+            mf_steps = self._multi_file_splitter.build_subtasks(user_text)
+            plan.subtasks = mf_steps
+            plan.status = "active"
+            self._task_planner.store.save_plan(plan)
+            logger.info(f"[task] multi-file split: {len(mf_steps)} file steps")
+
         # 尝试用OpenSoul DAG规划器增强任务拆解
         if plan.subtasks and len(plan.subtasks) > 2:
             try:
@@ -4108,6 +4139,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
 
                 step.status = StepStatus.RUNNING
                 _traj_seg = ""
+                step_tools = []  # 2.3 逐步提交：本步骤工具账本（异常路径不残留上轮值）
                 try:
                     # trajectory span：plan步骤LLM段（round级子span由_run_llm_with_tools
                     # 内部落——段span先建拿id，执行完end盖总账；tools账本由round承载）
@@ -4146,6 +4178,8 @@ You can send files to the user natively: to deliver a file, write a brief confir
 
                 if reflection.get("passed"):
                     step.status = StepStatus.SUCCESS
+                    # 2.3 逐步提交：本步骤触碰的文件独立 commit（成功才入库）
+                    await self._commit_step_changes(session_id, idx, step, step_tools)
                     all_results.append(f"✅ 步骤{idx+1}: {step.description}\n   结果: {step.result[:200]}")
                     logger.info(f"[task] Step {idx+1} passed: {reflection.get('summary', '')}")
                     self._task_planner.store.save_plan(plan)
@@ -4168,6 +4202,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
                         "role": "system",
                         "content": "⚠️ 上次执行失败了。注意：不要创建新文件、不要写代码脚本。直接用已有数据以文本形式输出结果。",
                     })
+                    retry_tools = []  # 2.3 逐步提交：重试轮工具账本
                     try:
                         _traj_seg = ""
                         _traj_seg = await self._traj_recorder.start_llm_span(
@@ -4198,6 +4233,8 @@ You can send files to the user natively: to deliver a file, write a brief confir
                     step.error_type = retry_reflection.get("error_type", "") or ""
                     if retry_reflection.get("passed"):
                         step.status = StepStatus.SUCCESS
+                        # 2.3 逐步提交：首试+重试触碰的文件一起独立 commit
+                        await self._commit_step_changes(session_id, idx, step, (step_tools or []) + (retry_tools or []))
                         all_results.append(f"✅ 步骤{idx+1}(重试): {step.description}\n   结果: {step.result[:200]}")
                     else:
                         step.status = StepStatus.FAILED
