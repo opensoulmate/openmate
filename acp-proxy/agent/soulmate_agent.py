@@ -133,6 +133,7 @@ from agent.permissions import ToolPolicy
 from agent.permission_gate import PermissionGate
 from agent.permission_provenance import PermissionProvenanceRecorder, build_provenance
 from agent.tool_errors import ToolError, ToolErrorHandler
+from agent.tool_recovery import ToolRecoveryManager, FailureKind, MAX_RECOVERY_ATTEMPTS
 from agent.writer_fence import SessionWriterFence, WriteAction
 from agent.steering import (
     ABORT_MESSAGE,
@@ -309,6 +310,8 @@ class SoulMateAgent:
         self._schema_doctor = SchemaDoctor(db_path=':memory:')
         # 工具错误处理器（分类+doom loop检测）
         self._tool_error_handler = ToolErrorHandler()
+        # 路线图2.2 失败恢复：工具报错自动重试/换路径（最多2次）+失败原因持久化日志
+        self._tool_recovery = ToolRecoveryManager()
         # ── P0-4/P1: 插话队列 + 活动可观测（goose peek三指标 + claude-code noop自报）──
         self._steering = SteeringQueue()                     # Khoj interrupt_queue + goose Steer
         self._activity_store = ActivityStore()               # SQLite持久化，HTTP peek端点跨进程读
@@ -1265,6 +1268,71 @@ class SoulMateAgent:
             return f"[CODE_MODE] 工具执行超时: {func_name}"
         except Exception as e:
             return f"[CODE_MODE] 工具执行异常: {func_name}: {e}"
+
+    async def _tool_recovery_execute(
+        self, session_id: str, func_name: str, func_args: dict, cwd: str,
+        first_result: str,
+    ) -> str:
+        """路线图2.2 失败恢复：工具报错自动重试/换路径（最多2次）+失败原因入日志。
+
+        铁律：BLOCKED（权限/沙箱拦截）绝不重试——重试=绕过权限引擎；
+        恢复重执行走 _code_mode_tool_call 原始执行器（同款语义+每步仍过
+        permission_gate），写操作/terminal 由 plan_steps 排除（副作用风险）。
+        """
+        # 与 _persistent_memory/_session_recall 同款 lazy-init（__new__ 构造
+        # 的实例未过 __init__ 时自举，避免 AttributeError 炸整个工具回合）
+        mgr = getattr(self, "_tool_recovery", None)
+        if mgr is None:
+            mgr = ToolRecoveryManager()
+            self._tool_recovery = mgr
+        kind = mgr.classify(first_result)
+        if kind in (FailureKind.OK, FailureKind.BLOCKED):
+            return first_result
+        _cwd = str(
+            cwd
+            or getattr(self, "_session_cwds", {}).get(session_id, "")
+            or getattr(self, "_project_root", "")
+            or ""
+        )
+        steps = mgr.plan_steps(
+            func_name, func_args, first_result, kind,
+            search_roots=[_cwd, str(getattr(self, "_project_root", ""))],
+        )
+        if not steps:
+            # 无恢复方案（参数错误/副作用工具/无换路径映射）——失败原因照记
+            mgr.record(
+                session_id, func_name, kind.value, first_result,
+                action="none", attempt=0, outcome="no_plan",
+                note="无恢复方案，错误回注LLM", func_args=func_args,
+            )
+            return first_result
+        result = first_result
+        for attempt, step in enumerate(steps[:MAX_RECOVERY_ATTEMPTS], start=1):
+            logger.warning(
+                f"[tool-recovery] {func_name} 失败({kind.value})，第{attempt}次"
+                f"{step.action}: {step.note}")
+            result = await self._code_mode_tool_call(
+                session_id, step.tool_name, step.func_args, _cwd)
+            if mgr.classify(result) == FailureKind.OK:
+                mgr.record(
+                    session_id, func_name, kind.value, first_result,
+                    action=step.action, attempt=attempt, outcome="recovered",
+                    note=step.note, func_args=step.func_args,
+                )
+                logger.warning(
+                    f"[tool-recovery] {func_name} 第{attempt}次{step.action}成功")
+                return result
+            mgr.record(
+                session_id, step.tool_name, mgr.classify(result).value, result,
+                action=step.action, attempt=attempt, outcome="failed",
+                note=step.note, func_args=step.func_args,
+            )
+        mgr.record(
+            session_id, func_name, kind.value, result,
+            action="give_up", attempt=len(steps), outcome="exhausted",
+            note="2次恢复均失败", func_args=func_args,
+        )
+        return result
 
     def _profile_audit_dispatch(self, func_args: dict) -> str:
         """profile_audit 工具分发（路线图 1.5：画像审计可见 + 删除须确认）。
@@ -2901,6 +2969,10 @@ You can send files to the user natively: to deliver a file, write a brief confir
                                     _cm_tools = [t["function"]["name"] for t in all_tools]
                                     async def _cm_dispatch(_n, _a, _sid=session_id, _cwd=cwd):
                                         _r = await self._code_mode_tool_call(_sid, _n, _a, _cwd)
+                                        # 路线图2.2 失败恢复（批内同款：重试/
+                                        # 换路径最多2次+失败原因入日志）
+                                        _r = await self._tool_recovery_execute(
+                                            _sid, _n, _a, _cwd, str(_r))
                                         # kilocode #4/#6：批内每次调用同样留工具动作轮廓
                                         self._turn_read_view.record_tool(
                                             _sid, _n, _a,
@@ -2928,6 +3000,11 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             result = await self._call_mcp_resource_tool(func_name, func_args)
                         else:
                             result = await self._call_mcp_tool(func_name, func_args)
+                        # ── 路线图2.2 失败恢复：工具报错自动重试/换路径
+                        # （最多2次）+失败原因持久化日志；OK/BLOCKED 原样通过
+                        # （权限拦截绝不重试绕过）──
+                        result = await self._tool_recovery_execute(
+                            session_id, func_name, func_args, cwd, str(result))
                         tool_results.append({
                             "tool_call_id": tc["id"],
                             "role": "tool",
