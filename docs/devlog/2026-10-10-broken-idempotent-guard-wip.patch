@@ -1,0 +1,71 @@
+diff --git a/acp-proxy/agent/soulmate_agent.py b/acp-proxy/agent/soulmate_agent.py
+index 025280be..49da9e7d 100644
+--- a/acp-proxy/agent/soulmate_agent.py
++++ b/acp-proxy/agent/soulmate_agent.py
+@@ -84,7 +84,57 @@ from agent.token_analyzer import TokenAnalyzer
+ from agent.agent_tracer import AgentTracer
+ from agent.event_bus import get_event_bus
+ from agent.config_manager import HotConfigManager
+-from agent.agent_checkpoint import AgentCheckpointManager
++from agent.agent_checkpoint import AgentCheckpointMan
++
++# ---- session 初始化幂等兜底（防御性守卫，主竞态修复在前端/ws_acp.py） ----
++# 记录已完成初始化的 session_id -> 缓存的入口返回值，重复 initialize/session_start 直接复用，
++# 避免重复执行 DNA 加载 / 记忆恢复 / 知识蒸馏等重操作。
++_INITIALIZED_SESSIONS: dict[str, Any] = {}
++
++
++def _idem_session_id_from(self_obj: Any, args: tuple, kwargs: dict) -> str | None:
++    """尽量从调用参数或 self 上解析出 session_id；解析不到返回 None（不守卫）。"""
++    sid = kwargs.get("session_id") or kwargs.get("sessionId")
++    if sid:
++        return str(sid)
++    for arg in args:
++        if arg is None:
++            continue
++        sid = getattr(arg, "session_id", None) or getattr(arg, "sessionId", None)
++        if sid:
++            return str(sid)
++    sid = getattr(self_obj, "session_id", None) or getattr(self_obj, "session_id_current", None)
++    return str(sid) if sid else None
++
++
++def _idempotent_session_init(cls):
++    """类装饰器：为 initialize/session_start 等入口加幂等守卫。
++
++    同一 session_id 的重复调用不再执行原方法体（避免 DNA 加载、记忆恢复等重操作的
++    重复副作用），直接返回首次调用缓存的状态；未携带 session_id 的调用不受影响。
++    """
++    for meth_name in ("initialize", "session_start", "new_session"):
++        fn = getattr(cls, meth_name, None)
++        if fn is None or getattr(fn, "__soulmate_idempotent__", False):
++            continue
++
++        async def _wrapper(self, *args, __fn=fn, __name=meth_name, **kwargs):
++            sid = _idem_session_id_from(self, args, kwargs)
++            if sid and sid in _INITIALIZED_SESSIONS:
++                logging.info(
++                    "[soulmate][idempotent] session %s 已初始化，跳过重复 %s", sid, __name
++                )
++                return _INITIALIZED_SESSIONS[sid]
++            result = await __fn(self, *args, **kwargs)
++            sid = sid or _idem_session_id_from(self, args, kwargs)
++            if sid and sid not in _INITIALIZED_SESSIONS:
++                _INITIALIZED_SESSIONS[sid] = result
++            return result
++
++        _wrapper.__soulmate_idempotent__ = True  # type: ignore[attr-defined]
++        _wrapper.__name__ = fn.__name__
++        setattr(cls, meth_name, _wrapper)
++    return clsager
+ from agent.health_checker import HealthChecker
+ from agent.intent_classifier import IntentClassifier
+ from agent.user_preferences import UserPreferenceLearner
+@@ -147,6 +197,7 @@ from agent.schema_doctor import SchemaDoctor
+ logger = logging.getLogger("acp-agent.soulmate")
+ 
+ 
++@_idempotent_session_init
+ class SoulMateAgent:
+     """SoulMate Agent — 实现官方 acp.Agent 协议
+ 
