@@ -56,6 +56,7 @@ from agent.code_mode import CodeModeExecutor
 from agent.sandbox_policy import SandboxPolicy  # kilocode supplement3 #15 网络受限工具面收缩
 from agent.output_guard import SecretStreamRedactor, redact_secrets  # P0 输出侧护栏：流式密钥脱敏（Warp secret_redaction）
 from agent.multi_file_plan import MultiFileSplitter, StepCommitter  # 2.3 复杂任务分解器：多文件拆步+逐步提交
+from agent.system_checkup import SystemCheckup  # 2.4 系统状态一键体检：服务/磁盘/进程
 from agent.infection_guard import InfectionGate  # P0 输出侧护栏：注入审计门（agent-zero _infection_check三态verdict）
 from agent.read_turn import DIFF_MAX_BYTES, TurnReadView, render_trace, result_ok
 from agent.mcp_resources import (
@@ -252,6 +253,8 @@ class SoulMateAgent:
         )
         # 需求自验器（路线图 2.1，计划-执行-验证循环的验证环节）
         self._self_verifier = SelfVerifier()
+        # 系统一键体检器（路线图 2.4：服务/磁盘/进程，只读探测）
+        self._system_checkup = SystemCheckup()
         # 技能学习器
         self._skill_learner = SkillLearner()
         # 可观测性管理器
@@ -1280,6 +1283,9 @@ class SoulMateAgent:
                     return _cm_msg
                 return self._pref_learner.get_profile_summary(
                     fact_type=func_args.get("fact_type", ""))
+            # 系统状态一键体检（路线图 2.4）：批内同样可用，只读探测
+            if func_name == "system_checkup":
+                return self._system_checkup_dispatch(func_args)
             # kilocode #19 MCP resource三件套：批内同样可用（与主循环同款注入安全层）
             if func_name in MCP_RESOURCE_TOOL_NAMES:
                 return await self._call_mcp_resource_tool(func_name, func_args)
@@ -1289,6 +1295,20 @@ class SoulMateAgent:
             return f"[CODE_MODE] 工具执行超时: {func_name}"
         except Exception as e:
             return f"[CODE_MODE] 工具执行异常: {func_name}: {e}"
+
+    def _system_checkup_dispatch(self, func_args: dict) -> str:
+        """system_checkup 工具分发（路线图 2.4：服务/磁盘/进程一键体检）。
+
+        主循环与 code-mode 内层共用此入口，行为一致。只读探测不外抛。
+        """
+        checker = getattr(self, "_system_checkup", None)
+        if checker is None:
+            # build_env 手工搭 agent / 旧进程热更兜底
+            checker = SystemCheckup()
+            self._system_checkup = checker
+        section = str(func_args.get("section", "") or "all").strip().lower()
+        report = checker.run(section=section)
+        return SystemCheckup.format_report(report)
 
     def _profile_audit_dispatch(self, func_args: dict) -> str:
         """profile_audit 工具分发（路线图 1.5：画像审计可见 + 删除须确认）。
@@ -1440,6 +1460,7 @@ ACP代理目录: {cwd}/acp-proxy（后端 Python 代码在此）
 - memory_read / memory_write / memory_append: 持久记忆MEMORY.md（跨会话、人类可读）的读取/整体改写/追加条目。需要跨会话记住的重要事实、用户明确的偏好、经验教训，用 memory_append 记录；查看用 memory_read；整理重写用 memory_write
 - profile_record / profile_read: 用户画像（偏好/环境事实/身份，跨会话自动注入系统提示）。用户告知或纠正偏好、环境事实（操作系统/机器/常用工具/部署位置）、身份（角色/技能水平）→ 立即 profile_record 显式记录（fact_type=preference/environment/identity）；需要了解用户背景时用 profile_read
 - profile_audit: 用户画像审计/清理。action=list 可见复盘全部画像条目（含噪音嫌疑标记）；用户明确要求清理画像时 action=delete（先 confirm 缺省预览，用户确认后 confirm=true 执行）。⚠️ 禁止擅自清库，删除必须用户明确要求
+- system_checkup: 系统状态一键体检（只读探测不改系统）——服务端口在线状态/磁盘占用/负载与内存与进程Top。用户问系统/服务/磁盘/机器负载现状，或需要运维判断时使用；section 可只查 services/disk/processes 单项
 
 You can send files to the user natively: to deliver a file, write a brief confirmation message (e.g. "文件已发送，请查收"), then include MEDIA:/absolute/path/to/file on a new line. The gateway extracts the tag, strips it, and sends the file as a download card. Always write some text before the MEDIA: tag — never output a bare MEDIA: tag alone. Use search_files first if you don't know the exact path. Do NOT paste file contents into chat."""
 
@@ -1966,6 +1987,34 @@ You can send files to the user natively: to deliver a file, write a brief confir
             },
         }]
         builtin_tools.extend(profile_tools)
+
+        # ── 系统状态一键体检工具（路线图 2.4）────────────────────
+        # 服务端口/磁盘/进程三项只读探测，运维基础能力。
+        system_checkup_tool = {
+            "type": "function",
+            "function": {
+                "name": "system_checkup",
+                "description": (
+                    "系统状态一键体检（只读探测，不改系统）。一次返回三段："
+                    "services（核心服务端口在线/离线）、disk（磁盘占用+阈值状态）、"
+                    "processes（负载/内存/进程数/内存Top进程）。"
+                    "用户问「系统怎么样/服务还活着吗/磁盘满了吗/机器卡不卡」或需要运维"
+                    "现状判断时使用。section 可只查单项。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "section": {
+                            "type": "string",
+                            "enum": ["all", "services", "disk", "processes"],
+                            "description": "体检范围（默认 all=三项全查）",
+                            "default": "all",
+                        },
+                    },
+                },
+            },
+        }
+        builtin_tools.append(system_checkup_tool)
 
         # 添加进化引擎工具（支持直接对象或HTTP API两种模式）
         evolution_tools = []
@@ -2903,6 +2952,14 @@ You can send files to the user natively: to deliver a file, write a brief confir
                                 else:
                                     result = self._pref_learner.get_profile_summary(
                                         fact_type=func_args.get("fact_type", ""))
+                            except Exception as e:
+                                te = self._tool_error_handler.handle_error(
+                                    session_id, func_name, e, func_args)
+                                result = te.to_model_message()
+                        elif func_name == "system_checkup":
+                            # ── 系统状态一键体检（路线图 2.4：服务/磁盘/进程）──
+                            try:
+                                result = self._system_checkup_dispatch(func_args)
                             except Exception as e:
                                 te = self._tool_error_handler.handle_error(
                                     session_id, func_name, e, func_args)
