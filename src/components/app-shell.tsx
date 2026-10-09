@@ -458,7 +458,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                             const agent = agents.find((a: AgentInfo) => a.id === agentId);
                             const tempSessionId = `temp-${Date.now()}`;
                             useAppStore.getState().setActiveSession(tempSessionId, agentId === 'soulmate' ? null : agentId, { agentName: agent?.name || agentId, _isNewSessionFlow: true });
-                            router.push('/chat?new=' + Date.now());
+                            // 不再用 ?new=时间戳强制重挂载：重挂载的清理逻辑会杀掉正在握手的新连接（"连接已断开"根因）。
+                            // 会话切换由 _isNewSessionFlow 状态机制完成；仅跨页面时才导航。
+                            if (window.location.pathname !== '/chat') {
+                              router.push('/chat');
+                            }
                           }}
                           onDeleteSession={async (sessionId) => {
                             setDeleteTargetId(sessionId);

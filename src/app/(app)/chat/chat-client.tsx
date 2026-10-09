@@ -553,6 +553,7 @@ function useAcpWebSocket(params: {
       return;
     }
     const existingWs = wsMapRef.current.get(sessionId);
+    console.debug(`[ACP-DEBUG] connectSession(${sessionId}) existing=${existingWs ? existingWs.readyState : 'none'}`);
     if (existingWs && existingWs.readyState === WebSocket.OPEN) return; // 已连接
     if (existingWs) { existingWs.close(); wsMapRef.current.delete(sessionId); } // 清理已关闭的WS
 
@@ -632,6 +633,7 @@ function useAcpWebSocket(params: {
 
     const connect = () => {
       if (state.unmounted) return;
+      console.debug(`[ACP-DEBUG] effect-connect(${sessionId}) mapEntry=${wsMapRef.current.get(sessionId) ? wsMapRef.current.get(sessionId)!.readyState : 'none'}`);
       const currentToken = getToken();
       if (!currentToken) {
         console.warn('[ACP] 无token，跳转登录页');
@@ -1896,6 +1898,7 @@ export function ChatClient() {
       spWaited += 500; // 每500ms检查一次
       // WS 可能被迁移到新 sessionId（temp→real），两个都检查
       const ws2 = wsMapRef.current.get(sessionId) || wsMapRef.current.get(useAppStore.getState().activeSessionId || '');
+      console.debug(`[ACP-DEBUG] waitForConnection(${sessionId}) poll#${spWaited / 500} active=${useAppStore.getState().activeSessionId} found=${ws2 ? ws2.readyState : 'none'}`);
       if (ws2?.readyState === WebSocket.OPEN) {
         clearInterval(spWaitConnect);
         // 用迁移后的 sessionId 发送
