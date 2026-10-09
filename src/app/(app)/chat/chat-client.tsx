@@ -553,7 +553,7 @@ function useAcpWebSocket(params: {
       return;
     }
     const existingWs = wsMapRef.current.get(sessionId);
-    if (existingWs && existingWs.readyState === WebSocket.OPEN) return; // 已连接
+    if (existingWs && (existingWs.readyState === WebSocket.OPEN || existingWs.readyState === WebSocket.CONNECTING)) return; // 已连接/连接中，防双开（双WS会触发双session/new→双开会话）
     if (existingWs) { existingWs.close(); wsMapRef.current.delete(sessionId); } // 清理已关闭的WS
 
     const state = getSessionState(sessionId);
