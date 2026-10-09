@@ -1239,7 +1239,9 @@ class SoulMateAgent:
                     return _cm_msg
                 _ok, _cm_msg = self._persistent_memory.append(func_args.get("entry", ""))
                 return _cm_msg
-            if func_name in ("profile_record", "profile_read"):
+            if func_name in ("profile_record", "profile_read", "profile_audit"):
+                if func_name == "profile_audit":
+                    return self._profile_audit_dispatch(func_args)
                 if func_name == "profile_record":
                     _p_ev = str(func_args.get("evidence", "") or "").strip()
                     _ok, _cm_msg = self._pref_learner.record_fact(
@@ -1260,6 +1262,45 @@ class SoulMateAgent:
             return f"[CODE_MODE] 工具执行超时: {func_name}"
         except Exception as e:
             return f"[CODE_MODE] 工具执行异常: {func_name}: {e}"
+
+    def _profile_audit_dispatch(self, func_args: dict) -> str:
+        """profile_audit 工具分发（路线图 1.5：画像审计可见 + 删除须确认）。
+
+        主循环与 code-mode 内层共用此入口，行为一致。
+        """
+        action = str(func_args.get("action", "") or "list").strip().lower()
+        only_suspect = bool(func_args.get("only_suspect", False))
+        if action == "delete":
+            _ok, _msg = self._pref_learner.delete_facts(
+                pref_ids=func_args.get("pref_ids") or [],
+                keys=func_args.get("keys") or [],
+                fact_type=str(func_args.get("fact_type", "") or ""),
+                only_suspect=only_suspect,
+                confirm=bool(func_args.get("confirm", False)),
+            )
+            return _msg
+        if action != "list":
+            return f"错误: action 必须是 list 或 delete，收到: {action!r}"
+        audit = self._pref_learner.audit_entries(only_suspect=only_suspect)
+        lines = [
+            f"# 用户画像审计（共{audit['total']}条，嫌疑{audit['suspect_count']}条，"
+            f"正常{audit['clean_count']}条）",
+            "",
+        ]
+        for e in audit["entries"]:
+            mark = "⚠️" if e["suspect"] else "✅"
+            lines.append(
+                f"{mark} {e['pref_id']} [{e['fact_type']}] {e['key']} = "
+                f"{e['value'][:80]}（置信度{e['confidence']:.0%}, {e['source']}）"
+            )
+            for r in e["reasons"]:
+                lines.append(f"    └ 嫌疑: {r}")
+        if not audit["entries"]:
+            lines.append("（画像为空）")
+        lines.append("")
+        lines.append("删除方法: profile_audit(action=delete, pref_ids=[...], confirm=true)。"
+                     "⚠️ 数据删除需用户明确确认，先用 confirm 缺省做预览。")
+        return "\n".join(lines)
 
     async def _traj_record_round(
         self,
@@ -1371,6 +1412,7 @@ ACP代理目录: {cwd}/acp-proxy（后端 Python 代码在此）
 - batch_execute: Code Mode批量执行，script 参数必填——Python脚本，会话内工具函数可直接调用（如 read_file(path=...), terminal(command=...)），最终结果赋给 result 变量。≥3次独立工具调用时优先使用；每次内层工具调用仍逐条过权限审核
 - memory_read / memory_write / memory_append: 持久记忆MEMORY.md（跨会话、人类可读）的读取/整体改写/追加条目。需要跨会话记住的重要事实、用户明确的偏好、经验教训，用 memory_append 记录；查看用 memory_read；整理重写用 memory_write
 - profile_record / profile_read: 用户画像（偏好/环境事实/身份，跨会话自动注入系统提示）。用户告知或纠正偏好、环境事实（操作系统/机器/常用工具/部署位置）、身份（角色/技能水平）→ 立即 profile_record 显式记录（fact_type=preference/environment/identity）；需要了解用户背景时用 profile_read
+- profile_audit: 用户画像审计/清理。action=list 可见复盘全部画像条目（含噪音嫌疑标记）；用户明确要求清理画像时 action=delete（先 confirm 缺省预览，用户确认后 confirm=true 执行）。⚠️ 禁止擅自清库，删除必须用户明确要求
 
 You can send files to the user natively: to deliver a file, write a brief confirmation message (e.g. "文件已发送，请查收"), then include MEDIA:/absolute/path/to/file on a new line. The gateway extracts the tag, strips it, and sends the file as a download card. Always write some text before the MEDIA: tag — never output a bare MEDIA: tag alone. Use search_files first if you don't know the exact path. Do NOT paste file contents into chat."""
 
@@ -1869,6 +1911,29 @@ You can send files to the user natively: to deliver a file, write a brief confir
                     "type": "object",
                     "properties": {
                         "fact_type": {"type": "string", "enum": ["preference", "environment", "identity"], "description": "只看某类型（可选，缺省全部）"},
+                    },
+                },
+            },
+        }, {
+            "type": "function",
+            "function": {
+                "name": "profile_audit",
+                "description": (
+                    "用户画像审计/清理（路线图 1.5）。action=list：列出全部画像条目+噪音嫌疑"
+                    "标记（suspect+原因）+统计，用于可见复盘；action=delete：删除画像条目。"
+                    "⚠️ delete 是数据删除操作：必须用户明确要求清理后才可带 confirm=true 执行，"
+                    "禁止擅自清库；confirm 缺省/false 时只返回删除预览不落库。删除范围用 "
+                    "pref_ids/keys/fact_type/only_suspect 至少一项指定，禁止无条件清空。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": {"type": "string", "enum": ["list", "delete"], "description": "list=审计可见（默认）；delete=删除条目"},
+                        "only_suspect": {"type": "boolean", "description": "只看/只删噪音嫌疑条目（默认false）"},
+                        "pref_ids": {"type": "array", "items": {"type": "string"}, "description": "按 pref_id 精确删除（action=delete）"},
+                        "keys": {"type": "array", "items": {"type": "string"}, "description": "按 key 精确删除（action=delete）"},
+                        "fact_type": {"type": "string", "enum": ["preference", "environment", "identity"], "description": "按类型过滤（action=delete）"},
+                        "confirm": {"type": "boolean", "description": "删除确认。必须用户明确要求后才传true；false/缺省=仅预览"},
                     },
                 },
             },
@@ -2795,10 +2860,12 @@ You can send files to the user natively: to deliver a file, write a brief confir
                                 te = self._tool_error_handler.handle_error(
                                     session_id, func_name, e, func_args)
                                 result = te.to_model_message()
-                        elif func_name in ("profile_record", "profile_read"):
-                            # ── 用户画像（路线图 1.4：偏好/环境事实/身份）──
+                        elif func_name in ("profile_record", "profile_read", "profile_audit"):
+                            # ── 用户画像（路线图 1.4/1.5：偏好/环境事实/身份+审计）──
                             try:
-                                if func_name == "profile_record":
+                                if func_name == "profile_audit":
+                                    result = self._profile_audit_dispatch(func_args)
+                                elif func_name == "profile_record":
                                     _p_ev = str(func_args.get("evidence", "") or "").strip()
                                     _ok, result = self._pref_learner.record_fact(
                                         fact_type=func_args.get("fact_type", ""),

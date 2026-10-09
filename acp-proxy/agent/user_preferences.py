@@ -331,6 +331,148 @@ class UserPreferenceLearner:
             "by_category": {c[0]: c[1] for c in by_category},
         }
 
+    # ── 画像审计/清理（路线图 1.5）────────────────────────────
+    # 噪音识别是启发式建议（suspect+reasons），最终取舍交用户；删除必须显式
+    # confirm=true（=用户已明确要求），防 agent 擅自清库。
+
+    #: 疑似任务请求/问句的动词前缀与句尾特征（旧裸"我"模式把任务句整句存成偏好）
+    _SUSPECT_VERBS = (
+        "写一个", "写个", "写一份", "做一个", "做个", "帮我", "麻烦", "分析",
+        "生成", "修复", "查一下", "查下", "查询", "告诉我", "展现", "对比",
+        "解释", "实现", "设计", "创建", "删除", "修改", "测试", "运行",
+        "安装", "总结", "翻译", "计算", "说一下", "给我说", "想让", "打算",
+        "请问", "怎么", "为什么", "如何", "是不是", "对不对", "继续", "新建",
+    )
+
+    def audit_reasons(self, row: dict) -> list[str]:
+        """单条画像的噪音嫌疑判定（多规则叠加，返回原因列表；空=无嫌疑）。"""
+        reasons: list[str] = []
+        key = str(row.get("key", ""))
+        value = str(row.get("value", ""))
+        source = str(row.get("source", ""))
+
+        # 规则1：key 是 value 的前缀截断（旧 _extract_key=text[:20] 特征）
+        truncated = bool(key) and value.startswith(key)
+        if truncated:
+            reasons.append("key由value截断生成（旧裸\"我\"模式特征，非真实主题词）")
+        # 规则2/3 仅在截断特征成立时叠加——record_fact 记录的规范条目
+        # （语义key+事实value）不受句式启发式误伤（如 value=\"测试驱动开发\"）
+        if truncated:
+            # 规则2：value 像任务请求/问句而非事实陈述
+            if any(value.startswith(v) for v in self._SUSPECT_VERBS):
+                reasons.append("value像任务请求/问句，不是用户事实")
+            if value.endswith(("？", "?", "呢", "呗", "吧")):
+                reasons.append("value以疑问/语气词结尾，不是事实陈述")
+            # 规则3：explicit_negative 存储时丢了"不要/别"前缀，注入时语义反转
+            if source == "explicit_negative":
+                reasons.append("否定偏好丢失\"不要/别\"前缀，注入画像时语义反转")
+        return reasons
+
+    def audit_entries(self, only_suspect: bool = False) -> dict:
+        """画像审计视图（profile_audit 工具 action=list）。
+
+        返回全部条目 + 每条 suspect/原因 + 汇总统计，供用户/agent 可见复盘。
+        """
+        prefs = self.get_preferences(min_confidence=0.0)
+        entries = []
+        for p in prefs:
+            reasons = self.audit_reasons(p)
+            entries.append({
+                "pref_id": p["pref_id"],
+                "fact_type": self._type_of(p),
+                "category": p["category"],
+                "key": p["key"],
+                "value": p["value"],
+                "confidence": round(float(p["confidence"]), 2),
+                "source": p["source"],
+                "use_count": int(p.get("use_count", 0)),
+                "updated_at": p.get("updated_at", 0),
+                "suspect": bool(reasons),
+                "reasons": reasons,
+            })
+        suspect_count = sum(1 for e in entries if e["suspect"])
+        if only_suspect:
+            entries = [e for e in entries if e["suspect"]]
+        return {
+            "total": len(prefs),
+            "suspect_count": suspect_count,
+            "clean_count": len(prefs) - suspect_count,
+            "entries": entries,
+        }
+
+    @classmethod
+    def _type_of(cls, row: dict) -> str:
+        """单条归入画像三类型（与 _filter_by_type 同语义）。"""
+        cat = row.get("category", "")
+        if cat == "environment":
+            return "environment"
+        if cat == "identity":
+            return "identity"
+        return "preference"
+
+    def delete_facts(
+        self,
+        pref_ids: Optional[list[str]] = None,
+        keys: Optional[list[str]] = None,
+        fact_type: str = "",
+        only_suspect: bool = False,
+        confirm: bool = False,
+    ) -> tuple[bool, str]:
+        """画像条目删除（profile_audit 工具 action=delete）。
+
+        ⚠️ 数据删除操作：必须用户明确要求后才可带 confirm=true 执行。
+        confirm=false 时只返回将删除的预览，绝不落库。
+        """
+        pref_ids = [str(x) for x in (pref_ids or []) if str(x).strip()]
+        keys = [str(x).strip() for x in (keys or []) if str(x).strip()]
+        ft = (fact_type or "").strip().lower()
+        if ft and ft not in self.FACT_TYPES:
+            return False, f"错误: fact_type 必须是 {list(self.FACT_TYPES)} 之一，收到: {fact_type!r}"
+        if not pref_ids and not keys and not ft and not only_suspect:
+            return False, ("错误: 至少给一个删除范围（pref_ids / keys / fact_type / "
+                           "only_suspect），禁止无条件清空画像库")
+
+        # 先取全量再按条件过滤（与 audit 同一套 suspect 判定）
+        matched: list[dict] = []
+        for p in self.get_preferences(min_confidence=0.0):
+            if pref_ids and p["pref_id"] not in pref_ids:
+                continue
+            if keys and p["key"] not in keys:
+                continue
+            if ft and self._type_of(p) != ft:
+                continue
+            if only_suspect and not self.audit_reasons(p):
+                continue
+            matched.append(p)
+
+        if not matched:
+            return True, "无匹配条目，未删除任何数据。"
+
+        preview_lines = [
+            f"- {p['pref_id']} [{self._type_of(p)}] {p['key']} = {p['value'][:60]}"
+            for p in matched[:30]
+        ]
+        if len(matched) > 30:
+            preview_lines.append(f"… 共 {len(matched)} 条")
+
+        if not confirm:
+            return False, (
+                f"⚠️ 删除未执行（预览）：将删除 {len(matched)} 条画像\n"
+                + "\n".join(preview_lines)
+                + "\n\n数据删除需用户明确确认；确认后请带 confirm=true 再次调用 profile_audit(action=delete)。"
+            )
+
+        ids = [p["pref_id"] for p in matched]
+        with sqlite3.connect(self.db_path) as conn:
+            conn.executemany(
+                "DELETE FROM preferences WHERE pref_id = ?", [(i,) for i in ids]
+            )
+            conn.commit()
+        logger.info(f"[profile] audit delete: {len(ids)} entries removed")
+        return True, (
+            f"✅ 已删除 {len(ids)} 条画像\n" + "\n".join(preview_lines)
+        )
+
     def _extract_key(self, text: str) -> str:
         """从文本中提取偏好key"""
         # 简单实现：取前20个字符作为key

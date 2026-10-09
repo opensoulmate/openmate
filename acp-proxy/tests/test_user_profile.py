@@ -158,7 +158,7 @@ def test_wiring_tools_registered_in_builtin_tools():
 
 def test_wiring_main_dispatch_branch_executes_profile_tools():
     src = _agent_src()
-    assert 'elif func_name in ("profile_record", "profile_read"):' in src
+    assert 'elif func_name in ("profile_record", "profile_read", "profile_audit"):' in src
     assert "self._pref_learner.record_fact(" in src
     assert "self._pref_learner.get_profile_summary(" in src
 
@@ -169,7 +169,7 @@ def test_wiring_code_mode_dispatch_includes_profile_and_memory():
     cm_start = src.index("async def _code_mode_tool_call")
     cm_end = src.index("async def _traj_record_round")
     cm_src = src[cm_start:cm_end]
-    assert 'if func_name in ("profile_record", "profile_read"):' in cm_src
+    assert 'if func_name in ("profile_record", "profile_read", "profile_audit"):' in cm_src
     assert "self._pref_learner.record_fact(" in cm_src
     assert 'if func_name in ("memory_read", "memory_write", "memory_append"):' in cm_src
     assert "self._persistent_memory.read(" in cm_src
