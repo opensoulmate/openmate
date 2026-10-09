@@ -14,6 +14,7 @@ import logging
 import os
 import re
 import sys
+import time
 from uuid import UUID
 
 import jwt
@@ -92,6 +93,30 @@ def _extract_acp_session_id(parsed: dict, session_new_id) -> str | None:
     if not isinstance(result, dict):
         return None
     return result.get("sessionId") or result.get("session_id") or None
+
+
+# ───会话级常驻子进程注册表（2026-10-09 观察窗解耦）───
+# 语义：生成任务归系统生命周期，页面只是观察窗。WS断开=摘除观察窗，子进程
+# 继续在后台生成并落库；新WS连同一会话=接回观察窗，流式继续。系统没退出
+# 就不中断会话；空闲静默超时才由回收器兜底（生成中的任务持续有输出，不会误杀）。
+_LIVE: dict[str, dict] = {}
+_DETACH_TTL = 30 * 60  # 观察窗摘除后，输出静默超过30分钟才回收
+
+
+async def _reap_detached(reg_key: str, entry: dict) -> None:
+    """兜底回收：已摘窗且输出静默超TTL的子进程才结束；仍在流动则顺延。"""
+    await asyncio.sleep(_DETACH_TTL)
+    try:
+        proc = entry.get("proc")
+        if entry.get("ws") is not None or proc is None or proc.returncode is not None:
+            return  # 已接回观察窗 / 已自然结束
+        if time.time() - float(entry.get("last") or 0) < _DETACH_TTL:
+            asyncio.create_task(_reap_detached(reg_key, entry))  # 仍在输出，顺延检查
+            return
+        logger.info(f"[ACP] reap idle detached subprocess pid={proc.pid} key={reg_key}")
+        proc.terminate()
+    except Exception as e:
+        logger.debug(f"[ACP] reap failed (非致命): {e}")
 
 
 async def ws_acp_endpoint(client_ws: WebSocket):
@@ -216,10 +241,27 @@ async def ws_acp_endpoint(client_ws: WebSocket):
             logger.warning(f"[ACP] relay trajectory observer init failed (非致命): {e}")
 
     # 启动Agent子进程（Hermes需要用pty模式，因为hermes acp的asyncio不支持非TTY stdin）
+    # 同一会话已有后台子进程 → 接回观察窗，不重复起进程（防双生成器）
+    _key_client = ((session_msg or {}).get("params") or {}).get("_meta", {}).get("session_id") \
+        or client_ws.query_params.get("sessionId") or ""
+    reg_key = f"{agent_id}:{_key_client}" if _key_client else None
+    entry = None
+    if reg_key and (e := _LIVE.get(reg_key)) is not None and e["proc"].returncode is None:
+        entry = e
+    reattached = entry is not None
     proc = None
     use_pty = agent_id == "hermes"
+    master_fd = None
+    if reattached:
+        proc = entry["proc"]
+        use_pty = entry["use_pty"]
+        master_fd = entry.get("master_fd")
+        entry["ws"] = client_ws
+        logger.info(f"[ACP] reattach: 会话已有后台子进程 (pid={proc.pid}), 接回观察窗")
     try:
-        if use_pty:
+        if reattached:
+            logger.info(f"[ACP] reuse detached subprocess (pid={proc.pid})")
+        elif use_pty:
             import pty, termios, tty as tty_mod
             master_fd, slave_fd = pty.openpty()
             # 禁用 echo 和行缓冲，防止输入被回显到 stdout
@@ -265,6 +307,15 @@ async def ws_acp_endpoint(client_ws: WebSocket):
         await _send_acp(client_ws, {"jsonrpc": "2.0", "id": session_msg.get("id"), "error": {"code": -32603, "message": f"Agent {agent_id} unavailable: {e}"}})
         await client_ws.close()
         return
+
+    if entry is None:
+        entry = {"proc": proc, "use_pty": use_pty,
+                 "master_fd": master_fd if use_pty else None,
+                 "ws": client_ws, "last": time.time(), "keys": set()}
+    if reg_key:
+        entry["keys"].add(reg_key)
+        _LIVE[reg_key] = entry
+    keep_running = False
 
     # 转发所有缓冲消息到子进程（initialize + session/new）
     # 注意：子进程（ACP SDK）期望 initialize params 里有 protocolVersion
@@ -339,13 +390,10 @@ async def ws_acp_endpoint(client_ws: WebSocket):
         except Exception as e:
             logger.info(f"[{user_id}] ws_to_stdin ERROR: {e}")
         finally:
-            try:
-                if use_pty:
-                    os.close(master_fd)
-                else:
-                    proc.stdin.close()
-            except Exception:
-                pass
+            # 观察窗解耦（2026-10-09）：WS断开≠会话终止——绝不能在这里关子进程的
+            # stdin/pty，agent收到EOF会立刻自杀（实测：断连瞬间进程退出、生成全丢）。
+            # 子进程生命周期由 _LIVE 注册表 + _reap_detached 空闲兜底管理。
+            pass
 
     # ANSI 转义码清理正则
     ansi_escape = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?\x07|\r')
@@ -377,6 +425,22 @@ async def ws_acp_endpoint(client_ws: WebSocket):
             traj_relay.observe_agent(parsed)
         await ws.send_text(msg)
 
+    async def _pump_line(msg: str, init_ids: set, agent_id: str, entry: dict):
+        """输出泵单行处理：投递到当前观察窗（entry["ws"]）；窗不在只排空不投递。
+        投递失败不断排空（管道不堵塞，后台生成不中断）。"""
+        entry["last"] = time.time()
+        _sid = acp_state.get("acp_sid")
+        if _sid and _sid not in entry["keys"]:
+            entry["keys"].add(_sid)
+            _LIVE[f"{agent_id}:{_sid}"] = entry
+        ws_target = entry.get("ws")
+        if ws_target is None:
+            return  # 观察窗已摘除：继续排空
+        try:
+            await _process_line(msg, init_ids, agent_id, ws_target)
+        except Exception as pe:
+            logger.debug(f"[ACP] pump deliver failed (忽略，继续排空): {pe}")
+
     async def stdout_to_ws():
         """subprocess stdout → WebSocket（过滤掉 subprocess 的 initialize 响应）"""
         # 只跟踪 initialize 的 request id（不包括 session/new 等其他 buffered 消息）
@@ -402,14 +466,14 @@ async def ws_acp_endpoint(client_ws: WebSocket):
                         line, line_buf = line_buf.split("\n", 1)
                         msg = line.strip()
                         if msg:
-                            await _process_line(msg, init_ids, agent_id, client_ws)
+                            await _pump_line(msg, init_ids, agent_id, entry)
                 else:
                     line = await proc.stdout.readline()
                     if not line:
                         break
                     msg = line.decode().strip()
                     if msg:
-                        await _process_line(msg, init_ids, agent_id, client_ws)
+                        await _pump_line(msg, init_ids, agent_id, entry)
         except (WebSocketDisconnect, ConnectionError):
             pass
         except Exception as e:
@@ -426,10 +490,23 @@ async def ws_acp_endpoint(client_ws: WebSocket):
         except Exception:
             pass
 
+    # 接回观察窗：输出泵（stdout_to_ws/stderr_drain）仍在原处理器里常驻运行，
+    # 这里只跑本WS的输入泵；WS断开同样只是摘窗。
+    if reattached:
+        try:
+            await ws_to_stdin()
+        except Exception:
+            pass
+        entry["ws"] = None
+        keep_running = True
+        logger.info(f"[ACP] WS detached (reattach), subprocess keeps running (pid={proc.pid})")
+        if reg_key:
+            asyncio.create_task(_reap_detached(reg_key, entry))
+
     # 主循环：子进程退出后如果WebSocket还活着，用同一ACP session_id重启
     max_restarts = 3
     restart_count = 0
-    while True:
+    while not reattached:
         t1 = asyncio.create_task(ws_to_stdin())
         t2 = asyncio.create_task(stdout_to_ws())
         t3 = asyncio.create_task(stderr_drain())
@@ -441,18 +518,15 @@ async def ws_acp_endpoint(client_ws: WebSocket):
             ws_disconnected = t1 in done and not t2.done()
 
             if ws_disconnected:
-                # WebSocket断开但子进程还在跑 — 给宽限期完成当前工作
-                logger.info(f"[ACP] WebSocket disconnected, giving subprocess 30s grace period")
-                try:
-                    await asyncio.wait_for(asyncio.shield(t2), timeout=30)
-                    logger.info(f"[ACP] subprocess finished naturally during grace period")
-                except asyncio.TimeoutError:
-                    logger.warning(f"[ACP] grace period expired, killing subprocess")
-                except Exception:
-                    pass
-                for t in pending:
-                    t.cancel()
-                break  # WebSocket已断开，退出主循环
+                # 观察窗摘除：页面切走≠会话终止（系统没退出就不中断会话）。
+                # 子进程继续在后台生成并落库；t2/t3输出泵继续运行（无窗只排空）；
+                # 空闲静默由 _reap_detached 兜底回收。
+                logger.info(f"[ACP] WS detached; subprocess keeps running (pid={proc.pid}, key={reg_key})")
+                entry["ws"] = None
+                keep_running = True
+                if reg_key:
+                    asyncio.create_task(_reap_detached(reg_key, entry))
+                break  # 退出主循环；t2/t3在后台继续运行
 
             # 子进程退出但WebSocket还活着 — 重启子进程
             for t in pending:
@@ -519,11 +593,12 @@ async def ws_acp_endpoint(client_ws: WebSocket):
             logger.error(f"[ACP] restart loop error: {e}")
             break
 
-    # 最终清理
-    try:
-        t3.cancel()
-    except Exception:
-        pass
+    # 最终清理（keep_running=观察窗已摘但子进程仍活着：常驻泵继续运行，不取消）
+    if not keep_running:
+        try:
+            t3.cancel()
+        except Exception:
+            pass
     if relay_task is not None:
         relay_task.cancel()
     if traj_relay is not None:
@@ -532,14 +607,14 @@ async def ws_acp_endpoint(client_ws: WebSocket):
             await traj_relay.close()
         except Exception as e:
             logger.debug(f"[ACP] relay trajectory close failed (非致命): {e}")
-    if proc.returncode is None:
+    if proc.returncode is None and not keep_running:
         try:
             proc.terminate()
             await asyncio.wait_for(proc.wait(), timeout=5)
         except Exception:
             proc.kill()
     _end_sid = acp_state.get("acp_sid") or ""
-    if traj_recorder is not None and _end_sid:
+    if traj_recorder is not None and _end_sid and not keep_running:
         # session收口（04:20轮遗留#2销账）：连接结束=观察窗结束，trajectory
         # session翻completed（opensoul侧add_event自愈可翻回running）。
         # 顺序纪律：必须在traj_relay.close()（drain完回合事件）与proc死透

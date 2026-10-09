@@ -395,6 +395,62 @@ class SoulMateAgent:
             meta["session_source"] = source
         return json.dumps(meta, ensure_ascii=False)
 
+    @staticmethod
+    def _plan_visible_text(plan) -> str:
+        """任务管线可见文本：各已完成步骤的产出拼接（增量落库用）。"""
+        parts = []
+        for i, s in enumerate(getattr(plan, "steps", []) or []):
+            if getattr(s, "result", None):
+                parts.append(f"## 步骤{i + 1}：{getattr(s, 'description', '')}\n\n{s.result}")
+        return "\n\n".join(parts)
+
+    def _save_progress(self, session_id: str, text: str) -> None:
+        """增量落库：生成中的回复按当前内容存一条 assistant 行（首次插入复用 _save_message，
+        后续原地更新同一行）。生成中途被杀（切页/断连/取消）已有内容不丢；
+        正常走完由 _save_message_final 接管同一行写入最终回复。"""
+        if not text or not text.strip():
+            return
+        sess = self.sessions.get(session_id)
+        if sess is None:
+            return
+        try:
+            pid = sess.get("_progress_id")
+            if pid:
+                db = self._get_db()
+                try:
+                    db.execute("UPDATE agent_messages SET content=? WHERE id=?", (text, pid))
+                    db.commit()
+                finally:
+                    db.close()
+            else:
+                pid = self._save_message(session_id, "assistant", text, metadata=json.dumps({"progress": True}))
+                if pid:
+                    sess["_progress_id"] = pid
+        except Exception as e:
+            logger.warning(f"[progress] 增量落库失败: {e}")
+
+    def _save_message_final(self, session_id: str, text: str, metadata: str | None = None) -> None:
+        """最终回复落库：若存在增量落库行则原地接管（更新为完整内容，避免重复行），否则正常插入。"""
+        sess = self.sessions.get(session_id) or {}
+        pid = sess.pop("_progress_id", None)
+        if pid:
+            try:
+                db = self._get_db()
+                try:
+                    db.execute(
+                        "UPDATE agent_messages SET content=?, metadata=? WHERE id=?",
+                        (text, self._merge_session_meta(session_id, metadata), pid),
+                    )
+                    db.commit()
+                finally:
+                    db.close()
+                logger.info(f"[progress] 最终回复接管增量行 id={pid}")
+                return
+            except Exception as e:
+                logger.warning(f"[progress] 接管增量行失败，回退新插: {e}")
+        self._save_message(session_id, "assistant", text, metadata=metadata)
+
+
     def _save_message(
         self,
         session_id: str,
@@ -3817,6 +3873,9 @@ You can send files to the user natively: to deliver a file, write a brief confir
                     await self._traj_recorder.end_llm_span(
                         session_id, _traj_seg, status="error")
 
+                # 增量落库：每步执行完即存档已生成内容（切页/断连/取消不丢已生成部分）
+                self._save_progress(session_id, self._plan_visible_text(plan))
+
                 # 自省校验
                 reflection = await self._self_reflector.reflect(step)
                 step.reflection = reflection.get("summary", "")
@@ -4075,7 +4134,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
         _marker_json = memory_marker.metadata_json(
             memory_marker.from_recall(sources=recalled_ids, texts=recalled_texts)
         )
-        self._save_message(session_id, "assistant", full_response, metadata=_marker_json)
+        self._save_message_final(session_id, full_response, metadata=_marker_json)
         logger.info(f"Response [{session_id}]: {full_response[:100]}")
         logger.info(f"[prompt] done, response_len={len(full_response)}, tools={tool_calls_log}")
 
