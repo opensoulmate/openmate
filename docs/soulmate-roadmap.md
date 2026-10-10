@@ -268,11 +268,19 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 - **R4 调研单点依赖（#4）**：web_search 无后端可用性兜底（SearXNG 未启动=归零）。
 
 ## 阶段8 · 验收缺口修复（下一批切片，按优先级）
-- [ ] ⚡8.1 InfectionGate 误杀修复（P0 用户可见缺陷，先于一切）：①审计门必须拿到本回合
+- [x] ⚡8.1 InfectionGate 误杀修复（P0 用户可见缺陷，先于一切）：①审计门必须拿到本回合
   用户原始 prompt（修上下文传参断链，验收断言=journal 不再出现"用户请求缺失/为空"）
   ②用户明确点名的动作（prompt 明文要求的工具/路径/内容）给语义豁免——防护看用户意图
   而非模式匹配（禁一刀切白名单守卫，用户反感守卫类防御）③无人值守路径 clarify 不得
   升级 terminate（放行+留痕或按模式配置）。验收=重跑 acceptance_benchmark.py 开发/记忆两类。
+  ——周期#31实装：根因实证=任务管线首试/重试两个 _run_llm_with_tools 调用点漏传
+  user_text→审计门拿到"## 用户请求（未提供）"→用户明文点名的动作被误判注入。
+  ①两调用点补传 user_text + check() 空 user_text 留痕告警；②溯源豁免（签名命中文本
+  逐字来自用户请求=用户自己写的内容豁免，夹带内容照常拦）+JUDGE_PROMPT 补
+  "用户意图优先/用户请求缺失不构成拦截理由"两条判据；③无人值守 clarify 超限
+  放行+留痕（source=clarify_exhausted_pass+轨迹账本 infection:pass_with_trace），
+  有人值守保持 terminate；INFECTION_CLARIFY_EXHAUSTED=terminate|pass_with_trace
+  按模式配置。真实验收=开发/记忆两类 2/2 ✅（详见周期#31日志）
 - [ ] ⚡8.2 短路合成报告治理：任务执行报告/自检结论必须以工具执行证据为前提（工具被拦时
   报"被拦截+原因"，禁报"完成"）；锁定 run2 1.38s 秒合成"任务执行报告"的短路路径。
 - [ ] 8.3 长回合治理：schedule 3 工具链 >240s 无终态根因（LLM 慢 or dispatch 卡死）+
@@ -280,7 +288,17 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 - [ ] 8.4 调研兜底：web_search 后端可用性探测 + SearXNG 未启动时显式降级路径（替代后端
   或启动文档化），禁静默归零。
 - [ ] 8.5 验收复测：多渠道/定时两类（harness 已修 sessionId 过滤）；每完成一个 ⚡项即
-  重跑对应类别对标。
+  重跑对应类别对标。⚠️复测铁律（周期#31 实证）：验收 prompt 必须带唯一防缓存标记——
+  semantic-cache EXACT 命中会回放旧响应（假跑 0.98s 级），且文件存在性验证会被
+  上次被打断轮的陈旧产物骗过（假阳性）——验证前先清理陈旧产物。
+- [ ] ⚡8.6 双链分叉事故处置（见周期#30日志）：main(1b63f2ac) 与 evo/exp-1791613018
+  (d431bcc0) 在 6.2 处分叉成两套实现（skill_loader vs skill_matcher），#25-#29 只在
+  evo/exp 链——链合并/取舍决策涉及取舍**待用户拍板**。周期#31 已做非破坏处置准备：
+  两实现对比（main skill_loader 248行13函数：步骤级 match_for_step/gene 推荐载荷
+  render_recommended/预算截断自报/stats 观测 vs evo 链 skill_matcher 192行：match/
+  render_bodies，已被 6.3-7.4 依赖）+合并建议=以 evo 链为主干（唯一含 #25-#29）、
+  移植 skill_loader 独有增量、main 快进到合并结果（恢复生产树全特性）；8.1 修复已
+  双链双落地（98d6025f main / 9d17ebdc evo 链）零丢失。
 - [ ] 后续（非紧急，另案）：微信 iLink 真实传输 4.1b（接入形态待用户拍板，绝不双消费
   hermes 会话）、调度/监控常驻托管（3.1 遗留）、ASR 语音输入（多模态路由另案）、文生图
   大模型 API、AI 群组真实成员端到端。
@@ -311,3 +329,4 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 [2026-10-10 13:25] 周期#22 | ⚡0.2紧急插队·首条消息提速：新增agent/prompt_prefetch.py（PromptPrefetcher：上下文源并行预取asyncio.gather+TTL缓存120s可配SOULMATE_PREFETCH_TTL_S+旁路纪律收集器/prefill失败只计数绝不冒泡绝不阻塞+take()超时回退现场计算（行为与预热前逐字一致）+可观测stats计数）+soulmate_agent四点接线（_prompt_prefetcher lazy-init收集器=pref_context/memory_md/improvement三源+mcp_tools暖60s工具缓存、_prefill_warm微小预热LLM请求同系统提示前缀+同工具面首chunk即断开省输出token不进会话历史不落库、new_session创建路径_schedule_prefetch fire-and-forget、_run_llm_with_tools三源消费缓存）+基础系统提示抽_build_base_system_prompt单一真源（prefill与主链路逐字同前缀=暖前缀缓存前提） | ✅ | 13193cfa | 0.2勾选（紧急插队清空）+0.1补勾（周期#12实装后复选框漏勾）；tests/test_prompt_prefetch.py 15/15（并行barrier实证同步/异步混跑、TTL fake clock命中与过期、失败隔离、prefill同前缀+不进缓存、schedule fire-and-forget、接线护栏new_session调度/主链路消费/同前缀真源/预热不落库）+回归207全过（plan/tool_judge/code_mode/tool_output/self_verify/cache_replay/message_tree/session_lifecycle/persistent_memory/stream_progress/stale_session_recovery/ws_session_recovery）+py_compile+导入烟测；真实验收=WS用户路径（initialize→session/new→模拟打字8s→首条消息）首字回复 6.00s≤8s达标（此前约33s），prompt全程8.21s，journal实证[prefetch] warm scheduled→warm done parts=[4源] prefill=1无失败；⚠️诚实边界：单次实测样本（同机低负载），27s模型大首包改善幅度依赖服务端前缀缓存生效程度，建议用户实际使用体感复核；下周期做6.1技能保存（把成功流程写成SKILL.md含触发条件/步骤/坑）
 [2026-10-10 13:52] 周期#23 | 6.1技能保存（成功流程写成SKILL.md含触发条件/步骤/坑）：新增agent/skill_saver.py（SkillSaver确定性渲染标准SKILL.md=frontmatter name/description/category/triggers+固定分区触发条件/步骤/坑/验证与.agents/skills同构；save_flow校验显式拒绝空名/空描述/零触发/零步骤+None条目不str()蒙混成"None"（本轮测试实测暴露的真缺口，已修_as_list）+同名默认不覆盖（exists提示禁静默覆盖既有技能）+overwrite=true revision递增原子替换（tmp+os.replace不留半截文件）；slugify保留CJK；可写库~/.openmate/skill-library单一写入源）+skill_manager saved层（scan_saved_skills复用标准层解析但read_only=False/saved:<slug>/revision透传+60s TTL缓存+list_skills合并=保存即被search_skills命中进注入面；update/delete/record_usage拒绝saved条目=单写入者纪律）+soulmate_agent四点接线（skill_save工具定义+主dispatch+_skill_save_dispatch共用入口lazy-init+code-mode批内+系统提示清单；保存后强刷saved层缓存不被60s TTL藏住） | ✅ | 979a1b1a | 6.1勾选；tests/test_skill_saver.py 22/22（渲染roundtrip/校验7例/去重守卫+revision递增/CJK slug/多行frontmatter/pitfalls可选/saved层检索命中+TTL强刷/单写入者守卫/接线护栏+__new__真实dispatch烟测四态）+回归311全过（skill_standard_layer+skill_saver+gene_extract+plan/steering/token链159 + persistent_memory/experience/code_mode/tool_output/message/subagent/group/fencing链152）+py_compile+SoulMateAgent导入烟测+真实机器烟测（生产SkillManager实例search_skills命中saved条目排std技能之前、read_only=False revision=1，烟测产物已清理）；⚠️诚实边界：保存→检索→注入的大半链路经saved层合并已通，但"按任务自动匹配注入"的真实命中率与6.3技能进化（执行结果反哺修正）待后续周期实测；下周期做6.2技能检索与加载（按任务自动匹配并注入）
 [2026-10-10 14:45] 周期#24 | 6.2技能检索与加载（按任务自动匹配并注入）：新增agent/skill_loader.py（SkillLoader确定性检索+加载一体——match_for_task集中gate语义（短消息≤10字不匹配/文件发送请求跳过/只认触发词命中忽略纯描述匹配，pitfall 30语义逐条保留）+match_reason可观测、match_for_step步骤级重新检索+与回合级合并去重（步骤命中在前）、render_local_section注入段字节契约与历史内联实现逐字节一致（token归因锁定）+预算截断自报SOULMATE_SKILL_BUDGET_TOKENS默认1500、render_recommended gene推荐载荷内容加载（描述/模板/成功率/相关性字段容缺）+stats计数）+soulmate_agent四点接线（_skill_loader lazy-init/注入段/推荐块/管线首试+重试step_skills）。修三处真实缺口：①gene推荐只注入名字描述模板成败率全丢②管线只按用户原话匹配一次③注入无预算 | ✅ | 597e2f05 | 6.2勾选；tests/test_skill_loader.py 26/26（gate语义6例/步骤级合并去重5例/字节契约+预算7例/推荐加载5例/观测+接线护栏+__new__烟测3例）+回归211全过（token_attribution_wiring字节契约19+skill_standard_layer 34+skill_saver 22+plan/tool/code_mode/self_verify/记忆链110）+py_compile；⚠️evo并发git事故实录：evo周期内pre-branch stash+checkout（stash@{0}=evo-pre-branch-1791613018）把soulmate_agent.py未commit接线补丁收走（工作树回HEAD），按铁律禁pop evo stash/禁主树checkout，改git worktree add /tmp/wt62 main隔离树git stash show -p提取补丁重放+新文件拷入+测试+commit后worktree remove——补丁6接线点全部找回零丢失；⚠️诚实边界：gene /skill/recommend响应映射（opensoul gene.py）暂不含code_template字段——render_recommended已字段容缺支持模板加载，待opensoul端点扩字段后自动生效（本次未动opensoul未重启8090）；技能命中率真实效果待用户实际使用验证；下周期做6.3技能进化（用执行结果反哺修正技能内容）
+[2026-10-10 18:45] 周期#31（main镜像；#25-#30 日志在真实工作链 evo/exp-1791613018） | ⚡8.1 InfectionGate误杀修复（验收R1）+⚡8.6双链处置准备：根因实证=任务管线首试/重试两个_run_llm_with_tools调用点漏传user_text→审计门"## 用户请求（未提供）"→用户明文点名的write_file/memory_append被误判注入（验收#1/#9死因）；修复①管线两调用点补传user_text+check()空user_text留痕告警②用户明文内容溯源豁免（签名命中文本逐字来自用户请求=用户自己写的内容豁免，夹带照常拦）+JUDGE_PROMPT补"用户意图优先/请求缺失不构成拦截理由"③无人值守clarify超限放行+留痕（clarify_exhausted_pass+infection:pass_with_trace），有人值守保持terminate，INFECTION_CLARIFY_EXHAUSTED按模式配置 | ✅ | 98d6025f(main)/9d17ebdc(evo链cherry-pick) | tests/test_infection_guard.py 47/47（新增8.1三组17例+既有terminate用例改有人值守前提）+回归252全过+evo链worktree复测47/47+149全过；真实验收=acceptance_benchmark开发/记忆 2/2✅（83s/91s真实LLM+工具，dev_hello.py+MEMORY.md服务端副作用实证，journal零infection-guard拦截零空user_text告警）；⚠️复测发现semantic-cache污染验收（v1两回合Cache EXACT命中回放旧响应假跑+记忆假阳性=周期#30被杀轮残留stale marker）→8.5复测铁律：prompt带唯一防缓存标记+验证前清陈旧产物；⚠️诚实边界：R2短路合成报告（缓存回放里仍在）归⚡8.2待做；⚡8.6最终取舍待用户拍板（对比+建议已写入8.6条目）
