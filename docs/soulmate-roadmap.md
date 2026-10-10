@@ -410,12 +410,23 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 - [ ] 8.5c 验收发现遗留（周期#41 实证，优先级高）：
   ①回复风格：任务类回答尾部固定带"补做结果/逐项说明"元叙事（违反验收 prompt
   "简短回答一句话"，self_verify 补做把条件子句逐条复盘）——待治理；
-  ②可用性误报（**本日两次实证，最高优先**）：模型谎称工具"不在工具列表/运行时未注入"
+  ②✅可用性误报（**本日两次实证，最高优先**）——周期#42实装治理：模型谎称工具
+  "不在工具列表/运行时未注入"
   ——run-A 称"没有 web_search"（账本实证同回合已成功调用 web_search）、FINAL 轮
   发布类称"message_send 运行时未注入"并拒发（代码实证 builtin_tools 无条件装配+
   系统提示有清单，且下一回合同工具正常调用=间歇性模型行为非确定性缺失）。
-  治理方向=可用性声称对照工具账本/self._active_tool_names 确定性核验（8.2 延伸：
-  "说了≠做了"的镜像"做了说没做"），amend_response 同款降级修正；
+  治理=可用性声称对照工具账本/self._active_tool_names 确定性核验（8.2 延伸：
+  "说了≠做了"的镜像"做了/有，说没有"），amend_response 同款降级修正。
+  ——周期#42实装：report_evidence 增可用性声称抽取（registration/availability/
+  generic 三类正则+结果类宾语排除"没有 X 的结果"防误纠+词尾边界防排除词被回溯
+  绕过"terminal 输出"缩成"termina"）+assess_availability 两级判据（registration
+  =工具面真源 _active_tool_names 在册即证伪；availability=模糊声称仅"本回合真实
+  执行成功"证伪——被拦截的调用反向支持模型说法不更正；generic=有成功执行才证伪；
+  无真源无账本一律不更正）+amend_availability/availability_banner 前置更正声明
+  （原文保留可审计）+soulmate_agent 接线（证据治理后、自验前，真源=_active_tool_
+  names）；tests/test_tool_availability_claims.py 18例+回归167全过；⚠️诚实边界：
+  ①治理的是"说"侧（更正声明），模型拒做行为本身靠更正声明引导，未做强制重试
+  ②availability 类声称未试过就喊不可用的（在册但零执行）不武断更正（防误纠）
   ③InfectionGate 把模型自主 `bash ~/searxng-data/start.sh` 自愈环境判 infection:clarify
   （有人值守回合中断自愈链）——自愈类低危命令豁免语义待评估；
   ④SearXNG 常驻托管：本轮手动启动（bash ~/searxng-data/start.sh），无 systemd 托管
@@ -475,3 +486,4 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 [2026-10-10 22:55] 周期#40 | 8.5验收复测（多渠道/定时两类；⚡区0.1/0.2已完、8.6待用户拍板）：acceptance_benchmark.py增量改造三件套——①ACCEPT_CATEGORIES类别过滤（"每完成一个⚡项即重跑对应类别对标"能力落地，ACCEPT_CATEGORIES=定时,多渠道实测只跑2任务）②每运行注入唯一RUN_TAG防缓存标记进prompt（复测铁律①：semantic-cache EXACT命中回放旧响应假跑0.98s级）③setup()先cleanup()清陈旧产物（复测铁律②：上次被打断轮的accept_probe行/记忆标记会假阳性）+summary记run_tag/categories | ✅ | (本次提交) | 8.5勾选；真实复测2/2✅（tag=RETEST85_1791643501，真实WS用户路径session/new→session/prompt，每类独立session）：定时76.57s end_turn server_side（cron_tasks.db accept_probe行=1+journal实证schedule_task真实创建#3「accept_probe」interval:1h含持久化回执）、多渠道40.56s end_turn reply_assisted（journal实证wechat_route_list+message_send真实工具账本permission=allow"已发文本1块给微信peer「accept_peer」"，response_len=859）；非缓存假跑三证（延迟76s/40s≠0.98s短路形态、journal零semantic-cache回放、工具账本带真实result_preview）；Gate1 git diff三处改动落盘、Gate2 类别过滤/RUN_TAG/setup预清理均被本次真实运行走中（只跑2类+tag打印+预清理生效）、Gate3 2/2真实产出（DB行+journal工具账本）；测试产物复核清理归零（accept_probe行0）；py_compile过 | ⚠️诚实边界：每类单次样本（同机低负载）；多渠道verify为reply_assisted（微信通道loopback传输，真实iLink归4.1b待用户拍板）；8.6双链合并落地后建议全量10类复测；下周期做全量10类验收对标实测（harness已支持类别过滤，超时则分批5+5跑，结果写进路线图）并规划下一批切片（当前阶段1-7+⚡8.1-8.5全完，余项全为待用户拍板/另案）
 
 [2026-10-10 23:55] 周期#41 | 8.5b 全量10类验收对标实测（分批5+5+修复链+复测）：分批真实跑完10类（tag=FULL10_A/B）9/10当场过、调研类连环挖出4真根因逐修后转✅+全量单轮FINAL台面10/10但发布类经行归属取证为陈旧行假阳性（模型误报message_send"未注入"拒发，旧cleanup漏清agent_messages探针行）修复后真复测✅——修复五连：①report_evidence动作类判据补搜索/检索/抓取/爬取动词+_TOOL_NAMED_RE显式工具点名（5a8a16a3，根因：调研回合被判非执行类→semantic-cache 88% SEMANTIC命中回放旧误报，复测标记只防EXACT）②search_backend超时15s→30s SOULMATE_SEARCH_TIMEOUT_S可配+exit28措辞"响应超时…勿断言未启动"（0aab4f8c，根因：SearXNG冷查询实测20.0s>15s→curl exit 28误报"不可达"→模型误称"SearXNG未启动"）③verify_research语义收敛=剥心跳快照+主答区判自报（引号内引用不计）+须含被搜事实3.13+2024（ce1ec4c4/23fa4f94，根因：裸子串"不可用"判据被补做说明引用提示语/心跳粘连假阴性杀正确回答，全文regex打地鼠E/G/H三轮不收敛）④cleanup补清agent_messages探针行+verify_publish只认accept-pub-target投递行（89013b1a，复测铁律②漏网形态）⑤SearXNG手动启动（start.sh，20s冷聚合实证） | ✅ | 5a8a16a3/0aab4f8c/c6abf31e/23fa4f94/89013b1a | 8.5b勾选；tests：report_evidence+self_verify 35、search_backend+report_evidence 48、回归126（cache_replay/turn_outcome/output_guard/infection_guard/skill_evolution）全绿+verify判据7历史形态离线判别全对；真实验收=10类全有真实通过证据（开发59.95s/调试64.39s/运维23.14s/调研75.66s web_search真实执行答案2024-10-07/发布33.76s投递行真实落库/办公151.9s xlsx 4964B/定时116.32s cron_tasks.db行/多渠道53.87s工具账本/记忆63.16s MEMORY.md标记/协作61.66s subagent_runs双worker），journal工具账本permission=allow实证；⚠️诚实边界：调研/发布为修复后类别复测形态（非同一轮全量全绿），每类单样本同机低负载；新发现入8.5c待办5项（①回答尾部"补做结果/逐项说明"元叙事违反"简短一句话"②**可用性误报本日两次实证最高优先**：run-A谎称没有web_search（账本证同回合已调用）、FINAL轮谎称message_send未注入拒发（代码证无条件装配+下回合正常）→治理=可用性声称对照工具账本/_active_tool_names确定性核验③InfectionGate拦模型自启SearXNG自愈④SearXNG无常驻托管重启即丢⑤心跳帧混入harness回复采集）；下周期做8.5c-②可用性误报治理（工具面确定性核验+amend降级修正，用户可见缺陷最高优先）
+[2026-10-10 23:59] 周期#42 | 8.5c②可用性误报治理（"说了≠做了"的镜像"做了/有，说没有"）：report_evidence增可用性声称抽取find_availability_claims（registration/availability/generic三类正则，覆盖"没有X工具/X运行时未注入/X不在工具列表/X工具不可用/无法使用X/工具未注入"等实证形态；结果类宾语排除"没有X的结果"防误纠+词尾边界防排除词被正则回溯绕过）+assess_availability两级判据（registration=工具面真源_active_tool_names在册即证伪proof=registry；availability模糊声称仅本回合真实执行成功才证伪proof=executed——被拦截调用反向支持模型说法不更正；generic=有成功执行才证伪；无真源无账本一律不更正=宁漏纠不误纠）+amend_availability/availability_banner前置更正声明（原文保留可审计，列证伪依据）+soulmate_agent接线（8.2证据治理后、2.1自验前，真源=getattr(self,"_active_tool_names")） | ✅ | a02984e2 | Gate1 git diff 407行真实落盘+Gate2 grep接线点（assess_availability/banner/amend三调用+_active_tool_names真源传参）+Gate3 tests/test_tool_availability_claims.py 18/18（抽取7形态+结果宾语排除+注入词非工具语境排除+具名压制generic噪音+两级判据registry/executed/未知工具不纠/在册未试不纠/被拦不纠/generic/无真源不纠+banner措辞两态+接线护栏先证据后自验）+回归167全过（report_evidence/self_verify/tool_recovery/cache_replay/code_mode/plan_tool_ledger/degraded_spill/turn_lifecycle）+py_compile+SoulMateAgent导入烟测（__new__+_active_tool_names真实更正输出实证）；⚠️诚实边界：治理"说"侧更正声明，拒做行为本身未强制重试；同机单样本未跑真LLM回合（间歇性误报需用户实际使用观察）；下周期做8.5c-①回复风格元叙事治理
