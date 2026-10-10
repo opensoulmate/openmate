@@ -156,6 +156,10 @@ from agent.browser_automation import (  # 路线图7.1 浏览器自动化（CDP�
     BrowserAutomation,
     get_browser_automation as _get_browser_automation,
 )
+from agent.doc_generator import (  # 路线图7.2 文档生成（docx/pdf/xlsx）
+    DocGenerator,
+    get_doc_generator as _get_doc_generator,
+)
 from agent.writer_fence import SessionWriterFence, WriteAction
 from agent.tool_exec_fencing import FileFenceTimeout, file_fence
 from agent.steering import (
@@ -1384,6 +1388,9 @@ class SoulMateAgent:
             # 浏览器自动化（路线图 7.1）：批内同样可用（CDP 网络IO，需await）
             if func_name == "browser_act":
                 return await self._browser_dispatch(func_args)
+            # 文档生成（路线图 7.2）：批内同样可用（本地文件写+soffice子进程）
+            if func_name == "doc_generate":
+                return self._doc_dispatch(func_args, session_id)
             # kilocode #19 MCP resource三件套：批内同样可用（与主循环同款注入安全层）
             if func_name in MCP_RESOURCE_TOOL_NAMES:
                 return await self._call_mcp_resource_tool(func_name, func_args)
@@ -1986,6 +1993,32 @@ class SoulMateAgent:
         }
         return await browser.act(action, **kwargs)
 
+    def _doc_dispatch(self, func_args: dict, session_id: str = "") -> str:
+        """doc_generate 分发（路线图 7.2：文档生成 docx/pdf/xlsx）。
+
+        主循环与 code-mode 内层共用此入口（本地文件写 + soffice 子进程，
+        无需 await）。生成全确定性不走 LLM；校验/依赖/转换失败时
+        DocGenerator.generate 已把报因文本化（"[错误] …"），不抛穿主循环。
+        与 _browser_dispatch 同款 lazy-init（__new__ 裸实例零感知）。
+        """
+        gen = getattr(self, "_doc_generator", None)
+        if gen is None:
+            gen = _get_doc_generator()
+            self._doc_generator = gen
+        fmt = str(func_args.get("format", "") or "").strip().lower()
+        path = str(func_args.get("path", "") or "")
+        if fmt in ("docx", "pdf"):
+            return gen.generate(
+                fmt, path,
+                title=func_args.get("title", ""),
+                content=func_args.get("content"),
+                tables=func_args.get("tables"),
+            )
+        return gen.generate(
+            fmt, path,
+            sheets=func_args.get("sheets"),
+        )
+
     def _skill_save_dispatch(self, func_args: dict, session_id: str = "") -> str:
         """skill_save 分发（路线图 6.1：把成功流程写成 SKILL.md）。
 
@@ -2197,6 +2230,7 @@ ACP代理目录: {cwd}/acp-proxy（后端 Python 代码在此）
 - skill_save: 技能保存（把成功流程写成SKILL.md含触发条件/步骤/坑，存技能库供复用）。刚成功完成多步骤可复用任务、或用户要求"把XX流程保存为技能/记住怎么做"时使用；同名技能默认不覆盖（更新传 overwrite=true）。保存后同类任务命中触发词会自动加载该技能
 - skill_evolve: 技能进化（用执行结果反哺修正技能内容，saved技能库）。查看某技能待应用修正（执行中工具失败/需求遗漏反馈）→ action=pending；把修正合并进技能"坑"分区（revision递增+去重）→ action=apply；反馈统计→ action=stats。用户要求"更新/修正/进化某技能"或发现技能内容与实际执行不符时使用
 - browser_act: 浏览器自动化（CDP直连Chromium：打开网页/提取文本链接/点击/填字/截图/执行JS/关页）。需要操作网页（打开URL看内容、抓取页面文本或链接、点击按钮、填写表单、页面截图）时使用：action=open 打开URL、extract 提取（links=true 抓链接）、click 点击（selector或x+y，真实鼠标事件）、fill 填字（真实输入事件）、screenshot 截图（MEDIA标签发给用户）、eval 执行JS、tabs/close 标签页管理。⚠️ 浏览器未以远程调试模式运行时会显式报启动指引，如实告知用户
+- doc_generate: 文档生成（docx/pdf/xlsx，确定性）。需要生成 Word/PDF/Excel 文件时使用：format=docx（title+content段落+tables表格）、format=pdf（同docx内容，LibreOffice转换，中文可选中）、format=xlsx（sheets=[{{name,rows}}]多表数据）。成功结果带MEDIA标签可发给用户；失败显式报因（校验拒绝/依赖缺失），如实告知用户
 
 You can send files to the user natively: to deliver a file, write a brief confirmation message (e.g. "文件已发送，请查收"), then include MEDIA:/absolute/path/to/file on a new line. The gateway extracts the tag, strips it, and sends the file as a download card. Always write some text before the MEDIA: tag — never output a bare MEDIA: tag alone. Use search_files first if you don't know the exact path. Do NOT paste file contents into chat."""
 
@@ -3333,6 +3367,88 @@ You can send files to the user natively: to deliver a file, write a brief confir
         }]
         builtin_tools.extend(browser_act_tool)
 
+        # ── 文档生成工具（路线图 7.2）──────────────────────────
+        # docx/pdf/xlsx 确定性生成（python-docx/openpyxl + LibreOffice headless）。
+        doc_generate_tool = [{
+            "type": "function",
+            "function": {
+                "name": "doc_generate",
+                "description": (
+                    "文档生成（docx/pdf/xlsx，确定性）：format=docx 生成 Word 文档"
+                    "（title 标题可选 + content 段落列表/多行字符串 + tables 表格可选）；"
+                    "format=pdf 生成 PDF（同 docx 内容参数，LibreOffice headless 转换，"
+                    "中文可选中）；format=xlsx 生成 Excel（sheets=[{name, rows}] 多表行数据）。"
+                    "成功结果带 MEDIA 标签可把文件发给用户。⚠️ 失败会显式报因"
+                    "（格式/路径/内容校验拒绝、LibreOffice 不可用或转换失败），"
+                    "绝不静默；输出路径缺扩展名自动补，扩展名与格式不符显式拒绝"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "format": {
+                            "type": "string",
+                            "enum": ["docx", "pdf", "xlsx"],
+                            "description": "文档格式（必填）",
+                        },
+                        "path": {
+                            "type": "string",
+                            "description": "输出文件路径（必填，缺扩展名自动补；仅允许 $HOME 与 /tmp 下）",
+                        },
+                        "title": {
+                            "type": "string",
+                            "description": "文档标题（docx/pdf 可选）",
+                        },
+                        "content": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "段落列表（docx/pdf 用，每项一段；至少一段）",
+                        },
+                        "tables": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "headers": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                    },
+                                    "rows": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "array",
+                                            "items": {"type": "string"},
+                                        },
+                                    },
+                                },
+                                "required": ["headers", "rows"],
+                            },
+                            "description": "表格列表（docx/pdf 可选）",
+                        },
+                        "sheets": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {"type": "string"},
+                                    "rows": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "array",
+                                            "items": {},
+                                        },
+                                    },
+                                },
+                                "required": ["rows"],
+                            },
+                            "description": "xlsx 的工作表列表 [{name, rows}]，rows 为二维数组（数字/文本保型）",
+                        },
+                    },
+                    "required": ["format", "path"],
+                },
+            },
+        }]
+        builtin_tools.extend(doc_generate_tool)
+
         # 添加进化引擎工具（支持直接对象或HTTP API两种模式）
         evolution_tools = []
         has_evolution = self._evolution_engine is not None or hasattr(self, '_evolution_api_url')
@@ -4354,6 +4470,14 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             # ── 浏览器自动化（路线图 7.1）──────────────────────
                             try:
                                 result = await self._browser_dispatch(func_args, session_id)
+                            except Exception as e:
+                                te = self._tool_error_handler.handle_error(
+                                    session_id, func_name, e, func_args)
+                                result = te.to_model_message()
+                        elif func_name == "doc_generate":
+                            # ── 文档生成（路线图 7.2）──────────────────────────
+                            try:
+                                result = self._doc_dispatch(func_args, session_id)
                             except Exception as e:
                                 te = self._tool_error_handler.handle_error(
                                     session_id, func_name, e, func_args)
