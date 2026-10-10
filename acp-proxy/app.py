@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from proxy import get_acp_process
 from ws_chat import router as ws_router
 from ws_group import router as ws_group_router
-from ws_acp import ws_acp_endpoint
+from ws_acp import ws_acp_endpoint, agents_router
 from mcp.server import router as mcp_router
 from gateway.router import router as gateway_router
 from model_router import get_model_router
@@ -266,6 +266,7 @@ app.add_middleware(
 # 核心路由
 app.include_router(ws_router)
 app.include_router(ws_group_router)
+app.include_router(agents_router)
 app.include_router(mcp_router)
 app.include_router(gateway_router)
 app.include_router(skills_router)
