@@ -375,10 +375,20 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
   真实机器实证（SearXNG恰好未启动）：searxng❌不可达+bing✅0块（疑似反爬）→输出
   "⚠️未获得搜索结果…不足以断言无资料…启动方法start.sh"——旧实现同场景会报
   "搜索不可用: curl stderr"或假"无搜索结果"，现四态诚实成文
-- [ ] 8.5 验收复测：多渠道/定时两类（harness 已修 sessionId 过滤）；每完成一个 ⚡项即
+- [x] 8.5 验收复测：多渠道/定时两类（harness 已修 sessionId 过滤）；每完成一个 ⚡项即
   重跑对应类别对标。⚠️复测铁律（周期#31 实证）：验收 prompt 必须带唯一防缓存标记——
   semantic-cache EXACT 命中会回放旧响应（假跑 0.98s 级），且文件存在性验证会被
   上次被打断轮的陈旧产物骗过（假阳性）——验证前先清理陈旧产物。
+  ——周期#40复测落地：acceptance_benchmark.py 增 ACCEPT_CATEGORIES 类别过滤
+  （"每完成一个⚡项即重跑对应类别"能力）+每次运行注入唯一 RUN_TAG 防缓存标记
+  （复测铁律①）+setup() 先 cleanup() 清陈旧产物（复测铁律②）。真实复测定时/多渠道
+  两类 2/2✅（tag=RETEST85_1791643501）：定时 76.57s server_side（cron_tasks.db
+  accept_probe 行实证+journal schedule_task 真实创建#3）、多渠道 40.56s reply_assisted
+  （journal wechat_route_list+message_send 真实工具账本 permission=allow、
+  "已发文本1块给微信peer"）；延迟非 0.98s 短路形态+journal 零 semantic-cache 回放
+  =非缓存假跑；测试产物复核清理归零（accept_probe 行 0）。
+  ⚠️诚实边界：每类单次样本（同机低负载）；多渠道 verify 为 reply_assisted（微信通道
+  loopback 传输，真实 iLink 归 4.1b 待拍板）；8.6 双链合并落地后建议全量 10 类复测。
 - [ ] ⚡8.6 双链分叉事故处置（见周期#30日志）：main(1b63f2ac) 与 evo/exp-1791613018
   (d431bcc0) 在 6.2 处分叉成两套实现（skill_loader vs skill_matcher），#25-#29 只在
   evo/exp 链——链合并/取舍决策涉及取舍**待用户拍板**。周期#31 已做非破坏处置准备：
@@ -428,3 +438,5 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 [2026-10-10 21:47] 周期#38 | 7.3 TTS/语音（阶段顺序下一刀；⚡区0.1/0.2已完、8.6待用户拍板）：新增agent/tts_worker.py（edge-tts独立子进程worker JSON单发协议——主agent进程可能已有事件循环，进程内asyncio.run不可用故子进程隔离+有界超时，失败退出码+JSON报因回传禁静默）+agent/tts_tools.py（TTSTools文本→真实音频落~/.hermes/soulmate/audio/返回MEDIA:路径；双后端分层：edge-tts在线神经语音（服务venv实测带edge_tts）主后端+espeak-ng离线兜底（系统实测可用）；诚实多态：在线失败离线成功显式⚠️报因禁假称edge-tts成功/双后端全失败逐后端报因+安装提示/超时显式/0字节不算成功/空text·过长>5000字·非法voice·rate·文件名越界显式拒绝；voice→espeak语言确定性映射zh→cmn）+sandbox NETWORK_TOOL_NAMES归类text_to_speech（edge-tts出网）+soulmate_agent五点接线（工具定义/主dispatch/_tts_dispatch共享lazy-init/code-mode批内/系统提示清单） | ✅ | (本次提交) | 7.3勾选；tests/test_tts_tools.py 22/22（成功/MEDIA行/自定义文件名/voice·rate透传与默认值/参数拒绝6例含路径穿越与拒绝不落盘/在线失败·超时→离线兜底/双后端失败双因齐报/0字节不算成功/后缀mp3→wav切换/语言映射4例/JSON尾行解析）+py_compile+SoulMateAgent导入烟测（__new__裸实例_tts_dispatch真实dispatch四态）+回归全量tests/ 2176全过（403s全库零失败）+_build_base_system_prompt运行时实证text_to_speech行进系统提示；真实机器验收双后端全绿：edge-tts真实合成acceptance.mp3 21168字节ffprobe实证mp3可播3.528s（服务同款interpreter）+espeak-ng离线兜底offline.wav 114688字节ffprobe实证wav 2.600s（⚠️文案+MEDIA正常）；⚠️诚实边界：语音输入/ASR（听懂语音）不在本切片（只做TTS输出方向）、edge-tts需联网（离线自动降级espeak-ng音质机械）；下周期做7.4图像生成/编辑或8.5验收复测
 
 [2026-10-10 22:40] 周期#39 | 7.4图像生成/编辑（阶段顺序下一刀，阶段7全部完成；⚡区0.1/0.2已完、8.6待用户拍板）：新增agent/image_tools.py（ImageTools：编辑=确定性Pillow八动作resize/crop/rotate/flip/convert/annotate/compose/thumbnail——RGBA→JPG白底合成/CJK字体确定性查找(Noto Sans CJK+SOULMATE_IMAGE_FONT覆盖)/overlay越界拒绝；生成=双后端诚实多态对标7.3：SOULMATE_IMAGEGEN_API_URL→OpenAI兼容images API真实AI生成（b64_json/url+90s有界超时）或未配置→PIL程序化绘制兜底（渐变底+文字卡）显式标注"⚠️程序化绘制（非AI生成…）"禁假称AI+配置文档化、AI失败显式报因禁降级冒充、0字节/不可解码不算成功、filename白名单禁穿越）+sandbox NETWORK_TOOL_NAMES归类image+soulmate_agent五点接线（image工具定义/主dispatch/_image_dispatch共享lazy-init/code-mode批内+系统提示） | ✅ | fde10dea | 7.4勾选（阶段7工具生态补齐全部完成）；tests/test_image_tools.py 23/23（编辑八动作尺寸与像素实证/JPG白底/文字上画/拼接三态/生成兜底诚实标注/AI后端成功·失败·空内容·垃圾字节四态/参数拒绝与路径穿越/0字节/接线护栏+__new__真实dispatch烟测+lazy-init构造）+全量回归2199 passed零失败（18m32s全库）+py_compile+_build_base_system_prompt运行时实证image行进系统提示（fuzzy patch误伤tts描述行已按脚本法修复，py_compile过）；真实机器烟测全绿（服务同款interpreter PIL 12.3.0：程序化绘制400x240→resize→annotate金色水印→convert jpg→compose纵向拼接→thumbnail 64x38，PIL独立回读全部产物尺寸/mode一致，负路径显式报因）+双实例重启health OK；实现中测试暴露并修复1个真缺口（_size默认值分支在generate未传尺寸时误判"尺寸非法"）+1个输出契约修正（兜底提示曾拼在MEDIA:行后，改前置保持MEDIA末行供网关按行提取）；⚠️诚实边界：AI图像生成API后端未实测（无真实API配置，走注入fake单测实证，代码就绪待用户配置SOULMATE_IMAGEGEN_API_URL）；程序化绘制是兜底非语义生成；下周期做8.5验收复测（多渠道/定时两类，prompt带唯一防缓存标记+先清陈旧产物）或8.6双链合并（待用户拍板）
+
+[2026-10-10 22:55] 周期#40 | 8.5验收复测（多渠道/定时两类；⚡区0.1/0.2已完、8.6待用户拍板）：acceptance_benchmark.py增量改造三件套——①ACCEPT_CATEGORIES类别过滤（"每完成一个⚡项即重跑对应类别对标"能力落地，ACCEPT_CATEGORIES=定时,多渠道实测只跑2任务）②每运行注入唯一RUN_TAG防缓存标记进prompt（复测铁律①：semantic-cache EXACT命中回放旧响应假跑0.98s级）③setup()先cleanup()清陈旧产物（复测铁律②：上次被打断轮的accept_probe行/记忆标记会假阳性）+summary记run_tag/categories | ✅ | (本次提交) | 8.5勾选；真实复测2/2✅（tag=RETEST85_1791643501，真实WS用户路径session/new→session/prompt，每类独立session）：定时76.57s end_turn server_side（cron_tasks.db accept_probe行=1+journal实证schedule_task真实创建#3「accept_probe」interval:1h含持久化回执）、多渠道40.56s end_turn reply_assisted（journal实证wechat_route_list+message_send真实工具账本permission=allow"已发文本1块给微信peer「accept_peer」"，response_len=859）；非缓存假跑三证（延迟76s/40s≠0.98s短路形态、journal零semantic-cache回放、工具账本带真实result_preview）；Gate1 git diff三处改动落盘、Gate2 类别过滤/RUN_TAG/setup预清理均被本次真实运行走中（只跑2类+tag打印+预清理生效）、Gate3 2/2真实产出（DB行+journal工具账本）；测试产物复核清理归零（accept_probe行0）；py_compile过 | ⚠️诚实边界：每类单次样本（同机低负载）；多渠道verify为reply_assisted（微信通道loopback传输，真实iLink归4.1b待用户拍板）；8.6双链合并落地后建议全量10类复测；下周期做全量10类验收对标实测（harness已支持类别过滤，超时则分批5+5跑，结果写进路线图）并规划下一批切片（当前阶段1-7+⚡8.1-8.5全完，余项全为待用户拍板/另案）

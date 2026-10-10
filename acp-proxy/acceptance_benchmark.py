@@ -38,6 +38,13 @@ PROMPT_TIMEOUT_S = 300
 
 MEM_MARKER = "ACCEPT_MEM_MARK_9"
 
+# ── 8.5 验收复测支持（周期#40）────────────────────────────────────
+# ACCEPT_CATEGORIES="定时,多渠道" 只跑指定类别（"每完成一个⚡项即重跑对应类别"）；
+# 每次运行注入唯一 RUN_TAG 防缓存标记——semantic-cache EXACT 命中会回放旧响应
+# （周期#31 实证假跑 0.98s 级），唯一标记让缓存永不命中。
+RETEST_CATEGORIES = {c.strip() for c in os.environ.get("ACCEPT_CATEGORIES", "").split(",") if c.strip()}
+RUN_TAG = os.environ.get("ACCEPT_RUN_TAG") or f"RETEST_{int(time.time())}"
+
 
 def _read(path: str) -> str:
     try:
@@ -214,6 +221,7 @@ TASKS = [
 
 
 def setup() -> None:
+    cleanup()  # 复测铁律：验证前先清陈旧产物（上次被打断轮的 accept_probe 行/记忆标记会假阳性）
     shutil.rmtree(WORKDIR, ignore_errors=True)
     os.makedirs(WORKDIR, exist_ok=True)
     with open(os.path.join(WORKDIR, "buggy.py"), "w", encoding="utf-8") as f:
@@ -283,6 +291,11 @@ async def _rpc(ws, method: str, params: dict, rid: int, timeout: float,
 
 async def main() -> None:
     setup()
+    tasks = [t for t in TASKS if not RETEST_CATEGORIES or t["category"] in RETEST_CATEGORIES]
+    if RETEST_CATEGORIES:
+        missing = RETEST_CATEGORIES - {t["category"] for t in tasks}
+        if missing:
+            print(f"⚠️ 未知类别被忽略: {sorted(missing)}", flush=True)
     results = []
     token = pyjwt.encode({"sub": f"accept-{int(time.time())}"}, JWT_SECRET, algorithm="HS256")
     if isinstance(token, bytes):
@@ -291,10 +304,11 @@ async def main() -> None:
         r, _ = await _rpc(ws, "initialize", {"protocolVersion": 1}, rid=1, timeout=30)
         if not (r.get("result") or {}).get("protocolVersion"):
             print("initialize 握手失败:", r, flush=True)
-        for i, task in enumerate(TASKS, 1):
-            print(f"[{i}/{len(TASKS)}] {task['category']} ...", flush=True)
+        for i, task in enumerate(tasks, 1):
+            print(f"[{i}/{len(tasks)}] {task['category']} (tag={RUN_TAG}) ...", flush=True)
             t0 = time.monotonic()
-            entry = {"category": task["category"], "prompt": task["prompt"][:120]}
+            entry = {"category": task["category"], "prompt": task["prompt"][:120], "run_tag": RUN_TAG}
+            prompt_text = f"{task['prompt']}\n（复测标记 {RUN_TAG}，此行仅为防缓存标记，忽略其语义）"
             try:
                 r, _ = await _rpc(
                     ws, "session/new",
@@ -308,7 +322,7 @@ async def main() -> None:
                 r, reply = await _rpc(
                     ws, "session/prompt",
                     {"sessionId": sid, "messageId": f"accept-{i}",
-                     "prompt": [{"type": "text", "text": task["prompt"]}]},
+                     "prompt": [{"type": "text", "text": prompt_text}]},
                     rid=101 + i * 2, timeout=PROMPT_TIMEOUT_S, collect_sid=sid,
                 )
                 stop = (r.get("result") or {}).get("stopReason", "-")
@@ -339,6 +353,8 @@ async def main() -> None:
     cleanup()
     summary = {
         "run_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "run_tag": RUN_TAG,
+        "categories": sorted(RETEST_CATEGORIES) if RETEST_CATEGORIES else "ALL",
         "passed": sum(1 for r in results if r["ok"]),
         "total": len(results),
         "results": results,
