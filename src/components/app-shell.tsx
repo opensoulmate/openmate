@@ -296,11 +296,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   // Only fetch sessions on chat page — other pages don't need the session list
   const isChatRoute = pathname.startsWith('/chat');
+  const sidebarRefreshKey = useAppStore((s) => s.sidebarRefreshKey);
   useEffect(() => {
-    if (isChatRoute) {
-      fetchSessions();
-    }
-  }, [isChatRoute, fetchSessions, activeSessionId, useAppStore((s) => s.sidebarRefreshKey)]);
+    if (!isChatRoute) return;
+    // 250ms 收敛：一次操作的多个刷新信号（注册/标题更新/迁移）合并为一次拉取。
+    // 依赖去掉 fetchSessions/activeSessionId：切会话不再整表重拉（"老是自动刷新"的主因），
+    // fetchSessions 引用波动也不再触发风暴。
+    const timer = setTimeout(() => { fetchSessions(); }, 250);
+    return () => clearTimeout(timer);
+  }, [isChatRoute, sidebarRefreshKey]);
 
   // Toggle agent expand
   const toggleAgent = useCallback((agentId: string) => {

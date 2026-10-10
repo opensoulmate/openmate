@@ -1305,8 +1305,7 @@ export function ChatClient() {
     if (pendingSessionIdRef.current === oldId) pendingSessionIdRef.current = newId;
     if (selectedSessionRef.current?.id === oldId) selectedSessionRef.current = { ...selectedSessionRef.current, id: newId };
     // Note: sessionStateMapRef and wsMapRef migration happens in hook's performHandshake
-    // Trigger sidebar refresh so fetchSessions picks up the real session from server
-    useAppStore.getState().refreshSidebar();
+    // 刷新由注册流程落库后的 refreshSidebar 统一触发（此处不重复，防一次操作多次整表重拉）
   }, []);
 
   // Derived messages for active session (read from store — single source of truth)
