@@ -27,9 +27,11 @@ from urllib.parse import quote
 
 DEFAULT_SEARXNG_URL = "http://localhost:8888"
 
-# 启动文档化（8.4 要求"替代后端或启动文档化"）——命令来自 unified-search 技能实测流程
+# 启动文档化（8.4 要求"替代后端或启动文档化"）——首选 systemd 常驻托管（8.5c-④，
+# 重启不再丢），无 systemd 时用 unified-search 技能实测流程手动启动
 STARTUP_HINT = (
-    "启动方法：`bash ~/searxng-data/start.sh`；或手动 `cd ~/SearXNG-master && "
+    "启动方法：`systemctl --user start searxng`（常驻托管，已 enabled 开机自启）；"
+    "无 systemd 时 `bash ~/searxng-data/start.sh`；或手动 `cd ~/SearXNG-master && "
     'SEARXNG_SETTINGS_PATH="$HOME/searxng-data/settings.yml" python3 -m searx.webapp`。'
     "也可用环境变量 SOULMATE_SEARXNG_URL 指向其他 SearXNG 实例。"
 )

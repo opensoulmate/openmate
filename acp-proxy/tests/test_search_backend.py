@@ -136,6 +136,8 @@ def test_unavailable_includes_startup_docs():
     op = FakeOpener([("x", (False, "", "refused"))])
     out = SearchBackends(opener=op, bing_enabled=False).search("query")
     assert STARTUP_HINT in out.text
+    # 8.5c-④：首选 systemd 常驻托管命令，手动命令保留为兜底
+    assert "systemctl --user start searxng" in out.text
     assert "start.sh" in out.text and "searx.webapp" in out.text
 
 
