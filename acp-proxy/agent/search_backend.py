@@ -66,6 +66,13 @@ def _curl_opener(url: str, timeout: float) -> Tuple[bool, str, str]:
     except Exception as e:  # opener 自身不冒泡——一切失败都走显式降级路径
         return False, "", f"请求异常: {e}"
     if proc.returncode != 0:
+        if proc.returncode == 28:
+            # 周期#41实证：SearXNG冷查询聚合可达20s+，exit 28=慢不是"未启动"——
+            # 措辞区分超时与拒绝连接，防模型误报"SearXNG 未启动"
+            return False, "", (
+                f"响应超时(>{max(1, int(timeout))}s)——服务可能在启动/慢聚合中，"
+                f"勿断言未启动；可加大 SOULMATE_SEARCH_TIMEOUT_S"
+            )
         return False, "", (proc.stderr or f"curl exit {proc.returncode}").strip()[:200]
     return True, proc.stdout, ""
 
@@ -102,7 +109,7 @@ class SearchBackends:
         self,
         searx_url: Optional[str] = None,
         opener: Optional[Opener] = None,
-        timeout: float = 15.0,
+        timeout: Optional[float] = None,
         bing_enabled: Optional[bool] = None,
     ):
         self.searx_url = (
@@ -111,6 +118,13 @@ class SearchBackends:
             or DEFAULT_SEARXNG_URL
         ).rstrip("/")
         self._opener = opener or _curl_opener
+        # 周期#41实证：SearXNG冷查询聚合实测20s+，15s默认超时必然误报不可达。
+        # 默认30s，SOULMATE_SEARCH_TIMEOUT_S 可配。
+        if timeout is None:
+            try:
+                timeout = float(os.environ.get("SOULMATE_SEARCH_TIMEOUT_S", "30"))
+            except ValueError:
+                timeout = 30.0
         self.timeout = timeout
         if bing_enabled is None:
             bing_enabled = os.environ.get("SOULMATE_SEARCH_BING_FALLBACK", "1") != "0"

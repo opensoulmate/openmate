@@ -3,7 +3,10 @@
 全程注入假 opener 零网络；接线护栏断言 soulmate_agent 两执行点共用单一真源。
 """
 import json
+import os
 import re
+import socket
+import threading
 from pathlib import Path
 
 import pytest
@@ -12,6 +15,7 @@ from agent.search_backend import (
     STARTUP_HINT,
     BackendAttempt,
     SearchBackends,
+    _curl_opener,
     parse_bing_html,
     run_search,
 )
@@ -291,3 +295,39 @@ def test_no_other_inline_searxng_call_sites():
 def test_attempt_dataclass_shape():
     a = BackendAttempt("searxng", True, "可达")
     assert a.backend == "searxng" and a.ok and a.detail == "可达"
+
+
+# ---------- 周期#41：超时措辞 + 超时预算 ----------
+
+def test_curl_exit28_wording_distinguishes_timeout_from_not_started():
+    """真哑socket（accept后不响应）→ curl exit 28 → 措辞必须是"响应超时"且禁断言未启动。"""
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    port = srv.getsockname()[1]
+
+    def _accept_and_hold():
+        conn, _ = srv.accept()
+        threading.Event().wait(30)  # 持有连接不回数据，逼curl超时
+        conn.close()
+
+    t = threading.Thread(target=_accept_and_hold, daemon=True)
+    t.start()
+    try:
+        ok, body, err = _curl_opener(f"http://127.0.0.1:{port}/search?q=x", 1)
+    finally:
+        srv.close()
+    assert not ok and body == ""
+    assert "响应超时" in err and "勿断言未启动" in err
+    assert "curl exit 28" not in err  # 旧误导措辞清零
+
+
+def test_timeout_default_30_and_env_override(monkeypatch):
+    fake = FakeOpener([])
+    monkeypatch.delenv("SOULMATE_SEARCH_TIMEOUT_S", raising=False)
+    assert SearchBackends(opener=fake).timeout == 30.0
+    monkeypatch.setenv("SOULMATE_SEARCH_TIMEOUT_S", "45")
+    assert SearchBackends(opener=fake).timeout == 45.0
+    monkeypatch.setenv("SOULMATE_SEARCH_TIMEOUT_S", "not-a-number")
+    assert SearchBackends(opener=fake).timeout == 30.0  # 坏值回退默认
+    assert SearchBackends(opener=fake, timeout=7).timeout == 7.0  # 显式参数优先
