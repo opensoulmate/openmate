@@ -166,6 +166,36 @@ class BridgeStore:
         finally:
             db.close()
 
+    def list_mappings(self) -> list[dict]:
+        """全部 peer→session 映射（最近消息倒序）——路线图4.1c 路由管理面。"""
+        db = self._connect()
+        try:
+            rows = db.execute(
+                "SELECT peer, session_id, last_seen_ms FROM peers "
+                "ORDER BY last_seen_ms DESC, peer"
+            ).fetchall()
+            return [
+                {"peer": str(r[0]), "session_id": str(r[1]), "last_seen_ms": int(r[2])}
+                for r in rows
+            ]
+        finally:
+            db.close()
+
+    def unbind(self, peer: str) -> str | None:
+        """删除 peer→session 映射，返回被删的 session_id（原本没有→None）。"""
+        db = self._connect()
+        try:
+            row = db.execute(
+                "SELECT session_id FROM peers WHERE peer=?", (str(peer),)
+            ).fetchone()
+            if row is None:
+                return None
+            db.execute("DELETE FROM peers WHERE peer=?", (str(peer),))
+            db.commit()
+            return str(row[0])
+        finally:
+            db.close()
+
 
 # ── 默认回合体：无客户端SoulMateAgent跑一个微信回合 ──────────────
 

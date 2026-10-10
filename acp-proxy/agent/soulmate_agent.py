@@ -137,6 +137,7 @@ from agent.tool_recovery import ToolRecoveryManager, FailureKind, MAX_RECOVERY_A
 from agent.system_health import SystemHealthChecker
 from agent.soulmate_scheduler import get_scheduler as _get_cron_scheduler  # 路线图3.1 cron引擎
 from agent.health_monitor import get_health_monitor as _get_health_monitor  # 路线图3.3 监控告警
+from agent.wechat_router import get_wechat_router as _get_wechat_router  # 路线图4.1c 会话级路由
 from agent.writer_fence import SessionWriterFence, WriteAction
 from agent.steering import (
     ABORT_MESSAGE,
@@ -1335,6 +1336,9 @@ class SoulMateAgent:
             # 监控告警（路线图 3.3）：批内同样可用
             if func_name in ("monitor_add", "monitor_list", "monitor_remove", "monitor_check"):
                 return self._monitor_dispatch(func_name, func_args, session_id)
+            # 微信会话级路由（路线图 4.1c）：批内同样可用
+            if func_name in ("wechat_route_list", "wechat_route_bind", "wechat_route_unbind"):
+                return self._wechat_route_dispatch(func_name, func_args, session_id)
             # kilocode #19 MCP resource三件套：批内同样可用（与主循环同款注入安全层）
             if func_name in MCP_RESOURCE_TOOL_NAMES:
                 return await self._call_mcp_resource_tool(func_name, func_args)
@@ -1616,6 +1620,63 @@ class SoulMateAgent:
         except Exception as e:
             return f"[错误] 监控操作失败: {type(e).__name__}: {e}"
 
+    def _wechat_route_dispatch(self, func_name: str, func_args: dict, session_id: str = "") -> str:
+        """wechat_route_list / wechat_route_bind / wechat_route_unbind 分发（路线图 4.1c）。
+
+        主循环与 code-mode 内层共用此入口。映射读写与微信桥同一 SQLite
+        （wechat_bridge.BridgeStore）；只操作 peers 映射表，不碰消息收发、
+        不碰 hermes 侧。与 _monitor_dispatch 同款 lazy-init（__new__ 构造
+        实例未过 __init__ 自举）。
+        """
+        router = getattr(self, "_wechat_router", None)
+        if router is None:
+            router = _get_wechat_router()
+            self._wechat_router = router
+
+        def _fmt(ms) -> str:
+            try:
+                return time.strftime("%Y-%m-%d %H:%M", time.localtime(int(ms) / 1000))
+            except Exception:
+                return str(ms)
+
+        try:
+            if func_name == "wechat_route_list":
+                routes = router.list_routes(
+                    peer=func_args.get("peer"), session_id=func_args.get("session_id"))
+                if not routes:
+                    if func_args.get("peer") or func_args.get("session_id"):
+                        return "（该条件下没有匹配的微信路由映射）"
+                    return "（当前没有微信peer→会话映射）"
+                lines = [f"🔀 微信路由映射共{len(routes)}条："]
+                for r in routes:
+                    lines.append(
+                        f"peer「{r['peer']}」→ 会话 {r['session_id']}"
+                        f"｜最近消息 {_fmt(r['last_seen_ms'])}")
+                return "\n".join(lines)
+            if func_name == "wechat_route_bind":
+                r = router.bind(
+                    peer=func_args.get("peer", ""),
+                    session_id=func_args.get("session_id", ""))
+                if r["created"]:
+                    return (
+                        f"✅ 已绑定：peer「{r['peer']}」→ 会话 {r['session_id']}\n"
+                        "该peer的微信消息将进入此会话（映射已持久化，跨会话有效）。")
+                return (
+                    f"✅ 已改绑：peer「{r['peer']}」"
+                    f"{r['previous_session_id']} → {r['session_id']}\n"
+                    "后续该peer的微信消息进入新会话；原会话消息保留不动。")
+            # wechat_route_unbind
+            r = router.unbind(peer=func_args.get("peer", ""))
+            if not r["removed"]:
+                return f"❌ peer「{r['peer']}」没有已绑定的映射（wechat_route_list 可查）"
+            return (
+                f"✅ 已解绑：peer「{r['peer']}」（原会话 {r['session_id']}）\n"
+                "该peer下次发消息将按首见逻辑自动新建会话；历史会话保留不动。")
+        except ValueError as e:
+            return f"错误: {e}"
+        except Exception as e:
+            return f"[错误] 微信路由操作失败: {type(e).__name__}: {e}"
+
     async def _traj_record_round(
         self,
         session_id: str,
@@ -1735,6 +1796,7 @@ ACP代理目录: {cwd}/acp-proxy（后端 Python 代码在此）
 - system_checkup: 系统状态一键体检（只读，不改系统）。服务运行状态/端口监听/磁盘占用/内存/负载/进程（内存TopN+僵尸）六项一次查全；用户问系统/服务/磁盘/负载现状或需要运维判断时使用。sections 参数可只查部分分区
 - schedule_task / schedule_list / schedule_cancel: 定时任务调度（SoulMate自己的cron：到点自动执行+执行日志+自动排下一次，区别于一次性唤醒）。用户要求"定时/每天/每小时/每周做某事"→ schedule_task（schedule=interval:5m 或 cron:0 9 * * *）；查看任务与执行日志→ schedule_list；停用/删除→ schedule_cancel
 - monitor_add / monitor_list / monitor_check / monitor_remove: 监控告警（对指定服务/网站做周期健康检查：异常告警+恢复通知，目标持久化）。用户要求"监控某网站/服务是否存活、挂了提醒我"→ monitor_add（kind=website/service/port）；查看监控项与最近检查→ monitor_list；立即检查→ monitor_check；停用/删除→ monitor_remove。⚠️ 监控检查只读，不改目标系统
+- wechat_route_list / wechat_route_bind / wechat_route_unbind: 微信会话级路由（peer↔OpenMate会话映射管理，持久化）。查看映射（可按peer/session_id过滤反查）→ wechat_route_list；用户要求"把某微信用户的对话换到某会话/重新绑定/纠正绑错"→ wechat_route_bind；"解绑/断开某微信用户"→ wechat_route_unbind（下次来消息自动新建会话，历史保留）。⚠️ 只改映射，不删消息、不碰消息收发与hermes侧
 
 You can send files to the user natively: to deliver a file, write a brief confirmation message (e.g. "文件已发送，请查收"), then include MEDIA:/absolute/path/to/file on a new line. The gateway extracts the tag, strips it, and sends the file as a download card. Always write some text before the MEDIA: tag — never output a bare MEDIA: tag alone. Use search_files first if you don't know the exact path. Do NOT paste file contents into chat."""
 
@@ -2435,6 +2497,64 @@ You can send files to the user natively: to deliver a file, write a brief confir
             },
         }]
         builtin_tools.extend(monitor_tools)
+
+        # ── 微信会话级路由工具（路线图 4.1c）──────────────────────
+        # peer↔OpenMate会话映射管理：查询/改绑/解绑，映射持久化。
+        wechat_route_tools = [{
+            "type": "function",
+            "function": {
+                "name": "wechat_route_list",
+                "description": (
+                    "列出微信peer→OpenMate会话的路由映射（持久化）。"
+                    "可按 peer 或 session_id 过滤（session_id 过滤=反查某会话绑了哪些微信用户）。"
+                    "用户问『微信消息进的是哪个会话/谁绑在某会话上』时使用。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "peer": {"type": "string", "description": "只看该微信peer的映射（缺省全部）"},
+                        "session_id": {"type": "string", "description": "只看绑定到该会话的映射（缺省全部）"},
+                    },
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "wechat_route_bind",
+                "description": (
+                    "绑定/改绑微信peer→OpenMate会话：该peer后续微信消息进入指定会话。"
+                    "已存在映射则改绑（返回旧绑定）。用户要求"
+                    "『把某微信用户的对话换到某会话/重新绑定/纠正绑错的会话』时使用。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "peer": {"type": "string", "description": "微信peer标识（微信用户id）"},
+                        "session_id": {"type": "string", "description": "目标OpenMate会话id"},
+                    },
+                    "required": ["peer", "session_id"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "wechat_route_unbind",
+                "description": (
+                    "解绑微信peer的路由映射：该peer下次发消息按首见逻辑自动新建会话，"
+                    "历史会话保留不动。用户要求『解绑/断开某微信用户』时使用。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "peer": {"type": "string", "description": "微信peer标识（微信用户id）"},
+                    },
+                    "required": ["peer"],
+                },
+            },
+        }]
+        builtin_tools.extend(wechat_route_tools)
 
         # 添加进化引擎工具（支持直接对象或HTTP API两种模式）
         evolution_tools = []
@@ -3396,6 +3516,14 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             # ── 监控告警（路线图 3.3）────────────────────
                             try:
                                 result = self._monitor_dispatch(func_name, func_args, session_id)
+                            except Exception as e:
+                                te = self._tool_error_handler.handle_error(
+                                    session_id, func_name, e, func_args)
+                                result = te.to_model_message()
+                        elif func_name in ("wechat_route_list", "wechat_route_bind", "wechat_route_unbind"):
+                            # ── 微信会话级路由（路线图 4.1c）────────────────
+                            try:
+                                result = self._wechat_route_dispatch(func_name, func_args, session_id)
                             except Exception as e:
                                 te = self._tool_error_handler.handle_error(
                                     session_id, func_name, e, func_args)
