@@ -51,6 +51,17 @@
 
 ## 阶段规划（每阶段内拆成 15 分钟可完成的切片）
 
+### ⚡ 紧急插队（优先级最高——先于阶段3执行，做完再回到3.1）
+- [x] 0.1 简单对话流式路径增量落库（真实缺陷修复）：simple chat 的 full_response 流式
+  积累处（soulmate_agent.py `full_response += safe_text` 附近）按节奏节流调用
+  _save_progress(session_id, full_response)（每积累约800字或距上次落库≥2秒，取先到），
+  使生成中任意时刻切页/重载都能从库重建已生成内容（任务管线已有per-step落库，此为补齐
+  simple路径——用户实测08:22切页丢前段流式内容的根因）——周期#12实装：_progress_saver
+  节流器（模块级阈值_PROGRESS_SAVE_CHARS/_INTERVAL_S可测）+_run_llm_with_tools加
+  stream_progress开关（仅simple调用点传True，管线步骤/补做保持per-step落库）+流式积累与
+  round尾flush双挂钩+_prompt_inner回合开始_reset_progress_row作废上回合残留进度行指针
+  （防最终接管UPDATE旧行覆盖丢失上回合部分内容，旧行原样保留、新回合自建新行）
+
 ### 阶段1 · 记忆与知识（优先级最高——agent 的"长期大脑"）
 - [x] 1.1 MEMORY.md 型持久记忆：读/写/追加工具 + 跨会话加载进系统提示（7cb4e532）
 - [x] 1.2 会话历史检索：按关键词查过往会话（SQLite sessions/messages）——周期#3对标实测勾选（真实库398会话search/read/no-match均正确）
@@ -107,3 +118,4 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 [2026-10-10 07:55] 周期#9 | 2.3复杂任务分解器：新增agent/task_decomposer.py（TaskDecomposer确定性拆解不走LLM——目标文件抽取：路径token正则保序去重+node_modules/.next等噪音过滤；多文件改动判定=≥2目标文件+变更动词（纯阅读/提问不拆）；decompose一步一文件顺序依赖+末尾整体验证步依赖全部文件步；commit_step逐步提交=只`git add -- <指定文件>`+commit、realpath前缀校验路径越界拒绝、无变更noop、未跟踪新文件可提交、绝不push/reset/checkout）+task_engine.TaskPlanner.plan接线（多文件目标确定性拆步顶掉LLM"simple"误判/漏拆，拆解异常静默回退LLM计划不炸链路）+soulmate_agent._commit_step_changes（步骤SUCCESS后提交该步目标文件并推送📦sha，首试/重试双成功路径接线，commit失败只warning不阻塞） | ✅ | 401dc86e | 2.3勾选；tests/test_task_decomposer.py 15/15（含真实tmp git仓库实证：逐步提交只含本步文件git show --name-only验证、其余文件保持未提交、noop/越界拒绝/新文件）+回归215全过(2.2/2.1/1.x记忆链142+plan_execution/plan_tool_ledger/task_judge/code_mode 73)+py_compile三文件+SoulMateAgent真实导入烟测；下周期做2.4系统状态感知（服务/磁盘/进程一键体检工具）
 [2026-10-10 08:10] 周期#10 | 2.4系统状态感知：新增agent/system_health.py（SystemHealthChecker只读六分区体检services/ports/disk/memory/load/processes——systemd五态映射+socket端口监听+磁盘/内存85%/95%双阈值+load对cpu核数三档+ps内存TopN+僵尸计数；HealthReport.overall最差值；采集器全可注入+SOULMATE_HEALTH_SERVICES/PATHS/PORTS可配；单项异常降级unknown不炸整轮——测试实证该缺口后补的per-item try/except）+soulmate_agent四点接线（工具定义/主dispatch/共享_system_health_dispatch(lazy-init)/code-mode批内+系统提示清单） | ✅ | e3751d5e | 2.4勾选（阶段2全部完成）；tests/test_system_health.py 21/21+回归250全过(1.x/2.x记忆恢复链142+plan_execution/plan_tool_ledger/task_judge/code_mode/tool_output 108)+真实机器烟测13项全ok（4服务active/8090+8092监听/磁盘80.1%/mem 44%/load 4.21@8核/367进程0僵尸）+__new__构造lazy-init烟测PASS；下周期做3.1 cron引擎（SoulMate自己的任务调度：schedule+执行+日志）
 [2026-10-10 08:33] 周期#11 | 3.1 cron引擎：新增agent/soulmate_scheduler.py（SoulMateScheduler：tasks/runs两表SQLite持久化+确定性5字段cron解析（*/n/a-b/列表+Vixie dom/dow语义+7=周日，字段跳进next_after）+interval/cron两形态调度串+到点CAS领取（UPDATE rowcount==1多进程不双跑、错过不补跑不积压重放）+默认执行体default_cron_fire复用wakeup_executor无客户端回合+LLM级失败/零输出判定+失败可见（runs日志+fail_streak+周期任务照常排下次）+周期表损坏自动停用+snapshot观测）+soulmate_agent四点接线（schedule_task/schedule_list/schedule_cancel工具定义+主dispatch+code-mode批内+_cron_dispatch共用入口lazy-init+系统提示清单）+start.py stdio入口有存活任务才自举循环 | ✅ | 979bb241 | 3.1勾选；tests/test_soulmate_scheduler.py 24/24（cron解析7例+调度串拒绝+CRUD+interval/cron执行日志重排+失败重排+async fire+CAS输家确定性验证+停用/错过不补跑+损坏停用+接线护栏4例）+回归339全过(1.x/2.x记忆链+plan/task_judge/code_mode/tool_output)+SoulMateAgent真实dispatch烟测（创建/列表/不存在/停用/删除/坏调度串全态输出实证）；⚠️遗留：调度循环宿主=存活agent进程（无进程时不执行错过不补跑），常驻托管待后续；cron回合实时推送归3.2；下周期做3.2定时汇报（主动向OpenMate推送任务进展/异常）
+[2026-10-10 09:01] 周期#12 | ⚡0.1紧急插队·simple chat流式路径增量落库：soulmate_agent.py加_progress_saver节流器（≥800字或≥2秒取先到，模块级阈值可测）+stream_progress开关（仅simple调用点4605行传True，任务管线/补做保持per-step落库零变化）+流式积累/round尾flush双挂钩节流落库+_prompt_inner回合开始_reset_progress_row（防接管串行：上回合中断残留_progress_id会让本回合UPDATE旧行覆盖丢失，改为旧行保留+新回合自建新行） | ✅ | f94067b5 | 0.1勾选；tests/test_stream_progress_persist.py 13/13（节流双阈值/时间阈值fake clock/中途被杀部分行/最终接管同行无重复/陈旧指针不劫持旧行/接线护栏4例）+回归271全过(cache_replay_persist/message_tree/plan_execution/plan_tool_ledger/task_judge/code_mode/tool_output/self_verify/1.x记忆链/session_source/stream_continuation/turn_lifecycle)+py_compile+SoulMateAgent导入烟测；下周期做3.2定时汇报（主动向OpenMate推送任务进展/异常）
