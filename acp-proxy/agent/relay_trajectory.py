@@ -37,6 +37,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 
+from agent.frame_origin import KIND_ENGINE_CHROME, split_frames, strip_engine_chrome
 from agent.trajectory_recorder import TrajectoryRecorder, llm_outcome_status
 
 logger = logging.getLogger("acp-proxy.relay-trajectory")
@@ -66,6 +67,21 @@ class _TurnState:
     def text(self) -> str:
         # 优先chunk流（增量真源）；无chunk时回退完整agent_message（某些引擎只发整条）
         return "".join(self.text_parts) or self.full_text
+
+    def filtered_text(self) -> tuple[str, dict[str, int]]:
+        """⚡周期#47 采集侧同源过滤：系统帧/引擎chrome不进trajectory content。
+
+        帧级：split_frames 判别 heartbeat/self_check/audit_notice（soulmate 生产者
+        帧走同一 agent_message_chunk 通道——8.5c-⑤ 同源粘连）；合并级：
+        strip_engine_chrome 剥开头的引擎启动横幅块（真实库实证：hermes acp 横幅
+        占满 content[:500] 遮蔽真实回答）。返回 (回答文本, 过滤计数)。
+        """
+        frames = self.text_parts or ([self.full_text] if self.full_text else [])
+        text, counts = split_frames(frames)
+        text, chrome_n = strip_engine_chrome(text)
+        if chrome_n:
+            counts[KIND_ENGINE_CHROME] = counts.get(KIND_ENGINE_CHROME, 0) + chrome_n
+        return text, counts
 
 
 class RelayTrajectory:
@@ -245,6 +261,8 @@ class RelayTrajectory:
             ):
                 if not s:
                     return
+                # ⚡周期#47：CLI兜底回答同样过采集侧过滤（hermes -z 输出可带启动横幅）
+                ax, _filtered = strip_engine_chrome(ax)
                 root_id = await self.recorder.start_turn(s, tx, agent_id=self.agent_id)
                 status = (
                     "error" if stop in STOP_ERROR_REASONS else llm_outcome_status(ax)
@@ -278,7 +296,7 @@ class RelayTrajectory:
         ):
             if not t.session_id:
                 return
-            text = t.text()
+            text, filtered = t.filtered_text()
             status = override or llm_outcome_status(text)
             meta_stop = stop  # 保留stop_reason供日志核对
             tools = t.tool_entries()
@@ -296,7 +314,8 @@ class RelayTrajectory:
             logger.debug(
                 f"[relay-traj] turn closed: agent={self.agent_id} sid={t.session_id} "
                 f"status={status} stop={meta_stop or '-'} chars={len(text)} "
-                f"tools={len(tools)} thought_chars={t.thought_chars}"
+                f"tools={len(tools)} thought_chars={t.thought_chars} "
+                f"filtered={filtered or '-'}"
             )
 
         self._enqueue(_finish)

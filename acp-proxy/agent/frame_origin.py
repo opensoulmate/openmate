@@ -18,8 +18,18 @@ turn_origin）——turn_watchdog 心跳快照、self_verify 需求自检推送�
 其余 = 回答帧（回答文本、🛑 停止提示/轮次耗尽提示等 full_response 的组成部分，
 属回答语义"失败必须可见"，不过滤；📋 任务拆解/🔧 步骤类管线进度行视为回答帧——
 只认帧首前缀，正文中间出现同字样不误伤）。
+
+⚡周期#47 引擎chrome横幅（轨迹采集同源粘连实证）：CLI 引擎（hermes acp 等）的
+启动横幅/工具清单 ASCII 框线块与回答走同一 agent_message_chunk 通道——relay
+trajectory 把它并进 llm_call content（真实库实证：content[:500] 全被
+"╭─── Hermes Agent v0.15.2 … Available Tools …" 框线占满，真实回答被完全遮蔽）。
+strip_engine_chrome 在合并文本开头剥这类 chrome 块（╭ 顶边到 ╰ 底边的框线块），
+窄签名=块内须命中已知 chrome 标记（"Available Tools"/"Agent v"/"upstream"），
+含框线的正文/ASCII 图不误伤；只剥开头，正文中间的框线不动。
 """
 from __future__ import annotations
+
+import re
 
 from agent.report_evidence import AVAIL_BANNER_PREFIX, GOV_BANNER_PREFIXES
 from agent.self_verify import REPORT_HEADER
@@ -29,6 +39,7 @@ ANSWER = "answer"
 KIND_HEARTBEAT = "heartbeat"
 KIND_SELF_CHECK = "self_check"
 KIND_AUDIT_NOTICE = "audit_notice"
+KIND_ENGINE_CHROME = "engine_chrome"
 
 # 帧首前缀 → 帧来源（顺序即优先级；均为生产者输出契约的字面前缀）
 _PREFIXES: dict[str, tuple[str, ...]] = {
@@ -84,3 +95,51 @@ def split_frames(texts: list[str]) -> tuple[str, dict[str, int]]:
                 kept.append(body)  # 横幅+正文同帧：只剥横幅块，正文归回答
         counts[kind] = counts.get(kind, 0) + 1
     return "".join(kept), counts
+
+
+# 引擎chrome横幅（hermes acp 启动横幅/工具清单 ASCII 框线块，真实库实证形状）
+_CHROME_TOP = "╭"
+# 框线块内行首字符（顶边/侧边/分隔/底边 + 竖排框线变体）
+_CHROME_LINE_RE = re.compile(r"^[│┃║├╠╰╚┼╬─━═⠿⣿⣀⣁⣠⣤⣴⣶⣷⣿⡀⡁⡂⡄⡅⡆⡇]")
+# 窄签名：块内须命中已知chrome标记（防误杀含框线的正文/ASCII图）
+_CHROME_MARKERS = ("Available Tools", "Agent v", "upstream")
+# 底边行：╰───…───╯（其后可能粘着回答——chunk流无分隔符拼接）
+_CHROME_BOTTOM_RE = re.compile(r"^[╰╚][─━═]*[╯╝]")
+
+
+def strip_engine_chrome(text: str) -> tuple[str, int]:
+    """剥合并文本开头的引擎chrome横幅块。返回 (正文, 剥除块数 0|1)。
+
+    只认开头（lead前导空白之后以 ╭ 起），块边界= ╰ 底边行或首个非框线行；
+    窄签名=块内命中 _CHROME_MARKERS 之一，否则原样返回（正文里的框线图不误伤）。
+    """
+    if not (text or "").strip():
+        return text, 0
+    lead = len(text) - len(text.lstrip())
+    body = text[lead:]
+    lines = body.split("\n")
+    if not lines or not lines[0].startswith(_CHROME_TOP):
+        return text, 0
+    end = None
+    glue_tail = ""
+    for i in range(1, len(lines)):
+        ln = lines[i]
+        if ln.startswith("╰") or ln.startswith("╚"):
+            end = i + 1
+            # 底边行可能粘着回答（chunk流无分隔符拼接，实证形态）：
+            # "╰───╯回答…" —— 边框后的尾巴归回答，不吞
+            m = _CHROME_BOTTOM_RE.match(ln)
+            if m:
+                glue_tail = ln[m.end():]
+            break
+        if not _CHROME_LINE_RE.match(ln):
+            end = i
+            break
+    if end is None:
+        end = len(lines)
+    block = "\n".join(lines[:end])
+    if not any(m in block for m in _CHROME_MARKERS):
+        return text, 0
+    rest_lines = ([glue_tail] if glue_tail else []) + lines[end:]
+    rest = "\n".join(rest_lines)
+    return rest.lstrip("\n"), 1
