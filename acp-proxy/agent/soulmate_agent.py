@@ -146,6 +146,7 @@ from agent.subagent_manager import (  # 路线图5.1 子代理并行执行
     get_subagent_manager as _get_subagent_manager,
 )
 from agent.writer_fence import SessionWriterFence, WriteAction
+from agent.tool_exec_fencing import FileFenceTimeout, file_fence
 from agent.steering import (
     ABORT_MESSAGE,
     MAX_QUEUE_DEPTH,
@@ -372,7 +373,9 @@ class SoulMateAgent:
         )
 
     def _get_db(self) -> sqlite3.Connection:
-        db = sqlite3.connect(str(self._db_path))
+        # 5.2 并发隔离：多会话/子代理worker并发写 agent_messages 时 busy 等待
+        # 而不是默认5s就抛 "database is locked"（timeout=busy_timeout秒）
+        db = sqlite3.connect(str(self._db_path), timeout=30)
         db.row_factory = sqlite3.Row
         return db
 
@@ -1228,13 +1231,19 @@ class SoulMateAgent:
                 path = func_args.get("path", "")
                 old_string = func_args.get("old_string", "")
                 new_string = func_args.get("new_string", "")
-                with open(path, "r", encoding="utf-8") as f:
-                    file_content = f.read()
-                if old_string not in file_content:
-                    return f"错误: 在 {path} 中未找到匹配文本"
                 from utils.file_safety import atomic_write
-                _new = file_content.replace(old_string, new_string, 1)
-                ok, err = atomic_write(path, _new)
+                # 5.2 并发隔离：读-改-写全程持跨进程文件栅栏（多会话/子代理
+                # 并发patch同一文件防lost update）；超时显式报冲突，禁无锁裸写
+                try:
+                    with file_fence(path):
+                        with open(path, "r", encoding="utf-8") as f:
+                            file_content = f.read()
+                        if old_string not in file_content:
+                            return f"错误: 在 {path} 中未找到匹配文本"
+                        _new = file_content.replace(old_string, new_string, 1)
+                        ok, err = atomic_write(path, _new)
+                except FileFenceTimeout as _fe:
+                    return f"错误: {_fe}（本次未做修改，请稍后重试）"
                 if ok:
                     self._turn_read_view.record_file_change(
                         session_id, path, "patch", file_content, _new)
@@ -3356,21 +3365,26 @@ You can send files to the user natively: to deliver a file, write a brief confir
                                 path = func_args.get("path", "")
                                 old_string = func_args.get("old_string", "")
                                 new_string = func_args.get("new_string", "")
-                                with open(path, "r", encoding="utf-8") as f:
-                                    file_content = f.read()
-                                if old_string not in file_content:
-                                    result = f"错误: 在 {path} 中未找到匹配文本"
-                                else:
-                                    _before = file_content
-                                    file_content = file_content.replace(old_string, new_string, 1)
-                                    from utils.file_safety import atomic_write
-                                    ok, err = atomic_write(path, file_content)
-                                    if not ok:
-                                        result = f"修改失败: {err}"
+                                from utils.file_safety import atomic_write
+                                # 5.2 并发隔离：读-改-写全程持跨进程文件栅栏
+                                # （多会话/子代理并发patch同一文件防lost update）
+                                with file_fence(path):
+                                    with open(path, "r", encoding="utf-8") as f:
+                                        file_content = f.read()
+                                    if old_string not in file_content:
+                                        result = f"错误: 在 {path} 中未找到匹配文本"
                                     else:
-                                        self._turn_read_view.record_file_change(
-                                            session_id, path, "patch", _before, file_content)
-                                        result = f"已修改 {path}"
+                                        _before = file_content
+                                        file_content = file_content.replace(old_string, new_string, 1)
+                                        ok, err = atomic_write(path, file_content)
+                                        if not ok:
+                                            result = f"修改失败: {err}"
+                                        else:
+                                            self._turn_read_view.record_file_change(
+                                                session_id, path, "patch", _before, file_content)
+                                            result = f"已修改 {path}"
+                            except FileFenceTimeout as _fe:
+                                result = f"错误: {_fe}（本次未做修改，请稍后重试）"
                             except Exception as e:
                                 result = f"修改失败: {e}"
 

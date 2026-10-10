@@ -17,6 +17,7 @@ import os
 import time
 from pathlib import Path
 
+from agent.tool_exec_fencing import FileFenceTimeout, file_fence
 from utils.file_safety import atomic_write
 
 DEFAULT_MEMORY_PATH = str(
@@ -58,10 +59,14 @@ class PersistentMemory:
             return False, "错误: content 不能为空（防误清空；要清空请写入占位说明）"
         try:
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
-            ok, err = atomic_write(self.path, content)
+            # 5.2 并发隔离：覆盖写与追加互斥（多会话/子代理并发下防 lost update）
+            with file_fence(self.path):
+                ok, err = atomic_write(self.path, content)
             if not ok:
                 return False, f"错误: 写入失败: {err}"
             return True, f"已写入持久记忆 {self.path} ({len(content)} 字符)"
+        except FileFenceTimeout as e:
+            return False, f"错误: {e}"
         except Exception as e:
             return False, f"错误: 写入持久记忆失败: {e}"
 
@@ -75,15 +80,19 @@ class PersistentMemory:
         line = f"- [{stamp}] {entry}"
         try:
             p = Path(self.path)
-            existing = p.read_text(encoding="utf-8") if p.exists() else ""
-            if existing and not existing.endswith("\n"):
-                existing += "\n"
-            new_content = existing + line + "\n"
-            p.parent.mkdir(parents=True, exist_ok=True)
-            ok, err = atomic_write(self.path, new_content)
+            # 5.2 并发隔离：读-改-写全程持栅栏（多会话/子代理并发追加不丢行）
+            with file_fence(self.path):
+                existing = p.read_text(encoding="utf-8") if p.exists() else ""
+                if existing and not existing.endswith("\n"):
+                    existing += "\n"
+                new_content = existing + line + "\n"
+                p.parent.mkdir(parents=True, exist_ok=True)
+                ok, err = atomic_write(self.path, new_content)
             if not ok:
                 return False, f"错误: 追加失败: {err}"
             return True, f"已追加记忆条目: {line}"
+        except FileFenceTimeout as e:
+            return False, f"错误: {e}"
         except Exception as e:
             return False, f"错误: 追加持久记忆失败: {e}"
 
