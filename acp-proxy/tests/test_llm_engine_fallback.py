@@ -309,30 +309,30 @@ class TestChatStreamFallback:
     def test_5xx_retries_primary_then_switches(self, monkeypatch):
         ch = _chain(_link())
         calls, sleeps = _prep(monkeypatch, [
-            _err(500), _err(500), _err(500), _sse_text("OK"),
+            _err(500), _err(500), _err(500), _err(500), _err(500), _sse_text("OK"),
         ], chain=ch)
         out = run(_stream(_engine()))
         assert out == ["OK"]
-        assert len(calls) == 4  # primary全预算3发（2+4s退避）→备胎1发
-        assert sleeps == [2.0, 4.0]
-        assert calls[3]["base_url"] == BACKUP1
+        assert len(calls) == 6  # primary全预算5发（2+4+8+16s退避）→备胎1发
+        assert sleeps == [2.0, 4.0, 8.0, 16.0]
+        assert calls[5]["base_url"] == BACKUP1
 
     def test_no_chain_behavior_byte_identical(self, monkeypatch):
-        # 无链（opt-in未配置）：3发干等+原错误契约逐字不变
+        # 无链（opt-in未配置）：MAX_ATTEMPTS=5发干等+原错误契约逐字不变
         calls, sleeps = _prep(monkeypatch, [_err(429, b"rl")], chain=FallbackChain(links=[]))
         out = run(_stream(_engine()))
         assert out == ["\n[LLM错误: LLM API error 429: rl]"]
-        assert len(calls) == 3
-        assert sleeps == [2.0, 4.0]
+        assert len(calls) == 5
+        assert sleeps == [2.0, 4.0, 8.0, 16.0]
         assert all(c["base_url"] == PRIMARY for c in calls)
 
     def test_chain_exhausted_lists_all_tried_models(self, monkeypatch):
-        # 全500：primary 3发+4个link各1发（环绕两遍）=7发，报错列全部
+        # 全500：primary 5发+4个link各1发（环绕两遍）=9发，报错列全部
         ch = _chain(_link("m-b1"), _link("m-b2", BACKUP2))
         calls, sleeps = _prep(monkeypatch, [_err(500, b"oops")], chain=ch)
         out = run(_stream(_engine()))
-        assert len(calls) == 7
-        assert sleeps == [2.0, 4.0]  # 只有primary干等；切换link零等待
+        assert len(calls) == 9
+        assert sleeps == [2.0, 4.0, 8.0, 16.0]  # 只有primary干等；切换link零等待
         msg = out[-1]
         assert "主模型与全部兜底模型均调用失败（5个模型全部试过）" in msg
         assert "m-primary" in msg and "qwen/m-b1" in msg and "qwen/m-b2" in msg
@@ -401,15 +401,15 @@ class TestWithToolsFallback:
         ch = _chain(_link())
         calls, sleeps = _prep(monkeypatch, [_err(500, b"oops")], chain=ch)
         out = run(_stream_tools(_engine(), tools=[{"type": "function"}]))
-        assert len(calls) == 5  # primary 3发 + 备胎1发 + 环绕1发
-        assert sleeps == [2.0, 4.0]  # 只有primary的同link重试在等
+        assert len(calls) == 7  # primary 5发 + 备胎1发 + 环绕1发
+        assert sleeps == [2.0, 4.0, 8.0, 16.0]  # 只有primary的同link重试在等
         assert "主模型与全部兜底模型均调用失败" in out[-1]
 
     def test_no_chain_429_identical_contract(self, monkeypatch):
         calls, sleeps = _prep(monkeypatch, [_err(429, b"rl")], chain=FallbackChain(links=[]))
         out = run(_stream_tools(_engine(), tools=[{"type": "function"}]))
         assert out == ["\n[LLM错误: LLM API error 429: rl]"]
-        assert len(calls) == 3 and sleeps == [2.0, 4.0]
+        assert len(calls) == 5 and sleeps == [2.0, 4.0, 8.0, 16.0]
 
 
 # ══════════════════════ 4. chat()（非流式judge/计划/摘要面） ══════════════════════
@@ -434,13 +434,13 @@ class TestChatFallback:
         calls, sleeps = _prep(monkeypatch, [_err(500, b"boom")], chain=FallbackChain(links=[]))
         out = run(_engine().chat([{"role": "user", "content": "hi"}]))
         assert out == "[LLM错误: LLM API error 500: boom]"
-        assert len(calls) == 3 and sleeps == [2.0, 4.0]
+        assert len(calls) == 5 and sleeps == [2.0, 4.0, 8.0, 16.0]
 
     def test_chain_exhausted_lists_all(self, monkeypatch):
         ch = _chain(_link())
         calls, sleeps = _prep(monkeypatch, [_err(500, b"oops")], chain=ch)
         out = run(_engine().chat([{"role": "user", "content": "hi"}]))
-        assert len(calls) == 5  # primary 3发 + 备胎1发 + 环绕1发
+        assert len(calls) == 7  # primary 5发 + 备胎1发 + 环绕1发
         assert "主模型与全部兜底模型均调用失败（3个模型全部试过）" in out
 
     def test_sticky_continuation_rounds(self, monkeypatch):
@@ -462,12 +462,13 @@ class TestChatFallback:
         ch = _chain(_link())
         calls, sleeps = _prep(monkeypatch, [
             httpx.ConnectError("refused"), httpx.ConnectError("refused"),
+            httpx.ConnectError("refused"), httpx.ConnectError("refused"),
             httpx.ConnectError("refused"), _json_ok("OK"),
         ], chain=ch)
         out = run(_engine().chat([{"role": "user", "content": "hi"}]))
         assert out == "OK"
-        assert len(calls) == 4 and calls[3]["base_url"] == BACKUP1
-        assert sleeps == [2.0, 4.0]
+        assert len(calls) == 6 and calls[5]["base_url"] == BACKUP1
+        assert sleeps == [2.0, 4.0, 8.0, 16.0]
 
 
 # ══════════════════════ 5. 接线钉 ══════════════════════

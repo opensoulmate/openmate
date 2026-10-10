@@ -17,7 +17,9 @@ logger = logging.getLogger(__name__)
 MAX_CONTINUATION = 3  # 最大续写次数
 MAX_OUTPUT_TOKENS = 4096  # 单次输出token上限
 MAX_TOOL_OUTPUT_CHARS = 8000  # 工具输出字符上限
-MAX_TURN_SENDS = 8  # 逻辑回合HTTP发送硬顶（续写×重试联合封顶）
+# 10.1（2026-10-11）：8→12，随MAX_ATTEMPTS 3→5联动（5发×4段=20理论最坏，
+# 硬顶12仍严格小于理论最坏=封顶仍真实生效）
+MAX_TURN_SENDS = 12  # 逻辑回合HTTP发送硬顶（续写×重试联合封顶）
 
 
 class TurnSendBudget:

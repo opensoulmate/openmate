@@ -33,7 +33,10 @@ from agent.infection_guard import (  # noqa: E402
 
 
 def run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    # 事件循环无关（测试基建修复）：get_event_loop() 在前序测试 asyncio.run()
+    # 清理（set_event_loop(None)）之后会抛 "There is no current event loop"
+    # ——与被测代码无关的排序污染；asyncio.run 自建循环无此脆弱性
+    return asyncio.run(coro)
 
 
 # ── 工具调用构造（check() 接线面形状：{name, arguments}，arguments 可为 dict/JSON str）──

@@ -220,12 +220,12 @@ class TestCallLLMFailureVisible:
 
         monkeypatch.setattr(dna_evolution.asyncio, "sleep", _nosleep)
         monkeypatch.setattr(dna_evolution.httpx, "AsyncClient",
-                            _fake_client_factory([_httpx.ConnectError("connection refused")] * 3))
+                            _fake_client_factory([_httpx.ConnectError("connection refused")] * 5))
         s = _strand(tmp_path)
         with pytest.raises(LLMCallError):
             run(s._call_llm("hi"))
-        # 策略单一真源消费证据：指数退避2s×2^n（kilocode无头语义）
-        assert sleeps == [2.0, 4.0]
+        # 策略单一真源消费证据：指数退避2s×2^n（kilocode无头语义，10.1 MAX_ATTEMPTS=5）
+        assert sleeps == [2.0, 4.0, 8.0, 16.0]
 
     def test_partial_content_kept_on_mid_continuation_failure(self, tmp_path, monkeypatch):
         """续写中断：半截输出不丢（partial_content），但仍判失败"""

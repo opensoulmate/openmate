@@ -183,13 +183,13 @@ class TestDnaRetryPolicyWiring:
     def test_5xx_exhausted_visible_failure(self, tmp_path, monkeypatch):
         sleeps = []
         monkeypatch.setattr(dna_evolution.asyncio, "sleep", _nosleep_factory(sleeps))
-        fc = _fake_client_factory([_resp(504, text="gateway timeout")] * 3)
+        fc = _fake_client_factory([_resp(504, text="gateway timeout")] * 5)
         monkeypatch.setattr(dna_evolution.httpx, "AsyncClient", fc)
         s = _strand(tmp_path)
         with pytest.raises(LLMCallError) as ei:
             run(s._call_llm("hi"))
-        assert fc.calls["n"] == 3
-        assert sleeps == [2.0, 4.0]
+        assert fc.calls["n"] == 5
+        assert sleeps == [2.0, 4.0, 8.0, 16.0]
         assert "504" in str(ei.value)
 
     def test_402_fail_fast_single_call(self, tmp_path, monkeypatch):

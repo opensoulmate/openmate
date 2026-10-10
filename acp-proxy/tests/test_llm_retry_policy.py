@@ -40,6 +40,7 @@ from utils.llm_retry import (
     backoff_ms,
     is_retryable_status,
     is_transient_error,
+    RETRY_MAX_WAIT_MS,
     parse_retry_after_ms,
     plan_error_retry,
     plan_status_retry,
@@ -126,15 +127,17 @@ class TestBackoff:
         assert backoff_ms(1, {"retry-after-ms": "250"}) == 250.0
         assert backoff_ms(2, {"retry-after": "7"}) == 7000.0
 
-    def test_headers_without_parseable_value_kilocode_semantics(self):
-        # 有头但无可解析值：退避只cap i32（kilocode delay()语义，不封30s）
+    def test_headers_without_parseable_value_bounded(self):
+        # 10.1收口：有头但无可解析值→指数退避同样受等待硬上限（禁静默空转；
+        # kilocode原语义不封顶=1024s干等隐患，显式偏差）
         val = backoff_ms(10, {"x-other": "1"})
-        assert val > RETRY_MAX_DELAY_NO_HEADERS_MS  # 不受30s封顶
-        assert val == RETRY_INITIAL_DELAY_MS * (2 ** 9)
+        assert val == RETRY_MAX_WAIT_MS  # 2^9×2s=1024s被截到硬上限
 
-    def test_cap_i32(self):
+    def test_wait_hard_bound_overrides_i32(self):
+        # 10.1：parse层仍cap i32（RETRY_MAX_DELAY_MS契约不动），但backoff
+        # 实际等待一律 ≤ RETRY_MAX_WAIT_MS（kilocode i32≈24.8天=静默空转隐患）
         huge = backoff_ms(1, {"retry-after-ms": "99999999999"})
-        assert huge == 2_147_483_647
+        assert huge == RETRY_MAX_WAIT_MS
 
 
 class TestStatusAndErrorClassification:
@@ -312,7 +315,7 @@ class TestChatRetry:
         ])
         out = asyncio.run(_engine().chat([{"role": "user", "content": "hi"}]))
         assert out.startswith("[LLM错误:") and "500" in out  # 失败契约不变
-        assert state["calls"] == MAX_ATTEMPTS  # 恰好3发，不无限
+        assert state["calls"] == MAX_ATTEMPTS  # 恰好MAX_ATTEMPTS发，不无限
 
     def test_401_fail_fast_single_call(self, monkeypatch):
         waits = _patch_sleep(monkeypatch)
@@ -544,14 +547,18 @@ class TestWiring:
         assert "2 ** _retry" not in src  # 旧固定指数退避绝迹
         assert "range(3)" not in src  # 旧硬编码次数绝迹
 
-    def test_constants_match_kilocode(self):
+    def test_constants_match_policy(self):
         # kilocode retry.ts逐值：RETRY_INITIAL_DELAY=2000 / FACTOR=2 /
-        # RETRY_MAX_DELAY_NO_HEADERS=30_000 / RETRY_MAX_DELAY=i32上限
+        # RETRY_MAX_DELAY=i32上限（parse层）。
+        # ⚠️10.1韧性治理显式偏差（2026-10-11，周期#54上游降级实证）：
+        # NO_HEADERS 30_000→60_000（退避上限拉长）、MAX_ATTEMPTS 3→5（持续
+        # 降级耐性）、新增RETRY_MAX_WAIT_MS=60_000等待硬上限（禁静默空转）
         assert llm_retry.RETRY_INITIAL_DELAY_MS == 2000
         assert llm_retry.RETRY_BACKOFF_FACTOR == 2
-        assert llm_retry.RETRY_MAX_DELAY_NO_HEADERS_MS == 30_000
+        assert llm_retry.RETRY_MAX_DELAY_NO_HEADERS_MS == 60_000
         assert llm_retry.RETRY_MAX_DELAY_MS == 2_147_483_647
-        assert llm_retry.MAX_ATTEMPTS == 3
+        assert llm_retry.MAX_ATTEMPTS == 5
+        assert llm_retry.RETRY_MAX_WAIT_MS == 60_000
 
 
 # ════════════════════════════════════════════════════════════════

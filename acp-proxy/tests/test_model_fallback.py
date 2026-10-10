@@ -262,13 +262,13 @@ class TestFallbackWalk:
     def test_primary_exhausted_switches_to_backup(self, monkeypatch):
         sleeps = []
         monkeypatch.setattr(llm_transport.asyncio, "sleep", _nosleep(sleeps))
-        c = _FakeClient([_resp(504, text="gateway timeout")] * 3 + [_resp(200, content="ok")])
+        c = _FakeClient([_resp(504, text="gateway timeout")] * 5 + [_resp(200, content="ok")])
         data = run(_post(c, chain=_chain(_link())))
         assert data["choices"][0]["message"]["content"] == "ok"
         counts = _url_counts(c)
-        # primary=MAX_ATTEMPTS全预算3发；备胎link只给1发（CowAgent link_retries=0）
-        assert counts == {f"{PRIMARY}/chat/completions": 3, f"{BACKUP1}/chat/completions": 1}
-        assert sleeps == [2.0, 4.0]  # primary重试退避照旧；切换不睡
+        # primary=MAX_ATTEMPTS全预算5发（10.1）；备胎link只给1发（CowAgent link_retries=0）
+        assert counts == {f"{PRIMARY}/chat/completions": 5, f"{BACKUP1}/chat/completions": 1}
+        assert sleeps == [2.0, 4.0, 8.0, 16.0]  # primary重试退避照旧；切换不睡
 
     def test_one_attempt_per_backup_link_then_wrap_then_exhaust(self, monkeypatch):
         sleeps = []
@@ -277,9 +277,9 @@ class TestFallbackWalk:
         with pytest.raises(LLMCallError) as ei:
             run(_post(c, chain=_chain(_link("m1", BACKUP1), _link("m2", BACKUP2))))
         counts = _url_counts(c)
-        # primary 3发 + 备胎每link 1发 × 环绕2遍（m1,m2,m1,m2）= 3+4 = 7发
+        # primary 5发 + 备胎每link 1发 × 环绕2遍（m1,m2,m1,m2）= 5+4 = 9发
         assert counts == {
-            f"{PRIMARY}/chat/completions": 3,
+            f"{PRIMARY}/chat/completions": 5,
             f"{BACKUP1}/chat/completions": 2,
             f"{BACKUP2}/chat/completions": 2,
         }
@@ -304,10 +304,10 @@ class TestFallbackWalk:
         # 回归钉：无链=原行为"没备胎干等"（退避重试，不换模型）
         sleeps = []
         monkeypatch.setattr(llm_transport.asyncio, "sleep", _nosleep(sleeps))
-        c = _FakeClient([_resp(429, text="rate limited")] * 3)
+        c = _FakeClient([_resp(429, text="rate limited")] * 5)
         with pytest.raises(LLMCallError):
             run(_post(c))
-        assert len(c.calls) == 3 and sleeps == [2.0, 4.0]
+        assert len(c.calls) == 5 and sleeps == [2.0, 4.0, 8.0, 16.0]
 
     def test_non_retryable_advances_to_backup(self, monkeypatch):
         # CowAgent："Retries are exhausted (or the error was never retryable)"
@@ -330,24 +330,26 @@ class TestFallbackWalk:
             parks.append(type(exc).__name__)
             return "not_offline"
         monkeypatch.setattr(llm_transport.network_state, "maybe_park", _park)
-        c = _FakeClient([httpx.ConnectError("refused")] * 3 + [_resp(200, content="ok")])
+        c = _FakeClient([httpx.ConnectError("refused")] * 5 + [_resp(200, content="ok")])
         data = run(_post(c, chain=_chain(_link())))
         assert data["choices"][0]["message"]["content"] == "ok"
-        assert len(parks) == 3  # park接线在链路径上依然生效
-        assert sleeps == [2.0, 4.0]
+        assert len(parks) == 5  # park接线在链路径上依然生效
+        assert sleeps == [2.0, 4.0, 8.0, 16.0]
 
     def test_no_chain_transport_error_raw_unchanged(self, monkeypatch):
         # 回归钉：无链时传输错误原样抛原始httpx异常（原契约逐字不变）
         sleeps = []
         monkeypatch.setattr(llm_transport.asyncio, "sleep", _nosleep(sleeps))
-        c = _FakeClient([httpx.ConnectError("refused")] * 3)
+        c = _FakeClient([httpx.ConnectError("refused")] * 5)
         with pytest.raises(httpx.ConnectError):
             run(_post(c))
-        assert len(c.calls) == 3
+        assert len(c.calls) == 5
 
     def test_link_payload_carries_link_model_and_auth(self, monkeypatch):
         monkeypatch.setattr(llm_transport.asyncio, "sleep", _nosleep([]))
         c = _FakeClient([
+            _resp(500, text="boom"),
+            _resp(500, text="boom"),
             _resp(500, text="boom"),
             _resp(500, text="boom"),
             _resp(500, text="boom"),

@@ -25,6 +25,7 @@ from utils.llm_safety import (
 # 零HTTP重试（瞬时429/5xx直接"[LLM错误: …]"掐断）、with_tools固定退避不听头
 # 且把400当可重试却漏501/504等其余5xx
 from utils.llm_retry import (
+    classify_failure,
     MAX_ATTEMPTS,
     backoff_ms,
     is_retryable_status,
@@ -38,6 +39,39 @@ from utils.llm_retry import (
 # 链耗尽报错列出所有试过的模型。opt-in：LLM_FALLBACK_CHAIN未配置=空链=行为与
 # 接线前逐字一致
 from utils.model_fallback import FallbackChain, FallbackLink, load_fallback_chain
+
+# ── 传输故障可观测（路线图10.1）：分类入tool_failures.db ──────────────────
+_llm_fail_log = None
+
+
+def record_llm_failure(path: str, source, action: str, attempt: int,
+                       outcome: str, detail: str = "") -> None:
+    """传输故障分类落 tool_failures.db（10.1：传输故障分类可观测）。
+
+    kind=utils.llm_retry.classify_failure 单一真源（rate_limit/server_error/
+    protocol_error/read_timeout/connect_error/network_error/client_error…）。
+    旁路纪律（同prompt_prefetch/experience_sink）：只记账，绝不冒泡、绝不阻塞
+    LLM 链路；action=llm_retry（重试已排程）/llm_give_up（放弃，失败必须可见）。
+    """
+    global _llm_fail_log
+    try:
+        # 测试期卫生：不污染真实 tool_failures.db（要观测的测试显式设
+        # TOOL_FAILURE_DB_PATH 到临时库即可正常记账）
+        if os.environ.get("PYTEST_CURRENT_TEST") and not os.environ.get("TOOL_FAILURE_DB_PATH"):
+            return
+        if _llm_fail_log is None:
+            from agent.tool_recovery import ToolRecoveryManager
+            _llm_fail_log = ToolRecoveryManager()
+        _llm_fail_log.record(
+            session_id="", tool_name=f"llm:{path}",
+            kind=classify_failure(source),
+            error=detail or str(source),
+            action=action, attempt=int(attempt), outcome=outcome,
+        )
+    except Exception:
+        pass
+
+
 # 网络离线三态=utils.network_state（网络恢复专项，kilocode SessionNetwork移植）：
 # 传输错误先过离线判定——全局断网则park等待恢复（3URL竞速探测+3s轮询+10s宽限
 # 自动续跑，有界park），恢复后继续原有重试；端点级故障/非断网走原有退避不变
@@ -329,6 +363,7 @@ class LLMEngine:
                                 f"[LLM] API {response.status_code}，{_wait:.1f}s后重试 "
                                 f"({_retry_count+1}/{MAX_ATTEMPTS})"
                             )
+                            record_llm_failure("chat_stream", response.status_code, "llm_retry", _retry_count + 1, "retry_scheduled", _summary)
                             await asyncio.sleep(_wait)
                             async for _c in self.chat_stream(
                                 messages, cancel_event, system_prompt,
@@ -338,6 +373,7 @@ class LLMEngine:
                             ):
                                 yield _c
                             return
+                        record_llm_failure("chat_stream", response.status_code, "llm_give_up", _retry_count + 1, "failed", _summary)
                         raise RuntimeError(
                             chain.fail(_summary, f"LLM API error {response.status_code}: {_err}")
                         )
@@ -457,6 +493,7 @@ class LLMEngine:
                     f"[LLM] 传输错误{e.__class__.__name__}，{_wait:.1f}s后重试 "
                     f"({_retry_count+1}/{MAX_ATTEMPTS})"
                 )
+                record_llm_failure("chat_stream", e, "llm_retry", _retry_count + 1, "retry_scheduled", _summary)
                 await asyncio.sleep(_wait)
                 async for _c in self.chat_stream(
                     messages, cancel_event, system_prompt,
@@ -468,6 +505,7 @@ class LLMEngine:
                 return
             # 最终失败：单link=原契约逐字不变（"[LLM响应超时]"/"[LLM错误: …]"）；
             # 多link试过=chain.fail列出全部（CowAgent语义3），失败必须可见
+            record_llm_failure("chat_stream", e, "llm_give_up", _retry_count + 1, "failed", _summary)
             _fail_msg = chain.fail(_summary, str(e))
             if len(chain.spent) > 1:
                 logger.error(f"LLM stream error (降级链耗尽): {_fail_msg}", exc_info=True)
@@ -646,10 +684,12 @@ class LLMEngine:
                                     f"[LLM] API {response.status_code}，{_wait:.1f}s后重试 "
                                     f"({_retry+1}/{MAX_ATTEMPTS}): {error_msg[:100]}"
                                 )
+                                record_llm_failure("chat_stream_with_tools", response.status_code, "llm_retry", _retry_count + _retry + 1, "retry_scheduled", _summary)
                                 await asyncio.sleep(_wait)
                                 # 修复：此前误用break——直接退出重试循环且零yield，
                                 # 消费方拿到空响应（"瞬时限流→静默空白"死路径）
                                 continue  # 回到for _retry重试
+                            record_llm_failure("chat_stream_with_tools", response.status_code, "llm_give_up", _retry_count + _retry + 1, "failed", _summary)
                             raise RuntimeError(
                                 chain.fail(_summary, f"LLM API error {response.status_code}: {error_msg}")
                             )
@@ -839,9 +879,11 @@ class LLMEngine:
                         f"[LLM] 传输错误{e.__class__.__name__}，{_wait:.1f}s后重试 "
                         f"({_retry+1}/{MAX_ATTEMPTS})"
                     )
+                    record_llm_failure("chat_stream_with_tools", e, "llm_retry", _retry + 1, "retry_scheduled", _summary)
                     await asyncio.sleep(_wait)
                     continue
                 # 最终失败：单link=原契约逐字不变；多link试过=列出全部（CowAgent语义3）
+                record_llm_failure("chat_stream_with_tools", e, "llm_give_up", _retry + 1, "failed", _summary)
                 _fail_msg = chain.fail(_summary, str(e))
                 if len(chain.spent) > 1:
                     logger.error(f"LLM stream error (降级链耗尽): {_fail_msg}", exc_info=True)
@@ -856,6 +898,7 @@ class LLMEngine:
             except LLMNonRetryableError as e:
                 # 401/403/404等：重试不会自愈，直接可见失败（fail-fast）
                 logger.error(f"LLM non-retryable error: {e}")
+                record_llm_failure("chat_stream_with_tools", e, "llm_give_up", 1, "failed")
                 yield f"\n[LLM错误: {e}]"
                 return
             except RuntimeError as e:
@@ -959,8 +1002,10 @@ class LLMEngine:
                                         f"[LLM] 传输错误{e.__class__.__name__}，"
                                         f"{_wait:.1f}s后重试 ({_http_retry+1}/{MAX_ATTEMPTS})"
                                     )
+                                    record_llm_failure("chat", e, "llm_retry", _http_retry + 1, "retry_scheduled", f"{e.__class__.__name__}: {e}")
                                     await asyncio.sleep(_wait)
                                     continue
+                                record_llm_failure("chat", e, "llm_give_up", _http_retry + 1, "failed", f"{e.__class__.__name__}: {e}")
                                 raise RuntimeError(
                                     chain.fail(f"{e.__class__.__name__}: {e}", str(e))
                                 ) from e
@@ -982,6 +1027,7 @@ class LLMEngine:
                                 self._apply_link(client, payload, chain.current)
                                 break  # 换link重发（外层while）
                             if _wait is None or budget.remaining <= 0:
+                                record_llm_failure("chat", resp.status_code, "llm_give_up", _http_retry + 1, "failed", _summary)
                                 raise RuntimeError(
                                     chain.fail(
                                         _summary,
@@ -993,6 +1039,7 @@ class LLMEngine:
                                 f"[LLM] API {resp.status_code}，{_wait:.1f}s后重试 "
                                 f"({_http_retry+1}/{MAX_ATTEMPTS})"
                             )
+                            record_llm_failure("chat", resp.status_code, "llm_retry", _http_retry + 1, "retry_scheduled", _summary)
                             await asyncio.sleep(_wait)
                         if _link_ok:
                             break

@@ -107,7 +107,11 @@ def main() -> int:
 
     # 2. 下任务（自动拆解+自动链式执行；goal 无关键词→默认 规划/执行/验证/审查 4 子任务）
     goal = f"口算17加25的结果并用一句话说明理由[防缓存标记 {marker}]"
-    r = client.post(f"{API}/api/ai-groups/{gid}/tasks", json={"goal": goal})
+    r = client.post(f"{API}/api/ai-groups/{gid}/tasks",
+                    json={"goal": goal,
+                          # 探针走真实写路径：声明 test 出身（产生侧标注，
+                          # test_probe_provenance 要求；API 按 BaseModel 忽略扩展字段）
+                          "_meta": {"source": "test"}})
     r.raise_for_status()
     task_id = r.json()["task_id"]
     print(f"[2] task submitted: {task_id} subtasks={r.json()['subtasks_count']}")

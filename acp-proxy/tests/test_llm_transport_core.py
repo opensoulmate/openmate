@@ -133,10 +133,10 @@ class TestPostChatCompletion:
     def test_5xx_exhausted_visible_failure(self, monkeypatch):
         sleeps = []
         monkeypatch.setattr(llm_transport.asyncio, "sleep", _nosleep(sleeps))
-        c = _FakeClient([_resp(504, text="gateway timeout")] * 3)
+        c = _FakeClient([_resp(504, text="gateway timeout")] * 5)
         with pytest.raises(LLMCallError) as ei:
             run(_post(c))
-        assert c.calls == 3 and sleeps == [2.0, 4.0]
+        assert c.calls == 5 and sleeps == [2.0, 4.0, 8.0, 16.0]
         assert "504" in str(ei.value)
 
     def test_402_fail_fast_single_call(self, monkeypatch):

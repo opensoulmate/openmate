@@ -30,6 +30,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from agent.llm_engine import LLMEngine
+from utils.llm_retry import MAX_ATTEMPTS
 from utils.llm_safety import MAX_CONTINUATION, MAX_TURN_SENDS, TurnSendBudget
 from utils.model_fallback import FallbackChain
 
@@ -199,8 +200,8 @@ class TestBudgetUnit:
         assert b.spent == 2
 
     def test_cap_is_meaningful_vs_theoretical(self):
-        """硬顶必须真正小于理论最坏（4段×3发=12），否则封顶形同虚设"""
-        assert MAX_TURN_SENDS < (MAX_CONTINUATION + 1) * 3
+        """硬顶必须真正小于理论最坏（4段×5发=20，10.1后），否则封顶形同虚设"""
+        assert MAX_TURN_SENDS < (MAX_CONTINUATION + 1) * MAX_ATTEMPTS
 
 
 # ════════════════════════════════════════════════════════════════
@@ -214,7 +215,8 @@ class TestChatStreamJointCap:
         responses = [
             _err(429), _err(429), _sse_text("S1", finish="length"),
             _err(429), _err(429), _sse_text("S2", finish="length"),
-            _err(429), _err(429), _err(429), _err(429),
+            _err(429), _err(429), _sse_text("S3", finish="length"),
+            _err(429), _err(429), _err(429),
         ]
         calls, sleeps = _prep(monkeypatch, responses)
         out = []
@@ -222,7 +224,7 @@ class TestChatStreamJointCap:
             async for d in _engine().chat_stream([{"role": "user", "content": "hi"}]):
                 out.append(d)
         run(_go())
-        assert len(calls) == MAX_TURN_SENDS  # 硬顶封口，不发第9发
+        assert len(calls) == MAX_TURN_SENDS  # 硬顶封口，不发第13发（10.1后硬顶12）
         text = "".join(d for d in out if isinstance(d, str))
         assert "S1" in text and "S2" in text  # 已流出内容保留
         assert "[LLM错误:" in text  # 失败必须可见
@@ -292,7 +294,8 @@ class TestWithToolsJointCap:
         responses = [
             _err(429), _err(429), _sse_text("S1", finish="length"),
             _err(429), _err(429), _sse_text("S2", finish="length"),
-            _err(429), _err(429), _err(429), _err(429),
+            _err(429), _err(429), _sse_text("S3", finish="length"),
+            _err(429), _err(429), _err(429),
         ]
         calls, _ = _prep(monkeypatch, responses)
         out = []
@@ -351,7 +354,8 @@ class TestChatJointCap:
         responses = [
             _err(429), _err(429), _json_ok("S1", finish="length"),
             _err(429), _err(429), _json_ok("S2", finish="length"),
-            _err(429), _err(429), _err(429), _err(429),
+            _err(429), _err(429), _json_ok("S3", finish="length"),
+            _err(429), _err(429), _err(429),
         ]
         calls, _ = _prep(monkeypatch, responses)
         result = run(_engine().chat([{"role": "user", "content": "hi"}]))

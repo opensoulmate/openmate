@@ -486,7 +486,7 @@ class TestLLMEngineIntegration:
         out = asyncio.run(_engine().chat([{"role": "user", "content": "hi"}]))
         assert out.startswith("[LLM错误:")
         assert network_state.list_waits()[0]["state"] == ABORTED
-        assert state["calls"] == 3  # 原MAX_ATTEMPTS重试记账不变
+        assert state["calls"] == 5  # MAX_ATTEMPTS=5重试记账（10.1拉长）
 
     def test_chat_stream_disconnect_park_then_resume(self, monkeypatch, clean):
         _patch_llm_sleep(monkeypatch)

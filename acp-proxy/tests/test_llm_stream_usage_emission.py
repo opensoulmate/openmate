@@ -296,11 +296,12 @@ class TestRetryReal:
                    for c in chunks)
 
     def test_500_exhausts_attempts_then_visible_error(self, monkeypatch):
-        """持续500：3次尝试后报错信息可见（mem0：失败必须可见，禁止静默空白）"""
+        """持续500：MAX_ATTEMPTS=5次尝试后报错信息可见（mem0：失败必须可见，禁止静默空白；
+        10.1韧性治理后重试预算3→5，本钉随之重推导）"""
         err = lambda: _ErrResp(500, b'{"error": "boom"}')
         engine = _engine()
         chunks, payloads = _run(_collect_tools(engine, monkeypatch, [err()]))
-        assert len(payloads) == 3, f"应尝试3次，实际{len(payloads)}"
+        assert len(payloads) == 5, f"应尝试5次（10.1 MAX_ATTEMPTS=5），实际{len(payloads)}"
         assert any(isinstance(c, str) and "LLM错误" in c for c in chunks)
 
     def test_non_retryable_401_fails_fast(self, monkeypatch):
