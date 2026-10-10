@@ -5889,6 +5889,30 @@ You can send files to the user natively: to deliver a file, write a brief confir
         except Exception as e:
             logger.debug(f"[report-evidence] 治理失败(非致命): {e}")
 
+        # ── ⚡8.5c② 可用性误报治理：谎称工具"未注入/不在工具列表"对照真源核验 ──
+        # 8.2 "说了≠做了"的镜像（"做了/有，说没有"）：可用性声称对照工具面真源
+        # （_active_tool_names 本轮真实注入清单）+执行账本确定性核验，被证伪的声称
+        # 前置更正声明（原文保留可审计）。无真源/无执行证据的一律不更正（不误纠）。
+        try:
+            _avail = report_evidence.assess_availability(
+                full_response,
+                getattr(self, "_active_tool_names", None),
+                tool_calls_log,
+            )
+            if _avail.false_claims:
+                full_response = report_evidence.amend_availability(full_response, _avail)
+                logger.warning(
+                    f"[tool-avail] session={session_id} 可用性误报×{len(_avail.false_claims)}: "
+                    + "; ".join(f"{c.tool_name or 'generic'}({c.proof})" for c in _avail.false_claims))
+                if self._client is not None:
+                    await self._client.session_update(
+                        session_id=session_id,
+                        update=acp.update_agent_message_text(
+                            "\n" + report_evidence.availability_banner(_avail)),
+                    )
+        except Exception as e:
+            logger.debug(f"[tool-avail] 可用性核验失败(非致命): {e}")
+
         # ── 路线图 2.1 计划-执行-验证循环：对照原始需求逐条自验 ──────
         # 验证环节收口在MEDIA提取之前——补做产出若含MEDIA标签也能被网关处理。
         # 确定性核对（不走LLM）；未覆盖项→补做1轮（上限防失控，细粒度失败恢复属2.2）

@@ -209,3 +209,189 @@ def amend_response(response: str, assessment: EvidenceAssessment) -> str:
         return response
     body = _HEADING_RE.sub("## 任务执行报告（⚠️ 未经执行验证）", response or "")
     return governance_banner(assessment) + "\n\n" + body
+
+
+# ══════════════════════════════════════════════════════════════════
+# ⚡8.5c② 可用性误报治理（8.2 "说了≠做了"的镜像："做了/有，说没有"）
+# ══════════════════════════════════════════════════════════════════
+# 实证形态（周期#41 两次）：模型谎称工具"不在工具列表/运行时未注入"并拒做——
+#   run-A 称"没有 web_search"（同回合账本已成功调用 web_search）；
+#   FINAL 轮称"message_send 运行时未注入"（builtin_tools 无条件装配+系统提示有清单）。
+# 治理=可用性声称对照**工具面真源**（_active_tool_names，本轮真实注入的工具名集合）
+# 与**执行账本**（parse_ledger 已执行侧）确定性核验，被证伪的声称降级修正（amend 同款）。
+#
+# 两级判据（宁可漏纠不误纠——误纠会侵蚀用户对更正的信任）：
+# - registration（注册类）："X 未注入/不在工具列表/不存在/没有 X 工具…"——声称针对
+#   **注册/注入事实**，工具名在工具面里即被证伪（无须执行过）
+# - availability（可用性类）："X 不可用/无法使用 X 工具"——声称模糊（可能指后端故障
+#   而非工具缺失），仅当 X 本回合**真实执行成功**才证伪（没试过就不武断更正）
+# - generic（无名类）："运行时未注入工具/没有可用工具"——仅当本回合有成功工具执行才证伪
+
+# 词尾边界内建进 token——防 _RESULTISH 排除词被回溯绕过（"terminal 输出"缩成"termina"）
+_NAME_TOKEN = r"[A-Za-z][A-Za-z0-9_\-]{1,40}(?![A-Za-z0-9_\-])"
+
+# "没有 X 的结果/输出…"不是可用性声称（是结果缺失）——排除词防误纠
+_RESULTISH = (
+    r"(?!\s*(?:的)?(?:结果|输出|返回|记录|数据|日志|缓存|命中|响应|内容|条目|行|"
+    r"权限|密钥|报错|错误|超时|更新|变化|改动|新增|删除|效果|进展|回复|消息|文件|"
+    r"截图|图片|附件|索引|配置|权限错误))"
+)
+
+# 注册类声称（名字在前 / 名字在后两形态）
+_REG_NAME_FIRST = re.compile(
+    rf"[`'\"]?(?P<name>{_NAME_TOKEN})[`'\"]?\s*"
+    rf"(?:这个)?(?:工具|命令|功能)?\s*"
+    rf"(?:运行时)?(?:未注入|未加载|未注册|没被注入|未被注入|没提供|未提供|"
+    rf"不存在|(?:不|没)(?:有|在)(?:当前)?(?:工具)?(?:列表|清单|之中|里面|里))"
+)
+_REG_NAME_LAST = re.compile(
+    rf"(?:没有|缺少|缺|不存在|未提供|没有提供|没有注册|未注册)(?:名为|叫做|叫)?\s*"
+    rf"[`'\"]?(?P<name>{_NAME_TOKEN})[`'\"]?\s*(?:这个)?(?:工具|命令|功能)"
+)
+# 无"工具"后缀的裸形态（run-A "没有 web_search"）：要求主语语境+排除结果类宾语
+_REG_BARE = re.compile(
+    rf"(?:我|本agent|本Agent|系统|助手|环境|运行时|当前|这里)(?:里|中|内|面|都)?(?:没有|不具备)"
+    rf"\s*[`'\"]?(?P<name>{_NAME_TOKEN})[`'\"]?{_RESULTISH}"
+)
+
+# 可用性类声称（模糊——仅执行账本可证伪）
+_AVAIL_NAME_FIRST = re.compile(
+    rf"[`'\"]?(?P<name>{_NAME_TOKEN})[`'\"]?\s*"
+    rf"(?:这个)?(?:工具|命令|功能)\s*"
+    rf"(?:现在)?(?:不|没)(?:可用|能用|可用了|能用了|有(?:响应|效果))|"
+    rf"[`'\"]?(?P<name2>{_NAME_TOKEN})[`'\"]?\s*(?:无法使用|用不了|调不了)"
+)
+_AVAIL_NAME_LAST = re.compile(
+    rf"(?:无法(?:使用|调用)|不能(?:使用|调用)|用不了)(?:该|这个)?(?:工具)?\s*"
+    rf"[`'\"]?(?P<name>{_NAME_TOKEN})[`'\"]?\s*(?:这个)?(?:工具|命令|功能)?{_RESULTISH}"
+)
+# 裸可用性形态（"我无法使用 web_search"）——模糊声称，只按执行账本证伪
+_AVAIL_BARE = re.compile(
+    rf"(?:我|本agent|本Agent|系统|助手|环境|运行时|当前|这里)(?:里|中|内|面|都)?(?:无法(?:使用|调用)|用不了)"
+    rf"\s*[`'\"]?(?P<name>{_NAME_TOKEN})[`'\"]?{_RESULTISH}"
+)
+
+# 无名类声称（必须与"工具"同现——防"参数没有注入到请求里"类误报）
+_GENERIC_CLAIM = re.compile(
+    r"(?:运行时)?(?:未|没有)(?:被)?注入(?:任何|可用的?)?工具|"
+    r"工具(?:未|没有)(?:被)?注入|"
+    r"没有(?:任何)?(?:可用的?)?工具(?:可用|可调用|可使用)?|"
+    r"(?:工具|工具列表|工具清单)(?:为空|是空的|没有(?:任何|一个))|"
+    r"未提供(?:任何)?(?:可用)?工具"
+)
+
+
+@dataclass
+class AvailabilityClaim:
+    kind: str          # "registration" / "availability" / "generic"
+    tool_name: str     # generic 时为 ""
+    snippet: str       # 声称原文片段（审计可见）
+    proof: str = ""    # 证伪依据："registry"（工具面在册）/ "executed"（本回合真实执行成功）
+
+
+def find_availability_claims(response: str) -> list[AvailabilityClaim]:
+    """抽取回复中的工具可用性声称（确定性正则，不走LLM）。"""
+    text = response or ""
+    claims: list[AvailabilityClaim] = []
+    seen: set[tuple[str, str]] = set()
+
+    def _add(kind: str, name: str, span: tuple[int, int]) -> None:
+        key = (kind, name)
+        if key in seen:
+            return
+        seen.add(key)
+        claims.append(AvailabilityClaim(
+            kind=kind, tool_name=name,
+            snippet=text[max(0, span[0] - 10):span[1] + 10].strip(),
+        ))
+
+    for pat, kind in ((_REG_NAME_FIRST, "registration"),
+                      (_REG_NAME_LAST, "registration"),
+                      (_REG_BARE, "registration")):
+        for m in pat.finditer(text):
+            _add(kind, m.group("name"), m.span())
+
+    for pat in (_AVAIL_NAME_FIRST, _AVAIL_NAME_LAST, _AVAIL_BARE):
+        for m in pat.finditer(text):
+            name = m.groupdict().get("name") or m.groupdict().get("name2") or ""
+            if name:
+                _add("availability", name, m.span())
+
+    # 无名类声称仅在没有任何具名声称时登记（具名更具体，同句双报属噪音）
+    if not any(c.kind != "generic" for c in claims):
+        for m in _GENERIC_CLAIM.finditer(text):
+            _add("generic", "", m.span())
+    return claims
+
+
+@dataclass
+class AvailabilityAssessment:
+    claims: list[AvailabilityClaim] = field(default_factory=list)
+    false_claims: list[AvailabilityClaim] = field(default_factory=list)
+
+    @property
+    def has_false_claim(self) -> bool:
+        return bool(self.false_claims)
+
+
+def assess_availability(
+    response: str,
+    available_tools: set | list | tuple | None,
+    tool_calls_log: list | None = None,
+) -> AvailabilityAssessment:
+    """对照工具面真源+执行账本核验可用性声称，挑出被证伪的声称。
+
+    - available_tools：本轮真实注入的工具名集合（soulmate_agent._active_tool_names）
+      ——"运行时未注入"类声称的第一真源；None/空=无真源可对照，一律不更正（诚实边界）
+    - tool_calls_log：回合工具账本；**已执行侧**（parse_ledger executed）才构成
+      "工具实际可用"证据——被拦截的调用恰证明"不可用"，反向支持模型的说法
+    """
+    claims = find_availability_claims(response)
+    names = {str(n) for n in (available_tools or []) if n}
+    executed, _blocked = parse_ledger(tool_calls_log)
+    executed_names = {e.name for e in executed}
+
+    false_claims: list[AvailabilityClaim] = []
+    for c in claims:
+        if c.kind == "generic":
+            if executed_names:
+                c.proof = "executed"
+                false_claims.append(c)
+        elif c.kind == "registration":
+            if c.tool_name and c.tool_name in executed_names:
+                c.proof = "executed"
+                false_claims.append(c)
+            elif c.tool_name and c.tool_name in names:
+                c.proof = "registry"
+                false_claims.append(c)
+        elif c.kind == "availability":
+            # 模糊声称：只有"真实执行成功"能证伪（工具面在册≠后端可用）
+            if c.tool_name and c.tool_name in executed_names:
+                c.proof = "executed"
+                false_claims.append(c)
+    return AvailabilityAssessment(claims=claims, false_claims=false_claims)
+
+
+def availability_banner(assessment: AvailabilityAssessment) -> str:
+    """可用性更正声明（用户可见）：被证伪的声称逐条列出+真源说明。"""
+    if not assessment.false_claims:
+        return ""
+    lines = ["⚠️ **工具可用性更正**（对照工具清单/执行账本核验，上文相关说法不成立）："]
+    for c in assessment.false_claims[:8]:
+        if c.kind == "generic":
+            lines.append(
+                "- 上文称\"工具未注入/无可用工具\"不成立——本回合有真实工具执行记录。"
+            )
+        elif c.proof == "executed":
+            lines.append(f"- `{c.tool_name}` —— {c.snippet[:80]}：该工具本回合已真实调用执行成功")
+        else:
+            lines.append(f"- `{c.tool_name}` —— {c.snippet[:80]}：该工具真实存在于本回合工具清单（已注入）")
+    lines.append("以上工具可用性以工具清单/执行账本为准，请勿以\"工具不存在/未注入\"为由拒做。")
+    return "\n".join(lines)
+
+
+def amend_availability(response: str, assessment: AvailabilityAssessment) -> str:
+    """被证伪的可用性声称 → 前置更正声明（原文保留，不删改模型原话——可审计）。"""
+    if not assessment.false_claims:
+        return response
+    return availability_banner(assessment) + "\n\n" + (response or "")
