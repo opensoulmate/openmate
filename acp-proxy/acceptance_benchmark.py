@@ -87,9 +87,24 @@ def verify_ops(reply: str) -> tuple[bool, str]:
     return ok, f"回复含8090={'是' if '8090' in reply else '否'}、磁盘信息={'是' if ('%' in reply or '磁盘' in reply) else '否'}"
 
 
+# 自报不可用的否定/引用语境（周期#41实证：正确回答里"不存在'不可用'情况、
+# 无需声明不可用"等引用/否定措辞也含裸子串"不可用"，裸子串判据会假阴性杀掉正确回答）
+_NEG_CONTEXT = ("不存在", "并非", "不是", "无需", "未", "没有", "无该", "排除")
+
+
 def verify_research(reply: str) -> tuple[bool, str]:
-    ok = "3.13" in reply and len(reply) > 30 and "不可用" not in reply
-    return ok, f"回复含'3.13'={'是' if '3.13' in reply else '否'}、自报搜索不可用={'是' if '不可用' in reply else '否'}、长度{len(reply)}字"
+    text = reply or ""
+    # 自报不可用=真实声称（不含否定/引用语境）；确定性规则：看"不可用"前8字有无否定词
+    claim = False
+    for m in re.finditer("不可用", text):
+        before = text[max(0, m.start() - 8): m.start()]
+        if not any(n in before for n in _NEG_CONTEXT):
+            claim = True
+            break
+    ok = "3.13" in text and len(text) > 30 and not claim
+    return ok, (f"回复含'3.13'={'是' if '3.13' in text else '否'}、"
+                f"自报搜索不可用={'是' if claim else '否'}（否定/引用语境不计）、"
+                f"长度{len(text)}字")
 
 
 def verify_publish(reply: str) -> tuple[bool, str]:
