@@ -52,11 +52,21 @@
 ## 阶段规划（每阶段内拆成 15 分钟可完成的切片）
 
 ### ⚡ 紧急插队（优先级最高——先于阶段3执行，做完再回到3.1）
-- [ ] 0.2 首条消息提速（用户实测"第一条回复特别慢"：6秒引擎准备+27秒模型大首包）：
+- [x] 0.2 首条消息提速（用户实测"第一条回复特别慢"：6秒引擎准备+27秒模型大首包）：
   a) new_session 时即预热引擎（记忆检索/画像/工具装配并行化，用户打字时间自然覆盖）
   b) 会话创建时发一次微小预热 LLM 请求（同系统提示前缀，回复丢弃）暖服务端缓存，
   真正首条消息打到热前缀。验收：新建会话→首条消息→首字回复 ≤8 秒（当前约33秒）。
-- [ ] 0.1 简单对话流式路径增量落库（真实缺陷修复）：simple chat 的 full_response 流式
+  ——周期#22实装：agent/prompt_prefetch.py（PromptPrefetcher：上下文源并行预取
+  asyncio.gather+TTL缓存120s可配SOULMATE_PREFETCH_TTL_S+旁路纪律失败只计数不冒泡+
+  take()超时回退现场计算+可观测stats计数）+soulmate_agent四点接线（_prompt_prefetcher
+  lazy-init收集器三源pref_context/memory_md/improvement+mcp_tools暖60s工具缓存、
+  _prefill_warm微小预热LLM请求同系统提示前缀+同工具面首chunk即断开省输出token不进
+  会话历史不落库、new_session创建路径_schedule_prefetch fire-and-forget、
+  _run_llm_with_tools三源消费缓存）+基础系统提示抽为_build_base_system_prompt单一真源
+  （prefill与主链路逐字同前缀——暖前缀缓存的前提）。真实验收：WS用户路径实测
+  新建会话→模拟打字8s→首条消息→首字回复 6.00s（≤8s达标，此前约33s），
+  journal实证"[prefetch] warm scheduled→warm done parts=[4源] prefill=1"无失败
+- [x] 0.1 简单对话流式路径增量落库（真实缺陷修复）：simple chat 的 full_response 流式
   积累处（soulmate_agent.py `full_response += safe_text` 附近）按节奏节流调用
   _save_progress(session_id, full_response)（每积累约800字或距上次落库≥2秒，取先到），
   使生成中任意时刻切页/重载都能从库重建已生成内容（任务管线已有per-step落库，此为补齐
@@ -214,3 +224,4 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 [2026-10-10 11:58] 周期#19 | 5.1子代理（拆分任务给并行worker，父代理收尾合并）：新增agent/subagent_manager.py（SubagentManager：asyncio.Semaphore限并发1-4+每worker独立wait_for超时隔离——失败/超时取消随行可见不影响其余worker，2-8子任务/超时10-600s夹取；默认worker=default_subagent_runner=隔离工作会话无客户端SoulMate回合，复用唤醒回合同款失败纪律refusal/LLM级失败/零输出都不假装成功+turn归因锚点收集产出+超长截断自报，判定复用wakeup_executor单一真源；parent_goal注入每个worker context；确定性merge不走LLM=成功/失败分节+按输入顺序+失败收尾警示；subagent_runs表持久化失败/超时同样落行+snapshot观测，写日志失败不阻塞）+soulmate_agent四点接线（delegate_tasks工具定义tasks/max_concurrency/parent_goal+主dispatch+_subagent_dispatch共用入口lazy-init+code-mode批内await+系统提示清单） | ✅ | (本次提交) | 5.1勾选；tests/test_subagent_manager.py 21/21（prompt构建/校验夹取/并行保序/失败与超时隔离含cancel实证/并发上限/parent_goal注入/merge两态/runs持久化+写失败不阻塞/默认runner四态+截断自报/接线护栏+__new__真实dispatch烟测）+回归516全过（message/media/wechat链107+wakeup/调度/relay链183+plan/tool链104+记忆链122）+py_compile+SoulMateAgent真实导入烟测；⚠️诚实边界：worker是真实LLM回合（各自调模型+工具），多会话并发的工具执行层隔离硬化归5.2（当前worker各用独立会话，共享agent实例观测采集端属弱共享）；下周期做5.2多会话并发隔离（写锁已有，扩到工具执行层）
 [2026-10-10 12:35] 周期#20 | 5.2多会话并发隔离（写锁已有，扩到工具执行层）：新增agent/tool_exec_fencing.py（以realpath为键的跨进程文件栅栏file_fence——flock互斥+锁文件走中央临时目录sha256命名不污染项目树+进程死亡自动释放无stale lock+同进程不同fd同样互斥+有界等待10s超时抛FileFenceTimeout显式报冲突禁无锁裸写）+接线三处读-改-写临界区（patch主循环/code-mode内层双执行点+PersistentMemory.write/append覆盖memory工具与experience_sink的MEMORY.md同步）+_get_db加busy timeout=30 | ✅ | 50132e40 | 5.2勾选；tests/test_tool_exec_fencing.py 11/11（真多进程lost-update回归/同进程双fd互斥/有界等待/超时消息可见/进程死亡自动释放/锁文件不污染项目目录/持久记忆并发追加不丢行/超时显式报错不改文件/code-mode patch行为实测冲突+正路径/接线护栏/_get_db timeout）+回归553全过（plan/tool/subagent/session链207+记忆/消息/调度链287+persistent_memory/experience/profile链59）+py_compile+真实导入烟测；根因实证：无栅栏两进程并发read-modify-write 5/5次lost update（/tmp/race_control.py对照），有栅栏全保留；⚠️诚实边界：terminal/execute_code任意副作用无法枚举上锁（归任务分解/意图层）、git index.lock串行化（task_decomposer.commit_step并发提交）与共享agent实例观测采集端弱共享待后续；下周期做5.3群组协作（AI群组里的任务编排，接现有ai_groups能力）
 [2026-10-10 12:52] 周期#21 | 5.3群组协作（AI群组任务编排，接现有ai_groups能力）：新增agent/group_orchestrator.py（GroupOrchestrator驱动opensoul /api/ai-groups既有任务面——提交主任务=自动分解子任务+按角色自动分配→逐个触发execute失败隔离（单个execute请求失败/无agent不阻塞兄弟，409已在执行容忍为在途）→有界轮询list_tasks到终态（wait_s 5-600s预算，耗尽子任务记TIMEOUT显式标注不假装成功）→终态读事件流finished/failed判定成败（ai_groups execute收尾status一律scored，成败真相在事件流——实证发现）→确定性merge不走LLM（成功/失败分节+按输入顺序+失败收尾警示同5.1纪律+超长截断自报）；传输层可注入零网络测试，缺省httpx调SOULMATE_AI_GROUPS_URL；只读查询面list_groups/task_status）+soulmate_agent四点接线（group_task工具action=list_groups/orchestrate/task_status+主dispatch+_group_dispatch共用入口lazy-init+code-mode批内await+系统提示清单） | ✅ | (本次提交) | 5.3勾选（阶段5全部完成）；tests/test_group_orchestrator.py 14/14（happy path顺序/execute失败隔离含兄弟照常执行实证/409容忍/无agent显式失败/事件failed覆盖scored/timeout显式标注/提交失败抛错/校验4例/merge确定性+截断自报/空子任务/list_groups与task_status格式/接线护栏+__new__真实dispatch烟测四态）+回归133全过（subagent/message/media/wechat/tool_fencing链85+code_mode/tool_output链48）+py_compile+SoulMateAgent真实导入烟测+真实机器烟测（:8090 ai-groups health ok，list_groups真实返回2个现存群组4703ec60 B群组/1cfdb9e5 A群组）；⚠️诚实边界：编排对象是ai_groups既有执行面（run_agent_proxy跑真实agent binary），本模块不重复实现执行器；轮询为快照轮询非WS实时尾随（ws_group实时面在前端侧）；真实群组端到端跑真实agent执行待有真实成员群组实测；下周期做6.1技能保存（把成功流程写成SKILL.md含触发条件/步骤/坑）
+[2026-10-10 13:25] 周期#22 | ⚡0.2紧急插队·首条消息提速：新增agent/prompt_prefetch.py（PromptPrefetcher：上下文源并行预取asyncio.gather+TTL缓存120s可配SOULMATE_PREFETCH_TTL_S+旁路纪律收集器/prefill失败只计数绝不冒泡绝不阻塞+take()超时回退现场计算（行为与预热前逐字一致）+可观测stats计数）+soulmate_agent四点接线（_prompt_prefetcher lazy-init收集器=pref_context/memory_md/improvement三源+mcp_tools暖60s工具缓存、_prefill_warm微小预热LLM请求同系统提示前缀+同工具面首chunk即断开省输出token不进会话历史不落库、new_session创建路径_schedule_prefetch fire-and-forget、_run_llm_with_tools三源消费缓存）+基础系统提示抽_build_base_system_prompt单一真源（prefill与主链路逐字同前缀=暖前缀缓存前提） | ✅ | 13193cfa | 0.2勾选（紧急插队清空）+0.1补勾（周期#12实装后复选框漏勾）；tests/test_prompt_prefetch.py 15/15（并行barrier实证同步/异步混跑、TTL fake clock命中与过期、失败隔离、prefill同前缀+不进缓存、schedule fire-and-forget、接线护栏new_session调度/主链路消费/同前缀真源/预热不落库）+回归207全过（plan/tool_judge/code_mode/tool_output/self_verify/cache_replay/message_tree/session_lifecycle/persistent_memory/stream_progress/stale_session_recovery/ws_session_recovery）+py_compile+导入烟测；真实验收=WS用户路径（initialize→session/new→模拟打字8s→首条消息）首字回复 6.00s≤8s达标（此前约33s），prompt全程8.21s，journal实证[prefetch] warm scheduled→warm done parts=[4源] prefill=1无失败；⚠️诚实边界：单次实测样本（同机低负载），27s模型大首包改善幅度依赖服务端前缀缓存生效程度，建议用户实际使用体感复核；下周期做6.1技能保存（把成功流程写成SKILL.md含触发条件/步骤/坑）
