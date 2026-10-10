@@ -407,9 +407,27 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
   ⚠️诚实边界：10 类均有真实通过证据（9 类在 FINAL 轮、调研/发布为修复后类别复测），
   但非同一轮全量全绿；同机低负载单样本/类；发布类"工具未注入"误报为间歇性
   模型行为（8.5c-②），非确定性缺失。
-- [ ] 8.5c 验收发现遗留（周期#41 实证，优先级高）：
-  ①回复风格：任务类回答尾部固定带"补做结果/逐项说明"元叙事（违反验收 prompt
-  "简短回答一句话"，self_verify 补做把条件子句逐条复盘）——待治理；
+- [x] 8.5c 验收发现遗留（周期#41 实证，优先级高；①②均已治理，③④⑤转后续另案）：
+  ①✅回复风格（周期#43 治理，d3dc9841）：任务类回答尾部固定带"补做结果/逐项说明"
+  元叙事（违反验收 prompt "简短回答一句话"）——三根因实证逐一修：
+  C（"固定带"主根因）=自否定元指令被当需求：验收防缓存标记行"此行仅为…忽略其
+  语义"被分句拆成需求项且必然 unmet → 每轮必触发补做；修=is_self_negating 显式
+  自否定措辞不算需求（"此行仅[为是]/只是"须伴"标记/占位"防误杀"此行只是第一部分"
+  类真实需求，"忽略大小写"类任务内容不受影响）；
+  A=条件子句"如果X就Y"被拆成独立需求项、短答覆盖不到 → unmet → 补做；修=条件项
+  unmet 封顶 uncertain 只提醒不补做（missing_requirements 恒不含条件项）；
+  B=build_remediation_prompt 旧措辞"完成后逐项简要说明结果"直接命令模型产出逐项
+  复盘；修=改"只输出需要补充的内容本身，禁'补做结果/逐项说明'复盘标题"；
+  连带修 harness 判据假阳性（STYLE85C_1 实证）：需求自检报告复述的需求原文"如果
+  搜索工具不可用…"被并帧采集混入主答区 → 正确回答误判"自报不可用"——主答区边界
+  补"🔍需求自检/可用性更正声明"切割点（元叙事区需求原文复述 ≠ 模型自报）。
+  tests/test_remediation_style.py 14例+同域回归120全过；真实验收调研类复测 ✅1/1
+  （tag=STYLE85C_2，31.5s，主答区自报不可用=否）——"补做结果/逐项说明"尾部在
+  STYLE85C_1/2 两轮真实 run 中均消失实证。
+  ⚠️诚实边界：①需求自检报告（observability 推送）仍并帧进合并采集视图（"简短
+  回答"场景合并视图非纯一句话）——采集侧帧过滤属 8.5c-⑤ 遗留；用户明示简短时
+  抑制自检推送涉及可观测性取舍待拍板；②补做内容若模型自发复盘无确定性剥离
+  （刻意不做输出后处理过滤，防过度防御）；③单样本复测（同机低负载）。
   ②✅可用性误报（**本日两次实证，最高优先**）——周期#42实装治理：模型谎称工具
   "不在工具列表/运行时未注入"
   ——run-A 称"没有 web_search"（账本实证同回合已成功调用 web_search）、FINAL 轮
@@ -443,7 +461,9 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
   双链双落地（98d6025f main / 9d17ebdc evo 链）零丢失。
 - [ ] 后续（非紧急，另案）：微信 iLink 真实传输 4.1b（接入形态待用户拍板，绝不双消费
   hermes 会话）、调度/监控常驻托管（3.1 遗留）、ASR 语音输入（多模态路由另案）、文生图
-  大模型 API、AI 群组真实成员端到端。
+  大模型 API、AI 群组真实成员端到端、8.5c-③InfectionGate 自愈类低危命令豁免语义评估、
+  8.5c-④SearXNG 常驻托管（systemd --user 服务或 agent 自启路径）、8.5c-⑤ harness 采集侧
+  按 turn_origin/帧类型过滤（心跳快照/需求自检推送混入合并回复视图）。
 
 ## 周期日志
 [2026-10-09 19:00] 周期#0 | 路线图建立+cron流水线上线 | ✅ | (本文档创建) | 首个自动周期15分钟后启动
@@ -487,3 +507,4 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 
 [2026-10-10 23:55] 周期#41 | 8.5b 全量10类验收对标实测（分批5+5+修复链+复测）：分批真实跑完10类（tag=FULL10_A/B）9/10当场过、调研类连环挖出4真根因逐修后转✅+全量单轮FINAL台面10/10但发布类经行归属取证为陈旧行假阳性（模型误报message_send"未注入"拒发，旧cleanup漏清agent_messages探针行）修复后真复测✅——修复五连：①report_evidence动作类判据补搜索/检索/抓取/爬取动词+_TOOL_NAMED_RE显式工具点名（5a8a16a3，根因：调研回合被判非执行类→semantic-cache 88% SEMANTIC命中回放旧误报，复测标记只防EXACT）②search_backend超时15s→30s SOULMATE_SEARCH_TIMEOUT_S可配+exit28措辞"响应超时…勿断言未启动"（0aab4f8c，根因：SearXNG冷查询实测20.0s>15s→curl exit 28误报"不可达"→模型误称"SearXNG未启动"）③verify_research语义收敛=剥心跳快照+主答区判自报（引号内引用不计）+须含被搜事实3.13+2024（ce1ec4c4/23fa4f94，根因：裸子串"不可用"判据被补做说明引用提示语/心跳粘连假阴性杀正确回答，全文regex打地鼠E/G/H三轮不收敛）④cleanup补清agent_messages探针行+verify_publish只认accept-pub-target投递行（89013b1a，复测铁律②漏网形态）⑤SearXNG手动启动（start.sh，20s冷聚合实证） | ✅ | 5a8a16a3/0aab4f8c/c6abf31e/23fa4f94/89013b1a | 8.5b勾选；tests：report_evidence+self_verify 35、search_backend+report_evidence 48、回归126（cache_replay/turn_outcome/output_guard/infection_guard/skill_evolution）全绿+verify判据7历史形态离线判别全对；真实验收=10类全有真实通过证据（开发59.95s/调试64.39s/运维23.14s/调研75.66s web_search真实执行答案2024-10-07/发布33.76s投递行真实落库/办公151.9s xlsx 4964B/定时116.32s cron_tasks.db行/多渠道53.87s工具账本/记忆63.16s MEMORY.md标记/协作61.66s subagent_runs双worker），journal工具账本permission=allow实证；⚠️诚实边界：调研/发布为修复后类别复测形态（非同一轮全量全绿），每类单样本同机低负载；新发现入8.5c待办5项（①回答尾部"补做结果/逐项说明"元叙事违反"简短一句话"②**可用性误报本日两次实证最高优先**：run-A谎称没有web_search（账本证同回合已调用）、FINAL轮谎称message_send未注入拒发（代码证无条件装配+下回合正常）→治理=可用性声称对照工具账本/_active_tool_names确定性核验③InfectionGate拦模型自启SearXNG自愈④SearXNG无常驻托管重启即丢⑤心跳帧混入harness回复采集）；下周期做8.5c-②可用性误报治理（工具面确定性核验+amend降级修正，用户可见缺陷最高优先）
 [2026-10-10 23:59] 周期#42 | 8.5c②可用性误报治理（"说了≠做了"的镜像"做了/有，说没有"）：report_evidence增可用性声称抽取find_availability_claims（registration/availability/generic三类正则，覆盖"没有X工具/X运行时未注入/X不在工具列表/X工具不可用/无法使用X/工具未注入"等实证形态；结果类宾语排除"没有X的结果"防误纠+词尾边界防排除词被正则回溯绕过）+assess_availability两级判据（registration=工具面真源_active_tool_names在册即证伪proof=registry；availability模糊声称仅本回合真实执行成功才证伪proof=executed——被拦截调用反向支持模型说法不更正；generic=有成功执行才证伪；无真源无账本一律不更正=宁漏纠不误纠）+amend_availability/availability_banner前置更正声明（原文保留可审计，列证伪依据）+soulmate_agent接线（8.2证据治理后、2.1自验前，真源=getattr(self,"_active_tool_names")） | ✅ | a02984e2 | Gate1 git diff 407行真实落盘+Gate2 grep接线点（assess_availability/banner/amend三调用+_active_tool_names真源传参）+Gate3 tests/test_tool_availability_claims.py 18/18（抽取7形态+结果宾语排除+注入词非工具语境排除+具名压制generic噪音+两级判据registry/executed/未知工具不纠/在册未试不纠/被拦不纠/generic/无真源不纠+banner措辞两态+接线护栏先证据后自验）+回归167全过（report_evidence/self_verify/tool_recovery/cache_replay/code_mode/plan_tool_ledger/degraded_spill/turn_lifecycle）+py_compile+SoulMateAgent导入烟测（__new__+_active_tool_names真实更正输出实证）；⚠️诚实边界：治理"说"侧更正声明，拒做行为本身未强制重试；同机单样本未跑真LLM回合（间歇性误报需用户实际使用观察）；下周期做8.5c-①回复风格元叙事治理
+[2026-10-11 00:45] 周期#43 | 8.5c-①回复风格元叙事治理（回答尾部"补做结果/逐项说明"）：三根因实证逐一修（d3dc9841）——C"固定带"主根因=自否定元指令被当需求（验收防缓存标记行"此行仅为…忽略其语义"被分句拆成需求项且必然unmet→每轮必触发补做），修is_self_negating显式自否定措辞不算需求（"此行仅[为是]/只是"须伴"标记/占位"防误杀真实需求）；A条件子句"如果X就Y"拆成独立需求项短答覆盖不到→unmet→补做，修条件项unmet封顶uncertain只提醒不补做；B补做提示词旧措辞"完成后逐项简要说明结果"直接命令模型逐项复盘，修"只输出需要补充的内容本身禁'补做结果/逐项说明'复盘标题"；连带修harness判据假阳性（STYLE85C_1实证：需求自检报告复述需求原文"如果搜索工具不可用…"被并帧采集混入主答区→正确回答误判"自报不可用"，主答区边界补🔍需求自检/可用性更正声明切割点） | ✅ | d3dc9841 | 8.5c-①勾选（8.5c①②全完，③④⑤转后续另案）；Gate1 git diff 289行真实落盘、Gate2 grep接线点（is_self_negating进extract两处/is_conditional进verify/soulmate_agent真实补做路径5926-5931完好）、Gate3 tests/test_remediation_style.py 14例+同域回归120全过（self_verify/report_evidence/tool_availability/infection_guard/plan_tool_ledger）+双实例重启health OK；真实验收调研类两轮实测：tag=STYLE85C_1挖出harness判据假阳性（"补做结果/逐项说明"尾部已消失实证）→judge修复+离线判别2例→tag=STYLE85C_2 ✅1/1（31.5s，主答区自报不可用=否、含3.13+2024）；⚠️诚实边界：需求自检推送仍并帧进合并采集视图（8.5c-⑤采集侧过滤遗留，"简短回答"合并视图非纯一句话）、补做内容若模型自发复盘不做输出后处理剥离（防过度防御）、单样本同机低负载；下周期：⚡区仅剩8.6待用户拍板→规划下一批切片（候选8.5c-⑤采集侧帧过滤/8.5c-④SearXNG systemd托管/8.5c-③自愈豁免评估）
