@@ -234,7 +234,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     // SoulMate (OpenMate platform) ALWAYS shows first
     const soulmateSessions = agentSessionMap['soulmate'] || [];
     agentMap.set('soulmate', {
-      id: 'soulmate', name: 'SoulMate', icon: '🏛️', description: 'OpenMate Platform',
+      id: 'soulmate', name: 'SoulMate', icon: '💫', logo: '/soulmate.svg', description: 'OpenMate Platform',
       installed: true, available: true, sessions: soulmateSessions,
       expanded: false, sourceGroups: buildSourceGroups(soulmateSessions, 'soulmate'),
     });

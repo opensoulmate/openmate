@@ -108,7 +108,7 @@ async def _reap_detached(reg_key: str, entry: dict) -> None:
     await asyncio.sleep(_DETACH_TTL)
     try:
         proc = entry.get("proc")
-        if entry.get("ws") is not None or proc is None or proc.returncode is not None:
+        if entry.get("subs") or proc is None or proc.returncode is not None:
             return  # 已接回观察窗 / 已自然结束
         if time.time() - float(entry.get("last") or 0) < _DETACH_TTL:
             asyncio.create_task(_reap_detached(reg_key, entry))  # 仍在输出，顺延检查
@@ -256,7 +256,7 @@ async def ws_acp_endpoint(client_ws: WebSocket):
         proc = entry["proc"]
         use_pty = entry["use_pty"]
         master_fd = entry.get("master_fd")
-        entry["ws"] = client_ws
+        entry["subs"].add(client_ws)
         logger.info(f"[ACP] reattach: 会话已有后台子进程 (pid={proc.pid}), 接回观察窗")
     try:
         if reattached:
@@ -311,7 +311,7 @@ async def ws_acp_endpoint(client_ws: WebSocket):
     if entry is None:
         entry = {"proc": proc, "use_pty": use_pty,
                  "master_fd": master_fd if use_pty else None,
-                 "ws": client_ws, "last": time.time(), "keys": set()}
+                 "subs": {client_ws}, "last": time.time(), "keys": set()}
     if reg_key:
         entry["keys"].add(reg_key)
         _LIVE[reg_key] = entry
@@ -433,13 +433,15 @@ async def ws_acp_endpoint(client_ws: WebSocket):
         if _sid and _sid not in entry["keys"]:
             entry["keys"].add(_sid)
             _LIVE[f"{agent_id}:{_sid}"] = entry
-        ws_target = entry.get("ws")
-        if ws_target is None:
-            return  # 观察窗已摘除：继续排空
-        try:
-            await _process_line(msg, init_ids, agent_id, ws_target)
-        except Exception as pe:
-            logger.debug(f"[ACP] pump deliver failed (忽略，继续排空): {pe}")
+        ws_targets = entry.get("subs") or set()
+        if not ws_targets:
+            return  # 无观察窗：继续排空（后台生成不中断）
+        for ws_target in list(ws_targets):
+            try:
+                await _process_line(msg, init_ids, agent_id, ws_target)
+            except Exception as pe:
+                logger.debug(f"[ACP] pump deliver failed (摘除死窗，继续排空): {pe}")
+                ws_targets.discard(ws_target)
 
     async def stdout_to_ws():
         """subprocess stdout → WebSocket（过滤掉 subprocess 的 initialize 响应）"""
@@ -497,7 +499,7 @@ async def ws_acp_endpoint(client_ws: WebSocket):
             await ws_to_stdin()
         except Exception:
             pass
-        entry["ws"] = None
+        entry["subs"].discard(client_ws)
         keep_running = True
         logger.info(f"[ACP] WS detached (reattach), subprocess keeps running (pid={proc.pid})")
         if reg_key:
@@ -522,7 +524,7 @@ async def ws_acp_endpoint(client_ws: WebSocket):
                 # 子进程继续在后台生成并落库；t2/t3输出泵继续运行（无窗只排空）；
                 # 空闲静默由 _reap_detached 兜底回收。
                 logger.info(f"[ACP] WS detached; subprocess keeps running (pid={proc.pid}, key={reg_key})")
-                entry["ws"] = None
+                entry["subs"].discard(client_ws)
                 keep_running = True
                 if reg_key:
                     asyncio.create_task(_reap_detached(reg_key, entry))
