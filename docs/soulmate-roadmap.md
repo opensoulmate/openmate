@@ -216,7 +216,21 @@
   +逐项归因/推荐块render_recommended/管线首试+重试消费step_skills）。
   修三处真实缺口：①gene推荐结果此前只注入"可用技能: 名字"描述/模板/成败率
   全丢②任务管线只按用户原话匹配一次技能③注入面无预算
-- [ ] 6.3 技能进化：用执行结果反哺修正技能内容
+- [x] 6.3 技能进化：用执行结果反哺修正技能内容——周期#35实装agent/skill_evolution.py
+  （SkillEvolver确定性反哺闭环不走LLM：回合工具账本→report_evidence.parse_ledger
+  拆"真实执行vs被拦截"（只认真实执行，被拦截不算技能缺陷证据）→tool_recovery.
+  classify_result单一真源判失败（OK/BLOCKED外=失败，按transient/recoverable/permanent
+  细分）→失败签名归一去重（首行前24字符键，已存在的坑不重复写）→确定性坑条目成文
+  （同名工具后续OK=「重试/换路径后可成功」/否则「本次未恢复，失败即停」）→经
+  SkillSaver.save_flow(overwrite=True)单一写入源revision递增原子替换+skill_manager
+  saved层缓存force_refresh强刷（保存即命中检索面）+skill_evolution.db全量审计
+  （每次evolved/no_change/skipped都落行含verify自验结果，audit写失败旁路不阻塞）；
+  上限：每回合每技能max_new_per_turn=2条新坑、总坑数封顶12超限显式报因；
+  单写入者纪律：只进化saved:<slug>可写库技能，标准层只读技能skipped留痕不动；
+  正文解析不出（非SkillSaver渲染格式）→skipped"不改写"禁猜禁编造；
+  soulmate_agent回合收尾钩子（record_usage之后、try_learn_skill之前，lazy-init
+  兼容__new__测试agent+旁路纪律失败只计数不阻塞）。⚠️诚实边界：内容变更仅"坑"
+  追加（确定性）；步骤/触发词的语义改写需LLM或用户拍板，未做
 
 ### 阶段7 · 工具生态补齐
 - [ ] 7.1 浏览器自动化（Playwright/CDP）
@@ -368,3 +382,4 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 [2026-10-10 19:04] 周期#32 | ⚡8.2 短路合成报告治理（验收R2）：新增agent/report_evidence.py（执行证据前提确定性治理——parse_ledger账本拆"真实执行vs被拦截"（permission单一真源：allow/ask-approved/degraded-allow/cached-allow/infection:pass_with_trace=执行证据；deny/ask-denied/sandbox-restricted/loop_guard:*/其余infection:*=被拦截；[xxx]伪条目两头不计）+assess四态(no-claim/grounded/blocked/unsupported)+amend_response报告标题降级"## 任务执行报告（⚠️ 未经执行验证）"+governance_banner被拦截报"被拦截+原因"禁报完成+is_cacheable_request语义缓存准入）；短路根因实证=语义缓存exact命中回放旧"任务执行报告"（跳过LLM/工具=run2 1.38s形态）→soulmate_agent三处接线（缓存get侧执行类请求不读缓存、put侧执行类回复不入缓存、回复治理收口先于自检且落库=治理后文本+banner推前端）；self_verify收紧"说了≠做了"（动作类met必须以工具执行证据为前提——原has_marker自证漏洞"回复自称已完成即给met"封死，被拦工具evidence报⛔被拦截+原因不计证据） | ✅ | (本次提交) | 8.2勾选+R2销账；tests/test_report_evidence.py 22/22+回归426全过（self_verify 13 + cache_replay/turn_outcome/output_guard/plan/plan_tool_ledger/task_judge_wiring/stream_progress/session_recall/experience_sink/persistent_memory 169 + code_mode/tool_output_wiring/turn_lifecycle/message_router/wechat_bridge/prompt_prefetch/infection_guard/tool_recovery/token_attribution 222）；真实验收=毒丸探针3/3✅（语义缓存埋exact命中的合成"任务执行报告"毒丸→WS真实用户路径/soulmate发同请求：毒丸FAKE标记未回放+journal实证"[semantic-cache] 执行类请求不走缓存"+dev_hello.py真实创建且内容/标记命中（执行证据），latency 51.95s≠1.38s短路形态，自检2/2基于真实工具）；⚠️诚实边界：治理负路径（工具真被拦时banner）以单测实证，真实拦截场景未在探针触发；下周期做8.3长回合治理（schedule 3工具链>240s无终态根因+回合级进度/超时可见）
 [2026-10-10 19:45] 周期#33 | ⚡8.3 长回合治理（R3）：根因实证=**非dispatch卡死**（journal 17:52-17:57 验收#7复盘，回合在真实推进），每工具一次注入审计LLM往返+R1误杀失败/重试轮把3工具链拉到5-8分钟级，harness 240s到点放弃即"无终态无落库"；实装agent/turn_watchdog.py（TurnWatchdog：后台心跳默认60s SOULMATE_TURN_HEARTBEAT_S推快照[已用时/轮次/工具数/最近工具]给客户端+journal不依赖轮次边界LLM单轮慢也照发+软预算240s SOULMATE_TURN_SOFT_BUDGET_S单次⚠️"继续执行不中断"禁硬杀+notify旁路纪律只计数不冒泡+960s自过期防孤儿心跳）+soulmate_agent五点接线（import+_watchdog_for/_stop_turn_watchdog lazy-init兼容__new__测试agent+工具循环前start+轮次/工具节点beat+turn.close订阅收口） | ✅ | (本次提交) | 8.3勾选；tests/test_turn_watchdog.py 8/8+回归169全过（turn_lifecycle/turn_outcome/loop_guard/prompt_prefetch/infection_guard/report_evidence/stream_progress）+py_compile+导入烟测+双实例重启health OK；真实验收=WS用户路径探针（schedule 3工具链+唯一防缓存标记，复用acceptance_benchmark采集器含sessionId过滤）：78.1s end_turn、需求自检3/3 met、journal实证心跳"[turn-watchdog] session=om-13507ea2b926 ⏳ 回合进行中：已用 60s｜第 2/15 轮｜已执行工具 1 个（最近：schedule_cancel）"、cron_tasks.db实证任务#2(wd_probe_1791631)创建后按要求停用(enabled=0)——R1修复后同链路从">240s无终态"变78s完整终态（8.5定时类预热通过，探针脚本wd_probe_ws.py留库可复跑）；⚠️诚实边界：耗时本身治理（单工具链审计LLM往返开销优化）未做另案；下周期做8.4调研兜底（web_search后端可用性探测+SearXNG未启动显式降级，禁静默归零）
 [2026-10-10 19:57] 周期#34 | 8.4 调研兜底（R4）：web_search 后端可用性探测+显式降级禁静默归零——新增agent/search_backend.py（SearXNG主后端+Bing HTML兜底降级链+probe()+四态语义：可信空只认searx JSON results:[]报"非故障"、bing 0块=inconclusive疑似反爬禁断言"无资料"、全挂=逐后端报因+启动文档化start.sh/searx.webapp）+修静默归零双根因（①后端挂了/非JSON/缺results键误报"无搜索结果"②query裸拼URL未编码空格/中文截断假零→quote()）+soulmate_agent两执行点收口run_search单一真源内联curl-SearXNG清零 | ✅ | e4e25c13 | 8.4勾选；tests/test_search_backend.py 24/24+回归109全过(code_mode/sandbox_policy/tool_recovery/tool_output)+真实机器实证（SearXNG未启动场景旧报"搜索不可用:curl stderr"/假零→现"⚠️未获得搜索结果…不足以断言无资料…启动方法"）+SoulMateAgent导入烟测；⚠️诚实边界：Bing兜底实测被反爬拦截0块（inconclusive已如实标注，SearXNG启动后主链路即恢复多引擎聚合）；8.5验收复测/⚡8.6双链合并（待用户拍板）仍未做；下周期做8.5验收复测（多渠道/定时两类，prompt带唯一防缓存标记+先清陈旧产物）
+[2026-10-10 20:45] 周期#35 | 6.3 技能进化（阶段顺序下一刀；⚡区0.1/0.2已完、8.6待用户拍板）：新增agent/skill_evolution.py（SkillEvolver确定性反哺闭环——账本parse_ledger拆真实执行/被拦截+classify_result单一真源判失败+签名去重+确定性坑条目成文[恢复成功/未恢复两态措辞]+SkillSaver.save_flow(overwrite=True)revision递增原子写回+skill_evolution.db全量审计+每回合每技能≤2新坑/总坑≤12封顶显式报因+只动saved可写技能标准层单写入者纪律skipped留痕）+soulmate_agent回合收尾钩子（record_usage后lazy-init+旁路纪律不阻塞） | ✅ | (本次提交) | 6.3勾选；tests/test_skill_evolution.py 20/20（坑沉淀/去重/双上限/恢复两态/拦截不算失败/标准层跳过/正文不可解析不改写/内容保真步骤触发词描述零丢失/审计落行含verify结果/审计写失败旁路/接线护栏钩子顺序断言）+回归143全过(skill_saver/loader/standard_layer/usage_receipt/self_verify/experience_sink/report_evidence)+真实机器烟测（SoulMateAgent导入+钩子接线inspect实证+真实单例db路径）；⚠️诚实边界：仅"坑"追加，步骤/触发词语义改写需LLM或用户拍板未做；下周期做7.1浏览器自动化（Playwright/CDP工具面）或8.5验收复测

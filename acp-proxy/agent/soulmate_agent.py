@@ -5694,6 +5694,33 @@ You can send files to the user natively: to deliver a file, write a brief confir
         for skill in matched_skills:
             self._skill_manager.record_usage(skill["id"])
 
+        # ── 路线图 6.3 技能进化：执行结果反哺技能内容（确定性坑沉淀）──
+        # 只对命中过的 saved 可写技能做失败→坑沉淀（单写入者纪律不动标准层）；
+        # 旁路纪律：进化失败只记日志，绝不阻塞回合收尾主链路。
+        try:
+            _skill_evolver = getattr(self, "_skill_evolver_inst", None)
+            if _skill_evolver is None:
+                from agent.skill_evolution import SkillEvolver
+
+                _skill_evolver = SkillEvolver(
+                    skill_manager=getattr(self, "_skill_manager", None)
+                )
+                self._skill_evolver_inst = _skill_evolver
+            _evo_results = _skill_evolver.evolve_from_turn(
+                skills=matched_skills,
+                tool_calls_log=tool_calls_log,
+                verify_report=verify_report,
+                session_id=session_id,
+            )
+            _evo_evolved = [r for r in _evo_results if r.action == "evolved"]
+            if _evo_evolved:
+                logger.info(
+                    f"[skill-evolution] evolved: "
+                    f"{[(r.slug, r.revision_before, r.revision_after) for r in _evo_evolved]}"
+                )
+        except Exception as e:
+            logger.debug(f"Skill evolution skipped: {e}")
+
         # ── 自动学习 ──────────────────────────────────────
         try:
             await self._skill_manager.try_learn_skill(
