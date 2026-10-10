@@ -21,6 +21,9 @@ from dataclasses import dataclass, field
 
 from agent.report_evidence import parse_ledger
 
+# 自检报告首行（frame_origin 采集侧帧分类的单一真源——改措辞须同步语义）
+REPORT_HEADER = "🔍 需求自检（对照原始需求逐条核对）："
+
 # 短于该长度且无枚举结构的消息视为闲聊，不做自验
 _MIN_TASK_LEN = 20
 
@@ -275,7 +278,7 @@ class SelfVerifier:
             return ""
         icons = {"met": "✅", "uncertain": "⚠️", "unmet": "❌"}
         labels = {"met": "", "uncertain": "（证据不足）", "unmet": "（未覆盖）"}
-        lines = ["🔍 需求自检（对照原始需求逐条核对）："]
+        lines = [REPORT_HEADER]
         for i, item in enumerate(report.items, 1):
             label = labels.get(item.status, "")
             if item.conditional and item.status != "met":

@@ -181,18 +181,27 @@ def assess(
 
 _HEADING_RE = re.compile(r"^## 任务执行报告\s*$", re.MULTILINE)
 
+# 横幅首行前缀（frame_origin 采集侧帧分类的单一真源——改措辞须同步语义）
+GOV_BANNER_PREFIXES = (
+    "⛔ **工具被拦截（未执行，不构成完成证明）**",
+    "⚠️ **执行证据不足**",
+)
+AVAIL_BANNER_PREFIX = (
+    "⚠️ **工具可用性更正**（对照工具清单/执行账本核验，上文相关说法不成立）："
+)
+
 
 def governance_banner(assessment: EvidenceAssessment) -> str:
     """治理声明（用户可见）：被拦截的工具报"被拦截+原因"；零执行报"不构成完成证明"。"""
     lines: list[str] = []
     if assessment.blocked:
-        lines.append("⛔ **工具被拦截（未执行，不构成完成证明）**：")
+        lines.append(f"{GOV_BANNER_PREFIXES[0]}：")
         for e in assessment.blocked[:8]:
             reason = e.result_preview.strip() or e.permission
             lines.append(f"- `{e.name}` —— 被拦截：{reason[:160]}")
     if assessment.verdict == "unsupported":
         lines.append(
-            "⚠️ **执行证据不足**：本回合无成功工具执行记录，"
+            f"{GOV_BANNER_PREFIXES[1]}：本回合无成功工具执行记录，"
             "以下内容未经执行验证，不构成完成证明。"
         )
     return "\n".join(lines)
@@ -376,7 +385,7 @@ def availability_banner(assessment: AvailabilityAssessment) -> str:
     """可用性更正声明（用户可见）：被证伪的声称逐条列出+真源说明。"""
     if not assessment.false_claims:
         return ""
-    lines = ["⚠️ **工具可用性更正**（对照工具清单/执行账本核验，上文相关说法不成立）："]
+    lines = [AVAIL_BANNER_PREFIX]
     for c in assessment.false_claims[:8]:
         if c.kind == "generic":
             lines.append(

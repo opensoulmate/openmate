@@ -35,6 +35,10 @@ DEFAULT_MAX_LIFETIME_S = 960.0
 
 _SNAPSHOT_FIELDS = ("round_index", "max_rounds", "tools_executed", "last_tool")
 
+# 消息前缀常量（frame_origin 采集侧帧分类的单一真源——改措辞须同步语义）
+SNAPSHOT_PREFIX = "⏳ 回合进行中"
+SOFT_WARN_PREFIX = "⚠️ 回合已超过软预算"
+
 
 @dataclass
 class TurnSnapshot:
@@ -123,7 +127,7 @@ class TurnWatchdog:
         if snap.last_tool:
             tool_part += f"（最近：{snap.last_tool}）"
         return (
-            f"⏳ 回合进行中：已用 {self.elapsed():.0f}s｜{round_part}｜{tool_part}")
+            f"{SNAPSHOT_PREFIX}：已用 {self.elapsed():.0f}s｜{round_part}｜{tool_part}")
 
     # ── 心跳循环 ────────────────────────────────────────────────
     async def _run(self) -> None:
@@ -150,7 +154,7 @@ class TurnWatchdog:
         if elapsed >= self.soft_budget_s and not self.soft_warned:
             self.soft_warned = True
             msg = (
-                f"⚠️ 回合已超过软预算 {self.soft_budget_s:.0f}s（长回合），"
+                f"{SOFT_WARN_PREFIX} {self.soft_budget_s:.0f}s（长回合），"
                 f"继续执行不中断。{msg}")
         self.beats_sent += 1
         logger.info(f"[turn-watchdog] session={self.session_id} {msg}")
