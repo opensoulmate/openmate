@@ -1940,6 +1940,15 @@ class SoulMateAgent:
         finally:
             await agen.aclose()
 
+    def _skill_loader(self):
+        """技能检索+加载器 lazy-init（__new__ 裸实例零感知，缺属性不炸）。"""
+        loader = getattr(self, "_skill_loader_inst", None)
+        if loader is None:
+            from agent.skill_loader import SkillLoader
+            loader = SkillLoader(skill_manager=getattr(self, "_skill_manager", None))
+            self._skill_loader_inst = loader
+        return loader
+
     def _schedule_prefetch(self, session_id: str, cwd: str | None = None) -> None:
         """new_session 即调度预热（fire-and-forget 旁路，失败只记日志绝不阻塞）。"""
         try:
@@ -2066,18 +2075,16 @@ You can send files to the user natively: to deliver a file, write a brief confir
             tokens=estimate_tokens(system_prompt),
         ))
 
-        # 注入匹配的技能上下文
+        # 注入匹配的技能上下文（6.2：经 SkillLoader 预算内渲染——小技能文本逐字节
+        # 不变（token归因契约），超预算截断自报）
         if matched_skills:
-            system_prompt += "\n\n## 相关技能（参考以下经验执行任务）\n"
-            for skill in matched_skills[:3]:
-                skill_body = f"\n### {skill['name']}\n{skill['content']}\n"
-                if skill.get("code_template"):
-                    skill_body += f"```\n{skill['code_template']}\n```\n"
-                system_prompt += skill_body
-                # P1归因：skill逐项（SDKContextUsage skills[]，名称+正文+模板）
+            _skill_section, _skill_bodies = self._skill_loader().render_local_section(matched_skills)
+            system_prompt += _skill_section
+            # P1归因：skill逐项（SDKContextUsage skills[]，名称+正文+模板）
+            for _s_name, _s_body in _skill_bodies:
                 attr_items.append(ContextItem(
-                    kind=KIND_SKILL, name=str(skill.get("name", "unnamed_skill")),
-                    source="skill_manager.search", tokens=estimate_tokens(skill_body),
+                    kind=KIND_SKILL, name=_s_name,
+                    source="skill_manager.search", tokens=estimate_tokens(_s_body),
                 ))
 
         # ⚡0.2 首条消息提速：new_session 预热产物（TTL 内）直接复用；
@@ -4879,27 +4886,13 @@ You can send files to the user natively: to deliver a file, write a brief confir
         logger.info(f"[_run_llm_with_tools] starting, client={self._client is not None}")
 
 
-        # ── 技能匹配（需要最低分数阈值，避免短消息误匹配）──────────
-        matched_skills = []
-        if len(user_text) > 10:  # 短消息不匹配技能
-            raw_skills = self._skill_manager.search_skills(user_text, limit=3)
-            # 只保留触发词匹配(score>=5)的技能，忽略纯描述匹配
-            # ── 文件请求模式检查：命中则跳过技能匹配（Hermes范式：LLM直接输出MEDIA标签）──
-            import re as _re
-            _has_filename = _re.search(r'[\w\-]+\.\w{1,5}', user_text)
-            _has_send_verb = _re.search(r'发给我|发送|发给|给我|下载|send|download', user_text)
-            _is_file_req = bool(_has_filename and _has_send_verb)
-
-            if not _is_file_req:
-                # .agents/skills标准层接线：触发词策略集中在skill_manager.is_injectable_trigger
-                # （英文len>2原行为不变；中文2字词是完整词，通用词除外）——
-                # 此前len(t)>2门槛系统性排除中文2字触发词，标准技能对中文查询永远不注入
-                matched_skills = [s for s in raw_skills if any(
-                    t.lower() in user_text.lower() and is_injectable_trigger(t)
-                    for t in s.get("triggers", [])
-                )]
-                if matched_skills:
-                    logger.info(f"Matched skills: {[s['name'] for s in matched_skills]}")
+        # ── 技能匹配（6.2：检索入口收口 SkillLoader.match_for_task 单一真源）──
+        # gate 语义逐条保留：短消息不匹配 / 文件请求跳过（MEDIA范式）/ 只认触发词
+        # 命中忽略纯描述匹配（pitfall 30 防误触发）；命中带 match_reason 可观测
+        matched_skills = self._skill_loader().match_for_task(user_text)
+        if matched_skills:
+            logger.info(
+                f"Matched skills: {[(s['name'], s.get('match_reason', '')) for s in matched_skills]}")
 
         # 构建上下文消息
         messages = session["messages"].copy()
@@ -5125,9 +5118,11 @@ You can send files to the user natively: to deliver a file, write a brief confir
                     if skill_data.get("skills"):
                         # 本回合注入的技能记账→回合收口后按结局回执usage
                         self._note_skill_injected(session_id, skill_data["skills"])
-                        skill_names = [s["name"] for s in skill_data["skills"][:3]]
-                        skill_ctx = f"\n## 相关技能\n可用技能: {', '.join(skill_names)}\n"
-                        messages.insert(0, {"role": "system", "content": skill_ctx})
+                        # 6.2 加载补缺：此前只注入"可用技能: 名字"（描述/模板/成败率
+                        # 全丢），现经 SkillLoader 渲染内容注入段（预算内截断自报）
+                        skill_ctx = self._skill_loader().render_recommended(skill_data["skills"])
+                        if skill_ctx:
+                            messages.insert(0, {"role": "system", "content": skill_ctx})
 
                 # 5. 环境信息注入（首次会话时）
                 if len(session.get("messages", [])) <= 1:
@@ -5273,6 +5268,9 @@ You can send files to the user natively: to deliver a file, write a brief confir
                 })
 
                 step.status = StepStatus.RUNNING
+                # 6.2 步骤级技能重新匹配：步骤文本（如"解析PDF"）可命中用户原话
+                # 没触发的技能；与回合级匹配合并去重（步骤命中在前）供本步LLM调用
+                step_skills = self._skill_loader().match_for_step(step.description, matched_skills)
                 _traj_seg = ""
                 try:
                     # trajectory span：plan步骤LLM段（round级子span由_run_llm_with_tools
@@ -5280,7 +5278,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
                     _traj_seg = await self._traj_recorder.start_llm_span(
                         session_id, traj_root_id,
                         content=f"plan_step: {step.description[:120]}")
-                    step_result, step_tools = await self._run_llm_with_tools(step_messages, session_id, matched_skills=matched_skills, traj_seg_id=_traj_seg)
+                    step_result, step_tools = await self._run_llm_with_tools(step_messages, session_id, matched_skills=step_skills, traj_seg_id=_traj_seg)
                     step.result = step_result
                     # P1修复（复杂路径tool_calls_log恒空→学习/记账链整体不触发）：
                     # 步骤工具账本汇入回合账本（3598行"两条路径都会用到"的兑现）——
@@ -5341,7 +5339,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
                         _traj_seg = await self._traj_recorder.start_llm_span(
                             session_id, traj_root_id,
                             content=f"plan_step_retry: {step.description[:120]}")
-                        retry_result, retry_tools = await self._run_llm_with_tools(step_messages, session_id, matched_skills=matched_skills, traj_seg_id=_traj_seg)
+                        retry_result, retry_tools = await self._run_llm_with_tools(step_messages, session_id, matched_skills=step_skills, traj_seg_id=_traj_seg)
                         step.result = retry_result
                         # 重试轮工具账本同样汇入（重试也是本回合真实工具面，含失败
                         # 首试的工具——审计/记账按真实执行记，不因结局回滚账本）
