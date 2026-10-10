@@ -44,7 +44,7 @@
 - ~~2.1 缺~~ **2.1 已补（周期#7）**：自验闭环（self_verify.py，收尾对照原始需求逐条核对+补做1轮+复检推送）
 - **2.2-2.4 全部已补**：失败恢复（周期#8）/复杂任务分解+逐步提交（周期#9）/系统状态一键体检（周期#10）
 - ~~3.x 缺~~ **3.1 已补（周期#11）**：cron引擎（agent/soulmate_scheduler.py，interval/cron周期调度+SQLite持久化+CAS到点执行+执行日志，区别于schedule_wakeup一次性唤醒）；**3.2 已补（周期#13）**：定时汇报（agent/cron_reporter.py，执行结果📊汇报行落opensoul.db+wakeup_relay推送面扩到{wakeup,cron,cron_report}即时推送）；**3.3 已补（周期#14）**：监控告警（agent/health_monitor.py，website/service/port三类周期健康检查+防抖告警+恢复通知）；⚠️3.1遗留：调度循环宿主=存活的SoulMateAgent进程（stdio子进程自举），无agent进程时任务不执行（错过不补跑），常驻托管（独立daemon）待后续
-- **4.x 半缺**：~~微信桥全缺~~ **4.1a 已补（周期#15）**：微信桥核心（agent/wechat_bridge.py，收发回路+去重+会话映射+失败纪律，loopback传输实证；iLink真实传输=4.1b待做）；消息路由、媒体收发仍缺（sense_* 只有感知无收发）
+- **4.x 半缺**：~~微信桥全缺~~ **4.1a 已补（周期#15）**：微信桥核心（agent/wechat_bridge.py，收发回路+去重+会话映射+失败纪律，loopback传输实证；iLink真实传输=4.1b待做）；**4.2 已补（周期#17）**：统一消息路由（agent/message_router.py，OpenMate/微信统一收发出入口+message_send工具）；媒体收发仍缺（sense_* 只有感知无收发）
 - **5.x 全缺**：子代理并行、群组任务编排
 - **6.x 半缺**：技能保存/检索/学习已有大半，6.3 用执行结果反哺修正待实测
 - **7.x 全缺**：浏览器自动化、docx/pdf/xlsx 生成、TTS、图像生成；另有 send_file/进程管理(text_to_speech等Hermes工具)缺口
@@ -52,7 +52,11 @@
 ## 阶段规划（每阶段内拆成 15 分钟可完成的切片）
 
 ### ⚡ 紧急插队（优先级最高——先于阶段3执行，做完再回到3.1）
-- [x] 0.1 简单对话流式路径增量落库（真实缺陷修复）：simple chat 的 full_response 流式
+- [ ] 0.2 首条消息提速（用户实测"第一条回复特别慢"：6秒引擎准备+27秒模型大首包）：
+  a) new_session 时即预热引擎（记忆检索/画像/工具装配并行化，用户打字时间自然覆盖）
+  b) 会话创建时发一次微小预热 LLM 请求（同系统提示前缀，回复丢弃）暖服务端缓存，
+  真正首条消息打到热前缀。验收：新建会话→首条消息→首字回复 ≤8 秒（当前约33秒）。
+- [ ] 0.1 简单对话流式路径增量落库（真实缺陷修复）：simple chat 的 full_response 流式
   积累处（soulmate_agent.py `full_response += safe_text` 附近）按节奏节流调用
   _save_progress(session_id, full_response)（每积累约800字或距上次落库≥2秒，取先到），
   使生成中任意时刻切页/重载都能从库重建已生成内容（任务管线已有per-step落库，此为补齐
@@ -121,7 +125,19 @@
     接线（wechat_route_list/bind/unbind工具定义+主dispatch+_wechat_route_dispatch
     共用入口lazy-init+code-mode批内dispatch+系统提示工具清单）；只操作peers映射表，
     不碰消息收发不碰hermes侧
-- [ ] 4.2 消息路由：OpenMate/微信统一收发
+- [x] 4.2 消息路由：OpenMate/微信统一收发——周期#17实装agent/message_router.py
+  （统一信封ChannelMessage+RouteResult；route_inbound统一入站按channel分发：
+  wechat→整体委托WeChatBridge.deliver()（去重/回合/回复单一owner仍在桥内，不双份
+  记账）、openmate→RouterStore(channel+msg_id复合主键去重)+无客户端回合（失败纪律
+  复用wakeup_executor：refusal/LLM级失败/零输出都不假装成功）；send_outbound统一
+  出站一个入口：wechat→WeChatBridge.send_proactive()拆块+限流发peer、openmate→
+  落库assistant行到目标会话（turn_origin=msg））+wechat_bridge增量（deliver()公开
+  投递入口+send_proactive()主动发送+WeChatTransport.send_text契约（默认NotImplemented
+  不破坏既有传输）+LoopbackTransport.proactive记录）+wakeup_relay补推面纳入msg出身
+  （入站回合行+出站消息行正连前端实时可见）+soulmate_agent四点接线（message_send
+  工具定义+主dispatch+_message_dispatch共用入口lazy-init+code-mode批内await+系统
+  提示工具清单）。⚠️诚实边界：微信通道仍loopback传输（iLink=4.1b待用户拍板）；
+  openmate出站=落库+relay补推非改写ws客户端连接
 - [ ] 4.3 媒体能力：图片/文件收发、截图理解
 
 ### 阶段5 · 并行与协作
@@ -162,3 +178,4 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 [2026-10-10 09:55] 周期#14 | 3.3监控告警：新增agent/health_monitor.py（HealthMonitor：targets/state/events三表SQLite持久化+三类确定性checker website=HTTP GET 2xx/3xx/service=systemd --user is-active/port=TCP连通，checker可注入+单项异常降级fail；告警防抖=连续失败达阈值才🚨告警+每10次续报+仅告过警的故障恢复发✅通知（含中断累计失败次数）；告警行turn_origin=health_alert落opensoul.db，无session_id显式跳过，落库失败不阻塞检查；run_forever后台循环+ensure_started惯例）+wakeup_relay推送面扩到{wakeup,cron,cron_report,health_alert}+start.py有启用目标才自举+soulmate_agent四点接线（monitor_add/list/remove/check工具定义+主dispatch+_monitor_dispatch共享lazy-init+code-mode批内+系统提示） | ✅ | 78ce5784 | 3.3勾选（阶段3全部完成）；tests/test_health_monitor.py 26/26（CRUD校验8例+真实socket/HTTP checker+防抖/续报/恢复边界+告警落库meta+relay推送面+run_due到点判定+接线护栏+SoulMateAgent __new__真实dispatch烟测）+回归161全过(cron_reporter/soulmate_scheduler/wakeup_relay/wakeup_executor/schedule_wakeup_wiring 120+observability/relay_traj 41——其中test_cron_reporter推送面断言随health_alert扩面从恰等改超集)+真实机器烟测（8090/8092端口ok、死端口/坏服务fail→alert事件、monitor_list真实输出）；实现中修2个自发现bug（阈值跨过判定streak==threshold、抖动恢复不发恢复通知）；⚠️3.1遗留同存（监控循环同样宿主存活agent进程，无进程时错过不补跑）；下周期做4.1微信桥（SoulMate接收/回复微信消息）
 [2026-10-10 10:22] 周期#15 | 4.1a微信桥核心：新增agent/wechat_bridge.py（WeChatTransport抽象+LoopbackTransport回环e2e实证"接收→无客户端SoulMate回合→回复"回路；msg_id去重SQLite持久=重启/重复投递不双跑；peer→session映射持久首见自动new_session同peer复用；默认回合复用wakeup_executor失败纪律refusal/LLM级失败/零输出都不假装成功+失败发告知不无声消失；回复按行拆块+出站限流min_send_interval_s（iLink撞限流静默丢经验）；context_token由transport随原消息回显；turn_origin=wechat入wakeup_relay补推面；start.py SOULMATE_WECHAT_ENABLED显式启用默认零开销） | ✅ | 6046514e | 4.1a切片（4.1拆三段）；tests/test_wechat_bridge.py 17/17（loopback e2e/去重跨重启/失败隔离/拆块+真实时钟限流0.3s断言/默认回合session映射+三态失败纪律/接线护栏）+回归183全过(cron_reporter/health_monitor/soulmate_scheduler/wakeup_relay/schedule_wakeup_wiring 107+wakeup_executor/wakeup_fire_llm_error/observability/relay_traj 76)+真实导入烟测（relayed origins含wechat）；⚠️iLink真实传输=4.1b未接（诚实边界：当前仅loopback传输，真实微信收发未通）——**接入形态待用户拍板（独立微信账号 or 替代期独占接管），绝不与hermes gateway双消费同一iLink会话**；下周期做4.1c会话级路由（peer↔会话映射管理工具）
 [2026-10-10 10:40] 周期#16 | 4.1c会话级路由：新增agent/wechat_router.py（WeChatRouter映射管理面：查询全量/peer过滤/session_id反查同会话多peer、改绑返回previous_session_id+created、解绑幂等、校验拒绝空值/空白字符、store可注入+get_wechat_router单例）+wechat_bridge.BridgeStore增list_mappings/unbind+soulmate_agent四点接线（wechat_route_list/bind/unbind工具定义+主dispatch+_wechat_route_dispatch共用入口lazy-init+code-mode批内+系统提示清单） | ✅ | (本次提交) | 4.1c勾选；tests/test_wechat_router.py 24/24（查询/反查/改绑/解绑幂等/校验7例/跨实例持久/单例/接线护栏+__new__真实dispatch烟测bind→list→rebind→unbind→错误路径全态）+回归183全过(cron_reporter/health_monitor/soulmate_scheduler/wakeup_relay/schedule_wakeup_wiring/wakeup_executor/wakeup_fire_llm_error/observability/relay_traj)+真实机器只读烟测（真实映射库0条=4.1a loopback未写真实库符合预期，校验路径实证）；⚠️4.1b iLink传输仍待用户拍板接入形态（独立微信账号 or 替代期独占接管，绝不双消费同一iLink会话）；下周期做4.2消息路由（OpenMate/微信统一收发）
+[2026-10-10 11:04] 周期#17 | 4.2消息路由（统一收发）：新增agent/message_router.py（UnifiedMessageRouter：统一信封ChannelMessage+RouteResult；route_inbound统一入站按channel分发——wechat整体委托WeChatBridge.deliver()单一owner不双份记账、openmate=RouterStore(channel+msg_id复合主键持久去重)+无客户端回合失败纪律复用wakeup_executor（refusal/LLM级失败/零输出都不假装成功）；send_outbound统一出站——wechat→send_proactive拆块+限流发peer、openmate→落库assistant行turn_origin=msg）+wechat_bridge增量（deliver()公开投递入口+send_proactive()+WeChatTransport.send_text默认NotImplemented不破坏既有传输+LoopbackTransport.proactive）+wakeup_relay补推面纳入msg出身（入站回合行+出站消息行正连前端实时可见）+soulmate_agent四点接线（message_send工具+主dispatch+_message_dispatch共用lazy-init+code-mode批内await+系统提示） | ✅ | (本次提交) | 4.2勾选；tests/test_message_router.py 16/16（信封/去重跨实例/入站三态/校验4例/微信委托真桥e2e+去重+失败告知/出站双通道/默认回合体失败纪律/接线护栏+__new__真实dispatch烟测）+回归240全过(cron_reporter/health_monitor/soulmate_scheduler/wakeup_relay/schedule_wakeup_wiring/wakeup_executor/wakeup_fire_llm_error/wakeup_observability/relay_trajectory/proxy_relay_traj/wechat_bridge/wechat_router)+真实机器烟测（singleton/relayed origins含msg/校验三路真实输出/SoulMateAgent导入）；⚠️诚实边界：微信通道仍loopback传输（4.1b iLink待用户拍板接入形态，绝不双消费hermes会话）；openmate出站=落库+relay补推；⚠️发现_split_blocks块上限下限200（既有契约，测试改用450字断言）；下周期做4.3媒体能力（图片/文件收发、截图理解）

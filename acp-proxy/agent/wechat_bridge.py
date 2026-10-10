@@ -66,6 +66,15 @@ class WeChatTransport(ABC):
     async def send_reply(self, msg: WeChatMessage, text: str) -> bool:
         """向该消息的对端发送回复文本（须回显msg.context_token）。返回是否成功。"""
 
+    async def send_text(self, peer: str, text: str) -> bool:
+        """主动发消息给peer（无入站消息上下文；路线图4.2统一出站）。
+
+        非抽象默认实现=该传输不支持主动发送（不破坏既有传输实现契约），
+        支持主动发的传输（Loopback/后续iLink）覆写此方法。
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} 不支持主动发送（send_text 未实现）")
+
 
 class LoopbackTransport(WeChatTransport):
     """进程内回环传输（测试/本地验证收发回路；4.1b iLink传输接入前的默认实现）。"""
@@ -73,6 +82,7 @@ class LoopbackTransport(WeChatTransport):
     def __init__(self) -> None:
         self._inbound: asyncio.Queue[WeChatMessage] = asyncio.Queue()
         self.sent: list[tuple[WeChatMessage, str]] = []
+        self.proactive: list[tuple[str, str]] = []
 
     def push(self, msg: WeChatMessage) -> None:
         """注入一条入站消息（模拟微信来消息）。"""
@@ -89,6 +99,10 @@ class LoopbackTransport(WeChatTransport):
 
     async def send_reply(self, msg: WeChatMessage, text: str) -> bool:
         self.sent.append((msg, text))
+        return True
+
+    async def send_text(self, peer: str, text: str) -> bool:
+        self.proactive.append((peer, text))
         return True
 
 
@@ -392,9 +406,17 @@ class WeChatBridge:
     # ── 处理回路 ───────────────────────────────────────────────
 
     async def _handle(self, msg: WeChatMessage) -> None:
+        await self.deliver(msg)
+
+    async def deliver(self, msg: WeChatMessage) -> str:
+        """投递单条入站消息（去重→回合→回复），返回 'delivered'|'duplicate'|'error'。
+
+        路线图4.2统一入站的微信通道委托入口（去重/回合/回复单一 owner=本桥）。
+        回合失败发失败告知后返回 'error'（失败必须可见，绝不无声消失）。
+        """
         if not self._store.first_time_seen(msg.msg_id, msg.received_at_ms):
             self.stats.duplicates += 1
-            return
+            return "duplicate"
         self.stats.fetched += 1
         try:
             reply = await self._turn_fn(msg)
@@ -403,9 +425,40 @@ class WeChatBridge:
             self._note_error(f"回合失败({msg.msg_id}): {e}")
             # 失败必须可见：给微信用户发失败告知，绝不无声消失
             await self._send_blocks(msg, self._failure_notice)
-            return
+            return "error"
         self.stats.turns_ok += 1
-        await self._send_blocks(msg, reply)
+        sent = await self._send_blocks(msg, reply)
+        return "delivered" if sent else "error"
+
+    def session_for(self, peer: str) -> str | None:
+        """该peer当前绑定的会话（统一路由结果回填用；无绑定=None）。"""
+        return self._store.session_for(peer)
+
+    async def send_proactive(self, peer: str, text: str) -> int:
+        """主动发消息给微信peer（无入站消息上下文；路线图4.2统一出站）。
+
+        拆块+限流与回复路径同款（iLink撞限流静默丢消息经验）；
+        返回发送成功块数（0=全失败，调用方按失败处理）。
+        """
+        if not str(peer or "").strip():
+            raise ValueError("peer不能为空")
+        sent = 0
+        for block in self._split_blocks(text):
+            await self._rate_limit()
+            try:
+                ok = await self._transport.send_text(peer, block)
+            except Exception as e:  # 传输异常不炸调用链
+                self.stats.send_failed += 1
+                self._note_error(f"send_text异常: {e}")
+                ok = False
+            finally:
+                self._last_send_at = time.monotonic()
+            if ok:
+                sent += 1
+                self.stats.replies_sent += 1
+            else:
+                self.stats.send_failed += 1
+        return sent
 
     async def run_once(self) -> int:
         """处理当前待处理入站消息一批（返回处理条数；重复投递不计）。"""

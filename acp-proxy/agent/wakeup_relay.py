@@ -41,14 +41,16 @@ from agent.health_monitor import HEALTH_ALERT_TURN_ORIGIN
 from agent.soulmate_scheduler import CRON_TURN_ORIGIN
 from agent.wechat_bridge import WECHAT_TURN_ORIGIN
 from agent.wakeup_executor import WAKEUP_TURN_ORIGIN
+from agent.message_router import MSG_TURN_ORIGIN
 
 logger = logging.getLogger("acp-proxy.wakeup_relay")
 
 # 补推出去的回合出身集合（wakeup唤醒/cron定时/cron_report定时汇报/health_alert
-# 监控告警/wechat微信回合；普通回合一律不在内——子进程自己流式推送，补推=重复）
+# 监控告警/wechat微信回合/msg统一路由消息（4.2入站回合行+出站消息行）；
+# 普通回合一律不在内——子进程自己流式推送，补推=重复）
 RELAYED_TURN_ORIGINS = frozenset(
     {WAKEUP_TURN_ORIGIN, CRON_TURN_ORIGIN, CRON_REPORT_TURN_ORIGIN,
-     HEALTH_ALERT_TURN_ORIGIN, WECHAT_TURN_ORIGIN})
+     HEALTH_ALERT_TURN_ORIGIN, WECHAT_TURN_ORIGIN, MSG_TURN_ORIGIN})
 
 _OPENSOUL_ROOT = os.environ.get("OPENSOUL_ROOT", "/home/climbing/opensoul")
 DEFAULT_DB_PATH = f"{_OPENSOUL_ROOT}/data/opensoul.db"
