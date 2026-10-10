@@ -47,6 +47,7 @@ from utils.token_manager import truncate_tool_result
 from agent.tool_output_handler import ToolOutputHandler, degraded_spill
 from agent.architecture_enhanced import EnhancedArchitecture
 from agent import arch_monitor
+from agent import search_backend  # 8.4 调研兜底：web_search 探测+显式降级单一真源
 from utils.task_state_manager import TaskStateManager, judge_task_continuation, extract_entities
 # P1/P2 架构组件
 from agent.semantic_cache import SemanticCache
@@ -1310,18 +1311,10 @@ class SoulMateAgent:
                     result += f"\n[exit code: {proc.returncode}]"
                 return result
             if func_name == "web_search":
-                query = func_args.get("query", "")
-                limit = func_args.get("limit", 5)
-                proc = subprocess.run(
-                    ["curl", "-s", f"http://localhost:8888/search?q={query}&format=json&pageno=1"],
-                    capture_output=True, text=True, errors="replace", timeout=15,
-                )
-                if proc.returncode == 0 and proc.stdout:
-                    data = json.loads(proc.stdout)
-                    results = data.get("results", [])[:limit]
-                    lines = [f"- {r.get('title', '')}: {r.get('url', '')}\n  {r.get('content', '')[:100]}" for r in results]
-                    return "\n".join(lines) if lines else "无搜索结果"
-                return f"搜索不可用: {proc.stderr or 'SearXNG未启动'}"
+                # 8.4 调研兜底：后端探测+显式降级收口 search_backend 单一真源
+                # （原内联 curl-SearXNG：query 未编码+挂了报"无搜索结果"双静默归零）
+                return search_backend.run_search(
+                    func_args.get("query", ""), func_args.get("limit", 5))
             if func_name == "web_extract":
                 url = func_args.get("url", "")
                 proc = subprocess.run(
@@ -3761,23 +3754,10 @@ You can send files to the user natively: to deliver a file, write a brief confir
 
                         elif func_name == "web_search":
                             try:
-                                query = func_args.get("query", "")
-                                limit = func_args.get("limit", 5)
-                                # 用 curl 调用 searxng 或直接返回提示
-                                proc = subprocess.run(
-                                    ["curl", "-s", f"http://localhost:8888/search?q={query}&format=json&pageno=1"],
-                                    capture_output=True, text=True, errors="replace", timeout=15,
-                                )
-                                if proc.returncode == 0 and proc.stdout:
-                                    data = json.loads(proc.stdout)
-                                    results = data.get("results", [])[:limit]
-                                    lines = []
-                                    for r in results:
-                                        lines.append(f"- {r.get('title', '')}: {r.get('url', '')}")
-                                        lines.append(f"  {r.get('content', '')[:100]}")
-                                    result = "\n".join(lines) if lines else "无搜索结果"
-                                else:
-                                    result = f"搜索不可用: {proc.stderr or 'SearXNG未启动'}"
+                                # 8.4 调研兜底：后端探测+显式降级收口 search_backend
+                                # 单一真源（与 code-mode 批内同一入口，禁再内联 curl）
+                                result = search_backend.run_search(
+                                    func_args.get("query", ""), func_args.get("limit", 5))
                             except Exception as e:
                                 result = f"搜索失败: {e}"
 
