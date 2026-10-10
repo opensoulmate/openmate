@@ -39,7 +39,8 @@ from datetime import datetime, timedelta
 
 logger = logging.getLogger("acp-proxy.soulmate_scheduler")
 
-# 任务回合出身标记（metadata.turn_origin；实时推送面接入留作后续切片）
+# 任务回合出身标记（metadata.turn_origin；wakeup_relay 实时推送面据此把 cron 回合
+# 行补推给正连前端——3.2 定时汇报已接）
 CRON_TURN_ORIGIN = "cron"
 CRON_PROMPT_MARKER = "⏰ [定时任务"
 
@@ -479,7 +480,24 @@ class SoulMateScheduler:
                 if int(task.get("fail_streak", 0)) + 1 >= _FAIL_STREAK_HINT:
                     hint = f"（连续失败{int(task.get('fail_streak', 0)) + 1}次，请关注）"
                 self._note(f"❌ 执行 #{task['id']} {task['name']} 失败: {detail[:80]}{hint}")
+            self._report_run(task, status, detail)
         return len(claimed)
+
+    def _report_run(self, task: dict, status: str, detail: str) -> None:
+        """3.2 定时汇报：执行结果（进展/异常）汇报给 OpenMate——落 opensoul.db
+        汇报行（wakeup_relay 推给正连前端）；汇报失败绝不阻塞调度链路。"""
+        try:
+            from agent.cron_reporter import CronReporter
+            if not hasattr(self, "_reporter") or self._reporter is None:
+                self._reporter = CronReporter()
+            fail_streak = 0 if status == "ok" else int(task.get("fail_streak", 0)) + 1
+            self._reporter.report(
+                task, status, detail,
+                next_run_ms=task.get("next_run_at_ms"),
+                fail_streak=fail_streak,
+            )
+        except Exception as e:  # 汇报面异常不得阻塞 fire/日志/排下次
+            logger.warning("[cron] 定时汇报失败（不阻塞调度）: %s", e)
 
     def _note(self, msg: str) -> None:
         self._recent.append(f"{datetime.now().strftime('%H:%M:%S')} {msg}")

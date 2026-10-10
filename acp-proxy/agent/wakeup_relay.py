@@ -18,6 +18,10 @@ SoulMateAgent._save_message metadata合并），每个proxy实例给**本地正�
 buildUserMessage），assistant出身行→agent_message（既有处理面逐字不变）——与
 前端loadHistory的role映射一致，同一行live视图与历史视图角色不翻转。
 
+推送面扩到定时任务（3.2定时汇报）：turn_origin∈{wakeup, cron, cron_report}的
+落库行都补推——cron回合行（任务进展）与CronReporter汇报行（📊结果/异常）对
+正连前端即时可见；未标记行依旧零推送（不与流式重复）。
+
 粒度诚实声明：消息级实时（默认2s轮询，env WAKEUP_RELAY_INTERVAL_S可调），
 非token级流式——token chunk跨进程不可复原（不落库），消息落库即推是可达上限。
 会话在relay启动前已落库的行不补推（前端历史加载覆盖；毫秒级竞态窗口有意接受）。
@@ -32,9 +36,16 @@ import os
 import sqlite3
 import time
 
+from agent.cron_reporter import CRON_REPORT_TURN_ORIGIN
+from agent.soulmate_scheduler import CRON_TURN_ORIGIN
 from agent.wakeup_executor import WAKEUP_TURN_ORIGIN
 
 logger = logging.getLogger("acp-proxy.wakeup_relay")
+
+# 补推出去的回合出身集合（wakeup唤醒/cron定时/cron_report定时汇报；普通回合
+# 一律不在内——子进程自己流式推送，补推=重复）
+RELAYED_TURN_ORIGINS = frozenset(
+    {WAKEUP_TURN_ORIGIN, CRON_TURN_ORIGIN, CRON_REPORT_TURN_ORIGIN})
 
 _OPENSOUL_ROOT = os.environ.get("OPENSOUL_ROOT", "/home/climbing/opensoul")
 DEFAULT_DB_PATH = f"{_OPENSOUL_ROOT}/data/opensoul.db"
@@ -55,22 +66,35 @@ def relay_stats() -> dict:
     return dict(_STATS)
 
 
-def is_wakeup_meta(metadata: str | None) -> bool:
-    """该落库行是否唤醒回合出身（turn_origin标记；解析失败/无标记=否）"""
+def turn_origin_of(metadata: str | None) -> str | None:
+    """落库行的回合出身标记（无标记/解析失败=普通回合→None）"""
     if not metadata:
-        return False
+        return None
     try:
         meta = json.loads(metadata)
     except (ValueError, TypeError):
-        return False
-    return isinstance(meta, dict) and meta.get("turn_origin") == WAKEUP_TURN_ORIGIN
+        return None
+    if not isinstance(meta, dict):
+        return None
+    origin = meta.get("turn_origin")
+    return str(origin) if origin else None
+
+
+def is_wakeup_meta(metadata: str | None) -> bool:
+    """该落库行是否唤醒回合出身（turn_origin标记；解析失败/无标记=否）"""
+    return turn_origin_of(metadata) == WAKEUP_TURN_ORIGIN
+
+
+def is_relayed_meta(metadata: str | None) -> bool:
+    """该落库行是否补推出去的出身（wakeup/cron/cron_report；普通回合=否）"""
+    return turn_origin_of(metadata) in RELAYED_TURN_ORIGINS
 
 
 def fetch_rows(db_path: str, session_id: str, after_id: int) -> list[dict]:
-    """取会话after_id之后的落库行（id升序），逐行带is_wakeup出身判定。
+    """取会话after_id之后的落库行（id升序），逐行带is_wakeup/is_relayed出身判定。
 
     连未标记行一起返回：调用方需用其id推进游标（未标记行不重扫），
-    推送侧只推is_wakeup=True的行。"""
+    推送侧只推is_relayed=True的行（wakeup/cron/cron_report出身）。"""
     db = sqlite3.connect(db_path)
     try:
         db.row_factory = sqlite3.Row
@@ -91,6 +115,7 @@ def fetch_rows(db_path: str, session_id: str, after_id: int) -> list[dict]:
             "role": r["role"],
             "content": r["content"] or "",
             "is_wakeup": is_wakeup_meta(r["metadata"]),
+            "is_relayed": is_relayed_meta(r["metadata"]),
         }
         for r in rows
     ]
@@ -177,7 +202,9 @@ class WakeupRelay:
         for row in rows:
             # 游标先推进（未标记行不重扫），推送失败也不回头重推已推行
             self._last_id = max(self._last_id, row["id"])
-            if not row["is_wakeup"]:
+            # 只推补推出身的行（wakeup/cron/cron_report）；普通回合行子进程自己
+            # 流式推送，补推=重复（fetch_rows旧调用方只给is_wakeup键时容错回退）
+            if not row.get("is_relayed", row.get("is_wakeup", False)):
                 continue
             try:
                 await self._send(update_payload(session_id, row))
