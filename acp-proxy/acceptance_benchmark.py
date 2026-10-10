@@ -39,6 +39,12 @@ SUB_DB = os.path.expanduser("~/.hermes/soulmate/memory/subagent_runs.db")
 # 周期#54：上游降级期实证回合 >300s 仍会服务端跑完（定时类 WS 300s 超时但
 # accept_probe 行后到落库），默认 300s 保留，降级期可 ACCEPT_PROMPT_TIMEOUT_S 拉长。
 PROMPT_TIMEOUT_S = int(os.environ.get("ACCEPT_PROMPT_TIMEOUT_S", "300"))
+# 10.4（周期#58）：WS 超时≠失败——服务端回合照跑（观察窗纪律），产出后到落库。
+# 超时后在预算内对服务端真源二次回读（落库回复+服务端副作用验证器），预算耗尽
+# 才如实记失败；期间持续排水 WS 帧（防读缓冲顶满反压 agent stdout 把回合拖死）。
+LATE_READBACK_BUDGET_S = float(os.environ.get("ACCEPT_LATE_READBACK_S", "300"))
+LATE_READBACK_POLL_S = float(os.environ.get("ACCEPT_LATE_READBACK_POLL_S", "5"))
+AGENT_MESSAGES_DB = os.path.expanduser("~/opensoul/data/opensoul.db")
 
 MEM_MARKER = "ACCEPT_MEM_MARK_9"
 
@@ -67,6 +73,88 @@ def _query(db_path: str, sql: str, args: tuple = ()) -> list[tuple]:
             conn.close()
     except sqlite3.Error:
         return []
+
+
+# ── 10.4 WS 超时的服务端后到产出二次回读（周期#58）──────────────────
+
+
+def _read_back_reply(session_id: str, db_path: str = "") -> str:
+    """服务端真源回复回读：该会话 assistant 落库行按序拼接（含增量落库接管行）。
+
+    WS 超时时回答帧已丢失，但服务端回合照跑并落库（观察窗纪律：页面/连接只是
+    观察窗）——agent_messages 里该 session 的 assistant 行就是服务端产出真源。
+    """
+    rows = _query(db_path or AGENT_MESSAGES_DB,
+                  "SELECT content FROM agent_messages WHERE session_id = ? "
+                  "AND role = 'assistant' ORDER BY id",
+                  (session_id,))
+    return "\n\n".join((r[0] or "") for r in rows)
+
+
+async def _drain_ws(ws, collect_sid: str, out: list, timeout: float) -> int:
+    """排水 WS 帧：收走后到帧防读缓冲顶满反压 agent stdout（回合被拖死的隐患），
+    顺带收集该会话文本作辅证。连接断开等异常只停排水不冒泡（DB 真源回读继续）。"""
+    got = 0
+    deadline = time.monotonic() + max(0.0, timeout)
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            raw = await asyncio.wait_for(ws.recv(), timeout=remaining)
+        except (TimeoutError, asyncio.TimeoutError):
+            break
+        except Exception:  # noqa: BLE001 — 连接已断/已关闭，排水终止即可
+            break
+        got += 1
+        try:
+            msg = json.loads(raw)
+        except (ValueError, TypeError):
+            continue
+        if msg.get("method") == "session/update":
+            psid = (msg.get("params") or {}).get("sessionId") or ""
+            if collect_sid and psid and psid != collect_sid:
+                continue  # 其他会话的在途帧，不混进本任务后到产出
+            _collect_texts(msg.get("params") or msg, out)
+    return got
+
+
+async def late_readback(verify, get_reply, ws=None, collect_sid: str = "",
+                        budget_s: float | None = None,
+                        poll_s: float | None = None) -> tuple[bool, str, float, int]:
+    """WS 超时后的二次回读：预算内轮询服务端真源直到验证通过或预算耗尽。
+
+    验证对象=落库回复（get_reply，服务端真源）+ 排水收到的后到帧文本；
+    verify 复用各类别验证器（服务端副作用优先纪律不变）。返回
+    (ok, detail, waited_s, attempts)——预算耗尽如实 False，禁把超时当成功。
+    """
+    budget_s = LATE_READBACK_BUDGET_S if budget_s is None else budget_s
+    poll_s = LATE_READBACK_POLL_S if poll_s is None else poll_s
+    t0 = time.monotonic()
+    attempts = 0
+    frame_chunks: list = []
+    while True:
+        attempts += 1
+        db_reply = get_reply() or ""
+        reply = "\n\n".join(x for x in (db_reply, "\n".join(frame_chunks)) if x)
+        waited = round(time.monotonic() - t0, 2)
+        try:
+            ok, detail = verify(reply)
+        except Exception as e:  # noqa: BLE001 — 验证器异常按未过计，不炸回读环
+            ok, detail = False, f"验证器异常: {type(e).__name__}: {e}"
+        if ok:
+            return True, f"{detail}｜后到回读{waited:.1f}s/{attempts}次", waited, attempts
+        if waited >= budget_s:
+            return (False,
+                    f"WS超时且后到回读预算耗尽({budget_s:.0f}s/{attempts}次仍无服务端产出): {detail}",
+                    waited, attempts)
+        window = min(poll_s, max(0.0, budget_s - (time.monotonic() - t0)))
+        t_win = time.monotonic()
+        if ws is not None:
+            await _drain_ws(ws, collect_sid, frame_chunks, timeout=window)
+        leftover = window - (time.monotonic() - t_win)
+        if leftover > 0:
+            await asyncio.sleep(leftover)
 
 
 # ── 各类别独立验证（服务端副作用优先）────────────────────────────
@@ -370,6 +458,8 @@ async def main() -> None:
             t0 = time.monotonic()
             entry = {"category": task["category"], "prompt": task["prompt"][:120], "run_tag": RUN_TAG}
             prompt_text = f"{task['prompt']}\n（复测标记 {RUN_TAG}，此行仅为防缓存标记，忽略其语义）"
+            sid = ""
+            prompt_timed_out = False
             try:
                 r, _, _ = await _rpc(
                     ws, "session/new",
@@ -380,23 +470,50 @@ async def main() -> None:
                 sid = res.get("session_id") or res.get("sessionId") or ""
                 if not sid:
                     raise RuntimeError(f"session/new 无session_id: {r}")
-                r, reply, sys_frames = await _rpc(
-                    ws, "session/prompt",
-                    {"sessionId": sid, "messageId": f"accept-{i}",
-                     "prompt": [{"type": "text", "text": prompt_text}]},
-                    rid=101 + i * 2, timeout=PROMPT_TIMEOUT_S, collect_sid=sid,
-                )
+                try:
+                    r, reply, sys_frames = await _rpc(
+                        ws, "session/prompt",
+                        {"sessionId": sid, "messageId": f"accept-{i}",
+                         "prompt": [{"type": "text", "text": prompt_text}]},
+                        rid=101 + i * 2, timeout=PROMPT_TIMEOUT_S, collect_sid=sid,
+                    )
+                except (TimeoutError, asyncio.TimeoutError):
+                    prompt_timed_out = True
+                    raise
                 stop = (r.get("result") or {}).get("stopReason", "-")
                 entry["session_id"] = sid
                 entry["stop_reason"] = stop
                 entry["http_ok"] = "result" in r
                 entry["system_frames"] = sys_frames
             except Exception as e:  # noqa: BLE001
-                entry.update(ok=False, latency_s=round(time.monotonic() - t0, 2),
-                             verify_mode="error", detail=f"WS失败: {type(e).__name__}: {e}",
-                             reply_excerpt="")
+                if prompt_timed_out and sid:
+                    # 10.4（周期#58）：WS 超时≠失败——服务端回合照跑（观察窗纪律），
+                    # 服务端产出会后到落库。二次回读服务端真源，与服务端真相同口径。
+                    entry["session_id"] = sid
+                    entry["ws_timeout"] = True
+                    entry["latency_s"] = round(time.monotonic() - t0, 2)
+                    print(f"    -> ⏱ WS {PROMPT_TIMEOUT_S}s 超时（服务端回合照跑），"
+                          f"后到产出二次回读（预算{LATE_READBACK_BUDGET_S:.0f}s）...", flush=True)
+                    ok, detail, waited, attempts = await late_readback(
+                        task["verify"], lambda: _read_back_reply(sid),
+                        ws=ws, collect_sid=sid)
+                    mode = "server_side" if task["category"] in SERVER_SIDE else "reply_assisted"
+                    entry.update(
+                        ok=bool(ok),
+                        verify_mode=f"{mode}_late" if ok else "ws_timeout_unrecovered",
+                        detail=detail,
+                        reply_excerpt=re.sub(r"\s+", " ", _read_back_reply(sid))[:200],
+                        late_readback_wait_s=waited,
+                        late_readback_attempts=attempts,
+                        latency_s=round(time.monotonic() - t0, 2),
+                    )
+                else:
+                    entry.update(ok=False, latency_s=round(time.monotonic() - t0, 2),
+                                 verify_mode="error", detail=f"WS失败: {type(e).__name__}: {e}",
+                                 reply_excerpt="")
                 results.append(entry)
-                print(f"    -> ❌ {entry['detail']} ({entry['latency_s']}s)", flush=True)
+                print(f"    -> {'✅' if entry['ok'] else '❌'} {entry['detail']} ({entry['latency_s']}s)",
+                      flush=True)
                 continue
             latency = round(time.monotonic() - t0, 2)
             entry["reply_excerpt"] = re.sub(r"\s+", " ", reply)[:200]
@@ -424,12 +541,20 @@ async def main() -> None:
         "passed": sum(1 for r in results if r["ok"]),
         "total": len(results),
         "system_frames_total": sys_total,
+        "late_readback": {
+            "ws_timeouts": sum(1 for r in results if r.get("ws_timeout")),
+            "recovered": sum(1 for r in results
+                             if r.get("ws_timeout") and r.get("verify_mode", "").endswith("_late")),
+        },
         "results": results,
     }
     with open(RESULTS_PATH, "w", encoding="utf-8") as f:
         json.dump(summary, f, ensure_ascii=False, indent=2)
     print("=" * 60)
     print(f"验收结果: {summary['passed']}/{summary['total']} 通过")
+    if summary["late_readback"]["ws_timeouts"]:
+        lr = summary["late_readback"]
+        print(f"WS超时后到回读（10.4）: 超时{lr['ws_timeouts']}个，二次回读恢复{lr['recovered']}个")
     if sys_total:
         print(f"采集侧系统帧过滤（8.5c-⑤）: {sys_total}")
     for r in results:
