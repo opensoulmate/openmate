@@ -150,6 +150,7 @@ from agent.group_orchestrator import (  # 路线图5.3 AI群组任务编排
     get_group_orchestrator as _get_group_orchestrator,
 )
 from agent.skill_saver import get_skill_saver as _get_skill_saver  # 路线图6.1 技能保存
+from agent.skill_matcher import get_skill_matcher as _get_skill_matcher  # 路线图6.2 技能检索与加载
 from agent.writer_fence import SessionWriterFence, WriteAction
 from agent.tool_exec_fencing import FileFenceTimeout, file_fence
 from agent.steering import (
@@ -2035,6 +2036,32 @@ ACP代理目录: {cwd}/acp-proxy（后端 Python 代码在此）
 
 You can send files to the user natively: to deliver a file, write a brief confirmation message (e.g. "文件已发送，请查收"), then include MEDIA:/absolute/path/to/file on a new line. The gateway extracts the tag, strips it, and sends the file as a download card. Always write some text before the MEDIA: tag — never output a bare MEDIA: tag alone. Use search_files first if you don't know the exact path. Do NOT paste file contents into chat."""
 
+    def _match_skills_for_task(self, user_text: str) -> list[dict]:
+        """路线图 6.2 技能检索与加载：按任务自动匹配（确定性打分）。
+
+        短消息不匹配（≤10字）；文件发送请求走 MEDIA 路径跳过技能注入
+        （Hermes 范式：LLM 直接输出 MEDIA 标签）；候选召回走
+        skill_manager.search_skills，任务级精排+触发词闸门集中到
+        SkillMatcher.match（纯描述/tag 命中不注入，保持既有语义）。
+        """
+        matched: list[dict] = []
+        if len(user_text) <= 10:  # 短消息不匹配技能
+            return matched
+        raw_skills = self._skill_manager.search_skills(user_text, limit=3)
+        # ── 文件请求模式检查：命中则跳过技能匹配 ──
+        _has_filename = re.search(r'[\w\-]+\.\w{1,5}', user_text)
+        _has_send_verb = re.search(r'发给我|发送|发给|给我|下载|send|download', user_text)
+        if _has_filename and _has_send_verb:
+            return matched
+        matcher = getattr(self, "_skill_matcher_inst", None)
+        if matcher is None:
+            matcher = _get_skill_matcher()
+            self._skill_matcher_inst = matcher
+        matched = matcher.match(user_text, raw_skills, limit=3)
+        if matched:
+            logger.info(f"Matched skills: {[s['name'] for s in matched]}")
+        return matched
+
     async def _run_llm_with_tools(
         self,
         messages: list[dict],
@@ -2066,19 +2093,24 @@ You can send files to the user natively: to deliver a file, write a brief confir
             tokens=estimate_tokens(system_prompt),
         ))
 
-        # 注入匹配的技能上下文
+        # 注入匹配的技能上下文（路线图6.2：预算感知加载——单技能/总预算双上限，
+        # 超长显式截断标记禁静默；渲染走 SkillMatcher.render_bodies 单一真源）
         if matched_skills:
+            _skm = getattr(self, "_skill_matcher_inst", None)
+            if _skm is None:
+                _skm = _get_skill_matcher()
+                self._skill_matcher_inst = _skm
+            _skill_bodies, _skill_note = _skm.render_bodies(matched_skills[:3])
             system_prompt += "\n\n## 相关技能（参考以下经验执行任务）\n"
-            for skill in matched_skills[:3]:
-                skill_body = f"\n### {skill['name']}\n{skill['content']}\n"
-                if skill.get("code_template"):
-                    skill_body += f"```\n{skill['code_template']}\n```\n"
+            for skill_body, skill in _skill_bodies:
                 system_prompt += skill_body
                 # P1归因：skill逐项（SDKContextUsage skills[]，名称+正文+模板）
                 attr_items.append(ContextItem(
                     kind=KIND_SKILL, name=str(skill.get("name", "unnamed_skill")),
                     source="skill_manager.search", tokens=estimate_tokens(skill_body),
                 ))
+            if _skill_note:
+                system_prompt += _skill_note
 
         # ⚡0.2 首条消息提速：new_session 预热产物（TTL 内）直接复用；
         # 未预热/超时回退现场计算——两条路径产出同一内容，仅省首条消息的准备时延
@@ -4879,27 +4911,9 @@ You can send files to the user natively: to deliver a file, write a brief confir
         logger.info(f"[_run_llm_with_tools] starting, client={self._client is not None}")
 
 
-        # ── 技能匹配（需要最低分数阈值，避免短消息误匹配）──────────
-        matched_skills = []
-        if len(user_text) > 10:  # 短消息不匹配技能
-            raw_skills = self._skill_manager.search_skills(user_text, limit=3)
-            # 只保留触发词匹配(score>=5)的技能，忽略纯描述匹配
-            # ── 文件请求模式检查：命中则跳过技能匹配（Hermes范式：LLM直接输出MEDIA标签）──
-            import re as _re
-            _has_filename = _re.search(r'[\w\-]+\.\w{1,5}', user_text)
-            _has_send_verb = _re.search(r'发给我|发送|发给|给我|下载|send|download', user_text)
-            _is_file_req = bool(_has_filename and _has_send_verb)
-
-            if not _is_file_req:
-                # .agents/skills标准层接线：触发词策略集中在skill_manager.is_injectable_trigger
-                # （英文len>2原行为不变；中文2字词是完整词，通用词除外）——
-                # 此前len(t)>2门槛系统性排除中文2字触发词，标准技能对中文查询永远不注入
-                matched_skills = [s for s in raw_skills if any(
-                    t.lower() in user_text.lower() and is_injectable_trigger(t)
-                    for t in s.get("triggers", [])
-                )]
-                if matched_skills:
-                    logger.info(f"Matched skills: {[s['name'] for s in matched_skills]}")
+        # ── 技能匹配（路线图6.2：任务级确定性匹配+触发词闸门，集中到
+        # _match_skills_for_task——短消息/文件发送请求跳过，纯描述匹配不注入）──
+        matched_skills = self._match_skills_for_task(user_text)
 
         # 构建上下文消息
         messages = session["messages"].copy()
