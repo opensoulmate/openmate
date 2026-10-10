@@ -100,6 +100,17 @@ async def _run_stdio(llm_engine: LLMEngine):
     except Exception as e:
         logger.warning("[stdio] cron调度循环启动失败（不阻塞agent）: %s", e)
 
+    # 路线图3.3 监控告警：有启用的监控目标就拉起监控循环（幂等；无目标零开销）
+    try:
+        from agent.health_monitor import get_health_monitor as _get_health_monitor
+
+        _monitor = _get_health_monitor()
+        if _monitor.has_enabled_targets():
+            _monitor.ensure_started()
+            logger.info("[stdio] 监控循环已启动（存在启用的监控目标）")
+    except Exception as e:
+        logger.warning("[stdio] 监控循环启动失败（不阻塞agent）: %s", e)
+
     # acp.run_agent 默认使用 sys.stdin/sys.stdout
     await acp.run_agent(agent=agent)
 

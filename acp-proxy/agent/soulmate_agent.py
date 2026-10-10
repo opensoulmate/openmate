@@ -136,6 +136,7 @@ from agent.tool_errors import ToolError, ToolErrorHandler
 from agent.tool_recovery import ToolRecoveryManager, FailureKind, MAX_RECOVERY_ATTEMPTS
 from agent.system_health import SystemHealthChecker
 from agent.soulmate_scheduler import get_scheduler as _get_cron_scheduler  # 路线图3.1 cron引擎
+from agent.health_monitor import get_health_monitor as _get_health_monitor  # 路线图3.3 监控告警
 from agent.writer_fence import SessionWriterFence, WriteAction
 from agent.steering import (
     ABORT_MESSAGE,
@@ -1331,6 +1332,9 @@ class SoulMateAgent:
             # 定时任务调度（路线图 3.1 cron引擎）：批内同样可用
             if func_name in ("schedule_task", "schedule_list", "schedule_cancel"):
                 return self._cron_dispatch(func_name, func_args, session_id)
+            # 监控告警（路线图 3.3）：批内同样可用
+            if func_name in ("monitor_add", "monitor_list", "monitor_remove", "monitor_check"):
+                return self._monitor_dispatch(func_name, func_args, session_id)
             # kilocode #19 MCP resource三件套：批内同样可用（与主循环同款注入安全层）
             if func_name in MCP_RESOURCE_TOOL_NAMES:
                 return await self._call_mcp_resource_tool(func_name, func_args)
@@ -1522,6 +1526,96 @@ class SoulMateAgent:
         except Exception as e:
             return f"[错误] 定时任务操作失败: {type(e).__name__}: {e}"
 
+    def _monitor_dispatch(self, func_name: str, func_args: dict, session_id: str = "") -> str:
+        """monitor_add/monitor_list/monitor_remove/monitor_check 分发（路线图 3.3 监控告警）。
+
+        主循环与 code-mode 内层共用此入口。登记/查询/停删写SQLite持久化（重启不丢）；
+        周期健康检查由后台监控循环到点执行，monitor_check 是立即检查入口（不等interval）。
+        与 _tool_recovery 同款 lazy-init（__new__ 构造实例未过 __init__ 自举）。
+        """
+        monitor = getattr(self, "_health_monitor", None)
+        if monitor is None:
+            monitor = _get_health_monitor()
+            self._health_monitor = monitor
+
+        def _fmt(ms) -> str:
+            try:
+                return time.strftime("%Y-%m-%d %H:%M", time.localtime(int(ms) / 1000))
+            except Exception:
+                return str(ms)
+
+        try:
+            if func_name == "monitor_add":
+                r = monitor.add_target(
+                    name=str(func_args.get("name", "")),
+                    kind=str(func_args.get("kind", "")),
+                    target=str(func_args.get("target", "")),
+                    interval_s=func_args.get("interval_s"),
+                    fail_threshold=func_args.get("fail_threshold"),
+                    session_id=str(func_args.get("session_id") or session_id or ""),
+                )
+                monitor.ensure_started()
+                return (
+                    f"✅ 监控目标已创建 #{r['target_id']}「{r['name']}」\n"
+                    f"类型: {r['kind']}｜目标: {r['target']}\n"
+                    f"检查间隔: {r['interval_s']}秒｜告警阈值: 连续失败{r['fail_threshold']}次\n"
+                    "目标已持久化（跨会话有效）；周期检查自动执行，异常/恢复都会推送通知。"
+                    "查看/立即检查/停删用 monitor_list / monitor_check / monitor_remove"
+                )
+            if func_name == "monitor_list":
+                targets = monitor.list_targets()
+                if not targets:
+                    return "（当前没有监控目标）"
+                lines = [f"📡 监控目标共{len(targets)}个："]
+                for t in targets:
+                    state = "监控中" if t.get("enabled") else "已停用"
+                    last = str(t.get("last_status") or "-")
+                    mark = {"ok": "✅", "fail": "❌"}.get(last, "⏳")
+                    lines.append(
+                        f"#{t['id']}「{t['name']}」[{state}] {t['kind']}: {t['target']}"
+                        f"｜间隔{t['interval_s']}s｜阈值{t['fail_threshold']}次"
+                        f"｜最近:{mark}{last} {_fmt(t.get('last_checked_at_ms'))}"
+                        f"｜连续失败{int(t.get('fail_streak') or 0)}次")
+                    for e in (t.get("recent_events") or [])[:3]:
+                        em = "✅" if e["status"] == "ok" else "❌"
+                        lines.append(
+                            f"    {em} [{e['kind']}] {_fmt(e['ts_ms'])} → "
+                            f"{str(e['detail'])[:120]}")
+                return "\n".join(lines)
+            if func_name == "monitor_check":
+                raw_id = func_args.get("target_id")
+                tid = None
+                if raw_id not in (None, "", 0, "0"):
+                    try:
+                        tid = int(raw_id)
+                    except (TypeError, ValueError):
+                        return "错误: target_id 必须是整数"
+                results, events = monitor.check_now(tid)
+                if not results:
+                    return "（没有可检查的启用监控目标）"
+                lines = ["🔍 立即检查结果："]
+                for r in results:
+                    mark = "✅" if r["status"] == "ok" else "❌"
+                    lines.append(
+                        f"{mark} #{r['target_id']}「{r['name']}」{r['kind']}: {r['target']}"
+                        f"｜{r['detail']}（{r['latency_ms']}ms）")
+                if events:
+                    lines.append("")
+                    lines.append(f"⚠️ 本次产生{len(events)}条告警/恢复通知（已落库并推送）")
+                return "\n".join(lines)
+            # monitor_remove
+            try:
+                target_id = int(func_args.get("target_id", 0))
+            except (TypeError, ValueError):
+                return "错误: target_id 必须是整数"
+            ok, msg = monitor.remove_target(
+                target_id, delete=bool(func_args.get("delete")))
+            return ("✅ " if ok else "❌ ") + msg
+        except ValueError as e:
+            return f"错误: {e}"
+        except Exception as e:
+            return f"[错误] 监控操作失败: {type(e).__name__}: {e}"
+
     async def _traj_record_round(
         self,
         session_id: str,
@@ -1640,6 +1734,7 @@ ACP代理目录: {cwd}/acp-proxy（后端 Python 代码在此）
 - profile_audit: 用户画像审计/清理。action=list 可见复盘全部画像条目（含噪音嫌疑标记）；用户明确要求清理画像时 action=delete（先 confirm 缺省预览，用户确认后 confirm=true 执行）。⚠️ 禁止擅自清库，删除必须用户明确要求
 - system_checkup: 系统状态一键体检（只读，不改系统）。服务运行状态/端口监听/磁盘占用/内存/负载/进程（内存TopN+僵尸）六项一次查全；用户问系统/服务/磁盘/负载现状或需要运维判断时使用。sections 参数可只查部分分区
 - schedule_task / schedule_list / schedule_cancel: 定时任务调度（SoulMate自己的cron：到点自动执行+执行日志+自动排下一次，区别于一次性唤醒）。用户要求"定时/每天/每小时/每周做某事"→ schedule_task（schedule=interval:5m 或 cron:0 9 * * *）；查看任务与执行日志→ schedule_list；停用/删除→ schedule_cancel
+- monitor_add / monitor_list / monitor_check / monitor_remove: 监控告警（对指定服务/网站做周期健康检查：异常告警+恢复通知，目标持久化）。用户要求"监控某网站/服务是否存活、挂了提醒我"→ monitor_add（kind=website/service/port）；查看监控项与最近检查→ monitor_list；立即检查→ monitor_check；停用/删除→ monitor_remove。⚠️ 监控检查只读，不改目标系统
 
 You can send files to the user natively: to deliver a file, write a brief confirmation message (e.g. "文件已发送，请查收"), then include MEDIA:/absolute/path/to/file on a new line. The gateway extracts the tag, strips it, and sends the file as a download card. Always write some text before the MEDIA: tag — never output a bare MEDIA: tag alone. Use search_files first if you don't know the exact path. Do NOT paste file contents into chat."""
 
@@ -2258,6 +2353,88 @@ You can send files to the user natively: to deliver a file, write a brief confir
             },
         }]
         builtin_tools.extend(cron_tools)
+
+        # ── 监控告警工具（路线图 3.3）────────────────────────────
+        # 对指定服务/网站做周期健康检查：异常告警+恢复通知（防抖阈值），目标持久化。
+        monitor_tools = [{
+            "type": "function",
+            "function": {
+                "name": "monitor_add",
+                "description": (
+                    "创建监控目标（周期健康检查+异常告警+恢复通知，目标持久化跨会话有效）。"
+                    "kind 三类：website=网站URL（HTTP状态检查）、service=服务名"
+                    "（systemd --user）、port=host:port（TCP连通检查）。"
+                    "用户要求『监控某网站/服务是否存活、挂了提醒我』时使用。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "description": "监控项名称（如『官网可用性』）"},
+                        "kind": {"type": "string", "enum": ["website", "service", "port"],
+                                 "description": "监控类型"},
+                        "target": {"type": "string",
+                                   "description": "监控目标：website=URL / service=服务名 / port=host:port"},
+                        "interval_s": {"type": "integer",
+                                       "description": "检查间隔秒数（缺省300，最小30）"},
+                        "fail_threshold": {"type": "integer",
+                                           "description": "连续失败N次才告警（缺省2，防抖）"},
+                        "session_id": {"type": "string",
+                                       "description": "告警推送的会话id（缺省当前会话）"},
+                    },
+                    "required": ["name", "kind", "target"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "monitor_list",
+                "description": (
+                    "列出全部监控目标及最近检查状态（最近结果/连续失败数/最近事件）。"
+                    "用户问『监控着什么/网站还活着吗/有没有告警』时使用。"
+                ),
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "monitor_remove",
+                "description": (
+                    "停用或删除监控目标。缺省=停用（不再检查）；delete=true=删除目标"
+                    "（检查日志保留可审计）。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "target_id": {"type": "integer",
+                                      "description": "监控目标id（monitor_list 可见）"},
+                        "delete": {"type": "boolean",
+                                   "description": "true=删除目标；false/缺省=仅停用"},
+                    },
+                    "required": ["target_id"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "monitor_check",
+                "description": (
+                    "立即执行一次健康检查（不等周期），返回各监控目标当前状态。"
+                    "用户问『现在检查一下/马上看看还活着吗』时使用。"
+                    "target_id 缺省=检查全部启用目标。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "target_id": {"type": "integer",
+                                      "description": "只检查该目标（缺省全部启用目标）"},
+                    },
+                },
+            },
+        }]
+        builtin_tools.extend(monitor_tools)
 
         # 添加进化引擎工具（支持直接对象或HTTP API两种模式）
         evolution_tools = []
@@ -3211,6 +3388,14 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             # ── 定时任务调度（路线图 3.1 cron引擎）────────
                             try:
                                 result = self._cron_dispatch(func_name, func_args, session_id)
+                            except Exception as e:
+                                te = self._tool_error_handler.handle_error(
+                                    session_id, func_name, e, func_args)
+                                result = te.to_model_message()
+                        elif func_name in ("monitor_add", "monitor_list", "monitor_remove", "monitor_check"):
+                            # ── 监控告警（路线图 3.3）────────────────────
+                            try:
+                                result = self._monitor_dispatch(func_name, func_args, session_id)
                             except Exception as e:
                                 te = self._tool_error_handler.handle_error(
                                     session_id, func_name, e, func_args)

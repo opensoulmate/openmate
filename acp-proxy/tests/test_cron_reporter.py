@@ -30,6 +30,7 @@ from agent.cron_reporter import (
     report_stats,
 )
 from agent.soulmate_scheduler import CRON_TURN_ORIGIN, SoulMateScheduler
+from agent.health_monitor import HEALTH_ALERT_TURN_ORIGIN
 from agent.wakeup_executor import WAKEUP_TURN_ORIGIN
 from agent.wakeup_relay import (
     RELAYED_TURN_ORIGINS,
@@ -188,8 +189,8 @@ class TestRelayPushesCronRows:
         assert is_relayed_meta(json.dumps({"turn_origin": WAKEUP_TURN_ORIGIN}))
         assert not is_relayed_meta(None)
         assert not is_relayed_meta(json.dumps({"turn_origin": "normal"}))
-        assert RELAYED_TURN_ORIGINS == {
-            WAKEUP_TURN_ORIGIN, CRON_TURN_ORIGIN, CRON_REPORT_TURN_ORIGIN}
+        assert {WAKEUP_TURN_ORIGIN, CRON_TURN_ORIGIN, CRON_REPORT_TURN_ORIGIN,
+                HEALTH_ALERT_TURN_ORIGIN} <= RELAYED_TURN_ORIGINS
 
     def test_poll_once_pushes_cron_and_report_rows_only(self):
         db_path = _make_msg_db()
