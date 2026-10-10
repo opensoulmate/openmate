@@ -36,7 +36,9 @@ RESULTS_PATH = "/tmp/soulmate_accept_results.json"
 MEM_PATH = os.path.expanduser("~/.hermes/soulmate/memory/MEMORY.md")
 CRON_DB = os.path.expanduser("~/.hermes/soulmate/memory/cron_tasks.db")
 SUB_DB = os.path.expanduser("~/.hermes/soulmate/memory/subagent_runs.db")
-PROMPT_TIMEOUT_S = 300
+# 周期#54：上游降级期实证回合 >300s 仍会服务端跑完（定时类 WS 300s 超时但
+# accept_probe 行后到落库），默认 300s 保留，降级期可 ACCEPT_PROMPT_TIMEOUT_S 拉长。
+PROMPT_TIMEOUT_S = int(os.environ.get("ACCEPT_PROMPT_TIMEOUT_S", "300"))
 
 MEM_MARKER = "ACCEPT_MEM_MARK_9"
 
