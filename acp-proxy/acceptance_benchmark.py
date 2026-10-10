@@ -99,17 +99,28 @@ _UNAVAIL_CLAIM_RE = re.compile(
 
 def verify_research(reply: str) -> tuple[bool, str]:
     text = reply or ""
-    # 引号奇偶校验：引号内的引用（如补做说明里逐字引用提示语
-    # "如果搜索工具不可用，明确说明不可用"）不计自报——周期#41 G轮实证形态
+    # ①剥离回合心跳噪声（turn_watchdog快照会被harness并进回复采集；
+    #   心跳可能与回答粘连无换行——按心跳结构精确剥，禁吞答案里的括号）
+    text = re.sub(
+        r"⏳ 回合进行中：已用 [^｜\n]*｜[^｜\n]*｜已执行工具 \d+ 个（最近：[^）\n]*）?",
+        "", text,
+    )
+    # ②自报不可用只在主答区判（首个段落边界前≤200字）——补做/逐项说明里的
+    #   引用提示语、可用性复盘不计（周期#41 E/G/H三轮实证：正确回答的补做说明
+    #   反复以新措辞引用"不可用"字样，全文扫描必然假阴性且不收敛）
+    lead = re.split(r"\n\s*\n|逐项说明|补做结果", text, maxsplit=1)[0][:200]
     claim = False
-    for m in _UNAVAIL_CLAIM_RE.finditer(text):
-        if text[:m.start()].count('"') % 2 == 1:
-            continue
+    for m in _UNAVAIL_CLAIM_RE.finditer(lead):
+        if lead[:m.start()].count('"') % 2 == 1:
+            continue  # 引号内的引用不计
         claim = True
         break
-    ok = "3.13" in text and len(text) > 30 and not claim
+    # ③必须给出被搜事实（问题=Python 3.13 发布时间，答案含 3.13 + 2024 年份）
+    has_fact = "3.13" in text and "2024" in text
+    ok = has_fact and len(text) > 30 and not claim
     return ok, (f"回复含'3.13'={'是' if '3.13' in text else '否'}、"
-                f"自报搜索不可用={'是' if claim else '否'}（主语邻接判据，引用不计）、"
+                f"含'2024'={'是' if '2024' in text else '否'}、"
+                f"主答区自报搜索不可用={'是' if claim else '否'}、"
                 f"长度{len(text)}字")
 
 
