@@ -3172,8 +3172,10 @@ You can send files to the user natively: to deliver a file, write a brief confir
         redactor = SecretStreamRedactor()
         # ── P0输出侧注入审计门（agent-zero _infection_check）：工具执行前gate，
         # 启发式劫持签名（离线兜底）+LLM语义审计三态verdict。每真实turn一个实例
-        # （clarify计数/LLM熔断不跨turn串扰）。──
-        infection_gate = InfectionGate(llm_call=self._infection_llm_call)
+        # （clarify计数/LLM熔断不跨turn串扰）。unattended=无客户端回合（唤醒/定时/
+        # 微信/子代理）——8.1③：无人值守 clarify 超限放行+留痕，不升级 terminate。──
+        infection_gate = InfectionGate(llm_call=self._infection_llm_call,
+                                       unattended=self._client is None)
         # ── P0-4: 活动观测开始（goose peek：status=running，durable turns开始计数）──
         activity = self._activity(session_id)
         activity.mark_running()
@@ -3440,6 +3442,18 @@ You can send files to the user natively: to deliver a file, write a brief confir
                         messages.append({"role": "assistant", "content": None, "tool_calls": tool_calls})
                         messages.extend(tool_results)
                         break
+                    elif infection_verdict.source == "clarify_exhausted_pass":
+                        # 8.1③ 无人值守放行+留痕：clarify 超限不再升级 terminate，
+                        # 工具照常执行，但放行原因进轨迹账本+日志（"为什么放行"可查）
+                        logger.warning(
+                            f"[infection-guard] session={session_id} clarify超限·无人值守放行留痕 "
+                            f"evidence={infection_verdict.evidence[:120]}")
+                        all_tool_calls.append({
+                            "name": "[infection-guard]",
+                            "arguments": {"action": "pass_with_trace"},
+                            "result_preview": infection_verdict.detail[:200],
+                            "permission": "infection:pass_with_trace",
+                        })
 
                     # 推送工具调用状态给前端
                     for tc in tool_calls:
@@ -5278,7 +5292,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
                     _traj_seg = await self._traj_recorder.start_llm_span(
                         session_id, traj_root_id,
                         content=f"plan_step: {step.description[:120]}")
-                    step_result, step_tools = await self._run_llm_with_tools(step_messages, session_id, matched_skills=step_skills, traj_seg_id=_traj_seg)
+                    step_result, step_tools = await self._run_llm_with_tools(step_messages, session_id, matched_skills=step_skills, user_text=user_text, traj_seg_id=_traj_seg)
                     step.result = step_result
                     # P1修复（复杂路径tool_calls_log恒空→学习/记账链整体不触发）：
                     # 步骤工具账本汇入回合账本（3598行"两条路径都会用到"的兑现）——
@@ -5339,7 +5353,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
                         _traj_seg = await self._traj_recorder.start_llm_span(
                             session_id, traj_root_id,
                             content=f"plan_step_retry: {step.description[:120]}")
-                        retry_result, retry_tools = await self._run_llm_with_tools(step_messages, session_id, matched_skills=step_skills, traj_seg_id=_traj_seg)
+                        retry_result, retry_tools = await self._run_llm_with_tools(step_messages, session_id, matched_skills=step_skills, user_text=user_text, traj_seg_id=_traj_seg)
                         step.result = retry_result
                         # 重试轮工具账本同样汇入（重试也是本回合真实工具面，含失败
                         # 首试的工具——审计/记账按真实执行记，不因结局回滚账本）
