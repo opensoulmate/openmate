@@ -450,8 +450,14 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
   ④✅SearXNG 常驻托管（周期#44 治理）：searxng.service（systemd --user）已建成
   enabled 开机自启（Restart=always，手动进程已移交 systemd 接管），search_backend
   STARTUP_HINT 升级首选 `systemctl --user start searxng`——"重启即丢全靠手动起"销账；
-  ⑤turn_watchdog 心跳帧会被 harness 并进回复文本采集（⏳ 快照与答案粘连）——
-  采集侧按 sessionId 过滤仍会混入同 session 心跳，需按 turn_origin/帧类型过滤。
+  ⑤✅harness 采集侧按帧来源过滤（周期#45 治理）：turn_watchdog 心跳帧/self_verify
+  需求自检推送/report_evidence 治理横幅曾被 harness 并进回复文本采集（⏳ 快照与
+  答案粘连、"简短一句话"合并视图非纯一句话）——实装 agent/frame_origin.py 帧分类
+  （origin_of 帧首前缀判别 heartbeat/self_check/audit_notice/answer；标记常量从
+  生产者模块 import 单一真源 SNAPSHOT_PREFIX/REPORT_HEADER/GOV_BANNER_PREFIXES/
+  AVAIL_BANNER_PREFIX；audit_notice 两形态：纯横幅帧整帧丢弃、横幅+正文同帧按
+  banner+空行+body 契约只剥横幅块保正文）+acceptance_benchmark._rpc 采集收口
+  split_frames（entry.system_frames+summary system_frames_total 过滤计数可观测）。
 - [ ] ⚡8.6 双链分叉事故处置（见周期#30日志）：main(1b63f2ac) 与 evo/exp-1791613018
   (d431bcc0) 在 6.2 处分叉成两套实现（skill_loader vs skill_matcher），#25-#29 只在
   evo/exp 链——链合并/取舍决策涉及取舍**待用户拍板**。周期#31 已做非破坏处置准备：
@@ -462,9 +468,7 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
   双链双落地（98d6025f main / 9d17ebdc evo 链）零丢失。
 - [ ] 后续（非紧急，另案）：微信 iLink 真实传输 4.1b（接入形态待用户拍板，绝不双消费
   hermes 会话）、调度/监控常驻托管（3.1 遗留）、ASR 语音输入（多模态路由另案）、文生图
-  大模型 API、AI 群组真实成员端到端、8.5c-③InfectionGate 自愈类低危命令豁免语义评估、
-  8.5c-⑤ harness 采集侧
-  按 turn_origin/帧类型过滤（心跳快照/需求自检推送混入合并回复视图）。
+  大模型 API、AI 群组真实成员端到端、8.5c-③InfectionGate 自愈类低危命令豁免语义评估。
 
 ## 周期日志
 [2026-10-09 19:00] 周期#0 | 路线图建立+cron流水线上线 | ✅ | (本文档创建) | 首个自动周期15分钟后启动
@@ -510,3 +514,4 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 [2026-10-10 23:59] 周期#42 | 8.5c②可用性误报治理（"说了≠做了"的镜像"做了/有，说没有"）：report_evidence增可用性声称抽取find_availability_claims（registration/availability/generic三类正则，覆盖"没有X工具/X运行时未注入/X不在工具列表/X工具不可用/无法使用X/工具未注入"等实证形态；结果类宾语排除"没有X的结果"防误纠+词尾边界防排除词被正则回溯绕过）+assess_availability两级判据（registration=工具面真源_active_tool_names在册即证伪proof=registry；availability模糊声称仅本回合真实执行成功才证伪proof=executed——被拦截调用反向支持模型说法不更正；generic=有成功执行才证伪；无真源无账本一律不更正=宁漏纠不误纠）+amend_availability/availability_banner前置更正声明（原文保留可审计，列证伪依据）+soulmate_agent接线（8.2证据治理后、2.1自验前，真源=getattr(self,"_active_tool_names")） | ✅ | a02984e2 | Gate1 git diff 407行真实落盘+Gate2 grep接线点（assess_availability/banner/amend三调用+_active_tool_names真源传参）+Gate3 tests/test_tool_availability_claims.py 18/18（抽取7形态+结果宾语排除+注入词非工具语境排除+具名压制generic噪音+两级判据registry/executed/未知工具不纠/在册未试不纠/被拦不纠/generic/无真源不纠+banner措辞两态+接线护栏先证据后自验）+回归167全过（report_evidence/self_verify/tool_recovery/cache_replay/code_mode/plan_tool_ledger/degraded_spill/turn_lifecycle）+py_compile+SoulMateAgent导入烟测（__new__+_active_tool_names真实更正输出实证）；⚠️诚实边界：治理"说"侧更正声明，拒做行为本身未强制重试；同机单样本未跑真LLM回合（间歇性误报需用户实际使用观察）；下周期做8.5c-①回复风格元叙事治理
 [2026-10-11 00:45] 周期#43 | 8.5c-①回复风格元叙事治理（回答尾部"补做结果/逐项说明"）：三根因实证逐一修（d3dc9841）——C"固定带"主根因=自否定元指令被当需求（验收防缓存标记行"此行仅为…忽略其语义"被分句拆成需求项且必然unmet→每轮必触发补做），修is_self_negating显式自否定措辞不算需求（"此行仅[为是]/只是"须伴"标记/占位"防误杀真实需求）；A条件子句"如果X就Y"拆成独立需求项短答覆盖不到→unmet→补做，修条件项unmet封顶uncertain只提醒不补做；B补做提示词旧措辞"完成后逐项简要说明结果"直接命令模型逐项复盘，修"只输出需要补充的内容本身禁'补做结果/逐项说明'复盘标题"；连带修harness判据假阳性（STYLE85C_1实证：需求自检报告复述需求原文"如果搜索工具不可用…"被并帧采集混入主答区→正确回答误判"自报不可用"，主答区边界补🔍需求自检/可用性更正声明切割点） | ✅ | d3dc9841 | 8.5c-①勾选（8.5c①②全完，③④⑤转后续另案）；Gate1 git diff 289行真实落盘、Gate2 grep接线点（is_self_negating进extract两处/is_conditional进verify/soulmate_agent真实补做路径5926-5931完好）、Gate3 tests/test_remediation_style.py 14例+同域回归120全过（self_verify/report_evidence/tool_availability/infection_guard/plan_tool_ledger）+双实例重启health OK；真实验收调研类两轮实测：tag=STYLE85C_1挖出harness判据假阳性（"补做结果/逐项说明"尾部已消失实证）→judge修复+离线判别2例→tag=STYLE85C_2 ✅1/1（31.5s，主答区自报不可用=否、含3.13+2024）；⚠️诚实边界：需求自检推送仍并帧进合并采集视图（8.5c-⑤采集侧过滤遗留，"简短回答"合并视图非纯一句话）、补做内容若模型自发复盘不做输出后处理剥离（防过度防御）、单样本同机低负载；下周期：⚡区仅剩8.6待用户拍板→规划下一批切片（候选8.5c-⑤采集侧帧过滤/8.5c-④SearXNG systemd托管/8.5c-③自愈豁免评估）
 [2026-10-11 00:55] 周期#44 | 8.5c-④ SearXNG 常驻托管（调研类FULL10失败链环境根因①销账："重启即丢全靠手动起"）：新增 systemd --user searxng.service（ExecStart=~/SearXNG-master/venv/bin/python3 -m searx.webapp+WorkingDirectory+SEARXNG_SETTINGS_PATH=~/searxng-data/settings.yml+Restart=always+enabled，Linger=yes实证开机自启）+手动进程PID 413102精确kill移交systemd接管（新PID 471760）+search_backend STARTUP_HINT升级首选`systemctl --user start searxng`（start.sh/手动命令保留兜底，测试同步断言） | ✅ | (本次提交) | 8.5c-④勾选（8.5c①②④全完，③⑤另案）；Gate1 git diff真实落盘（search_backend.py 4插2删+test 2行）；Gate2 grep STARTUP_HINT真实输出路径两处（hint=214/223）+重启实例后运行时已加载新常量；Gate3 tests/test_search_backend.py 26/26（新增systemd命令断言）+真实机器三证：systemd托管SearXNG真实查询"命中25条"（python.org结果回读）/`systemctl --user restart searxng`后active且复搜正常（"重启即丢"销账实证）/双实例重启health OK；⚠️诚实边界：开机自启以Linger=yes+enabled静态配置为证（禁reboot未做真实重启实测）；下周期做8.5c-⑤ harness采集侧按turn_origin/帧类型过滤（心跳快照/需求自检推送混入合并回复视图，8.5c-①遗留"简短回答合并视图非纯一句话"同源）
+[2026-10-11 01:10] 周期#45 | ⚡8.5c-⑤ harness 采集侧按帧来源过滤（心跳快照/需求自检推送/治理横幅混入合并回复视图）：根因=回答帧与系统帧走同一 agent_message_chunk 通道（ACP ContentChunk 无 metadata 字段，wire 不带 turn_origin）→ 采集侧只能按帧类型判别；实装 agent/frame_origin.py（origin_of 帧首前缀分类 heartbeat/self_check/audit_notice/answer + split_frames 合并过滤——纯横幅帧整帧丢弃、横幅+正文同帧按 banner+空行+body 契约只剥横幅块保正文防把非流式整发的回复误杀；只认帧首防正文中间同字样误伤；📋管线进度/🛑停止提示按设计归回答帧）+标记常量单一真源抽取（turn_watchdog SNAPSHOT_PREFIX/SOFT_WARN_PREFIX、self_verify REPORT_HEADER、report_evidence GOV_BANNER_PREFIXES/AVAIL_BANNER_PREFIX，生产者改措辞测试即红）+acceptance_benchmark._rpc 采集收口（entry.system_frames+summary system_frames_total 过滤计数可观测） | ✅ | 43d51f6f/d7541a83 | 8.5c-⑤勾选（8.5c①②④⑤全完，仅③另案）；Gate1 git diff 两提交286行真实落盘；Gate2 grep split_frames 在 _rpc 采集真实路径+本次真实运行命中过滤（计数即证）；Gate3 tests/test_frame_origin.py 12/12（真实生产者输出钉死三类帧+软预算帧+补做后缀+横幅两形态拆分+回答帧不误伤+混合计数）+同域回归122全过（self_verify/report_evidence/turn_watchdog/tool_availability/remediation_style/infection_guard）+双实例重启health OK；真实验收=WS 用户路径复测 tag=FRM85C_1 2/2✅（调研38.2s：合并回复=纯一句话"Python 3.13 于 **2024 年 10 月 7 日**正式发布。"38字零粘连（8.5c-①"合并视图非纯一句话"销账实证）、self_check×1 帧被过滤；定时100.11s：60s 心跳真实触发 heartbeat×1+self_check×1 过滤，cron_tasks.db 行=1）；⚠️诚实边界：帧分类是前缀判别非 wire 元数据（SDK 无 metadata 字段，真 turn_origin 需协议/前端扩展另案）；📋 任务拆解/🔧 步骤管线进度按设计留在回答帧（只过滤 roadmap 点名三类）；relay_trajectory 轨迹采集同源粘连未治理（另案）；下周期：⚡区仅剩8.6待用户拍板→规划下一批切片（候选：8.5c-③自愈豁免评估/轨迹采集同源过滤/新一批能力切片）
