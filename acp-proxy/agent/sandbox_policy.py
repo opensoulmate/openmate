@@ -54,6 +54,7 @@ NETWORK_TOOL_NAMES = frozenset({
     "web_search",
     "web_extract",
     "batch_execute",
+    "browser",  # 路线图7.1：浏览器自动化直接出网，受限会话同款收缩
 })
 
 

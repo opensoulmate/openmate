@@ -46,8 +46,8 @@
 - ~~3.x 缺~~ **3.1 已补（周期#11）**：cron引擎（agent/soulmate_scheduler.py，interval/cron周期调度+SQLite持久化+CAS到点执行+执行日志，区别于schedule_wakeup一次性唤醒）；**3.2 已补（周期#13）**：定时汇报（agent/cron_reporter.py，执行结果📊汇报行落opensoul.db+wakeup_relay推送面扩到{wakeup,cron,cron_report}即时推送）；**3.3 已补（周期#14）**：监控告警（agent/health_monitor.py，website/service/port三类周期健康检查+防抖告警+恢复通知）；⚠️3.1遗留：调度循环宿主=存活的SoulMateAgent进程（stdio子进程自举），无agent进程时任务不执行（错过不补跑），常驻托管（独立daemon）待后续
 - **4.x 半缺**：~~微信桥全缺~~ **4.1a 已补（周期#15）**：微信桥核心（agent/wechat_bridge.py，收发回路+去重+会话映射+失败纪律，loopback传输实证；iLink真实传输=4.1b待做）；**4.2 已补（周期#17）**：统一消息路由（agent/message_router.py，OpenMate/微信统一收发出入口+message_send工具）；**4.3 已补（周期#18）**：媒体收发（agent/media_channel.py，图片/文件收发+截图理解提示块，sense_*感知之外补齐收发形态）
 - **5.x 已补全**：~~子代理并行、群组任务编排全缺~~ **5.1 已补（周期#19）**子代理并行、**5.2 已补（周期#20）**工具执行层并发隔离、**5.3 已补（周期#21）**群组任务编排（接ai_groups）
-- **6.x 半缺**：6.1/6.2 已补（技能保存+检索加载注入），6.3 用执行结果反哺修正待实测
-- **7.x 全缺**：浏览器自动化、docx/pdf/xlsx 生成、TTS、图像生成；另有 send_file/进程管理(text_to_speech等Hermes工具)缺口
+- **6.x 半缺**：6.1/6.2/6.3 已补（技能保存+检索加载注入+执行结果反哺坑沉淀，周期#35）
+- **7.x 半缺**：~~浏览器自动化~~ **7.1 已补（周期#36）**：browser 工具面（Playwright/CDP）；仍缺 docx/pdf/xlsx 生成、TTS、图像生成；另有 send_file/进程管理(text_to_speech等Hermes工具)缺口
 
 ## 阶段规划（每阶段内拆成 15 分钟可完成的切片）
 
@@ -233,7 +233,18 @@
   追加（确定性）；步骤/触发词的语义改写需LLM或用户拍板，未做
 
 ### 阶段7 · 工具生态补齐
-- [ ] 7.1 浏览器自动化（Playwright/CDP）
+- [x] 7.1 浏览器自动化（Playwright/CDP）——周期#36实装agent/browser_worker.py
+  （独立子进程JSONL协议驱动playwright——服务venv无playwright，默认
+  SOULMATE_BROWSER_PYTHON=/usr/bin/python实测带playwright 1.60；常驻浏览器会话
+  页面状态跨调用保留；launch本地chromium或SOULMATE_BROWSER_CDP_URL附加既有
+  浏览器两模式；单动作失败ok:false不杀会话）+agent/browser_tools.py（BrowserTools
+  有界调用+诚实状态三态：后端不可用显式报因+启动文档化/超时显式+页面状态丢失
+  如实告知/崩溃重建提示一次；动作级timeout_ms自动留5s余量短于请求级硬超时——
+  真实smoke暴露等长时watchdog先开火把"选择器没找到"误报成会话超时重建；截断
+  自报；screenshot自动落盘~/.hermes/soulmate/browser_shots返回路径可MEDIA下发）
+  +sandbox NETWORK_TOOL_NAMES归类browser（受限会话同款收缩）+soulmate_agent
+  四点接线（browser工具定义9动作/主dispatch/_browser_dispatch共享lazy-init/
+  code-mode批内+系统提示清单）
 - [ ] 7.2 文档生成（docx/pdf/xlsx）
 - [ ] 7.3 TTS/语音
 - [ ] 7.4 图像生成/编辑
@@ -383,3 +394,4 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 [2026-10-10 19:45] 周期#33 | ⚡8.3 长回合治理（R3）：根因实证=**非dispatch卡死**（journal 17:52-17:57 验收#7复盘，回合在真实推进），每工具一次注入审计LLM往返+R1误杀失败/重试轮把3工具链拉到5-8分钟级，harness 240s到点放弃即"无终态无落库"；实装agent/turn_watchdog.py（TurnWatchdog：后台心跳默认60s SOULMATE_TURN_HEARTBEAT_S推快照[已用时/轮次/工具数/最近工具]给客户端+journal不依赖轮次边界LLM单轮慢也照发+软预算240s SOULMATE_TURN_SOFT_BUDGET_S单次⚠️"继续执行不中断"禁硬杀+notify旁路纪律只计数不冒泡+960s自过期防孤儿心跳）+soulmate_agent五点接线（import+_watchdog_for/_stop_turn_watchdog lazy-init兼容__new__测试agent+工具循环前start+轮次/工具节点beat+turn.close订阅收口） | ✅ | (本次提交) | 8.3勾选；tests/test_turn_watchdog.py 8/8+回归169全过（turn_lifecycle/turn_outcome/loop_guard/prompt_prefetch/infection_guard/report_evidence/stream_progress）+py_compile+导入烟测+双实例重启health OK；真实验收=WS用户路径探针（schedule 3工具链+唯一防缓存标记，复用acceptance_benchmark采集器含sessionId过滤）：78.1s end_turn、需求自检3/3 met、journal实证心跳"[turn-watchdog] session=om-13507ea2b926 ⏳ 回合进行中：已用 60s｜第 2/15 轮｜已执行工具 1 个（最近：schedule_cancel）"、cron_tasks.db实证任务#2(wd_probe_1791631)创建后按要求停用(enabled=0)——R1修复后同链路从">240s无终态"变78s完整终态（8.5定时类预热通过，探针脚本wd_probe_ws.py留库可复跑）；⚠️诚实边界：耗时本身治理（单工具链审计LLM往返开销优化）未做另案；下周期做8.4调研兜底（web_search后端可用性探测+SearXNG未启动显式降级，禁静默归零）
 [2026-10-10 19:57] 周期#34 | 8.4 调研兜底（R4）：web_search 后端可用性探测+显式降级禁静默归零——新增agent/search_backend.py（SearXNG主后端+Bing HTML兜底降级链+probe()+四态语义：可信空只认searx JSON results:[]报"非故障"、bing 0块=inconclusive疑似反爬禁断言"无资料"、全挂=逐后端报因+启动文档化start.sh/searx.webapp）+修静默归零双根因（①后端挂了/非JSON/缺results键误报"无搜索结果"②query裸拼URL未编码空格/中文截断假零→quote()）+soulmate_agent两执行点收口run_search单一真源内联curl-SearXNG清零 | ✅ | e4e25c13 | 8.4勾选；tests/test_search_backend.py 24/24+回归109全过(code_mode/sandbox_policy/tool_recovery/tool_output)+真实机器实证（SearXNG未启动场景旧报"搜索不可用:curl stderr"/假零→现"⚠️未获得搜索结果…不足以断言无资料…启动方法"）+SoulMateAgent导入烟测；⚠️诚实边界：Bing兜底实测被反爬拦截0块（inconclusive已如实标注，SearXNG启动后主链路即恢复多引擎聚合）；8.5验收复测/⚡8.6双链合并（待用户拍板）仍未做；下周期做8.5验收复测（多渠道/定时两类，prompt带唯一防缓存标记+先清陈旧产物）
 [2026-10-10 20:45] 周期#35 | 6.3 技能进化（阶段顺序下一刀；⚡区0.1/0.2已完、8.6待用户拍板）：新增agent/skill_evolution.py（SkillEvolver确定性反哺闭环——账本parse_ledger拆真实执行/被拦截+classify_result单一真源判失败+签名去重+确定性坑条目成文[恢复成功/未恢复两态措辞]+SkillSaver.save_flow(overwrite=True)revision递增原子写回+skill_evolution.db全量审计+每回合每技能≤2新坑/总坑≤12封顶显式报因+只动saved可写技能标准层单写入者纪律skipped留痕）+soulmate_agent回合收尾钩子（record_usage后lazy-init+旁路纪律不阻塞） | ✅ | (本次提交) | 6.3勾选；tests/test_skill_evolution.py 20/20（坑沉淀/去重/双上限/恢复两态/拦截不算失败/标准层跳过/正文不可解析不改写/内容保真步骤触发词描述零丢失/审计落行含verify结果/审计写失败旁路/接线护栏钩子顺序断言）+回归143全过(skill_saver/loader/standard_layer/usage_receipt/self_verify/experience_sink/report_evidence)+真实机器烟测（SoulMateAgent导入+钩子接线inspect实证+真实单例db路径）；⚠️诚实边界：仅"坑"追加，步骤/触发词语义改写需LLM或用户拍板未做；下周期做7.1浏览器自动化（Playwright/CDP工具面）或8.5验收复测
+[2026-10-10 21:05] 周期#36 | 7.1浏览器自动化（阶段顺序下一刀；⚡区0.1/0.2已完、8.6待用户拍板）：新增agent/browser_worker.py（独立子进程JSONL协议驱动playwright——服务venv无playwright故走子进程隔离，默认SOULMATE_BROWSER_PYTHON=/usr/bin/python实测带playwright 1.60；常驻浏览器会话页面状态跨调用保留；launch本地chromium或SOULMATE_BROWSER_CDP_URL附加既有浏览器；单动作失败ok:false不杀会话）+agent/browser_tools.py（BrowserTools有界调用+诚实三态：后端不可用显式报因+启动文档化/超时显式+状态丢失如实告知/崩溃重建提示一次；截断自报；screenshot自动落盘返回路径可MEDIA下发）+sandbox NETWORK_TOOL_NAMES归类browser+soulmate_agent四点接线（browser工具定义9动作goto/snapshot/click/type/fill/eval/screenshot/back/close+主dispatch+_browser_dispatch共享lazy-init+code-mode批内+系统提示清单） | ✅ | (本次提交) | 7.1勾选；tests/test_browser_tools.py 15/15（JSONL真子进程往返/崩溃重建/超时/不可用双形态interpreter缺失+playwright缺失stderr尾部如实报因/截断自报/screenshot自动落盘/接线护栏+__new__真实dispatch烟测+lazy-init构造）+回归191全过（browser+sandbox_policy+skill_saver/loader/standard_layer+self_verify/report_evidence/search_backend）+code_mode/tool_output/tool_recovery/infection_guard 121全过+运行时_build_base_system_prompt实证browser行进系统提示；真实机器smoke全绿（真实chromium：goto/snapshot标题正文链接/type后eval回读'ni hao'证明状态跨调用/坏选择器干净报因/截图11.4KB真实PNG/close）；实现中真实smoke暴露并修复1个真缺口：动作级timeout_ms与请求级硬超时等长时watchdog先开火把"选择器没找到"误报成"会话超时重建"→动作级自动留5s余量；⚠️诚实边界：单测走fake worker（真实playwright成本放smoke），CDP附加模式代码就绪未实测（无既有9222会话），JS eval任意副作用属工具固有能力（过permission_gate）；下周期做7.2文档生成（docx/pdf/xlsx）或8.5验收复测

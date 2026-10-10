@@ -153,6 +153,7 @@ from agent.group_orchestrator import (  # 路线图5.3 AI群组任务编排
     get_group_orchestrator as _get_group_orchestrator,
 )
 from agent.skill_saver import get_skill_saver as _get_skill_saver  # 路线图6.1 技能保存
+from agent.browser_tools import BrowserTools  # 路线图7.1 浏览器自动化（Playwright/CDP）
 from agent.writer_fence import SessionWriterFence, WriteAction
 from agent.tool_exec_fencing import FileFenceTimeout, file_fence
 from agent.steering import (
@@ -1400,6 +1401,9 @@ class SoulMateAgent:
             # 技能保存（路线图 6.1）：批内同样可用（纯本地文件写）
             if func_name == "skill_save":
                 return self._skill_save_dispatch(func_args, session_id)
+            # 浏览器自动化（路线图 7.1）：批内同样可用（有界子进程调用）
+            if func_name == "browser":
+                return self._browser_dispatch(func_args, session_id)
             # kilocode #19 MCP resource三件套：批内同样可用（与主循环同款注入安全层）
             if func_name in MCP_RESOURCE_TOOL_NAMES:
                 return await self._call_mcp_resource_tool(func_name, func_args)
@@ -1851,6 +1855,21 @@ class SoulMateAgent:
         except Exception as e:
             return f"[错误] 群组任务编排失败: {type(e).__name__}: {e}"
 
+    def _browser_dispatch(self, func_args: dict, session_id: str = "") -> str:
+        """browser 工具分发（路线图 7.1：浏览器自动化 Playwright/CDP）。
+
+        主循环与 code-mode 内层共用此入口。浏览器 worker 是独立子进程（服务 venv
+        无 playwright），动作有界超时；后端不可用/超时/崩溃由 BrowserTools 显式
+        报因禁静默。与 _skill_save_dispatch 同款 lazy-init（__new__ 裸实例零感知）。
+        """
+        tools = getattr(self, "_browser_tools_inst", None)
+        if tools is None:
+            tools = BrowserTools()
+            self._browser_tools_inst = tools
+        action = str(func_args.get("action", "") or "").strip().lower()
+        params = {k: v for k, v in func_args.items() if k != "action" and v is not None}
+        return tools.run(action, params)
+
     def _skill_save_dispatch(self, func_args: dict, session_id: str = "") -> str:
         """skill_save 分发（路线图 6.1：把成功流程写成 SKILL.md）。
 
@@ -2068,8 +2087,7 @@ ACP代理目录: {cwd}/acp-proxy（后端 Python 代码在此）
 - message_send: 统一消息出站（OpenMate/微信同一入口，支持media图片/文件附件收发）。channel='wechat'发给微信peer（拆块+限流），channel='openmate'落库到指定会话（正连前端实时可见）。用户要求"给某微信用户发消息/发文件发图片/通知某会话/主动推送"时使用；对方发来图片/截图时按消息内媒体提示块用vision_analyze/read_image理解（截图理解）
 - delegate_tasks: 子代理并行执行（拆分任务给并行worker，父代理收尾合并）。多个互不依赖的独立子任务（多路调研/多个互不依赖的问题/多份互不依赖的检查）→ delegate_tasks 拆给并行子代理并发执行（2-8个），合并结果后由你收尾总结论。⚠️ 有先后依赖的任务不要拆（会并行跑）；每个子任务 goal 必须自包含（子代理看不到当前对话，必要背景写进 goal/context）；失败/超时的子任务会在结果里标注原因，收尾时如实反映不要当成已完成
 - group_task: AI群组任务编排（接 ai-groups 多agent群组：自动分解→按角色分配→并行执行）。需要多agent分工协作的复杂目标（规划→执行→验证→审查）→ group_task(action=orchestrate) 交给群组执行并返回合并报告；查看群组→ action=list_groups；查任务进度→ action=task_status。⚠️ 失败/超时子任务在报告中标注原因，不要当成已完成
-- skill_save: 技能保存（把成功流程写成SKILL.md含触发条件/步骤/坑，存技能库供复用）。刚成功完成多步骤可复用任务、或用户要求"把XX流程保存为技能/记住怎么做"时使用；同名技能默认不覆盖（更新传 overwrite=true）。保存后同类任务命中触发词会自动加载该技能
-
+- skill_save: 技能保存（把成功流程写成SKILL.md含触发条件/步骤/坑，存技能库供复用）。刚成功完成多步骤可复用任务、或用户要求"把XX流程保存为技能/记住怎么做"时使用；同名技能默认不覆盖（更新传 overwrite=true）。保存后同类任务命中触发词会自动加载该技能\n- browser: 浏览器自动化（Playwright/CDP，真实浏览器会话）。action=goto 打开URL / snapshot 读页面标题+正文+链接 / click 点元素 / type 输入（submit=true回车）/ fill 清空填入 / eval 执行JS / screenshot 截图（返回文件路径可MEDIA下发）/ back 后退 / close 关闭会话。selector 用 CSS 选择器。需要看页面真实渲染内容、登录态页面、自动化网页操作时使用；纯静态网页抓取优先 web_extract。⚠️ 页面过长截断并自报；失败返回具体原因；页面状态跨调用保留（连续操作无需重复goto）\n
 You can send files to the user natively: to deliver a file, write a brief confirmation message (e.g. "文件已发送，请查收"), then include MEDIA:/absolute/path/to/file on a new line. The gateway extracts the tag, strips it, and sends the file as a download card. Always write some text before the MEDIA: tag — never output a bare MEDIA: tag alone. Use search_files first if you don't know the exact path. Do NOT paste file contents into chat."""
 
     async def _run_llm_with_tools(
@@ -3069,6 +3087,50 @@ You can send files to the user natively: to deliver a file, write a brief confir
             },
         }]
         builtin_tools.extend(skill_save_tool)
+
+        # ── 浏览器自动化工具（路线图 7.1：Playwright/CDP）───────────
+        # 真实浏览器会话（页面状态跨调用保留）；worker 独立子进程（服务 venv
+        # 无 playwright），失败/超时/不可用显式报因禁静默。
+        browser_tool = [{
+            "type": "function",
+            "function": {
+                "name": "browser",
+                "description": (
+                    "浏览器自动化（Playwright/CDP，真实浏览器会话，页面状态跨调用"
+                    "保留——连续操作无需重复goto）。action 取值：goto（打开url）/"
+                    "snapshot（读页面标题+正文+链接，过长截断并自报）/ click（点元素）/"
+                    "type（selector处输入text，submit=true回车提交）/ fill（清空后填入）/"
+                    "eval（执行js表达式返回结果）/ screenshot（截图存PNG，path可省略"
+                    "自动落盘并返回路径）/ back（后退）/ close（关闭浏览器会话）。"
+                    "selector 用 CSS 选择器。需要看页面真实渲染内容/登录态页面/自动化"
+                    "网页操作时使用；纯静态网页抓取优先 web_extract。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["goto", "snapshot", "click", "type", "fill",
+                                     "eval", "screenshot", "back", "close"],
+                            "description": "要执行的浏览器动作",
+                        },
+                        "url": {"type": "string", "description": "目标URL（goto）"},
+                        "selector": {"type": "string",
+                                     "description": "CSS选择器（click/type/fill）"},
+                        "text": {"type": "string", "description": "输入文字（type/fill）"},
+                        "submit": {"type": "boolean",
+                                   "description": "输入后回车提交（type/fill，可选）"},
+                        "js": {"type": "string", "description": "JS表达式（eval）"},
+                        "path": {"type": "string",
+                                 "description": "截图保存路径PNG（screenshot，可省略）"},
+                        "timeout_ms": {"type": "integer",
+                                       "description": "单动作超时毫秒（可选，默认30000）"},
+                    },
+                    "required": ["action"],
+                },
+            },
+        }]
+        builtin_tools.extend(browser_tool)
 
         # 添加进化引擎工具（支持直接对象或HTTP API两种模式）
         evolution_tools = []
@@ -4083,6 +4145,14 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             # ── 技能保存（路线图 6.1）──────────────────────────
                             try:
                                 result = self._skill_save_dispatch(func_args, session_id)
+                            except Exception as e:
+                                te = self._tool_error_handler.handle_error(
+                                    session_id, func_name, e, func_args)
+                                result = te.to_model_message()
+                        elif func_name == "browser":
+                            # ── 浏览器自动化（路线图 7.1，Playwright/CDP）──────
+                            try:
+                                result = self._browser_dispatch(func_args, session_id)
                             except Exception as e:
                                 te = self._tool_error_handler.handle_error(
                                     session_id, func_name, e, func_args)
