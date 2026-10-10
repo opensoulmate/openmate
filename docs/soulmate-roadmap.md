@@ -187,7 +187,22 @@
   +_group_dispatch共用入口lazy-init+code-mode批内await+系统提示清单）
 
 ### 阶段6 · 技能系统
-- [ ] 6.1 技能保存：把成功流程写成 SKILL.md（含触发条件/步骤/坑）
+- [x] 6.1 技能保存：把成功流程写成 SKILL.md（含触发条件/步骤/坑）——周期#23实装
+  agent/skill_saver.py（SkillSaver：确定性渲染标准 SKILL.md=YAML frontmatter
+  name/description/category/triggers + 固定分区触发条件/步骤/坑/验证，与
+  .agents/skills 同构；save_flow 校验显式拒绝空名/空描述/零触发/零步骤（None
+  条目不 str() 蒙混成"None"）+ 同名默认不覆盖（overwrite=false 返回 exists
+  提示禁静默覆盖既有技能）+ overwrite=true revision 递增原子替换（tmp+
+  os.replace 不留半截文件）；slugify 保留 CJK；可写库 ~/.openmate/skill-library
+  单一写入源）+ skill_manager saved 层（scan_saved_skills 复用标准层解析但
+  read_only=False/saved:<slug>/revision 透传 + 60s TTL 缓存 + list_skills 合并
+  =**保存即被 search_skills 命中进系统提示注入面**；update/delete/record_usage
+  拒绝 saved 条目=单写入者纪律，更新只走 save_flow(overwrite=true)）+
+  soulmate_agent 四点接线（skill_save 工具定义 + 主 dispatch +
+  _skill_save_dispatch 共用入口 lazy-init + code-mode 批内 + 系统提示清单；
+  保存后强刷 saved 层缓存不被 60s TTL 藏住）。真实机器烟测：生产 SkillManager
+  实例 search_skills 命中 saved 条目（排在 std 技能之前）read_only=False
+  revision=1（烟测产物已清理）
 - [ ] 6.2 技能检索与加载：按任务自动匹配并注入
 - [ ] 6.3 技能进化：用执行结果反哺修正技能内容
 
@@ -225,3 +240,4 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 [2026-10-10 12:35] 周期#20 | 5.2多会话并发隔离（写锁已有，扩到工具执行层）：新增agent/tool_exec_fencing.py（以realpath为键的跨进程文件栅栏file_fence——flock互斥+锁文件走中央临时目录sha256命名不污染项目树+进程死亡自动释放无stale lock+同进程不同fd同样互斥+有界等待10s超时抛FileFenceTimeout显式报冲突禁无锁裸写）+接线三处读-改-写临界区（patch主循环/code-mode内层双执行点+PersistentMemory.write/append覆盖memory工具与experience_sink的MEMORY.md同步）+_get_db加busy timeout=30 | ✅ | 50132e40 | 5.2勾选；tests/test_tool_exec_fencing.py 11/11（真多进程lost-update回归/同进程双fd互斥/有界等待/超时消息可见/进程死亡自动释放/锁文件不污染项目目录/持久记忆并发追加不丢行/超时显式报错不改文件/code-mode patch行为实测冲突+正路径/接线护栏/_get_db timeout）+回归553全过（plan/tool/subagent/session链207+记忆/消息/调度链287+persistent_memory/experience/profile链59）+py_compile+真实导入烟测；根因实证：无栅栏两进程并发read-modify-write 5/5次lost update（/tmp/race_control.py对照），有栅栏全保留；⚠️诚实边界：terminal/execute_code任意副作用无法枚举上锁（归任务分解/意图层）、git index.lock串行化（task_decomposer.commit_step并发提交）与共享agent实例观测采集端弱共享待后续；下周期做5.3群组协作（AI群组里的任务编排，接现有ai_groups能力）
 [2026-10-10 12:52] 周期#21 | 5.3群组协作（AI群组任务编排，接现有ai_groups能力）：新增agent/group_orchestrator.py（GroupOrchestrator驱动opensoul /api/ai-groups既有任务面——提交主任务=自动分解子任务+按角色自动分配→逐个触发execute失败隔离（单个execute请求失败/无agent不阻塞兄弟，409已在执行容忍为在途）→有界轮询list_tasks到终态（wait_s 5-600s预算，耗尽子任务记TIMEOUT显式标注不假装成功）→终态读事件流finished/failed判定成败（ai_groups execute收尾status一律scored，成败真相在事件流——实证发现）→确定性merge不走LLM（成功/失败分节+按输入顺序+失败收尾警示同5.1纪律+超长截断自报）；传输层可注入零网络测试，缺省httpx调SOULMATE_AI_GROUPS_URL；只读查询面list_groups/task_status）+soulmate_agent四点接线（group_task工具action=list_groups/orchestrate/task_status+主dispatch+_group_dispatch共用入口lazy-init+code-mode批内await+系统提示清单） | ✅ | (本次提交) | 5.3勾选（阶段5全部完成）；tests/test_group_orchestrator.py 14/14（happy path顺序/execute失败隔离含兄弟照常执行实证/409容忍/无agent显式失败/事件failed覆盖scored/timeout显式标注/提交失败抛错/校验4例/merge确定性+截断自报/空子任务/list_groups与task_status格式/接线护栏+__new__真实dispatch烟测四态）+回归133全过（subagent/message/media/wechat/tool_fencing链85+code_mode/tool_output链48）+py_compile+SoulMateAgent真实导入烟测+真实机器烟测（:8090 ai-groups health ok，list_groups真实返回2个现存群组4703ec60 B群组/1cfdb9e5 A群组）；⚠️诚实边界：编排对象是ai_groups既有执行面（run_agent_proxy跑真实agent binary），本模块不重复实现执行器；轮询为快照轮询非WS实时尾随（ws_group实时面在前端侧）；真实群组端到端跑真实agent执行待有真实成员群组实测；下周期做6.1技能保存（把成功流程写成SKILL.md含触发条件/步骤/坑）
 [2026-10-10 13:25] 周期#22 | ⚡0.2紧急插队·首条消息提速：新增agent/prompt_prefetch.py（PromptPrefetcher：上下文源并行预取asyncio.gather+TTL缓存120s可配SOULMATE_PREFETCH_TTL_S+旁路纪律收集器/prefill失败只计数绝不冒泡绝不阻塞+take()超时回退现场计算（行为与预热前逐字一致）+可观测stats计数）+soulmate_agent四点接线（_prompt_prefetcher lazy-init收集器=pref_context/memory_md/improvement三源+mcp_tools暖60s工具缓存、_prefill_warm微小预热LLM请求同系统提示前缀+同工具面首chunk即断开省输出token不进会话历史不落库、new_session创建路径_schedule_prefetch fire-and-forget、_run_llm_with_tools三源消费缓存）+基础系统提示抽_build_base_system_prompt单一真源（prefill与主链路逐字同前缀=暖前缀缓存前提） | ✅ | 13193cfa | 0.2勾选（紧急插队清空）+0.1补勾（周期#12实装后复选框漏勾）；tests/test_prompt_prefetch.py 15/15（并行barrier实证同步/异步混跑、TTL fake clock命中与过期、失败隔离、prefill同前缀+不进缓存、schedule fire-and-forget、接线护栏new_session调度/主链路消费/同前缀真源/预热不落库）+回归207全过（plan/tool_judge/code_mode/tool_output/self_verify/cache_replay/message_tree/session_lifecycle/persistent_memory/stream_progress/stale_session_recovery/ws_session_recovery）+py_compile+导入烟测；真实验收=WS用户路径（initialize→session/new→模拟打字8s→首条消息）首字回复 6.00s≤8s达标（此前约33s），prompt全程8.21s，journal实证[prefetch] warm scheduled→warm done parts=[4源] prefill=1无失败；⚠️诚实边界：单次实测样本（同机低负载），27s模型大首包改善幅度依赖服务端前缀缓存生效程度，建议用户实际使用体感复核；下周期做6.1技能保存（把成功流程写成SKILL.md含触发条件/步骤/坑）
+[2026-10-10 13:52] 周期#23 | 6.1技能保存（成功流程写成SKILL.md含触发条件/步骤/坑）：新增agent/skill_saver.py（SkillSaver确定性渲染标准SKILL.md=frontmatter name/description/category/triggers+固定分区触发条件/步骤/坑/验证与.agents/skills同构；save_flow校验显式拒绝空名/空描述/零触发/零步骤+None条目不str()蒙混成"None"（本轮测试实测暴露的真缺口，已修_as_list）+同名默认不覆盖（exists提示禁静默覆盖既有技能）+overwrite=true revision递增原子替换（tmp+os.replace不留半截文件）；slugify保留CJK；可写库~/.openmate/skill-library单一写入源）+skill_manager saved层（scan_saved_skills复用标准层解析但read_only=False/saved:<slug>/revision透传+60s TTL缓存+list_skills合并=保存即被search_skills命中进注入面；update/delete/record_usage拒绝saved条目=单写入者纪律）+soulmate_agent四点接线（skill_save工具定义+主dispatch+_skill_save_dispatch共用入口lazy-init+code-mode批内+系统提示清单；保存后强刷saved层缓存不被60s TTL藏住） | ✅ | 979a1b1a | 6.1勾选；tests/test_skill_saver.py 22/22（渲染roundtrip/校验7例/去重守卫+revision递增/CJK slug/多行frontmatter/pitfalls可选/saved层检索命中+TTL强刷/单写入者守卫/接线护栏+__new__真实dispatch烟测四态）+回归311全过（skill_standard_layer+skill_saver+gene_extract+plan/steering/token链159 + persistent_memory/experience/code_mode/tool_output/message/subagent/group/fencing链152）+py_compile+SoulMateAgent导入烟测+真实机器烟测（生产SkillManager实例search_skills命中saved条目排std技能之前、read_only=False revision=1，烟测产物已清理）；⚠️诚实边界：保存→检索→注入的大半链路经saved层合并已通，但"按任务自动匹配注入"的真实命中率与6.3技能进化（执行结果反哺修正）待后续周期实测；下周期做6.2技能检索与加载（按任务自动匹配并注入）
