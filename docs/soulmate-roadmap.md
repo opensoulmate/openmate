@@ -537,8 +537,6 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
   _channel_desc 如实标注（soulmate=`channel=soulmate-acp`，CLI 成员=`binary=<自己>`）；
   另修 opencode CLI_ARGS 过时（`-q` 已不是有效 flag 实测打印帮助文本假成功→`run`，经
   run_agent_proxy 真跑回"收到"）
-- [ ] 待用户拍板（不占阶段顺序）：⚡8.6 双链合并取舍、4.1b iLink 接入形态、
-  ASR 语音输入多模态路由
 
 ### 阶段10 · 韧性与真源收口（周期#54 上游降级实证后的下一批）
 - [x] 10.1 LLM 传输韧性治理（周期#54 实证：MiMo token-plan 上游 429/503/
@@ -601,6 +599,22 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
   ACCEPT_PROMPT_TIMEOUT_S=5 人为压短 WS 口径）：WS 5s 超时→服务端回合照跑→
   后到回读 20.0s/5次 恢复，1/1✅ verify_mode=server_side_late，harness ok 与
   服务端真源一致（dev_hello.py 真实落盘含 SOULMATE_DEV_OK 独立复核）
+
+### 阶段11 · 下一批切片（周期#58 规划——阶段1-10切片清零后的续刀，按优先级）
+- [ ] 11.1 全量10类验收对标实测（harness 带 10.4 超时降级适配后重跑；上游降级期
+  口径不再漏记后到完成）：tag 唯一防缓存，结果写进本路线图；失败类别逐根因修复
+  优先于新切片
+- [ ] 11.2 _run_soulmate_turn 挂死可见性（周期#57 诚实边界①销账）：10.3 三件套
+  （进度心跳/执行时长可查询/可显式取消）扩到群组任务的 soulmate ACP 回合通道
+  （此前只覆盖 CLI 通道 run_agent_proxy）；同样不加到点 SIGKILL
+- [ ] 11.3 LLM 故障分类记账补链（周期#55 诚实边界①销账）：utils/llm_transport→
+  dna 调用路径接 record_llm_failure（tool_failures.db 九态分类），使进化引擎的
+  LLM 调用失败也可审计
+- [ ] 11.4 soulmate-daemon 常驻托管覆盖面真实验收（周期#48 遗留）：实证"后建
+  任务/目标也被轮询拾取"（daemon 启动后新建 schedule_task/监控目标在周期内真被
+  执行/检查，而非只有启动时存量在跑）
+- [ ] 待用户拍板（不占阶段顺序）：⚡8.6 双链合并取舍、4.1b iLink 接入形态、
+  ASR 语音输入多模态路由
 
 ## 周期日志
 [2026-10-09 19:00] 周期#0 | 路线图建立+cron流水线上线 | ✅ | (本文档创建) | 首个自动周期15分钟后启动
