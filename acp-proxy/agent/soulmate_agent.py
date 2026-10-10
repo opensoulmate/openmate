@@ -140,6 +140,11 @@ from agent.health_monitor import get_health_monitor as _get_health_monitor  # �
 from agent.wechat_router import get_wechat_router as _get_wechat_router  # 路线图4.1c 会话级路由
 from agent.message_router import get_message_router as _get_message_router  # 路线图4.2 统一消息路由
 from agent.media_channel import from_paths as _media_from_paths  # 路线图4.3 媒体附件
+from agent.subagent_manager import (  # 路线图5.1 子代理并行执行
+    SubagentManager,
+    Subtask,
+    get_subagent_manager as _get_subagent_manager,
+)
 from agent.writer_fence import SessionWriterFence, WriteAction
 from agent.steering import (
     ABORT_MESSAGE,
@@ -1344,6 +1349,9 @@ class SoulMateAgent:
             # 统一消息出站（路线图 4.2）：批内同样可用（出站含传输IO，需await）
             if func_name == "message_send":
                 return await self._message_dispatch(func_name, func_args, session_id)
+            # 子代理并行执行（路线图 5.1）：批内同样可用（worker回合IO，需await）
+            if func_name == "delegate_tasks":
+                return await self._subagent_dispatch(func_args, session_id)
             # kilocode #19 MCP resource三件套：批内同样可用（与主循环同款注入安全层）
             if func_name in MCP_RESOURCE_TOOL_NAMES:
                 return await self._call_mcp_resource_tool(func_name, func_args)
@@ -1717,6 +1725,45 @@ class SoulMateAgent:
         except Exception as e:
             return f"[错误] 消息操作失败: {type(e).__name__}: {e}"
 
+    async def _subagent_dispatch(self, func_args: dict, session_id: str = "") -> str:
+        """delegate_tasks 分发（路线图 5.1：拆分任务给并行 worker，父代理收尾合并）。
+
+        主循环与 code-mode 内层共用此入口。子任务经 SubagentManager 并行执行
+        （每个 worker=隔离工作会话的无客户端SoulMate回合，默认runner复用唤醒
+        回合失败纪律——refusal/LLM级失败/零输出都不假装成功），确定性 merge
+        后回注父代理写收尾结论。与 _message_dispatch 同款 lazy-init（__new__
+        构造实例未过 __init__ 自举）。
+        """
+        mgr = getattr(self, "_subagent_manager", None)
+        if mgr is None:
+            mgr = _get_subagent_manager()
+            self._subagent_manager = mgr
+        try:
+            raw = func_args.get("tasks") or []
+            if not isinstance(raw, (list, tuple)):
+                raise ValueError("tasks 必须是子任务数组")
+            if not all(isinstance(t, dict) for t in raw):
+                raise ValueError("tasks 每项必须是对象（含 goal 字段）")
+            subtasks = [
+                Subtask(
+                    goal=str(t.get("goal", "") or ""),
+                    context=str(t.get("context", "") or ""),
+                    timeout_s=t.get("timeout_s", 120.0),
+                )
+                for t in raw
+            ]
+            results = await mgr.run(
+                subtasks,
+                max_concurrency=func_args.get("max_concurrency"),
+                parent_goal=str(func_args.get("parent_goal", "") or ""),
+                parent_session_id=session_id,
+            )
+            return mgr.merge(results)
+        except ValueError as e:
+            return f"错误: {e}"
+        except Exception as e:
+            return f"[错误] 子代理执行失败: {type(e).__name__}: {e}"
+
     async def _traj_record_round(
         self,
         session_id: str,
@@ -1838,6 +1885,7 @@ ACP代理目录: {cwd}/acp-proxy（后端 Python 代码在此）
 - monitor_add / monitor_list / monitor_check / monitor_remove: 监控告警（对指定服务/网站做周期健康检查：异常告警+恢复通知，目标持久化）。用户要求"监控某网站/服务是否存活、挂了提醒我"→ monitor_add（kind=website/service/port）；查看监控项与最近检查→ monitor_list；立即检查→ monitor_check；停用/删除→ monitor_remove。⚠️ 监控检查只读，不改目标系统
 - wechat_route_list / wechat_route_bind / wechat_route_unbind: 微信会话级路由（peer↔OpenMate会话映射管理，持久化）。查看映射（可按peer/session_id过滤反查）→ wechat_route_list；用户要求"把某微信用户的对话换到某会话/重新绑定/纠正绑错"→ wechat_route_bind；"解绑/断开某微信用户"→ wechat_route_unbind（下次来消息自动新建会话，历史保留）。⚠️ 只改映射，不删消息、不碰消息收发与hermes侧
 - message_send: 统一消息出站（OpenMate/微信同一入口，支持media图片/文件附件收发）。channel='wechat'发给微信peer（拆块+限流），channel='openmate'落库到指定会话（正连前端实时可见）。用户要求"给某微信用户发消息/发文件发图片/通知某会话/主动推送"时使用；对方发来图片/截图时按消息内媒体提示块用vision_analyze/read_image理解（截图理解）
+- delegate_tasks: 子代理并行执行（拆分任务给并行worker，父代理收尾合并）。多个互不依赖的独立子任务（多路调研/多个独立问题/多份互不依赖的检查）→ delegate_tasks 拆给并行子代理并发执行（2-8个），合并结果后由你收尾总结论。⚠️ 有先后依赖的任务不要拆（会并行跑）；每个子任务 goal 必须自包含（子代理看不到当前对话，必要背景写进 goal/context）；失败/超时的子任务会在结果里标注原因，收尾时如实反映不要当成已完成
 
 You can send files to the user natively: to deliver a file, write a brief confirmation message (e.g. "文件已发送，请查收"), then include MEDIA:/absolute/path/to/file on a new line. The gateway extracts the tag, strips it, and sends the file as a download card. Always write some text before the MEDIA: tag — never output a bare MEDIA: tag alone. Use search_files first if you don't know the exact path. Do NOT paste file contents into chat."""
 
@@ -2635,6 +2683,61 @@ You can send files to the user natively: to deliver a file, write a brief confir
             },
         }]
         builtin_tools.extend(message_send_tool)
+
+        # ── 子代理并行执行工具（路线图 5.1）────────────────────
+        # 拆分任务给并行 worker，父代理收尾合并：每个 worker=隔离工作会话的
+        # 独立SoulMate回合，失败/超时随行可见不假装成功。
+        delegate_tasks_tool = [{
+            "type": "function",
+            "function": {
+                "name": "delegate_tasks",
+                "description": (
+                    "子代理并行执行：把可并行的独立子任务拆给多个子代理 worker 并发执行，"
+                    "全部完成后合并结果返回，由你（父代理）收尾写总结论。每个子代理是隔离"
+                    "工作会话的独立SoulMate回合（带工具），看不到你的对话上下文。适用于："
+                    "多路调研/多个互不依赖的问题/多份互不依赖的检查。⚠️ 有先后依赖的子任务"
+                    "不要拆（会并行跑）；每个子任务 goal 必须自包含（把必要背景写进 goal/"
+                    "context）。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "tasks": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "goal": {
+                                        "type": "string",
+                                        "description": "子任务目标（自包含描述，子代理看不到当前对话）",
+                                    },
+                                    "context": {
+                                        "type": "string",
+                                        "description": "补充背景/约束（可选）",
+                                    },
+                                    "timeout_s": {
+                                        "type": "number",
+                                        "description": "该子任务超时秒数（10-600，默认120）",
+                                    },
+                                },
+                                "required": ["goal"],
+                            },
+                            "description": "2-8个可并行的独立子任务",
+                        },
+                        "max_concurrency": {
+                            "type": "integer",
+                            "description": "最大并行worker数（1-4，默认3）",
+                        },
+                        "parent_goal": {
+                            "type": "string",
+                            "description": "父任务总体目标（作为背景注入每个worker，可选）",
+                        },
+                    },
+                    "required": ["tasks"],
+                },
+            },
+        }]
+        builtin_tools.extend(delegate_tasks_tool)
 
         # 添加进化引擎工具（支持直接对象或HTTP API两种模式）
         evolution_tools = []
@@ -3612,6 +3715,14 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             # ── 统一消息出站（路线图 4.2）───────────────────
                             try:
                                 result = await self._message_dispatch(func_name, func_args, session_id)
+                            except Exception as e:
+                                te = self._tool_error_handler.handle_error(
+                                    session_id, func_name, e, func_args)
+                                result = te.to_model_message()
+                        elif func_name == "delegate_tasks":
+                            # ── 子代理并行执行（路线图 5.1）────────────────
+                            try:
+                                result = await self._subagent_dispatch(func_args, session_id)
                             except Exception as e:
                                 te = self._tool_error_handler.handle_error(
                                     session_id, func_name, e, func_args)
