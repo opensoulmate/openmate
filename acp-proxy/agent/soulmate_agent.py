@@ -134,6 +134,7 @@ from agent.permission_gate import PermissionGate
 from agent.permission_provenance import PermissionProvenanceRecorder, build_provenance
 from agent.tool_errors import ToolError, ToolErrorHandler
 from agent.tool_recovery import ToolRecoveryManager, FailureKind, MAX_RECOVERY_ATTEMPTS
+from agent.system_health import SystemHealthChecker
 from agent.writer_fence import SessionWriterFence, WriteAction
 from agent.steering import (
     ABORT_MESSAGE,
@@ -1288,6 +1289,9 @@ class SoulMateAgent:
                     return _cm_msg
                 return self._pref_learner.get_profile_summary(
                     fact_type=func_args.get("fact_type", ""))
+            # 系统状态体检（路线图 2.4）：只读体检，批内同样可用
+            if func_name == "system_checkup":
+                return self._system_health_dispatch(func_args)
             # kilocode #19 MCP resource三件套：批内同样可用（与主循环同款注入安全层）
             if func_name in MCP_RESOURCE_TOOL_NAMES:
                 return await self._call_mcp_resource_tool(func_name, func_args)
@@ -1402,6 +1406,21 @@ class SoulMateAgent:
                      "⚠️ 数据删除需用户明确确认，先用 confirm 缺省做预览。")
         return "\n".join(lines)
 
+    def _system_health_dispatch(self, func_args: dict) -> str:
+        """system_checkup 工具分发（路线图 2.4：服务/端口/磁盘/内存/负载/进程一键体检）。
+
+        主循环与 code-mode 内层共用此入口，行为一致。只读体检，不修改系统。
+        与 _tool_recovery 同款 lazy-init（__new__ 构造实例未过 __init__ 自举）。
+        """
+        checker = getattr(self, "_system_health", None)
+        if checker is None:
+            checker = SystemHealthChecker()
+            self._system_health = checker
+        sections = func_args.get("sections") or None
+        if sections is not None and not isinstance(sections, (list, tuple)):
+            sections = [str(sections)]
+        return checker.execute(sections)
+
     async def _traj_record_round(
         self,
         session_id: str,
@@ -1513,6 +1532,7 @@ ACP代理目录: {cwd}/acp-proxy（后端 Python 代码在此）
 - memory_read / memory_write / memory_append: 持久记忆MEMORY.md（跨会话、人类可读）的读取/整体改写/追加条目。需要跨会话记住的重要事实、用户明确的偏好、经验教训，用 memory_append 记录；查看用 memory_read；整理重写用 memory_write
 - profile_record / profile_read: 用户画像（偏好/环境事实/身份，跨会话自动注入系统提示）。用户告知或纠正偏好、环境事实（操作系统/机器/常用工具/部署位置）、身份（角色/技能水平）→ 立即 profile_record 显式记录（fact_type=preference/environment/identity）；需要了解用户背景时用 profile_read
 - profile_audit: 用户画像审计/清理。action=list 可见复盘全部画像条目（含噪音嫌疑标记）；用户明确要求清理画像时 action=delete（先 confirm 缺省预览，用户确认后 confirm=true 执行）。⚠️ 禁止擅自清库，删除必须用户明确要求
+- system_checkup: 系统状态一键体检（只读，不改系统）。服务运行状态/端口监听/磁盘占用/内存/负载/进程（内存TopN+僵尸）六项一次查全；用户问系统/服务/磁盘/负载现状或需要运维判断时使用。sections 参数可只查部分分区
 
 You can send files to the user natively: to deliver a file, write a brief confirmation message (e.g. "文件已发送，请查收"), then include MEDIA:/absolute/path/to/file on a new line. The gateway extracts the tag, strips it, and sends the file as a download card. Always write some text before the MEDIA: tag — never output a bare MEDIA: tag alone. Use search_files first if you don't know the exact path. Do NOT paste file contents into chat."""
 
@@ -2039,6 +2059,34 @@ You can send files to the user natively: to deliver a file, write a brief confir
             },
         }]
         builtin_tools.extend(profile_tools)
+
+        # ── 系统状态体检工具（路线图 2.4）──────────────────────────
+        # 服务/端口/磁盘/内存/负载/进程 一键体检，全部只读（不kill/不重启/不写盘）。
+        checkup_tool = {
+            "type": "function",
+            "function": {
+                "name": "system_checkup",
+                "description": (
+                    "系统状态一键体检（只读）：服务运行状态（systemd --user）、端口监听、"
+                    "磁盘占用、内存/交换、负载、进程（内存TopN+僵尸进程）。"
+                    "用户问『系统怎么样/服务还活着吗/磁盘满了吗/机器卡不卡』或需要运维"
+                    "现状判断时使用；按分区返回状态(ok/warn/critical)+关键数值。"
+                    "sections 可只查部分分区，缺省全部。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "sections": {
+                            "type": "array",
+                            "items": {"type": "string", "enum": [
+                                "services", "ports", "disk", "memory", "load", "processes"]},
+                            "description": "只查这些分区（缺省全部六项）",
+                        },
+                    },
+                },
+            },
+        }
+        builtin_tools.append(checkup_tool)
 
         # 添加进化引擎工具（支持直接对象或HTTP API两种模式）
         evolution_tools = []
@@ -2976,6 +3024,14 @@ You can send files to the user natively: to deliver a file, write a brief confir
                                 else:
                                     result = self._pref_learner.get_profile_summary(
                                         fact_type=func_args.get("fact_type", ""))
+                            except Exception as e:
+                                te = self._tool_error_handler.handle_error(
+                                    session_id, func_name, e, func_args)
+                                result = te.to_model_message()
+                        elif func_name == "system_checkup":
+                            # ── 系统状态体检（路线图 2.4，只读）──────────
+                            try:
+                                result = self._system_health_dispatch(func_args)
                             except Exception as e:
                                 te = self._tool_error_handler.handle_error(
                                     session_id, func_name, e, func_args)
