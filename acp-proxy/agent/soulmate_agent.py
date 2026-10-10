@@ -70,6 +70,7 @@ from agent import report_evidence  # ⚡8.2 短路合成报告治理（执行证
 from agent import gene_wire
 from agent import session_recall
 from agent import turn_lifecycle
+from agent.turn_watchdog import TurnWatchdog  # 8.3 回合级进度/超时可见（禁静默）
 from utils import network_state  # turn级park合并：turn.open/close驱动park预算
 from agent.dynamic_prompt import DynamicPromptBuilder
 from agent.memory_retrieval import MemoryRetrievalEngine
@@ -357,6 +358,12 @@ class SoulMateAgent:
         self._turn_lifecycle.subscribe(
             turn_lifecycle.EVENT_TURN_CLOSE,
             lambda record: network_state.end_turn(),
+        )
+        # ── 8.3 回合级进度/超时可见（禁静默）：turn.close 订阅收口看门狗——
+        # 所有 close 路径必发事件（正常/错误/缓存/superseded 全兜），孤儿心跳不残留 ──
+        self._turn_lifecycle.subscribe(
+            turn_lifecycle.EVENT_TURN_CLOSE,
+            lambda record: self._stop_turn_watchdog(record.session_id),
         )
         self._turn_close_reason: dict[str, str] = {}  # session_id -> 非正常收尾原因
         # ── gene技能消费回执归因清单：session_id -> 本回合注入过的技能id
@@ -787,6 +794,33 @@ class SoulMateAgent:
     async def _steer_notify(self, session_id: str, text: str):
         """插话相关通知推送给前端（委托_notify_client，best-effort）"""
         await self._notify_client(session_id, text)
+
+    # ── 8.3 长回合治理：回合级进度/超时可见（禁静默）────────────────
+    def _watchdog_for(self, session_id: str) -> TurnWatchdog:
+        """取/建本回合看门狗。一个会话同时最多一个（任务管线多步共享同一回合时钟），
+        lazy 初始化兼容 __new__ 搭建的测试 agent。"""
+        store = getattr(self, "_turn_watchdogs", None)
+        if store is None:
+            store = {}
+            self._turn_watchdogs = store
+        wd = store.get(session_id)
+        if wd is None or not wd.running:
+            if wd is not None:
+                wd.stop()
+            wd = TurnWatchdog(
+                session_id,
+                notify=lambda text: self._notify_client(session_id, text),
+            )
+            store[session_id] = wd
+            wd.start()
+        return wd
+
+    def _stop_turn_watchdog(self, session_id: str) -> None:
+        """收口看门狗（turn.close 订阅器调用；幂等）"""
+        store = getattr(self, "_turn_watchdogs", None)
+        wd = store.pop(session_id, None) if store else None
+        if wd is not None:
+            wd.stop()
 
     def peek_sessions(self) -> dict:
         """goose peek三指标（agent侧聚合；HTTP端点直接读ActivityStore）"""
@@ -3185,12 +3219,17 @@ You can send files to the user natively: to deliver a file, write a brief confir
         # ── P0 cortex: 循环/重复检测guard接入真实工具循环（opensoul侧模块此前无真实工具路径消费方）──
         guard = self._loop_guard_for(session_id)
         loop_intervene_count = 0
+        # ── 8.3 长回合治理：回合级进度/超时可见（禁静默）——后台心跳推进度
+        # （LLM 单轮慢也照发），软预算超限只提醒绝不硬杀（用户铁律：任务禁硬超时杀）──
+        watchdog = self._watchdog_for(session_id)
+        watchdog.beat(max_rounds=MAX_ROUNDS, tools_executed=len(all_tool_calls))
         for _round in range(MAX_ROUNDS):
             # ── P1 span粒度round级：本轮边界标记（LLM文本切片+工具账本切片+耗时，
             # round子span在循环尾/早返点收口）──
             _round_start = len(all_tool_calls)
             _round_t0 = time.time()
             _round_resp_mark = len(full_response)
+            watchdog.beat(round_index=_round + 1, tools_executed=len(all_tool_calls))
             # ── P1: turn间隙批量注入插话 ──
             # goose Steer: between-turns drain（上一角色=Tool或回合刚结束）+ with_steer标记；
             # Khoj interrupt_queue: 拼进当前任务历史、保留已完成迭代继续跑；
@@ -3465,6 +3504,8 @@ You can send files to the user natively: to deliver a file, write a brief confir
                     tool_results = []
                     for tc in tool_calls:
                         func_name = tc["function"]["name"]
+                        watchdog.beat(
+                            tools_executed=len(all_tool_calls), last_tool=func_name)
                         try:
                             func_args = json.loads(tc["function"]["arguments"]) if tc["function"]["arguments"] else {}
                         except json.JSONDecodeError:
