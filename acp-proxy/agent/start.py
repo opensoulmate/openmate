@@ -88,6 +88,18 @@ async def _run_stdio(llm_engine: LLMEngine):
 
     logger.info("Starting SoulMate Agent in stdio mode (ACP v1.0)")
 
+    # 路线图3.1 cron引擎：本进程有存活的任务就拉起调度循环（幂等；多进程/
+    # 双实例共存由SQLite CAS领取保证不双跑）。没有任何任务时不拉起零开销。
+    try:
+        from agent.soulmate_scheduler import get_scheduler as _get_cron_scheduler
+
+        _cron = _get_cron_scheduler()
+        if _cron.has_enabled_tasks():
+            _cron.ensure_started()
+            logger.info("[stdio] cron调度循环已启动（存在未完成定时任务）")
+    except Exception as e:
+        logger.warning("[stdio] cron调度循环启动失败（不阻塞agent）: %s", e)
+
     # acp.run_agent 默认使用 sys.stdin/sys.stdout
     await acp.run_agent(agent=agent)
 

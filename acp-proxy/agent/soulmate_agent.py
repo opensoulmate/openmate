@@ -135,6 +135,7 @@ from agent.permission_provenance import PermissionProvenanceRecorder, build_prov
 from agent.tool_errors import ToolError, ToolErrorHandler
 from agent.tool_recovery import ToolRecoveryManager, FailureKind, MAX_RECOVERY_ATTEMPTS
 from agent.system_health import SystemHealthChecker
+from agent.soulmate_scheduler import get_scheduler as _get_cron_scheduler  # 路线图3.1 cron引擎
 from agent.writer_fence import SessionWriterFence, WriteAction
 from agent.steering import (
     ABORT_MESSAGE,
@@ -1292,6 +1293,9 @@ class SoulMateAgent:
             # 系统状态体检（路线图 2.4）：只读体检，批内同样可用
             if func_name == "system_checkup":
                 return self._system_health_dispatch(func_args)
+            # 定时任务调度（路线图 3.1 cron引擎）：批内同样可用
+            if func_name in ("schedule_task", "schedule_list", "schedule_cancel"):
+                return self._cron_dispatch(func_name, func_args, session_id)
             # kilocode #19 MCP resource三件套：批内同样可用（与主循环同款注入安全层）
             if func_name in MCP_RESOURCE_TOOL_NAMES:
                 return await self._call_mcp_resource_tool(func_name, func_args)
@@ -1421,6 +1425,68 @@ class SoulMateAgent:
             sections = [str(sections)]
         return checker.execute(sections)
 
+    def _cron_dispatch(self, func_name: str, func_args: dict, session_id: str = "") -> str:
+        """schedule_task/schedule_list/schedule_cancel 分发（路线图 3.1 cron引擎）。
+
+        主循环与 code-mode 内层共用此入口。本方法只做登记/查询/停删（写SQLite
+        持久化，重启不丢）；到点执行由后台调度循环 CAS 领取，不在工具调用里阻塞。
+        与 _tool_recovery 同款 lazy-init（__new__ 构造实例未过 __init__ 自举）。
+        """
+        scheduler = getattr(self, "_cron_scheduler", None)
+        if scheduler is None:
+            scheduler = _get_cron_scheduler()
+            self._cron_scheduler = scheduler
+
+        def _fmt(ms) -> str:
+            try:
+                return time.strftime("%Y-%m-%d %H:%M", time.localtime(int(ms) / 1000))
+            except Exception:
+                return str(ms)
+
+        try:
+            if func_name == "schedule_task":
+                r = scheduler.add_task(
+                    name=str(func_args.get("name", "")),
+                    schedule=str(func_args.get("schedule", "")),
+                    payload=str(func_args.get("payload", "")),
+                    session_id=str(func_args.get("session_id") or session_id or ""),
+                )
+                scheduler.ensure_started()
+                return (
+                    f"✅ 定时任务已创建 #{r['task_id']}「{r['name']}」\n"
+                    f"周期: {r['schedule']}\n"
+                    f"下次执行: {_fmt(r['next_run_at_ms'])}\n"
+                    f"执行内容: {str(func_args.get('payload', ''))[:200]}\n"
+                    "任务已持久化（跨会话有效）；查看/取消用 schedule_list / schedule_cancel"
+                )
+            if func_name == "schedule_list":
+                tasks = scheduler.list_tasks()
+                if not tasks:
+                    return "（当前没有定时任务）"
+                lines = [f"📋 定时任务共{len(tasks)}个："]
+                for t in tasks:
+                    state = "运行中" if t.get("enabled") else "已停用"
+                    lines.append(
+                        f"#{t['id']}「{t['name']}」[{state}] 周期:{t['schedule_expr']}"
+                        f"｜已执行{t['run_count']}次｜下次:{_fmt(t['next_run_at_ms'])}"
+                        f"｜连续失败{t.get('fail_streak', 0)}次")
+                    for r in (t.get("recent_runs") or [])[:3]:
+                        mark = "✅" if r["status"] == "ok" else "❌"
+                        lines.append(
+                            f"    {mark} {_fmt(r['started_at_ms'])} → {str(r['detail'])[:120]}")
+                return "\n".join(lines)
+            # schedule_cancel
+            try:
+                task_id = int(func_args.get("task_id", 0))
+            except (TypeError, ValueError):
+                return "错误: task_id 必须是整数"
+            if task_id <= 0:
+                return "错误: task_id 必填（schedule_list 可见）"
+            ok, msg = scheduler.cancel_task(task_id, delete=bool(func_args.get("delete")))
+            return ("✅ " if ok else "❌ ") + msg
+        except Exception as e:
+            return f"[错误] 定时任务操作失败: {type(e).__name__}: {e}"
+
     async def _traj_record_round(
         self,
         session_id: str,
@@ -1533,6 +1599,7 @@ ACP代理目录: {cwd}/acp-proxy（后端 Python 代码在此）
 - profile_record / profile_read: 用户画像（偏好/环境事实/身份，跨会话自动注入系统提示）。用户告知或纠正偏好、环境事实（操作系统/机器/常用工具/部署位置）、身份（角色/技能水平）→ 立即 profile_record 显式记录（fact_type=preference/environment/identity）；需要了解用户背景时用 profile_read
 - profile_audit: 用户画像审计/清理。action=list 可见复盘全部画像条目（含噪音嫌疑标记）；用户明确要求清理画像时 action=delete（先 confirm 缺省预览，用户确认后 confirm=true 执行）。⚠️ 禁止擅自清库，删除必须用户明确要求
 - system_checkup: 系统状态一键体检（只读，不改系统）。服务运行状态/端口监听/磁盘占用/内存/负载/进程（内存TopN+僵尸）六项一次查全；用户问系统/服务/磁盘/负载现状或需要运维判断时使用。sections 参数可只查部分分区
+- schedule_task / schedule_list / schedule_cancel: 定时任务调度（SoulMate自己的cron：到点自动执行+执行日志+自动排下一次，区别于一次性唤醒）。用户要求"定时/每天/每小时/每周做某事"→ schedule_task（schedule=interval:5m 或 cron:0 9 * * *）；查看任务与执行日志→ schedule_list；停用/删除→ schedule_cancel
 
 You can send files to the user natively: to deliver a file, write a brief confirmation message (e.g. "文件已发送，请查收"), then include MEDIA:/absolute/path/to/file on a new line. The gateway extracts the tag, strips it, and sends the file as a download card. Always write some text before the MEDIA: tag — never output a bare MEDIA: tag alone. Use search_files first if you don't know the exact path. Do NOT paste file contents into chat."""
 
@@ -2087,6 +2154,68 @@ You can send files to the user natively: to deliver a file, write a brief confir
             },
         }
         builtin_tools.append(checkup_tool)
+
+        # ── 定时任务调度工具（路线图 3.1 cron引擎）──────────────────
+        # SoulMate 自己的周期调度：schedule+执行+日志（区别于 schedule_wakeup
+        # 的一次性延迟唤醒）。任务SQLite持久化，到点自动执行并记执行日志。
+        cron_tools = [{
+            "type": "function",
+            "function": {
+                "name": "schedule_task",
+                "description": (
+                    "创建周期定时任务（SoulMate自己的cron调度：到点自动执行+执行日志"
+                    "+自动排下一次，任务持久化跨会话有效）。schedule 两种形态："
+                    "interval:<秒|5m|1h>（每隔N时间执行一次）或 cron:<5字段表达式>"
+                    "（分 时 日 月 周，如 0 9 * * * = 每天9点）。payload=到点执行的任务内容。"
+                    "用户要求『定时/每天/每小时/每周做某事』时使用。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "description": "任务名（如『每日日报』）"},
+                        "schedule": {"type": "string",
+                                     "description": "调度串：interval:300 / interval:5m / cron:0 9 * * *"},
+                        "payload": {"type": "string",
+                                    "description": "到点执行的任务内容（作为自动回合的执行指令）"},
+                        "session_id": {"type": "string",
+                                       "description": "任务绑定的会话id（缺省当前会话）"},
+                    },
+                    "required": ["name", "schedule", "payload"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "schedule_list",
+                "description": (
+                    "列出全部定时任务及最近执行日志（下次执行时间/已执行次数/连续失败数）。"
+                    "用户问『我有哪些定时任务/定时任务跑得怎么样/上次执行结果』时使用。"
+                ),
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "schedule_cancel",
+                "description": (
+                    "停用或删除定时任务。缺省=停用（不再执行，可再启用）；"
+                    "delete=true=删除任务（执行日志保留可审计）。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "task_id": {"type": "integer",
+                                    "description": "任务id（schedule_list 可见）"},
+                        "delete": {"type": "boolean",
+                                   "description": "true=删除任务；false/缺省=仅停用"},
+                    },
+                    "required": ["task_id"],
+                },
+            },
+        }]
+        builtin_tools.extend(cron_tools)
 
         # 添加进化引擎工具（支持直接对象或HTTP API两种模式）
         evolution_tools = []
@@ -3032,6 +3161,14 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             # ── 系统状态体检（路线图 2.4，只读）──────────
                             try:
                                 result = self._system_health_dispatch(func_args)
+                            except Exception as e:
+                                te = self._tool_error_handler.handle_error(
+                                    session_id, func_name, e, func_args)
+                                result = te.to_model_message()
+                        elif func_name in ("schedule_task", "schedule_list", "schedule_cancel"):
+                            # ── 定时任务调度（路线图 3.1 cron引擎）────────
+                            try:
+                                result = self._cron_dispatch(func_name, func_args, session_id)
                             except Exception as e:
                                 te = self._tool_error_handler.handle_error(
                                     session_id, func_name, e, func_args)
