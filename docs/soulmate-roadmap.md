@@ -47,7 +47,7 @@
 - **4.x 半缺**：~~微信桥全缺~~ **4.1a 已补（周期#15）**：微信桥核心（agent/wechat_bridge.py，收发回路+去重+会话映射+失败纪律，loopback传输实证；iLink真实传输=4.1b待做）；**4.2 已补（周期#17）**：统一消息路由（agent/message_router.py，OpenMate/微信统一收发出入口+message_send工具）；**4.3 已补（周期#18）**：媒体收发（agent/media_channel.py，图片/文件收发+截图理解提示块，sense_*感知之外补齐收发形态）
 - **5.x 已补全**：~~子代理并行、群组任务编排全缺~~ **5.1 已补（周期#19）**子代理并行、**5.2 已补（周期#20）**工具执行层并发隔离、**5.3 已补（周期#21）**群组任务编排（接ai_groups）
 - **6.x 半缺**：6.1/6.2/6.3 已补（技能保存+检索加载注入+执行结果反哺坑沉淀，周期#35）
-- **7.x 半缺**：~~浏览器自动化/docx/pdf/xlsx生成/TTS~~ **7.1 已补（周期#36）**：browser 工具面（Playwright/CDP）；**7.2 已补（周期#37）**：document 文档生成（docx/pdf/xlsx）；**7.3 已补（周期#38）**：text_to_speech 语音合成（edge-tts+espeak-ng双后端）；仍缺图像生成；另有 send_file/进程管理(text_to_speech等Hermes工具)缺口中 text_to_speech 已销账
+- **7.x 半缺**：~~浏览器自动化/docx/pdf/xlsx生成/TTS~~ **7.1 已补（周期#36）**：browser 工具面（Playwright/CDP）；**7.2 已补（周期#37）**：document 文档生成（docx/pdf/xlsx）；**7.3 已补（周期#38）**：text_to_speech 语音合成（edge-tts+espeak-ng双后端）；**7.4 已补（周期#39）**：image 图像生成/编辑（Pillow编辑八动作+SOULMATE_IMAGEGEN_API_URL→OpenAI兼容images API真实生成/未配置PIL程序化兜底显式标注）；剩余 Hermes 对标工具缺口=send_file+process 进程管理（已排阶段9切片9.1/9.2）
 
 ## 阶段规划（每阶段内拆成 15 分钟可完成的切片）
 
@@ -479,6 +479,24 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
   （原"调度/监控常驻托管（3.1 遗留）"已 ✅ 周期#48 销账：systemd --user
   soulmate-daemon.service 常驻宿主，无 agent 进程也到点执行）
 
+### 阶段9 · Hermes 对标工具面补齐（周期#48 规划；⚡8.6/4.1b/后续均待用户拍板，**流水线下一刀=9.1**）
+> 现状盘点（周期#48 工具面 grep 实证）：对标 Hermes 核心工具清单（read_file/write_file/
+> patch/search_files/send_file、terminal/execute_code、web_search/web_extract、
+> vision_analyze/read_image、todo/memory/process/text_to_speech），SoulMate 缺口仅剩
+> send_file 与 process 进程管理两项（sense_transcribe_audio 已覆盖 ASR、text_to_speech 已销账）。
+- [ ] 9.1 send_file 文件下发工具：对标 Hermes send_file 语义（path+message→📎文件卡片），
+  与 MEDIA 标签下发通道（fileviewer-media-tag-pattern）对齐不双轨；文件不存在/空 path/
+  越界显式报因；产物经既有 MEDIA: 渲染面到前端（预览/下载/复制三键卡片）
+- [ ] 9.2 process 后台进程管理工具：对标 Hermes process 语义（list/poll/log/kill/write/
+  submit 有界子集），后台任务可见可管（用户极度重视可观测性）；禁硬杀长任务（到点只报
+  状态不 SIGKILL 既有铁律对齐）；子进程生命周期归系统（观察窗哲学）
+- [ ] 9.3 文生图真实后端 e2e：SOULMATE_IMAGEGEN_API_URL 配置文档化+真实 images API 端到端
+  实证（周期#39 只实证了 PIL 兜底与失败态；真实 AI 生成待可测配置），诚实多态保持
+- [ ] 9.4 AI 群组真实成员端到端（后续区提级）：群组任务链路已通（周期#21/ai-groups-e2e），
+  补真实多 agent 成员参与的端到端验收
+- [ ] 待用户拍板（不占阶段顺序）：⚡8.6 双链合并取舍、4.1b iLink 接入形态、
+  ASR 语音输入多模态路由
+
 ## 周期日志
 [2026-10-09 19:00] 周期#0 | 路线图建立+cron流水线上线 | ✅ | (本文档创建) | 首个自动周期15分钟后启动
 [2026-10-10 01:20] 周期#1 | 阶段0盘点：核实21工具/3记忆引擎/三层技能机制+缺口图；清理soulmate_agent.py损坏WIP（截断import`AgentCheckpointMan`+`return clsager`致ImportError，且属用户已否决的防双开守卫类，diff留证docs/devlog/2026-10-10-broken-idempotent-guard-wip.patch后还原HEAD，import实测恢复） | ⚠️ | 1ea328ce | 附带实测tests/test_skill_standard_layer.py 34 passed；下周期做1.1 MEMORY.md型持久记忆
@@ -527,3 +545,4 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 [2026-10-11 01:20] 周期#46 | 8.5c-③ InfectionGate 自愈类低危命令豁免语义（FULL10 调研类失败链遗留③：模型自启 SearXNG 自愈被 clarify 打断）：实装 agent/infection_guard.classify_self_heal 确定性分类（纯自愈批次=全部 terminal 单一命令匹配三类窄签名：systemctl --user 生命周期/journalctl 只读/start.sh 启动脚本（含周期#41 事故命令原文 bash ~/searxng-data/start.sh），拒 shell 元字符链式、拒混入非自愈命令、只认 command/cmd 键与权限引擎 _shell_command_of 同语义）+check() 豁免语义=LLM 审计 clarify 一级降级放行+留痕（source=self_heal_pass_with_trace，原疑问留痕可审计、不消耗 clarify 预算不再升级 terminate 杀整轮），terminate 照常终止、启发式劫持签名在前不受豁免影响、工具仍过 permission_gate/sandbox 不绕权限+JUDGE_PROMPT 补自愈指导语双保险+soulmate_agent 轨迹账本留痕分支扩 source（permission=infection:pass_with_trace 与 report_evidence 执行证据口径一致） | ✅ | 3006bee4 | 8.5c-③勾选（8.5c ①②③④⑤全完）；Gate1 git diff 256行真实落盘（3文件）；Gate2 grep 接线点（check() classify_self_heal 调用+降级返回+留痕分支+self_heal_note 日志）+真机分类实证（事故命令/systemctl --user start→True，sudo/链式rm→False，SoulMateAgent 导入 OK）；Gate3 tests/test_infection_self_heal.py 20/20（分类正负11例含事故命令原文/豁免语义8例含有人值守反复 clarify 不再 terminate 回归+terminate 保留+启发式不受豁免+非自愈行为不变/指导语/接线护栏）+同域回归87全过（report_evidence/self_verify/tool_availability/remediation_style/frame_origin/turn_watchdog）+既有 infection_guard 47/47 零回归+双实例重启 health OK（8092/8095）；⚠️诚实边界：豁免按命令形态分类非意图理解（新形态自愈命令如 pip install 补依赖未纳入窄签名，漏网时回到正常审计不误放）；LLM 审计误判的真机复现未跑真 LLM 回合（判词层用注入 fake 判词实证降级路径，指导语对真判词的降噪效果待用户实际使用观察）；下周期规划下一批切片（候选：轨迹采集同源过滤/调度监控常驻托管 3.1 遗留/新一批能力切片；⚡8.6 待用户拍板）
 [2026-10-11 01:50] 周期#47 | 轨迹采集同源过滤（周期#45遗留"relay_trajectory 轨迹采集同源粘连"销账）：真实库实证=hermes acp 启动横幅"╭─── Hermes Agent v0.15.2 … Available Tools …"与回答同走 agent_message_chunk 通道，relay_trajectory 把横幅并进 llm_call content（真实行 content[:500] 全被框线占满、真实回答被完全遮蔽）——8.5c-⑤ 同源粘连在轨迹采集侧的孪生缺陷；实装 frame_origin.strip_engine_chrome（合并文本开头剥引擎chrome框线块 ╭顶边→╰底边，窄签名=块内命中 Available Tools/Agent v/upstream 防误杀含框线正文/ASCII图，只剥开头正文中间框线不动，底边行粘连回答"╰───╯回答…"按边框后尾巴归回答不吞——chunk流无分隔符拼接实证形态）+relay_trajectory.filtered_text（帧级 split_frames 三类系统帧+合并级 strip_engine_chrome，_finalize 与 observe_cli_turn 双路径收口，过滤计数进日志可观测） | ✅ | 7615c61b | Gate1 git diff 305行真实落盘（3文件）；Gate2 grep filtered_text/strip_engine_chrome 在 _finalize(299)/CLI路径(265) 真实记账路径；Gate3 tests/test_relay_chrome_filter.py 12/12（真实库横幅形状剥除/截断横幅/窄签名不误伤框线图/中间横幅不动/系统帧过滤/full_text回退/CLI兜底/纯回答零变化/计数可观测）+同域回归45全过（test_frame_origin 12+test_relay_trajectory 17+test_proxy_relay_traj 16）+py_compile+真实库横幅行回放实证（n=1 剥除命中生产数据签名）+双实例重启 health OK（8092/8095）；⚠️诚实边界：引擎chrome窄签名按已知标记判别（其他 CLI 引擎自造横幅若无这三标记不剥，漏网时回到原样不误删）；粘连只处理底边行形态（侧边行粘回答不切，防把边框内合法内容误剪）；本切片未跑真 hermes 回合落库复测（真实库旧行即实证样本+集成测试覆盖记账路径），建议下次 hermes 会话后抽查 trajectory content；下周期：调度监控常驻托管（3.1/3.3遗留：调度/监控循环宿主存活agent进程，无进程时不执行错过不补跑）或新一批能力切片；⚡8.6 待用户拍板
 [2026-10-11 01:58] 周期#48 | 调度/监控常驻托管（3.1/3.3遗留销账）：新增agent/soulmate_daemon.py（独立常驻宿主：无条件托管soulmate_scheduler+health_monitor两条后台循环——与start.py嵌入式"有任务才启动"不同，常驻宿主的意义是后建任务/目标也被轮询拾取；SIGTERM/SIGINT优雅退出双stop()收尾；多宿主共存安全=SQLite CAS到点领取不双跑）+systemd --user soulmate-daemon.service（Restart=always+enabled开机自启，journal常驻日志） | ✅ | (本次提交) | 3.1/3.3遗留销账（"无进程时不执行"闭环）；Gate1 git diff三文件真实落盘；Gate2 grep run_daemon→run_forever双循环托管+systemd ExecStart真实拉起journal"[daemon] 常驻托管已启动：cron调度+健康监控（db=真实双库）"；Gate3 tests/test_soulmate_daemon.py 6/6（无条件托管has_enabled=False也托管/优雅退出双stop/stop_event注入/真实调度器守护宿主内claim→fire→runs行ok/真实监控器落state行/接线护栏）+同域回归72全过（soulmate_scheduler/health_monitor/cron_reporter）；真机e2e探针（pgrep实证零agent.start进程=遗留前提成立）：探针任务#7到点9s内被守护进程claim+fire，run#1诚实failed（全新会话DB零行拒绝造回合=拒绝纪律正确行为，首条📊汇报落库即建DB行）→run#2 ✅ ok end_turn（真实LLM回合"守护探针"落agent_messages+📊定时汇报3.2链同走）——无agent进程也到点执行实证；探针任务已删（runs留审计3行）；⚠️诚实边界：全新创建未落库会话被首fire拒一次是拒绝纪律设计行为（防给消失会话造回合），首行落库后自愈（_reload_session_from_db）；systemd开机自启以enabled+Linger静态配置为证（禁reboot未实测）；下周期规划下一批切片（候选：8.6待用户拍板后的双链合并/新能力切片）
+[2026-10-11 02:15] 周期#49 | 验收对标实测（⚡区仅剩8.6待拍板、4.1b/后续待拍板→按流水线预案跑验收+规划下一批切片）：真实WS用户路径4类抽测 tag=ACCEPT48_1791655467 **4/4✅**（开发110.22s dev_hello.py真实落盘+marker命中/调研47.72s web_search真实执行答案Python 3.13发布日2024-10-07正确+主答区零自报不可用/记忆78.45s MEMORY.md探针标记真实写入/协作30.79s subagent_runs双worker产出+近8行=8），采集侧系统帧过滤实证生效（heartbeat×1+self_check×2被过滤）；规划阶段9（Hermes对标工具面补齐）：工具面grep实证对标Hermes核心清单缺口仅剩send_file+process进程管理（sense_transcribe_audio已覆盖ASR），排9.1 send_file/9.2 process/9.3文生图真实后端e2e/9.4 AI群组真实成员端到端四切片+拍板项集中列表；缺口区同步修正7.4已完成的陈旧"仍缺图像生成"表述 | ✅ | (本次提交) | 本周期为验收/规划周期（无代码改动）；Gate1=git diff路线图三处改动真实落盘；Gate2=N/A（纯文档+验收，无新代码符号）；Gate3=acceptance_benchmark真实运行4/4通过（server_side判定+MEMORY.md/文件/subagent_runs数据工件回读）；⚠️诚实边界：4类抽测非全量10类（全量约25分钟防与下周期撞车，10类全量证据在周期#41 FULL10链）；下周期做9.1 send_file文件下发工具
