@@ -111,6 +111,19 @@ async def _run_stdio(llm_engine: LLMEngine):
     except Exception as e:
         logger.warning("[stdio] 监控循环启动失败（不阻塞agent）: %s", e)
 
+    # 路线图4.1 微信桥：显式启用才拉起（默认关闭零开销；4.1b iLink传输接入前
+    # 只有loopback传输，启用即自证回路，不影响hermes侧微信网关）
+    if os.environ.get("SOULMATE_WECHAT_ENABLED", "0").strip().lower() in ("1", "true", "yes"):
+        try:
+            from agent.wechat_bridge import get_wechat_bridge as _get_wechat_bridge
+
+            _wechat = _get_wechat_bridge()
+            _wechat.ensure_started()
+            logger.info("[stdio] 微信桥回路已启动（transport=%s）",
+                        type(_wechat._transport).__name__)
+        except Exception as e:
+            logger.warning("[stdio] 微信桥启动失败（不阻塞agent）: %s", e)
+
     # acp.run_agent 默认使用 sys.stdin/sys.stdout
     await acp.run_agent(agent=agent)
 
