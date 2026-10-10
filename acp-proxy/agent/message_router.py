@@ -31,7 +31,12 @@ import os
 import sqlite3
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Coroutine
+from typing import Any, Callable, Coroutine, Sequence
+
+from agent.media_channel import (
+    MediaAttachment,
+    media_prompt_block as _media_prompt_block,
+)
 
 logger = logging.getLogger("acp-proxy.message_router")
 
@@ -61,6 +66,7 @@ class ChannelMessage:
     session_id: str = ""       # openmate 通道必填（路由到哪个会话）
     context_token: str = ""    # 微信传输自用（iLink 回显），协议知识不下沉
     received_at_ms: int = 0
+    media: list = field(default_factory=list)  # 媒体附件（MediaAttachment，路线图4.3）
 
     def __post_init__(self) -> None:
         if not self.received_at_ms:
@@ -224,7 +230,7 @@ class UnifiedMessageRouter:
         *,
         get_wechat_bridge: Callable[[], Any] | None = None,
         turn_fn: Callable[[str, str], Coroutine[Any, Any, str]] | None = None,
-        openmate_send: Callable[[str, str], int] | None = None,
+        openmate_send: Callable[..., int] | None = None,
         store: RouterStore | None = None,
         openmate_db_path: str | None = None,
         now_fn: Callable[[], float] | None = None,
@@ -266,9 +272,9 @@ class UnifiedMessageRouter:
         if not str(msg.msg_id or "").strip():
             self.stats.inbound_failed += 1
             return RouteResult("error", channel, detail="msg_id 不能为空")
-        if not str(msg.text or "").strip():
+        if not str(msg.text or "").strip() and not msg.media:
             self.stats.inbound_failed += 1
-            return RouteResult("error", channel, detail="text 不能为空")
+            return RouteResult("error", channel, detail="text 不能为空（text 与 media 至少给一个）")
 
         if channel == CHANNEL_WECHAT:
             return await self._route_wechat(msg)
@@ -286,7 +292,12 @@ class UnifiedMessageRouter:
                 "duplicate", channel, target=str(msg.sender or ""), session_id=sid,
                 detail="重复投递/重启重放，回合不双跑")
         try:
-            reply = await self._turn_fn(sid, msg.text)
+            # 媒体附件：提示块拼进回合文本（本地路径+读取方式，截图理解走vision工具）
+            turn_text = str(msg.text)
+            if msg.media:
+                block = _media_prompt_block(msg.media)
+                turn_text = f"{turn_text}\n\n{block}" if turn_text.strip() else block
+            reply = await self._turn_fn(sid, turn_text)
         except Exception as e:
             self.stats.inbound_failed += 1
             self._note_error(f"openmate回合失败({msg.msg_id}): {e}")
@@ -308,6 +319,7 @@ class UnifiedMessageRouter:
             content=str(msg.text),
             context_token=str(msg.context_token or ""),
             received_at_ms=int(msg.received_at_ms),
+            media=list(msg.media or []),
         )
         try:
             status = await self._bridge().deliver(wmsg)
@@ -339,32 +351,69 @@ class UnifiedMessageRouter:
 
     # ── 出站 ───────────────────────────────────────────────────
 
-    def _default_openmate_send(self, session_id: str, text: str) -> int:
+    def _default_openmate_send(self, session_id: str, text: str,
+                               media: Sequence[MediaAttachment] = ()) -> int:
         """openmate 出站默认落库：assistant 行 + turn_origin=msg（relay 补推消费）。
 
+        媒体附件（路线图4.3）：内容追加 MEDIA:<path> 标签行（前端渲染下载卡片）
+        + attachments 列持久化 to_meta() JSON（历史加载可恢复附件）；表无该列时
+        ALTER 兜底（对齐 soulmate_agent 附件迁移惯例）。
         timestamp=time.time()（agent_messages 现行约定：秒；与 soulmate_agent
         _save_message 同款）。返回新行 id。
         """
         meta = {"turn_origin": MSG_TURN_ORIGIN, "channel": CHANNEL_OPENMATE}
+        atts = list(media or [])
+        content = str(text)
+        if atts:
+            tags = "\n".join(f"MEDIA:{a.path}" for a in atts)
+            content = f"{content}\n\n{tags}" if content.strip() else tags
         db = sqlite3.connect(self._openmate_db_path, timeout=_DB_TIMEOUT_S)
         try:
-            cur = db.execute(
-                "INSERT INTO agent_messages (session_id, role, content, timestamp,"
-                " metadata) VALUES (?,?,?,?,?)",
-                (str(session_id), "assistant", str(text),
-                 self._now_fn(), json.dumps(meta, ensure_ascii=False)),
-            )
+            if atts:
+                attachments_json = json.dumps(
+                    [a.to_meta() for a in atts], ensure_ascii=False)
+                try:
+                    cur = db.execute(
+                        "INSERT INTO agent_messages (session_id, role, content,"
+                        " timestamp, metadata, attachments) VALUES (?,?,?,?,?,?)",
+                        (str(session_id), "assistant", content,
+                         self._now_fn(), json.dumps(meta, ensure_ascii=False),
+                         attachments_json),
+                    )
+                except sqlite3.OperationalError:
+                    db.execute(
+                        "ALTER TABLE agent_messages ADD COLUMN attachments TEXT")
+                    cur = db.execute(
+                        "INSERT INTO agent_messages (session_id, role, content,"
+                        " timestamp, metadata, attachments) VALUES (?,?,?,?,?,?)",
+                        (str(session_id), "assistant", content,
+                         self._now_fn(), json.dumps(meta, ensure_ascii=False),
+                         attachments_json),
+                    )
+            else:
+                cur = db.execute(
+                    "INSERT INTO agent_messages (session_id, role, content, timestamp, metadata)"
+                    " VALUES (?,?,?,?,?)",
+                    (str(session_id), "assistant", content,
+                     self._now_fn(), json.dumps(meta, ensure_ascii=False)),
+                )
             db.commit()
             return int(cur.lastrowid or 0)
         finally:
             db.close()
 
     async def send_outbound(
-        self, channel: str, target: str, text: str) -> RouteResult:
-        """统一出站入口：发消息到任意通道目标（wechat=peer / openmate=session_id）。"""
+        self, channel: str, target: str, text: str,
+        media: Sequence[MediaAttachment] | None = None) -> RouteResult:
+        """统一出站入口：发消息（可带媒体附件）到任意通道目标。
+
+        media：MediaAttachment 序列（路线图4.3 图片/文件收发）；text 与 media
+        至少给一个（纯文件/图片消息合法）。
+        """
         ch = str(channel or "").strip().lower()
         tgt = str(target or "").strip()
         body = str(text or "")
+        atts = list(media or [])
         if ch not in CHANNELS:
             self.stats.outbound_failed += 1
             return RouteResult(
@@ -373,31 +422,52 @@ class UnifiedMessageRouter:
         if not tgt:
             self.stats.outbound_failed += 1
             return RouteResult("error", ch, detail="target 不能为空（微信peer或会话session_id）")
-        if not body.strip():
+        if not body.strip() and not atts:
             self.stats.outbound_failed += 1
-            return RouteResult("error", ch, target=tgt, detail="text 不能为空")
+            return RouteResult("error", ch, target=tgt, detail="text 不能为空（text 与 media 至少给一个）")
 
         if ch == CHANNEL_WECHAT:
+            sent = 0
+            media_sent = 0
             try:
-                sent = await self._bridge().send_proactive(tgt, body)
+                if body.strip():
+                    sent = await self._bridge().send_proactive(tgt, body)
+                if atts:
+                    send_media = getattr(self._bridge(), "send_media_proactive", None)
+                    if send_media is None:
+                        self.stats.outbound_failed += 1
+                        return RouteResult(
+                            "error", ch, target=tgt,
+                            detail="该微信桥不支持发送媒体附件（send_media_proactive 未实现）")
+                    media_sent = await send_media(tgt, atts)
+                    if media_sent <= 0:
+                        self.stats.outbound_failed += 1
+                        return RouteResult(
+                            "error", ch, target=tgt,
+                            detail="媒体发送失败：0 个成功（传输不支持/拒发）")
             except Exception as e:
                 self.stats.outbound_failed += 1
                 self._note_error(f"微信主动发送异常({tgt}): {e}")
                 return RouteResult(
                     "error", ch, target=tgt, detail=f"发送失败: {e}")
-            if sent <= 0:
+            if body.strip() and sent <= 0:
                 self.stats.outbound_failed += 1
                 return RouteResult(
                     "error", ch, target=tgt, detail="发送失败：0 块成功（传输拒发/全失败）")
             self.stats.outbound_ok += 1
+            parts = []
+            if body.strip():
+                parts.append(f"文本{sent}块")
+            if atts:
+                parts.append(f"媒体{media_sent}个")
             return RouteResult(
                 "delivered", ch, target=tgt, reply_sent=True,
-                detail=f"已发{sent}块给微信peer「{tgt}」")
+                detail=f"已发{'+'.join(parts)}给微信peer「{tgt}」")
 
         # ── openmate 出站：落库 + relay 补推（正连前端实时可见） ──
         try:
             sender = self._openmate_send or self._default_openmate_send
-            row_id = sender(tgt, body)
+            row_id = sender(tgt, body, atts)
         except Exception as e:
             self.stats.outbound_failed += 1
             self._note_error(f"openmate出站落库异常({tgt}): {e}")

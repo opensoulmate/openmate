@@ -139,6 +139,7 @@ from agent.soulmate_scheduler import get_scheduler as _get_cron_scheduler  # 路
 from agent.health_monitor import get_health_monitor as _get_health_monitor  # 路线图3.3 监控告警
 from agent.wechat_router import get_wechat_router as _get_wechat_router  # 路线图4.1c 会话级路由
 from agent.message_router import get_message_router as _get_message_router  # 路线图4.2 统一消息路由
+from agent.media_channel import from_paths as _media_from_paths  # 路线图4.3 媒体附件
 from agent.writer_fence import SessionWriterFence, WriteAction
 from agent.steering import (
     ABORT_MESSAGE,
@@ -1696,10 +1697,16 @@ class SoulMateAgent:
 
         try:
             if func_name == "message_send":
+                # 媒体附件（路线图4.3）：media=本地文件/图片路径列表
+                media_arg = func_args.get("media") or []
+                if not isinstance(media_arg, (list, tuple)):
+                    raise ValueError("media 必须是文件路径数组")
+                media = _media_from_paths([str(p) for p in media_arg])
                 r = await router.send_outbound(
                     channel=str(func_args.get("channel", "") or ""),
                     target=str(func_args.get("target", "") or ""),
                     text=str(func_args.get("text", "") or ""),
+                    media=media,
                 )
                 if r.status == "delivered":
                     return f"✅ 消息已发送（{r.channel} → {r.target}）：{r.detail}"
@@ -1830,7 +1837,7 @@ ACP代理目录: {cwd}/acp-proxy（后端 Python 代码在此）
 - schedule_task / schedule_list / schedule_cancel: 定时任务调度（SoulMate自己的cron：到点自动执行+执行日志+自动排下一次，区别于一次性唤醒）。用户要求"定时/每天/每小时/每周做某事"→ schedule_task（schedule=interval:5m 或 cron:0 9 * * *）；查看任务与执行日志→ schedule_list；停用/删除→ schedule_cancel
 - monitor_add / monitor_list / monitor_check / monitor_remove: 监控告警（对指定服务/网站做周期健康检查：异常告警+恢复通知，目标持久化）。用户要求"监控某网站/服务是否存活、挂了提醒我"→ monitor_add（kind=website/service/port）；查看监控项与最近检查→ monitor_list；立即检查→ monitor_check；停用/删除→ monitor_remove。⚠️ 监控检查只读，不改目标系统
 - wechat_route_list / wechat_route_bind / wechat_route_unbind: 微信会话级路由（peer↔OpenMate会话映射管理，持久化）。查看映射（可按peer/session_id过滤反查）→ wechat_route_list；用户要求"把某微信用户的对话换到某会话/重新绑定/纠正绑错"→ wechat_route_bind；"解绑/断开某微信用户"→ wechat_route_unbind（下次来消息自动新建会话，历史保留）。⚠️ 只改映射，不删消息、不碰消息收发与hermes侧
-- message_send: 统一消息出站（OpenMate/微信同一入口）。channel='wechat'发给微信peer（拆块+限流），channel='openmate'落库到指定会话（正连前端实时可见）。用户要求"给某微信用户发消息/通知某会话/主动推送"时使用
+- message_send: 统一消息出站（OpenMate/微信同一入口，支持media图片/文件附件收发）。channel='wechat'发给微信peer（拆块+限流），channel='openmate'落库到指定会话（正连前端实时可见）。用户要求"给某微信用户发消息/发文件发图片/通知某会话/主动推送"时使用；对方发来图片/截图时按消息内媒体提示块用vision_analyze/read_image理解（截图理解）
 
 You can send files to the user natively: to deliver a file, write a brief confirmation message (e.g. "文件已发送，请查收"), then include MEDIA:/absolute/path/to/file on a new line. The gateway extracts the tag, strips it, and sends the file as a download card. Always write some text before the MEDIA: tag — never output a bare MEDIA: tag alone. Use search_files first if you don't know the exact path. Do NOT paste file contents into chat."""
 
@@ -2597,10 +2604,12 @@ You can send files to the user natively: to deliver a file, write a brief confir
             "function": {
                 "name": "message_send",
                 "description": (
-                    "统一消息出站（OpenMate/微信同一入口）：主动给指定通道目标发消息。"
+                    "统一消息出站（OpenMate/微信同一入口）：主动给指定通道目标发消息，"
+                    "支持图片/文件附件（media=本地文件绝对路径列表）。"
                     "channel='wechat'→发给微信peer（拆块+限流，经微信桥传输）；"
                     "channel='openmate'→落库到指定OpenMate会话（正连前端实时可见，"
-                    "历史加载同样可见）。用户要求『给某微信用户发消息/通知某会话/主动推送』时使用。"
+                    "历史加载同样可见）。用户要求『给某微信用户发消息/发文件发图片/"
+                    "通知某会话/主动推送』时使用。text 与 media 至少给一个。"
                 ),
                 "parameters": {
                     "type": "object",
@@ -2614,9 +2623,14 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             "type": "string",
                             "description": "目标：微信peer标识 或 OpenMate会话session_id",
                         },
-                        "text": {"type": "string", "description": "消息文本"},
+                        "text": {"type": "string", "description": "消息文本（可与media二选一）"},
+                        "media": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "媒体附件：本地文件/图片绝对路径列表（图片对方可直接看，文件可下载）",
+                        },
                     },
-                    "required": ["channel", "target", "text"],
+                    "required": ["channel", "target"],
                 },
             },
         }]

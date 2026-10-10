@@ -44,7 +44,7 @@
 - ~~2.1 缺~~ **2.1 已补（周期#7）**：自验闭环（self_verify.py，收尾对照原始需求逐条核对+补做1轮+复检推送）
 - **2.2-2.4 全部已补**：失败恢复（周期#8）/复杂任务分解+逐步提交（周期#9）/系统状态一键体检（周期#10）
 - ~~3.x 缺~~ **3.1 已补（周期#11）**：cron引擎（agent/soulmate_scheduler.py，interval/cron周期调度+SQLite持久化+CAS到点执行+执行日志，区别于schedule_wakeup一次性唤醒）；**3.2 已补（周期#13）**：定时汇报（agent/cron_reporter.py，执行结果📊汇报行落opensoul.db+wakeup_relay推送面扩到{wakeup,cron,cron_report}即时推送）；**3.3 已补（周期#14）**：监控告警（agent/health_monitor.py，website/service/port三类周期健康检查+防抖告警+恢复通知）；⚠️3.1遗留：调度循环宿主=存活的SoulMateAgent进程（stdio子进程自举），无agent进程时任务不执行（错过不补跑），常驻托管（独立daemon）待后续
-- **4.x 半缺**：~~微信桥全缺~~ **4.1a 已补（周期#15）**：微信桥核心（agent/wechat_bridge.py，收发回路+去重+会话映射+失败纪律，loopback传输实证；iLink真实传输=4.1b待做）；**4.2 已补（周期#17）**：统一消息路由（agent/message_router.py，OpenMate/微信统一收发出入口+message_send工具）；媒体收发仍缺（sense_* 只有感知无收发）
+- **4.x 半缺**：~~微信桥全缺~~ **4.1a 已补（周期#15）**：微信桥核心（agent/wechat_bridge.py，收发回路+去重+会话映射+失败纪律，loopback传输实证；iLink真实传输=4.1b待做）；**4.2 已补（周期#17）**：统一消息路由（agent/message_router.py，OpenMate/微信统一收发出入口+message_send工具）；**4.3 已补（周期#18）**：媒体收发（agent/media_channel.py，图片/文件收发+截图理解提示块，sense_*感知之外补齐收发形态）
 - **5.x 全缺**：子代理并行、群组任务编排
 - **6.x 半缺**：技能保存/检索/学习已有大半，6.3 用执行结果反哺修正待实测
 - **7.x 全缺**：浏览器自动化、docx/pdf/xlsx 生成、TTS、图像生成；另有 send_file/进程管理(text_to_speech等Hermes工具)缺口
@@ -138,7 +138,19 @@
   工具定义+主dispatch+_message_dispatch共用入口lazy-init+code-mode批内await+系统
   提示工具清单）。⚠️诚实边界：微信通道仍loopback传输（iLink=4.1b待用户拍板）；
   openmate出站=落库+relay补推非改写ws客户端连接
-- [ ] 4.3 媒体能力：图片/文件收发、截图理解
+- [x] 4.3 媒体能力：图片/文件收发、截图理解——周期#18实装agent/media_channel.py
+  （MediaAttachment中立形状kind=image|file+to_meta()对齐agent_messages.attachments
+  持久化格式；save_inbound()入站base64（含data URL前缀）落盘本地→带真实路径附件；
+  from_paths()出站校验+kind推断；media_prompt_block()媒体提示块=本地路径+读取方式
+  确定性提示——图片/截图走vision_analyze/read_image（截图理解不靠LLM猜），文件走
+  read_file）+message_router增量（ChannelMessage.media信封字段+纯媒体消息text空合法
+  +入站媒体块拼进回合文本+send_outbound带media出站：wechat→桥send_media_proactive
+  逐个限流发送、openmate→MEDIA标签行+attachments列持久化（无列ALTER兜底）+
+  text与media至少给一个）+wechat_bridge增量（WeChatMessage.media+build_wechat_prompt
+  媒体块+WeChatTransport.send_media默认NotImplemented不破坏既有传输+Loopback记录
+  +send_media_proactive传输不支持→0+记错不谎报）+soulmate_agent接线（message_send
+  工具schema加media数组参数（text不再required）+_message_dispatch解析media经
+  from_paths校验透传+系统提示清单） | ✅ | (本次提交) | 4.3勾选（阶段4除4.1b全部完成）；tests/test_media_channel.py 20/20（kind推断/to_meta/from_paths去重与错误/save_inbound四态/提示块+入站媒体进回合3例+微信转发+bridge媒体e2e+出站双通道+不支持传输/校验/接线护栏+__new__真实dispatch烟测带媒体成功/坏类型/坏路径三态）+回归240全过（message_router/wechat_bridge/wechat_router/wakeup_relay/cron_reporter/health_monitor/soulmate_scheduler/wakeup_executor 167+wakeup_fire_llm_error/schedule_wakeup_wiring/observability/relay_traj/proxy_relay_traj 73）+真实机器烟测（SoulMateAgent导入/relayed origins含msg/真实singleton/media_prompt_block输出实证）；⚠️诚实边界：微信媒体真实传输=4.1b iLink AES媒体CDN未接（当前loopback），openmate出站媒体=落库attachments列+MEDIA标签（历史加载API回base64既有链路），入站"截图理解"=媒体提示块引导vision工具（真实理解效果待真图实测）
 
 ### 阶段5 · 并行与协作
 - [ ] 5.1 子代理：拆分任务给并行 worker，父代理收尾合并
@@ -179,3 +191,4 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 [2026-10-10 10:22] 周期#15 | 4.1a微信桥核心：新增agent/wechat_bridge.py（WeChatTransport抽象+LoopbackTransport回环e2e实证"接收→无客户端SoulMate回合→回复"回路；msg_id去重SQLite持久=重启/重复投递不双跑；peer→session映射持久首见自动new_session同peer复用；默认回合复用wakeup_executor失败纪律refusal/LLM级失败/零输出都不假装成功+失败发告知不无声消失；回复按行拆块+出站限流min_send_interval_s（iLink撞限流静默丢经验）；context_token由transport随原消息回显；turn_origin=wechat入wakeup_relay补推面；start.py SOULMATE_WECHAT_ENABLED显式启用默认零开销） | ✅ | 6046514e | 4.1a切片（4.1拆三段）；tests/test_wechat_bridge.py 17/17（loopback e2e/去重跨重启/失败隔离/拆块+真实时钟限流0.3s断言/默认回合session映射+三态失败纪律/接线护栏）+回归183全过(cron_reporter/health_monitor/soulmate_scheduler/wakeup_relay/schedule_wakeup_wiring 107+wakeup_executor/wakeup_fire_llm_error/observability/relay_traj 76)+真实导入烟测（relayed origins含wechat）；⚠️iLink真实传输=4.1b未接（诚实边界：当前仅loopback传输，真实微信收发未通）——**接入形态待用户拍板（独立微信账号 or 替代期独占接管），绝不与hermes gateway双消费同一iLink会话**；下周期做4.1c会话级路由（peer↔会话映射管理工具）
 [2026-10-10 10:40] 周期#16 | 4.1c会话级路由：新增agent/wechat_router.py（WeChatRouter映射管理面：查询全量/peer过滤/session_id反查同会话多peer、改绑返回previous_session_id+created、解绑幂等、校验拒绝空值/空白字符、store可注入+get_wechat_router单例）+wechat_bridge.BridgeStore增list_mappings/unbind+soulmate_agent四点接线（wechat_route_list/bind/unbind工具定义+主dispatch+_wechat_route_dispatch共用入口lazy-init+code-mode批内+系统提示清单） | ✅ | (本次提交) | 4.1c勾选；tests/test_wechat_router.py 24/24（查询/反查/改绑/解绑幂等/校验7例/跨实例持久/单例/接线护栏+__new__真实dispatch烟测bind→list→rebind→unbind→错误路径全态）+回归183全过(cron_reporter/health_monitor/soulmate_scheduler/wakeup_relay/schedule_wakeup_wiring/wakeup_executor/wakeup_fire_llm_error/observability/relay_traj)+真实机器只读烟测（真实映射库0条=4.1a loopback未写真实库符合预期，校验路径实证）；⚠️4.1b iLink传输仍待用户拍板接入形态（独立微信账号 or 替代期独占接管，绝不双消费同一iLink会话）；下周期做4.2消息路由（OpenMate/微信统一收发）
 [2026-10-10 11:04] 周期#17 | 4.2消息路由（统一收发）：新增agent/message_router.py（UnifiedMessageRouter：统一信封ChannelMessage+RouteResult；route_inbound统一入站按channel分发——wechat整体委托WeChatBridge.deliver()单一owner不双份记账、openmate=RouterStore(channel+msg_id复合主键持久去重)+无客户端回合失败纪律复用wakeup_executor（refusal/LLM级失败/零输出都不假装成功）；send_outbound统一出站——wechat→send_proactive拆块+限流发peer、openmate→落库assistant行turn_origin=msg）+wechat_bridge增量（deliver()公开投递入口+send_proactive()+WeChatTransport.send_text默认NotImplemented不破坏既有传输+LoopbackTransport.proactive）+wakeup_relay补推面纳入msg出身（入站回合行+出站消息行正连前端实时可见）+soulmate_agent四点接线（message_send工具+主dispatch+_message_dispatch共用lazy-init+code-mode批内await+系统提示） | ✅ | (本次提交) | 4.2勾选；tests/test_message_router.py 16/16（信封/去重跨实例/入站三态/校验4例/微信委托真桥e2e+去重+失败告知/出站双通道/默认回合体失败纪律/接线护栏+__new__真实dispatch烟测）+回归240全过(cron_reporter/health_monitor/soulmate_scheduler/wakeup_relay/schedule_wakeup_wiring/wakeup_executor/wakeup_fire_llm_error/wakeup_observability/relay_trajectory/proxy_relay_traj/wechat_bridge/wechat_router)+真实机器烟测（singleton/relayed origins含msg/校验三路真实输出/SoulMateAgent导入）；⚠️诚实边界：微信通道仍loopback传输（4.1b iLink待用户拍板接入形态，绝不双消费hermes会话）；openmate出站=落库+relay补推；⚠️发现_split_blocks块上限下限200（既有契约，测试改用450字断言）；下周期做4.3媒体能力（图片/文件收发、截图理解）
+[2026-10-10 11:35] 周期#18 | 4.3媒体能力（图片/文件收发、截图理解）：新增agent/media_channel.py（MediaAttachment中立形状+to_meta对齐attachments持久化格式+save_inbound入站base64落盘+from_paths出站校验+media_prompt_block媒体提示块——图片/截图走vision_analyze/read_image截图理解、文件走read_file）+message_router增量（ChannelMessage.media+纯媒体消息text空合法+入站媒体块拼回合文本+send_outbound带media：wechat→桥send_media_proactive逐个限流、openmate→MEDIA标签+attachments列持久化ALTER兜底）+wechat_bridge增量（WeChatMessage.media+build_wechat_prompt媒体块+send_media默认NotImplemented+Loopback记录+send_media_proactive传输不支持→0不谎报）+soulmate_agent接线（message_send工具media参数+dispatch校验透传+系统提示） | ✅ | (本次提交) | 4.3勾选（阶段4除4.1b全完成）；tests/test_media_channel.py 20/20+回归240全过（消息/唤醒/调度链167+观察/轨迹链73）+真实机器烟测（导入/relayed origins/singleton/提示块输出）；⚠️诚实边界：微信媒体真实传输=4.1b iLink AES媒体CDN未接（loopback），入站截图理解=提示块引导vision工具（真实理解效果待真图实测）；下周期做5.1子代理（拆分任务给并行worker，父代理收尾合并）

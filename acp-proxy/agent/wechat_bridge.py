@@ -28,6 +28,11 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Callable, Coroutine
 
+from agent.media_channel import (
+    MediaAttachment,
+    media_prompt_block as _media_prompt_block,
+)
+
 logger = logging.getLogger("acp-proxy.wechat_bridge")
 
 WECHAT_TURN_ORIGIN = "wechat"
@@ -49,6 +54,7 @@ class WeChatMessage:
     msg_type: str = "text"
     context_token: str = ""  # iLink协议：回复须回显对端最新token（transport自用）
     received_at_ms: int = 0
+    media: list = field(default_factory=list)  # 媒体附件（MediaAttachment，路线图4.3）
 
     def __post_init__(self) -> None:
         if not self.received_at_ms:
@@ -75,6 +81,15 @@ class WeChatTransport(ABC):
         raise NotImplementedError(
             f"{type(self).__name__} 不支持主动发送（send_text 未实现）")
 
+    async def send_media(self, peer: str, media: list) -> bool:
+        """主动发媒体附件给peer（路线图4.3图片/文件收发）。
+
+        非抽象默认实现=该传输不支持发媒体（不破坏既有传输契约），
+        支持的传输（Loopback/后续iLink AES媒体CDN）覆写此方法。
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} 不支持发送媒体（send_media 未实现）")
+
 
 class LoopbackTransport(WeChatTransport):
     """进程内回环传输（测试/本地验证收发回路；4.1b iLink传输接入前的默认实现）。"""
@@ -83,6 +98,7 @@ class LoopbackTransport(WeChatTransport):
         self._inbound: asyncio.Queue[WeChatMessage] = asyncio.Queue()
         self.sent: list[tuple[WeChatMessage, str]] = []
         self.proactive: list[tuple[str, str]] = []
+        self.media_sent: list[tuple[str, list]] = []
 
     def push(self, msg: WeChatMessage) -> None:
         """注入一条入站消息（模拟微信来消息）。"""
@@ -103,6 +119,10 @@ class LoopbackTransport(WeChatTransport):
 
     async def send_text(self, peer: str, text: str) -> bool:
         self.proactive.append((peer, text))
+        return True
+
+    async def send_media(self, peer: str, media: list) -> bool:
+        self.media_sent.append((peer, list(media or [])))
         return True
 
 
@@ -215,11 +235,19 @@ class BridgeStore:
 
 
 def build_wechat_prompt(msg: WeChatMessage) -> str:
-    """微信回合prompt——显式声明消息来自微信用户，要求直接回复该消息。"""
+    """微信回合prompt——显式声明消息来自微信用户，要求直接回复该消息。
+
+    媒体附件（路线图4.3）：追加媒体提示块（本地路径+读取方式，截图理解
+    走vision_analyze/read_image，确定性提示不靠LLM猜）。
+    """
     who = msg.from_name or msg.from_user or "微信用户"
+    body = msg.content
+    if msg.media:
+        block = _media_prompt_block(msg.media)
+        body = f"{body}\n\n{block}" if str(body).strip() else block
     return (
         f"{WECHAT_TURN_MARKER}｜来自微信用户「{who}」的消息，系统转入本会话执行]\n"
-        f"{msg.content}\n"
+        f"{body}\n"
         "请直接回复这条微信消息（简洁、对方能懂）；只做该消息要求的事。"
     )
 
@@ -302,6 +330,7 @@ class _BridgeStats:
     turns_ok: int = 0
     turns_failed: int = 0
     replies_sent: int = 0
+    media_sent: int = 0
     send_failed: int = 0
     last_error: str = ""
     last_error_at: int = 0
@@ -456,6 +485,40 @@ class WeChatBridge:
             if ok:
                 sent += 1
                 self.stats.replies_sent += 1
+            else:
+                self.stats.send_failed += 1
+        return sent
+
+    async def send_media_proactive(self, peer: str, media: list) -> int:
+        """主动发媒体附件给微信peer（路线图4.3图片/文件收发）。
+
+        逐个限流发送（iLink撞限流静默丢经验）；transport 未实现 send_media
+        （NotImplementedError）→ 记错误返回 0，调用方按失败处理（不谎报）。
+        返回发送成功个数。
+        """
+        if not str(peer or "").strip():
+            raise ValueError("peer不能为空")
+        atts = list(media or [])
+        if not atts:
+            raise ValueError("media不能为空")
+        sent = 0
+        for att in atts:
+            await self._rate_limit()
+            try:
+                ok = await self._transport.send_media(peer, [att])
+            except NotImplementedError as e:
+                self._note_error(f"send_media不支持: {e}")
+                self.stats.send_failed += 1
+                break  # 传输级不支持：后续附件同样发不了，不空转
+            except Exception as e:  # 传输异常不炸调用链
+                self.stats.send_failed += 1
+                self._note_error(f"send_media异常: {e}")
+                ok = False
+            finally:
+                self._last_send_at = time.monotonic()
+            if ok:
+                sent += 1
+                self.stats.media_sent += 1
             else:
                 self.stats.send_failed += 1
         return sent
