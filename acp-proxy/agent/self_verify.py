@@ -19,6 +19,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from agent.report_evidence import parse_ledger
+
 # 短于该长度且无枚举结构的消息视为闲聊，不做自验
 _MIN_TASK_LEN = 20
 
@@ -170,18 +172,17 @@ class SelfVerifier:
             return VerifyReport(items=[], coverage=1.0)
 
         tools = tool_calls_log or []
+        # ⚡8.2 报告/自检以工具执行证据为前提：账本拆"真实执行 vs 被拦截"
+        executed_tools, blocked_tools = parse_ledger(tools)
         tool_bits = []
-        for tc in tools:
-            if isinstance(tc, dict):
-                fn = tc.get("function") if isinstance(tc.get("function"), dict) else tc
-                name = str(fn.get("name", ""))
-                args = str(fn.get("arguments", ""))
-                tool_bits.append(f"{name} {args}")
+        for e in executed_tools:
+            tool_bits.append(f"{e.name} {e.arguments}")
+        for e in blocked_tools:
+            tool_bits.append(f"{e.name} {e.arguments}")
         tool_text = " ".join(tool_bits)
 
         ev_tokens = _tokens(response or "") | _tokens(tool_text)
-        turn_has_tools = bool(tools)
-        has_marker = any(m in (response or "") for m in _DONE_MARKERS)
+        has_executed = bool(executed_tools)
 
         items: list[VerifyItem] = []
         for req in reqs:
@@ -195,23 +196,25 @@ class SelfVerifier:
 
             if score >= self._MET_MIN:
                 status = "met"
-                # "说了≠做了"护栏：动作类需求无工具执行也无完成证据 → 最多证据不足
-                if needs_action and not turn_has_tools and not has_marker:
+                # "说了≠做了"护栏（⚡8.2收紧）：动作类需求的 met 必须以工具执行
+                # 证据为前提——回复自称"已完成"不是证据（原 has_marker 自证漏洞封死），
+                # 工具被拦/未执行 → 最多证据不足，禁报"完成"
+                if needs_action and not has_executed:
                     status = "uncertain"
             elif score >= self._UNCERTAIN_MIN:
                 status = "uncertain"
             else:
                 status = "unmet"
 
-            evidence = ("命中: " + "、".join(sorted(hit)[:6])) if hit else "无证据重合"
-            if turn_has_tools:
-                names = []
-                for t in tools:
-                    if isinstance(t, dict):
-                        raw_fn = t.get("function")
-                        fn = raw_fn if isinstance(raw_fn, dict) else t
-                        names.append(str(fn.get("name", "")))
-                evidence += f"；工具: {', '.join(n for n in names if n)[:80]}"
+            evidence = (f"命中: " + "、".join(sorted(hit)[:6])) if hit else "无证据重合"
+            if executed_tools:
+                evidence += "；工具: " + ", ".join(e.name for e in executed_tools[:8])
+            if blocked_tools:
+                # 工具被拦时报"被拦截+原因"，不计执行证据
+                evidence += "；⛔被拦截: " + "；".join(
+                    f"{e.name}({(e.result_preview.strip() or e.permission)[:60]})"
+                    for e in blocked_tools[:8]
+                )
             items.append(VerifyItem(req, status, round(score, 2), evidence))
 
         met = sum(1 for i in items if i.status == "met")

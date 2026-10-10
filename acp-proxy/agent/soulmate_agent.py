@@ -66,6 +66,7 @@ from agent.mcp_resources import (
 )
 from agent import memory_echo
 from agent import memory_marker
+from agent import report_evidence  # ⚡8.2 短路合成报告治理（执行证据前提）
 from agent import gene_wire
 from agent import session_recall
 from agent import turn_lifecycle
@@ -5018,7 +5019,13 @@ You can send files to the user natively: to deliver a file, write a brief confir
         recalled_texts: list[str] = []  # kilocode #9 marker items（实际注入的召回内容）
         try:
             # 1. 语义缓存：相似问题直接返回缓存
-            cached = self._semantic_cache.get(user_text)
+            # ⚡8.2 短路合成报告治理：执行类请求不走缓存——缓存回放的"完成报告"
+            # 对本回合请求不构成执行证据（run2 1.38s 秒合成"任务执行报告"短路路径），
+            # 必须真实执行；纯信息类问答仍可缓存回放。
+            _cacheable = report_evidence.is_cacheable_request(user_text)
+            cached = self._semantic_cache.get(user_text) if _cacheable else None
+            if not _cacheable:
+                logger.info(f"[semantic-cache] 执行类请求不走缓存（防合成报告短路）: {user_text[:60]}")
             if cached and len(cached) > 20:
                 logger.info(f"[semantic-cache] 命中缓存，跳过LLM调用")
                 # 缓存命中回复=真实回合输出：脱敏展示+落库+session历史追加
@@ -5518,7 +5525,12 @@ You can send files to the user natively: to deliver a file, write a brief confir
 
             # 2. 语义缓存存储（只缓存高质量回复；结局走turn_outcome_success
             # 单一真源——含"error/错误"字样但非失败的回复同样值得缓存）
-            if len(full_response) > 50 and turn_outcome_success(full_response):
+            # ⚡8.2：执行类请求的回复不入缓存（含完成声称的回复对相似请求=合成报告）
+            if (
+                len(full_response) > 50
+                and turn_outcome_success(full_response)
+                and report_evidence.is_cacheable_request(user_text)
+            ):
                 self._semantic_cache.put(
                     query=user_text, response=full_response,
                     tokens_used=len(full_response) // 3,
@@ -5551,6 +5563,25 @@ You can send files to the user natively: to deliver a file, write a brief confir
 
         except Exception as e:
             logger.debug(f"[p2-post] 后置处理失败(非致命): {e}")
+
+        # ── ⚡8.2 短路合成报告治理：报告必须以工具执行证据为前提 ──────
+        # 完成声称但本回合零成功工具执行（或工具全被拦截）→ 治理声明+报告标题降级，
+        # 禁报"完成"；被拦截的工具报"被拦截+原因"。落库回复=治理后文本。
+        try:
+            _evidence = report_evidence.assess(user_text, full_response, tool_calls_log)
+            if _evidence.verdict in ("blocked", "unsupported"):
+                _banner = report_evidence.governance_banner(_evidence)
+                full_response = report_evidence.amend_response(full_response, _evidence)
+                logger.warning(
+                    f"[report-evidence] session={session_id} verdict={_evidence.verdict} "
+                    f"executed={len(_evidence.executed)} blocked={len(_evidence.blocked)}")
+                if self._client is not None and _banner:
+                    await self._client.session_update(
+                        session_id=session_id,
+                        update=acp.update_agent_message_text("\n" + _banner),
+                    )
+        except Exception as e:
+            logger.debug(f"[report-evidence] 治理失败(非致命): {e}")
 
         # ── 路线图 2.1 计划-执行-验证循环：对照原始需求逐条自验 ──────
         # 验证环节收口在MEDIA提取之前——补做产出若含MEDIA标签也能被网关处理。
