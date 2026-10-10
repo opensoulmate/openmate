@@ -158,6 +158,7 @@ from agent.docgen_tools import DocGenTools  # 路线图7.2 文档生成（docx/p
 from agent.tts_tools import TTSTools  # 路线图7.3 语音合成（TTS）
 from agent.image_tools import ImageTools  # 路线图7.4 图像生成/编辑
 from agent.send_file_tools import SendFileTools  # 路线图9.1 文件下发（MEDIA标签通道）
+from agent.process_tools import ProcessTools  # 路线图9.2 后台进程管理（可见可管）
 from agent.writer_fence import SessionWriterFence, WriteAction
 from agent.tool_exec_fencing import FileFenceTimeout, file_fence
 from agent.steering import (
@@ -1420,6 +1421,9 @@ class SoulMateAgent:
             # 文件下发（路线图 9.1）：批内同样可用（纯本地校验，产出 MEDIA 标签）
             if func_name == "send_file":
                 return self._send_file_dispatch(func_args, session_id)
+            # 后台进程管理（路线图 9.2）：批内同样可用（注册表+进程状态确定性操作）
+            if func_name == "process":
+                return self._process_dispatch(func_args, session_id)
             # kilocode #19 MCP resource三件套：批内同样可用（与主循环同款注入安全层）
             if func_name in MCP_RESOURCE_TOOL_NAMES:
                 return await self._call_mcp_resource_tool(func_name, func_args)
@@ -1941,6 +1945,23 @@ class SoulMateAgent:
                     lst.append(p)
         return result
 
+    def _process_dispatch(self, func_args: dict, session_id: str = "") -> str:
+        """process 工具分发（路线图 9.2：后台进程可见可管）。
+
+        主循环与 code-mode 内层共用此入口。start/list/poll/log/kill/write/
+        submit/close 全部确定性操作（无 LLM 参与）；禁硬杀长任务（工具内无
+        到点 SIGKILL 路径），子进程生命周期归系统（start_new_session 脱离
+        会话进程组）。与 _send_file_dispatch 同款 lazy-init（__new__ 裸实例
+        零感知）。
+        """
+        tools = getattr(self, "_process_tools_inst", None)
+        if tools is None:
+            tools = ProcessTools()
+            self._process_tools_inst = tools
+        action = str(func_args.get("action", "") or "").strip().lower()
+        params = {k: v for k, v in func_args.items() if k != "action" and v is not None}
+        return tools.run(action, params, session_id=session_id)
+
     def _merge_pending_send_media(self, session_id: str, full_response: str) -> str:
         """9.1 确定性交付兜底：待交付 MEDIA 标签并入最终回复（末行）。
 
@@ -2187,7 +2208,7 @@ ACP代理目录: {cwd}/acp-proxy（后端 Python 代码在此）
 - message_send: 统一消息出站（OpenMate/微信同一入口，支持media图片/文件附件收发）。channel='wechat'发给微信peer（拆块+限流），channel='openmate'落库到指定会话（正连前端实时可见）。用户要求"给某微信用户发消息/发文件发图片/通知某会话/主动推送"时使用；对方发来图片/截图时按消息内媒体提示块用vision_analyze/read_image理解（截图理解）
 - delegate_tasks: 子代理并行执行（拆分任务给并行worker，父代理收尾合并）。多个互不依赖的独立子任务（多路调研/多个互不依赖的问题/多份互不依赖的检查）→ delegate_tasks 拆给并行子代理并发执行（2-8个），合并结果后由你收尾总结论。⚠️ 有先后依赖的任务不要拆（会并行跑）；每个子任务 goal 必须自包含（子代理看不到当前对话，必要背景写进 goal/context）；失败/超时的子任务会在结果里标注原因，收尾时如实反映不要当成已完成
 - group_task: AI群组任务编排（接 ai-groups 多agent群组：自动分解→按角色分配→并行执行）。需要多agent分工协作的复杂目标（规划→执行→验证→审查）→ group_task(action=orchestrate) 交给群组执行并返回合并报告；查看群组→ action=list_groups；查任务进度→ action=task_status。⚠️ 失败/超时子任务在报告中标注原因，不要当成已完成
-- skill_save: 技能保存（把成功流程写成SKILL.md含触发条件/步骤/坑，存技能库供复用）。刚成功完成多步骤可复用任务、或用户要求"把XX流程保存为技能/记住怎么做"时使用；同名技能默认不覆盖（更新传 overwrite=true）。保存后同类任务命中触发词会自动加载该技能\n- browser: 浏览器自动化（Playwright/CDP，真实浏览器会话）。action=goto 打开URL / snapshot 读页面标题+正文+链接 / click 点元素 / type 输入（submit=true回车）/ fill 清空填入 / eval 执行JS / screenshot 截图（返回文件路径可MEDIA下发）/ back 后退 / close 关闭会话。selector 用 CSS 选择器。需要看页面真实渲染内容、登录态页面、自动化网页操作时使用；纯静态网页抓取优先 web_extract。⚠️ 页面过长截断并自报；失败返回具体原因；页面状态跨调用保留（连续操作无需重复goto）\n- document: 文档生成（docx/pdf/xlsx，输出真实文件返回 MEDIA: 路径可直接下发）。format=docx|pdf 时 content 传块列表（heading/paragraph/bullet/table/pagebreak），format=xlsx 时传 sheets:[{{name, rows}}]。需要交付正式文档/报表/表格文件时使用；纯文本回答不需要生成文件\n- text_to_speech: 语音合成（TTS，文本→音频文件，输出返回 MEDIA: 路径可直接播放/下发）。需要把文字转成语音/音频文件（朗读稿/配音/语音播报）时使用；voice 可选（默认中文女声 zh-CN-XiaoxiaoNeural），rate 可选语速（如 +0%）。纯文字回复不需要合成音频\n- image: 图像生成/编辑（输出真实文件返回 MEDIA: 路径可直接下发）。action=generate 按 prompt 生成图像（⚠️ 未配置 AI 后端时为程序化绘制，会在结果里如实标注）；resize/crop/rotate/flip/convert/annotate/compose/thumbnail 为确定性编辑（传 path）。需要生成图片或处理图片（缩放/裁剪/加文字/拼图/转格式）时使用\n- send_file: 文件下发（本地已有文件→📎下载卡片，返回 MEDIA: 标签走既有下发通道）。path=文件绝对路径（不知道路径先用 search_files 找），message 可选随件附言。需要把本地文件交付给用户（产物/报告/日志）时使用；文件不存在/越界显式报因\n
+- skill_save: 技能保存（把成功流程写成SKILL.md含触发条件/步骤/坑，存技能库供复用）。刚成功完成多步骤可复用任务、或用户要求"把XX流程保存为技能/记住怎么做"时使用；同名技能默认不覆盖（更新传 overwrite=true）。保存后同类任务命中触发词会自动加载该技能\n- browser: 浏览器自动化（Playwright/CDP，真实浏览器会话）。action=goto 打开URL / snapshot 读页面标题+正文+链接 / click 点元素 / type 输入（submit=true回车）/ fill 清空填入 / eval 执行JS / screenshot 截图（返回文件路径可MEDIA下发）/ back 后退 / close 关闭会话。selector 用 CSS 选择器。需要看页面真实渲染内容、登录态页面、自动化网页操作时使用；纯静态网页抓取优先 web_extract。⚠️ 页面过长截断并自报；失败返回具体原因；页面状态跨调用保留（连续操作无需重复goto）\n- document: 文档生成（docx/pdf/xlsx，输出真实文件返回 MEDIA: 路径可直接下发）。format=docx|pdf 时 content 传块列表（heading/paragraph/bullet/table/pagebreak），format=xlsx 时传 sheets:[{{name, rows}}]。需要交付正式文档/报表/表格文件时使用；纯文本回答不需要生成文件\n- text_to_speech: 语音合成（TTS，文本→音频文件，输出返回 MEDIA: 路径可直接播放/下发）。需要把文字转成语音/音频文件（朗读稿/配音/语音播报）时使用；voice 可选（默认中文女声 zh-CN-XiaoxiaoNeural），rate 可选语速（如 +0%）。纯文字回复不需要合成音频\n- image: 图像生成/编辑（输出真实文件返回 MEDIA: 路径可直接下发）。action=generate 按 prompt 生成图像（⚠️ 未配置 AI 后端时为程序化绘制，会在结果里如实标注）；resize/crop/rotate/flip/convert/annotate/compose/thumbnail 为确定性编辑（传 path）。需要生成图片或处理图片（缩放/裁剪/加文字/拼图/转格式）时使用\n- send_file: 文件下发（本地已有文件→📎下载卡片，返回 MEDIA: 标签走既有下发通道）。path=文件绝对路径（不知道路径先用 search_files 找），message 可选随件附言。需要把本地文件交付给用户（产物/报告/日志）时使用；文件不存在/越界显式报因\n- process: 后台进程管理（长任务放后台跑，可见可管）。action=start 启动后台命令（command，返回 proc_id）/ list 列出全部 / poll 查状态 / log 看日志尾部 / kill 停止（默认 SIGTERM，force=true 才 SIGKILL）/ write 向 stdin 写入 / submit 写入并回车 / close 关闭 stdin。构建/测试/服务/长脚本等超过单次 terminal 耗时的任务用它；进程不随会话断开而终止。⚠️ 不会到点强杀长任务——超时只报状态\n
 You can send files to the user natively: to deliver a file, write a brief confirmation message (e.g. "文件已发送，请查收"), then include MEDIA:/absolute/path/to/file on a new line. The gateway extracts the tag, strips it, and sends the file as a download card. Always write some text before the MEDIA: tag — never output a bare MEDIA: tag alone. Use search_files first if you don't know the exact path. Do NOT paste file contents into chat."""
 
     async def _run_llm_with_tools(
@@ -3394,6 +3415,49 @@ You can send files to the user natively: to deliver a file, write a brief confir
         }]
         builtin_tools.extend(send_file_tool)
 
+        # ── 后台进程管理工具（路线图 9.2：process）──────────────────
+        # 对标 Hermes process 语义有界子集（start/list/poll/log/kill/write/
+        # submit/close），后台任务可见可管。禁硬杀长任务：工具内无到点 SIGKILL
+        # 路径，kill 仅显式意图（默认 SIGTERM）；进程生命周期归系统（不随会话
+        # 断开而终止）。
+        process_tool = [{
+            "type": "function",
+            "function": {
+                "name": "process",
+                "description": (
+                    "后台进程管理（长任务放后台跑，随时可见可管）。"
+                    "action=start 启动后台命令（command，返回 proc_id 句柄）/ "
+                    "list 列出全部 / poll 查状态（不传 proc_id=全部）/ "
+                    "log 看日志尾部（limit 行数）/ kill 停止（默认 SIGTERM，"
+                    "force=true 才 SIGKILL）/ write 向进程 stdin 写入 / "
+                    "submit 写入并回车 / close 关闭 stdin。适合构建/测试/服务/"
+                    "长脚本等超过单次 terminal 耗时的任务；进程不随会话断开而"
+                    "终止。⚠️ 不会到点强杀——长任务只报状态"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": {"type": "string",
+                                   "description": "操作：start/list/poll/log/kill/write/submit/close"},
+                        "command": {"type": "string",
+                                    "description": "start：后台执行的 shell 命令"},
+                        "proc_id": {"type": "string",
+                                    "description": "进程句柄（start 返回；其余 action 用）"},
+                        "cwd": {"type": "string",
+                                "description": "start：工作目录（可省略）"},
+                        "data": {"type": "string",
+                                 "description": "write/submit：写入进程 stdin 的内容"},
+                        "limit": {"type": "integer",
+                                  "description": "log：返回日志行数上限（默认200）"},
+                        "force": {"type": "boolean",
+                                  "description": "kill：true=SIGKILL 强杀（默认 SIGTERM）"},
+                    },
+                    "required": ["action"],
+                },
+            },
+        }]
+        builtin_tools.extend(process_tool)
+
         # 添加进化引擎工具（支持直接对象或HTTP API两种模式）
         evolution_tools = []
         has_evolution = self._evolution_engine is not None or hasattr(self, '_evolution_api_url')
@@ -4449,6 +4513,14 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             # ── 文件下发（路线图 9.1，MEDIA 标签下发通道）──────────
                             try:
                                 result = self._send_file_dispatch(func_args, session_id)
+                            except Exception as e:
+                                te = self._tool_error_handler.handle_error(
+                                    session_id, func_name, e, func_args)
+                                result = te.to_model_message()
+                        elif func_name == "process":
+                            # ── 后台进程管理（路线图 9.2，可见可管禁硬杀）──────────
+                            try:
+                                result = self._process_dispatch(func_args, session_id)
                             except Exception as e:
                                 te = self._tool_error_handler.handle_error(
                                     session_id, func_name, e, func_args)
