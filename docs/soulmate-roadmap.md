@@ -45,7 +45,7 @@
 - **2.2-2.4 全部已补**：失败恢复（周期#8）/复杂任务分解+逐步提交（周期#9）/系统状态一键体检（周期#10）
 - ~~3.x 缺~~ **3.1 已补（周期#11）**：cron引擎（agent/soulmate_scheduler.py，interval/cron周期调度+SQLite持久化+CAS到点执行+执行日志，区别于schedule_wakeup一次性唤醒）；**3.2 已补（周期#13）**：定时汇报（agent/cron_reporter.py，执行结果📊汇报行落opensoul.db+wakeup_relay推送面扩到{wakeup,cron,cron_report}即时推送）；**3.3 已补（周期#14）**：监控告警（agent/health_monitor.py，website/service/port三类周期健康检查+防抖告警+恢复通知）；⚠️3.1遗留：调度循环宿主=存活的SoulMateAgent进程（stdio子进程自举），无agent进程时任务不执行（错过不补跑），常驻托管（独立daemon）待后续
 - **4.x 半缺**：~~微信桥全缺~~ **4.1a 已补（周期#15）**：微信桥核心（agent/wechat_bridge.py，收发回路+去重+会话映射+失败纪律，loopback传输实证；iLink真实传输=4.1b待做）；**4.2 已补（周期#17）**：统一消息路由（agent/message_router.py，OpenMate/微信统一收发出入口+message_send工具）；**4.3 已补（周期#18）**：媒体收发（agent/media_channel.py，图片/文件收发+截图理解提示块，sense_*感知之外补齐收发形态）
-- **5.x 半缺**：~~子代理并行、群组任务编排全缺~~ **5.1 已补（周期#19）**子代理并行、**5.2 已补（周期#20）**工具执行层并发隔离；剩 5.3 群组任务编排
+- **5.x 已补全**：~~子代理并行、群组任务编排全缺~~ **5.1 已补（周期#19）**子代理并行、**5.2 已补（周期#20）**工具执行层并发隔离、**5.3 已补（周期#21）**群组任务编排（接ai_groups）
 - **6.x 半缺**：技能保存/检索/学习已有大半，6.3 用执行结果反哺修正待实测
 - **7.x 全缺**：浏览器自动化、docx/pdf/xlsx 生成、TTS、图像生成；另有 send_file/进程管理(text_to_speech等Hermes工具)缺口
 
@@ -164,7 +164,17 @@
   _get_db加busy timeout=30（多会话/子代理worker并发写agent_messages忙等30s，
   不再默认5s抛database is locked）。真实根因实证：无栅栏时两进程并发read-modify-write
   同一文件5/5次lost update（对照实验/tmp/race_control.py），有栅栏全保留
-- [ ] 5.3 群组协作：AI 群组里的任务编排（接现有 ai_groups 能力）
+- [x] 5.3 群组协作：AI 群组里的任务编排（接现有 ai_groups 能力）——周期#21实装agent/group_orchestrator.py
+  （GroupOrchestrator 驱动 opensoul /api/ai-groups 既有能力：提交主任务=自动分解
+  子任务+按角色自动分配→逐个触发execute（失败隔离：单个execute请求失败/无agent
+  不阻塞兄弟子任务，409已在执行容忍为在途）→有界轮询list_tasks到终态（5-600s
+  预算，耗尽子任务记TIMEOUT显式标注绝不假装成功）→终态读事件流finished/failed
+  判定（失败可见，ai_groups execute收尾status一律scored，成败在事件流）→确定性
+  merge不走LLM（成功/失败分节+按输入顺序+失败收尾警示"不要把失败子任务当成
+  已完成"，与5.1同款纪律）；传输层可注入（测试零网络），缺省httpx调
+  SOULMATE_AI_GROUPS_URL；只读查询面list_groups/task_status）+soulmate_agent
+  四点接线（group_task工具action=list_groups/orchestrate/task_status+主dispatch
+  +_group_dispatch共用入口lazy-init+code-mode批内await+系统提示清单）
 
 ### 阶段6 · 技能系统
 - [ ] 6.1 技能保存：把成功流程写成 SKILL.md（含触发条件/步骤/坑）
@@ -203,3 +213,4 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 [2026-10-10 11:35] 周期#18 | 4.3媒体能力（图片/文件收发、截图理解）：新增agent/media_channel.py（MediaAttachment中立形状+to_meta对齐attachments持久化格式+save_inbound入站base64落盘+from_paths出站校验+media_prompt_block媒体提示块——图片/截图走vision_analyze/read_image截图理解、文件走read_file）+message_router增量（ChannelMessage.media+纯媒体消息text空合法+入站媒体块拼回合文本+send_outbound带media：wechat→桥send_media_proactive逐个限流、openmate→MEDIA标签+attachments列持久化ALTER兜底）+wechat_bridge增量（WeChatMessage.media+build_wechat_prompt媒体块+send_media默认NotImplemented+Loopback记录+send_media_proactive传输不支持→0不谎报）+soulmate_agent接线（message_send工具media参数+dispatch校验透传+系统提示） | ✅ | (本次提交) | 4.3勾选（阶段4除4.1b全完成）；tests/test_media_channel.py 20/20+回归240全过（消息/唤醒/调度链167+观察/轨迹链73）+真实机器烟测（导入/relayed origins/singleton/提示块输出）；⚠️诚实边界：微信媒体真实传输=4.1b iLink AES媒体CDN未接（loopback），入站截图理解=提示块引导vision工具（真实理解效果待真图实测）；下周期做5.1子代理（拆分任务给并行worker，父代理收尾合并）
 [2026-10-10 11:58] 周期#19 | 5.1子代理（拆分任务给并行worker，父代理收尾合并）：新增agent/subagent_manager.py（SubagentManager：asyncio.Semaphore限并发1-4+每worker独立wait_for超时隔离——失败/超时取消随行可见不影响其余worker，2-8子任务/超时10-600s夹取；默认worker=default_subagent_runner=隔离工作会话无客户端SoulMate回合，复用唤醒回合同款失败纪律refusal/LLM级失败/零输出都不假装成功+turn归因锚点收集产出+超长截断自报，判定复用wakeup_executor单一真源；parent_goal注入每个worker context；确定性merge不走LLM=成功/失败分节+按输入顺序+失败收尾警示；subagent_runs表持久化失败/超时同样落行+snapshot观测，写日志失败不阻塞）+soulmate_agent四点接线（delegate_tasks工具定义tasks/max_concurrency/parent_goal+主dispatch+_subagent_dispatch共用入口lazy-init+code-mode批内await+系统提示清单） | ✅ | (本次提交) | 5.1勾选；tests/test_subagent_manager.py 21/21（prompt构建/校验夹取/并行保序/失败与超时隔离含cancel实证/并发上限/parent_goal注入/merge两态/runs持久化+写失败不阻塞/默认runner四态+截断自报/接线护栏+__new__真实dispatch烟测）+回归516全过（message/media/wechat链107+wakeup/调度/relay链183+plan/tool链104+记忆链122）+py_compile+SoulMateAgent真实导入烟测；⚠️诚实边界：worker是真实LLM回合（各自调模型+工具），多会话并发的工具执行层隔离硬化归5.2（当前worker各用独立会话，共享agent实例观测采集端属弱共享）；下周期做5.2多会话并发隔离（写锁已有，扩到工具执行层）
 [2026-10-10 12:35] 周期#20 | 5.2多会话并发隔离（写锁已有，扩到工具执行层）：新增agent/tool_exec_fencing.py（以realpath为键的跨进程文件栅栏file_fence——flock互斥+锁文件走中央临时目录sha256命名不污染项目树+进程死亡自动释放无stale lock+同进程不同fd同样互斥+有界等待10s超时抛FileFenceTimeout显式报冲突禁无锁裸写）+接线三处读-改-写临界区（patch主循环/code-mode内层双执行点+PersistentMemory.write/append覆盖memory工具与experience_sink的MEMORY.md同步）+_get_db加busy timeout=30 | ✅ | 50132e40 | 5.2勾选；tests/test_tool_exec_fencing.py 11/11（真多进程lost-update回归/同进程双fd互斥/有界等待/超时消息可见/进程死亡自动释放/锁文件不污染项目目录/持久记忆并发追加不丢行/超时显式报错不改文件/code-mode patch行为实测冲突+正路径/接线护栏/_get_db timeout）+回归553全过（plan/tool/subagent/session链207+记忆/消息/调度链287+persistent_memory/experience/profile链59）+py_compile+真实导入烟测；根因实证：无栅栏两进程并发read-modify-write 5/5次lost update（/tmp/race_control.py对照），有栅栏全保留；⚠️诚实边界：terminal/execute_code任意副作用无法枚举上锁（归任务分解/意图层）、git index.lock串行化（task_decomposer.commit_step并发提交）与共享agent实例观测采集端弱共享待后续；下周期做5.3群组协作（AI群组里的任务编排，接现有ai_groups能力）
+[2026-10-10 12:52] 周期#21 | 5.3群组协作（AI群组任务编排，接现有ai_groups能力）：新增agent/group_orchestrator.py（GroupOrchestrator驱动opensoul /api/ai-groups既有任务面——提交主任务=自动分解子任务+按角色自动分配→逐个触发execute失败隔离（单个execute请求失败/无agent不阻塞兄弟，409已在执行容忍为在途）→有界轮询list_tasks到终态（wait_s 5-600s预算，耗尽子任务记TIMEOUT显式标注不假装成功）→终态读事件流finished/failed判定成败（ai_groups execute收尾status一律scored，成败真相在事件流——实证发现）→确定性merge不走LLM（成功/失败分节+按输入顺序+失败收尾警示同5.1纪律+超长截断自报）；传输层可注入零网络测试，缺省httpx调SOULMATE_AI_GROUPS_URL；只读查询面list_groups/task_status）+soulmate_agent四点接线（group_task工具action=list_groups/orchestrate/task_status+主dispatch+_group_dispatch共用入口lazy-init+code-mode批内await+系统提示清单） | ✅ | (本次提交) | 5.3勾选（阶段5全部完成）；tests/test_group_orchestrator.py 14/14（happy path顺序/execute失败隔离含兄弟照常执行实证/409容忍/无agent显式失败/事件failed覆盖scored/timeout显式标注/提交失败抛错/校验4例/merge确定性+截断自报/空子任务/list_groups与task_status格式/接线护栏+__new__真实dispatch烟测四态）+回归133全过（subagent/message/media/wechat/tool_fencing链85+code_mode/tool_output链48）+py_compile+SoulMateAgent真实导入烟测+真实机器烟测（:8090 ai-groups health ok，list_groups真实返回2个现存群组4703ec60 B群组/1cfdb9e5 A群组）；⚠️诚实边界：编排对象是ai_groups既有执行面（run_agent_proxy跑真实agent binary），本模块不重复实现执行器；轮询为快照轮询非WS实时尾随（ws_group实时面在前端侧）；真实群组端到端跑真实agent执行待有真实成员群组实测；下周期做6.1技能保存（把成功流程写成SKILL.md含触发条件/步骤/坑）

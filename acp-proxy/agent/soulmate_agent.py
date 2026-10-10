@@ -145,6 +145,10 @@ from agent.subagent_manager import (  # 路线图5.1 子代理并行执行
     Subtask,
     get_subagent_manager as _get_subagent_manager,
 )
+from agent.group_orchestrator import (  # 路线图5.3 AI群组任务编排
+    GroupOrchestrator,
+    get_group_orchestrator as _get_group_orchestrator,
+)
 from agent.writer_fence import SessionWriterFence, WriteAction
 from agent.tool_exec_fencing import FileFenceTimeout, file_fence
 from agent.steering import (
@@ -1361,6 +1365,9 @@ class SoulMateAgent:
             # 子代理并行执行（路线图 5.1）：批内同样可用（worker回合IO，需await）
             if func_name == "delegate_tasks":
                 return await self._subagent_dispatch(func_args, session_id)
+            # AI群组任务编排（路线图 5.3）：批内同样可用（编排HTTP IO，需await）
+            if func_name == "group_task":
+                return await self._group_dispatch(func_args, session_id)
             # kilocode #19 MCP resource三件套：批内同样可用（与主循环同款注入安全层）
             if func_name in MCP_RESOURCE_TOOL_NAMES:
                 return await self._call_mcp_resource_tool(func_name, func_args)
@@ -1773,6 +1780,45 @@ class SoulMateAgent:
         except Exception as e:
             return f"[错误] 子代理执行失败: {type(e).__name__}: {e}"
 
+    async def _group_dispatch(self, func_args: dict, session_id: str = "") -> str:
+        """group_task 分发（路线图 5.3：AI 群组任务编排，接现有 ai_groups 能力）。
+
+        主循环与 code-mode 内层共用此入口。编排经 GroupOrchestrator 驱动
+        opensoul /api/ai-groups（自动分解→按角色分配→并行执行→事件流追踪），
+        确定性 merge 后回注父代理写收尾结论。与 _subagent_dispatch 同款
+        lazy-init（__new__ 构造实例未过 __init__ 自举）。
+        """
+        orch = getattr(self, "_group_orchestrator", None)
+        if orch is None:
+            orch = _get_group_orchestrator()
+            self._group_orchestrator = orch
+        action = str(func_args.get("action", "") or "orchestrate").strip().lower()
+        try:
+            if action == "list_groups":
+                return await orch.list_groups()
+            if action == "task_status":
+                return await orch.task_status(
+                    str(func_args.get("group_id", "") or ""),
+                    str(func_args.get("task_id", "") or ""),
+                )
+            if action == "orchestrate":
+                report = await orch.orchestrate(
+                    group_id=str(func_args.get("group_id", "") or ""),
+                    goal=str(func_args.get("goal", "") or ""),
+                    constraints=func_args.get("constraints") or [],
+                    completion_criteria=func_args.get("completion_criteria") or [],
+                    wait_s=func_args.get("wait_s", 180),
+                )
+                return orch.merge(report)
+            return (
+                f"错误: 未知 action={action}"
+                "（可选 list_groups / orchestrate / task_status）"
+            )
+        except ValueError as e:
+            return f"错误: {e}"
+        except Exception as e:
+            return f"[错误] 群组任务编排失败: {type(e).__name__}: {e}"
+
     async def _traj_record_round(
         self,
         session_id: str,
@@ -1894,7 +1940,8 @@ ACP代理目录: {cwd}/acp-proxy（后端 Python 代码在此）
 - monitor_add / monitor_list / monitor_check / monitor_remove: 监控告警（对指定服务/网站做周期健康检查：异常告警+恢复通知，目标持久化）。用户要求"监控某网站/服务是否存活、挂了提醒我"→ monitor_add（kind=website/service/port）；查看监控项与最近检查→ monitor_list；立即检查→ monitor_check；停用/删除→ monitor_remove。⚠️ 监控检查只读，不改目标系统
 - wechat_route_list / wechat_route_bind / wechat_route_unbind: 微信会话级路由（peer↔OpenMate会话映射管理，持久化）。查看映射（可按peer/session_id过滤反查）→ wechat_route_list；用户要求"把某微信用户的对话换到某会话/重新绑定/纠正绑错"→ wechat_route_bind；"解绑/断开某微信用户"→ wechat_route_unbind（下次来消息自动新建会话，历史保留）。⚠️ 只改映射，不删消息、不碰消息收发与hermes侧
 - message_send: 统一消息出站（OpenMate/微信同一入口，支持media图片/文件附件收发）。channel='wechat'发给微信peer（拆块+限流），channel='openmate'落库到指定会话（正连前端实时可见）。用户要求"给某微信用户发消息/发文件发图片/通知某会话/主动推送"时使用；对方发来图片/截图时按消息内媒体提示块用vision_analyze/read_image理解（截图理解）
-- delegate_tasks: 子代理并行执行（拆分任务给并行worker，父代理收尾合并）。多个互不依赖的独立子任务（多路调研/多个独立问题/多份互不依赖的检查）→ delegate_tasks 拆给并行子代理并发执行（2-8个），合并结果后由你收尾总结论。⚠️ 有先后依赖的任务不要拆（会并行跑）；每个子任务 goal 必须自包含（子代理看不到当前对话，必要背景写进 goal/context）；失败/超时的子任务会在结果里标注原因，收尾时如实反映不要当成已完成
+- delegate_tasks: 子代理并行执行（拆分任务给并行worker，父代理收尾合并）。多个互不依赖的独立子任务（多路调研/多个互不依赖的问题/多份互不依赖的检查）→ delegate_tasks 拆给并行子代理并发执行（2-8个），合并结果后由你收尾总结论。⚠️ 有先后依赖的任务不要拆（会并行跑）；每个子任务 goal 必须自包含（子代理看不到当前对话，必要背景写进 goal/context）；失败/超时的子任务会在结果里标注原因，收尾时如实反映不要当成已完成
+- group_task: AI群组任务编排（接 ai-groups 多agent群组：自动分解→按角色分配→并行执行）。需要多agent分工协作的复杂目标（规划→执行→验证→审查）→ group_task(action=orchestrate) 交给群组执行并返回合并报告；查看群组→ action=list_groups；查任务进度→ action=task_status。⚠️ 失败/超时子任务在报告中标注原因，不要当成已完成
 
 You can send files to the user natively: to deliver a file, write a brief confirmation message (e.g. "文件已发送，请查收"), then include MEDIA:/absolute/path/to/file on a new line. The gateway extracts the tag, strips it, and sends the file as a download card. Always write some text before the MEDIA: tag — never output a bare MEDIA: tag alone. Use search_files first if you don't know the exact path. Do NOT paste file contents into chat."""
 
@@ -2747,6 +2794,63 @@ You can send files to the user natively: to deliver a file, write a brief confir
             },
         }]
         builtin_tools.extend(delegate_tasks_tool)
+
+        # ── AI群组任务编排工具（路线图 5.3）──────────────────
+        # 接现有 ai_groups 能力：一个目标交给 AI 群组，自动分解→按角色分配→
+        # 并行执行→事件流追踪，SoulMate 编排收尾（失败子任务可见不假装成功）。
+        group_task_tool = [{
+            "type": "function",
+            "function": {
+                "name": "group_task",
+                "description": (
+                    "AI群组任务编排：把一个目标交给 AI 群组（opensoul ai-groups），"
+                    "由群组内多agent（advisor/executor/verifier等角色）自动分解子任务、"
+                    "按角色分配、并行执行，完成后返回各子任务结果合并报告。适用于："
+                    "需要多agent分工协作的复杂目标（规划→执行→验证→审查流水线）。"
+                    "action=list_groups 查看群组；action=orchestrate 提交目标并编排执行"
+                    "（有界等待，wait_s默认180秒）；action=task_status 查任务进度。"
+                    "⚠️ 失败/超时的子任务会在报告里标注原因，收尾时如实反映不要当成已完成。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["list_groups", "orchestrate", "task_status"],
+                            "description": "list_groups=查看群组；orchestrate=提交目标编排执行；task_status=查任务进度",
+                        },
+                        "group_id": {
+                            "type": "string",
+                            "description": "AI群组id（orchestrate/task_status 必填，list_groups 不需要）",
+                        },
+                        "goal": {
+                            "type": "string",
+                            "description": "要交给群组的总体目标（orchestrate 必填）",
+                        },
+                        "constraints": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "约束条件（可选）",
+                        },
+                        "completion_criteria": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "完成标准（可选）",
+                        },
+                        "task_id": {
+                            "type": "string",
+                            "description": "任务id（task_status 必填）",
+                        },
+                        "wait_s": {
+                            "type": "number",
+                            "description": "编排等待预算秒数（5-600，默认180；超时子任务标注timeout）",
+                        },
+                    },
+                    "required": ["action"],
+                },
+            },
+        }]
+        builtin_tools.extend(group_task_tool)
 
         # 添加进化引擎工具（支持直接对象或HTTP API两种模式）
         evolution_tools = []
@@ -3737,6 +3841,14 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             # ── 子代理并行执行（路线图 5.1）────────────────
                             try:
                                 result = await self._subagent_dispatch(func_args, session_id)
+                            except Exception as e:
+                                te = self._tool_error_handler.handle_error(
+                                    session_id, func_name, e, func_args)
+                                result = te.to_model_message()
+                        elif func_name == "group_task":
+                            # ── AI群组任务编排（路线图 5.3）────────────────
+                            try:
+                                result = await self._group_dispatch(func_args, session_id)
                             except Exception as e:
                                 te = self._tool_error_handler.handle_error(
                                     session_id, func_name, e, func_args)
