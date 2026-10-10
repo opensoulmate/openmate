@@ -292,7 +292,7 @@ export function AppShell({
               <div className="fixed inset-0 z-20 bg-black/40 animate-in fade-in-0" onClick={toggleSidebar} aria-hidden="true" />
             )}
             <div
-              className="shrink-0 overflow-hidden transition-[width] duration-200 ease-linear"
+              className="shrink-0 overflow-hidden transition-[width] duration-200 ease-linear relative z-30"
               style={{ ...(isMobile ? { position: 'fixed', top: 0, bottom: 0, left: 0, zIndex: 30 } : {}), width: sidebarCollapsed ? 0 : leftPanelWidth }}
             >
               <div className="h-full bg-background" style={{ width: leftPanelWidth }}>
