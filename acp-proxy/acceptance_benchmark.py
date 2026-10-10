@@ -27,6 +27,8 @@ import zipfile
 import jwt as pyjwt
 import websockets
 
+from agent.frame_origin import split_frames
+
 ACP_WS = "ws://127.0.0.1:8092/ws/acp"
 JWT_SECRET = "change-me-in-production"
 WORKDIR = "/tmp/soulmate_accept"
@@ -317,12 +319,16 @@ def _collect_texts(obj, out: list) -> None:
 
 
 async def _rpc(ws, method: str, params: dict, rid: int, timeout: float,
-               collect_sid: str = "") -> tuple[dict, str]:
+               collect_sid: str = "") -> tuple[dict, str, dict]:
     """发请求等同 id 响应；期间收集 session/update 文本块为回复文本。
 
     collect_sid 非空时只收集该 session 的帧——同一 WS 连接上前一回合的
     未完帧会继续到达，不按 sessionId 过滤会串进下一任务的回复（周期#30
     实测踩坑：任务7超时回合的帧污染任务8回复采集）。
+
+    ⚡8.5c-⑤：合并文本再按帧来源过滤（split_frames）——心跳快照/需求自检推送/
+    治理横幅是系统帧，混入回复会污染判据（周期#43 STYLE85C_1 实证），过滤计数
+    随返回值可观测。返回 (响应, 回答文本, 系统帧计数)。
     """
     await ws.send(json.dumps({"jsonrpc": "2.0", "id": rid, "method": method, "params": params}))
     chunks: list = []
@@ -332,7 +338,8 @@ async def _rpc(ws, method: str, params: dict, rid: int, timeout: float,
         msg = json.loads(raw)
         if msg.get("id") == rid:
             _collect_texts(msg, chunks)
-            return msg, "".join(chunks)
+            reply, sys_counts = split_frames(chunks)
+            return msg, reply, sys_counts
         if msg.get("method") == "session/update":
             psid = (msg.get("params") or {}).get("sessionId") or ""
             if collect_sid and psid and psid != collect_sid:
@@ -353,7 +360,7 @@ async def main() -> None:
     if isinstance(token, bytes):
         token = token.decode()
     async with websockets.connect(f"{ACP_WS}?token={token}", max_size=20_000_000) as ws:
-        r, _ = await _rpc(ws, "initialize", {"protocolVersion": 1}, rid=1, timeout=30)
+        r, _, _ = await _rpc(ws, "initialize", {"protocolVersion": 1}, rid=1, timeout=30)
         if not (r.get("result") or {}).get("protocolVersion"):
             print("initialize 握手失败:", r, flush=True)
         for i, task in enumerate(tasks, 1):
@@ -362,7 +369,7 @@ async def main() -> None:
             entry = {"category": task["category"], "prompt": task["prompt"][:120], "run_tag": RUN_TAG}
             prompt_text = f"{task['prompt']}\n（复测标记 {RUN_TAG}，此行仅为防缓存标记，忽略其语义）"
             try:
-                r, _ = await _rpc(
+                r, _, _ = await _rpc(
                     ws, "session/new",
                     {"cwd": "/home/climbing", "mcpServers": [], "agent_id": "soulmate"},
                     rid=100 + i * 2, timeout=90,
@@ -371,7 +378,7 @@ async def main() -> None:
                 sid = res.get("session_id") or res.get("sessionId") or ""
                 if not sid:
                     raise RuntimeError(f"session/new 无session_id: {r}")
-                r, reply = await _rpc(
+                r, reply, sys_frames = await _rpc(
                     ws, "session/prompt",
                     {"sessionId": sid, "messageId": f"accept-{i}",
                      "prompt": [{"type": "text", "text": prompt_text}]},
@@ -381,6 +388,7 @@ async def main() -> None:
                 entry["session_id"] = sid
                 entry["stop_reason"] = stop
                 entry["http_ok"] = "result" in r
+                entry["system_frames"] = sys_frames
             except Exception as e:  # noqa: BLE001
                 entry.update(ok=False, latency_s=round(time.monotonic() - t0, 2),
                              verify_mode="error", detail=f"WS失败: {type(e).__name__}: {e}",
@@ -403,18 +411,25 @@ async def main() -> None:
                   f"({latency}s, stop={entry.get('stop_reason')}) reply={entry['reply_excerpt'][:80]!r}",
                   flush=True)
     cleanup()
+    sys_total: dict[str, int] = {}
+    for r in results:
+        for kind, n in (r.get("system_frames") or {}).items():
+            sys_total[kind] = sys_total.get(kind, 0) + n
     summary = {
         "run_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "run_tag": RUN_TAG,
         "categories": sorted(RETEST_CATEGORIES) if RETEST_CATEGORIES else "ALL",
         "passed": sum(1 for r in results if r["ok"]),
         "total": len(results),
+        "system_frames_total": sys_total,
         "results": results,
     }
     with open(RESULTS_PATH, "w", encoding="utf-8") as f:
         json.dump(summary, f, ensure_ascii=False, indent=2)
     print("=" * 60)
     print(f"验收结果: {summary['passed']}/{summary['total']} 通过")
+    if sys_total:
+        print(f"采集侧系统帧过滤（8.5c-⑤）: {sys_total}")
     for r in results:
         print(f"  {'✅' if r['ok'] else '❌'} {r['category']:<4} {r['latency_s']:>7}s  {r['detail']}")
     print(f"完整结果: {RESULTS_PATH}")
