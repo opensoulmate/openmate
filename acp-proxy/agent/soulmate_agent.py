@@ -152,6 +152,10 @@ from agent.group_orchestrator import (  # 路线图5.3 AI群组任务编排
 from agent.skill_saver import get_skill_saver as _get_skill_saver  # 路线图6.1 技能保存
 from agent.skill_matcher import get_skill_matcher as _get_skill_matcher  # 路线图6.2 技能检索与加载
 from agent.skill_evolver import get_skill_evolver as _get_skill_evolver  # 路线图6.3 技能进化
+from agent.browser_automation import (  # 路线图7.1 浏览器自动化（CDP）
+    BrowserAutomation,
+    get_browser_automation as _get_browser_automation,
+)
 from agent.writer_fence import SessionWriterFence, WriteAction
 from agent.tool_exec_fencing import FileFenceTimeout, file_fence
 from agent.steering import (
@@ -1377,6 +1381,9 @@ class SoulMateAgent:
             # 技能进化（路线图 6.3）：批内同样可用（纯本地文件读写）
             if func_name == "skill_evolve":
                 return self._skill_evolve_dispatch(func_args, session_id)
+            # 浏览器自动化（路线图 7.1）：批内同样可用（CDP 网络IO，需await）
+            if func_name == "browser_act":
+                return await self._browser_dispatch(func_args)
             # kilocode #19 MCP resource三件套：批内同样可用（与主循环同款注入安全层）
             if func_name in MCP_RESOURCE_TOOL_NAMES:
                 return await self._call_mcp_resource_tool(func_name, func_args)
@@ -1960,6 +1967,25 @@ class SoulMateAgent:
             except Exception as e:
                 logger.debug(f"[skill-evolve] 反哺 {slug} 失败(非致命): {e}")
 
+    async def _browser_dispatch(self, func_args: dict, session_id: str = "") -> str:
+        """browser_act 分发（路线图 7.1：浏览器自动化，CDP 后端）。
+
+        主循环与 code-mode 内层共用此入口。动作经 BrowserAutomation 走
+        Chromium 远程调试协议（打开页面/提取/点击/填字/截图/执行JS/关页），
+        全确定性不走 LLM。与 _group_dispatch 同款 lazy-init（__new__ 构造
+        实例未过 __init__ 自举）。动作失败时 BrowserAutomation.act 已把
+        报因文本化（"[错误] …"），不抛穿主循环。
+        """
+        browser = getattr(self, "_browser_automation", None)
+        if browser is None:
+            browser = _get_browser_automation()
+            self._browser_automation = browser
+        action = str(func_args.get("action", "") or "").strip().lower()
+        kwargs = {
+            k: v for k, v in func_args.items() if k != "action"
+        }
+        return await browser.act(action, **kwargs)
+
     def _skill_save_dispatch(self, func_args: dict, session_id: str = "") -> str:
         """skill_save 分发（路线图 6.1：把成功流程写成 SKILL.md）。
 
@@ -2170,6 +2196,7 @@ ACP代理目录: {cwd}/acp-proxy（后端 Python 代码在此）
 - group_task: AI群组任务编排（接 ai-groups 多agent群组：自动分解→按角色分配→并行执行）。需要多agent分工协作的复杂目标（规划→执行→验证→审查）→ group_task(action=orchestrate) 交给群组执行并返回合并报告；查看群组→ action=list_groups；查任务进度→ action=task_status。⚠️ 失败/超时子任务在报告中标注原因，不要当成已完成
 - skill_save: 技能保存（把成功流程写成SKILL.md含触发条件/步骤/坑，存技能库供复用）。刚成功完成多步骤可复用任务、或用户要求"把XX流程保存为技能/记住怎么做"时使用；同名技能默认不覆盖（更新传 overwrite=true）。保存后同类任务命中触发词会自动加载该技能
 - skill_evolve: 技能进化（用执行结果反哺修正技能内容，saved技能库）。查看某技能待应用修正（执行中工具失败/需求遗漏反馈）→ action=pending；把修正合并进技能"坑"分区（revision递增+去重）→ action=apply；反馈统计→ action=stats。用户要求"更新/修正/进化某技能"或发现技能内容与实际执行不符时使用
+- browser_act: 浏览器自动化（CDP直连Chromium：打开网页/提取文本链接/点击/填字/截图/执行JS/关页）。需要操作网页（打开URL看内容、抓取页面文本或链接、点击按钮、填写表单、页面截图）时使用：action=open 打开URL、extract 提取（links=true 抓链接）、click 点击（selector或x+y，真实鼠标事件）、fill 填字（真实输入事件）、screenshot 截图（MEDIA标签发给用户）、eval 执行JS、tabs/close 标签页管理。⚠️ 浏览器未以远程调试模式运行时会显式报启动指引，如实告知用户
 
 You can send files to the user natively: to deliver a file, write a brief confirmation message (e.g. "文件已发送，请查收"), then include MEDIA:/absolute/path/to/file on a new line. The gateway extracts the tag, strips it, and sends the file as a download card. Always write some text before the MEDIA: tag — never output a bare MEDIA: tag alone. Use search_files first if you don't know the exact path. Do NOT paste file contents into chat."""
 
@@ -3241,6 +3268,71 @@ You can send files to the user natively: to deliver a file, write a brief confir
         }]
         builtin_tools.extend(skill_evolve_tool)
 
+        # ── 浏览器自动化工具（路线图 7.1）──────────────────────
+        # CDP 后端：打开页面/提取文本链接/真实鼠标点击/真实输入填字/
+        # 截图/执行JS/关页，全确定性（复现用户真实操作路径）。
+        browser_act_tool = [{
+            "type": "function",
+            "function": {
+                "name": "browser_act",
+                "description": (
+                    "浏览器自动化（CDP 直连 Chromium）：打开网页、提取页面文本/"
+                    "链接、点击元素、填写输入框、截图、执行JS、查看/关闭标签页。"
+                    "action=open 打开URL（同标签页复用）；action=extract 提取文本"
+                    "（selector 选择器，links=true 提取全部链接）；action=click 点击"
+                    "（selector 或 x+y 坐标，真实鼠标事件）；action=fill 填写输入框"
+                    "（selector+text，真实输入事件）；action=screenshot 截图（path "
+                    "可选，默认自动命名，结果带 MEDIA 标签可发给用户）；action=eval "
+                    "执行JS表达式；action=tabs 查看标签页；action=close 关闭标签页。"
+                    "⚠️ 需要 Chromium 以远程调试模式运行（SOULMATE_CDP_URL 可配），"
+                    "不可达时会显式报启动指引"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["open", "tabs", "screenshot", "extract",
+                                     "click", "fill", "eval", "close"],
+                            "description": "要执行的浏览器动作",
+                        },
+                        "url": {
+                            "type": "string",
+                            "description": "要打开的URL（action=open 必填）",
+                        },
+                        "selector": {
+                            "type": "string",
+                            "description": "CSS 选择器（extract/click/fill 用）",
+                        },
+                        "text": {
+                            "type": "string",
+                            "description": "要填入的文本（action=fill 必填）",
+                        },
+                        "expression": {
+                            "type": "string",
+                            "description": "JS 表达式（action=eval 必填）",
+                        },
+                        "path": {
+                            "type": "string",
+                            "description": "截图保存路径 .png（action=screenshot 可选）",
+                        },
+                        "x": {"type": "number", "description": "点击X坐标（click 可选）"},
+                        "y": {"type": "number", "description": "点击Y坐标（click 可选）"},
+                        "links": {
+                            "type": "boolean",
+                            "description": "extract 时提取全部链接而非文本（默认 false）",
+                        },
+                        "tab_id": {
+                            "type": "string",
+                            "description": "标签页id（action=close 可选，缺省当前页）",
+                        },
+                    },
+                    "required": ["action"],
+                },
+            },
+        }]
+        builtin_tools.extend(browser_act_tool)
+
         # 添加进化引擎工具（支持直接对象或HTTP API两种模式）
         evolution_tools = []
         has_evolution = self._evolution_engine is not None or hasattr(self, '_evolution_api_url')
@@ -4254,6 +4346,14 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             # ── 技能进化（路线图 6.3）──────────────────────────
                             try:
                                 result = self._skill_evolve_dispatch(func_args, session_id)
+                            except Exception as e:
+                                te = self._tool_error_handler.handle_error(
+                                    session_id, func_name, e, func_args)
+                                result = te.to_model_message()
+                        elif func_name == "browser_act":
+                            # ── 浏览器自动化（路线图 7.1）──────────────────────
+                            try:
+                                result = await self._browser_dispatch(func_args, session_id)
                             except Exception as e:
                                 te = self._tool_error_handler.handle_error(
                                     session_id, func_name, e, func_args)
