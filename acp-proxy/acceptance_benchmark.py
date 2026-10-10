@@ -87,23 +87,22 @@ def verify_ops(reply: str) -> tuple[bool, str]:
     return ok, f"回复含8090={'是' if '8090' in reply else '否'}、磁盘信息={'是' if ('%' in reply or '磁盘' in reply) else '否'}"
 
 
-# 自报不可用的否定/引用语境（周期#41实证：正确回答里"不存在'不可用'情况、
-# 无需声明不可用"等引用/否定措辞也含裸子串"不可用"，裸子串判据会假阴性杀掉正确回答）
-_NEG_CONTEXT = ("不存在", "并非", "不是", "无需", "未", "没有", "无该", "排除")
+# 自报搜索不可用=真实声称，判据=主语邻接（确定性规则，周期#41两轮实证收敛）：
+# "web_search 工具不可用"/"搜索工具不可用"（主体与"不可用"间≤6字且不在引号内）才算；
+# 引用/抽象提及（'因此"不可用时…'、'不存在"不可用"情况'、'无需声明不可用'）不计——
+# 模型会引用提示语里的"不可用"字样，裸子串判据会假阴性杀掉正确回答。
+_UNAVAIL_CLAIM_RE = re.compile(
+    r"(web_search|web_extract|搜索工具|搜索后端|搜索功能|搜索|工具)"
+    r"[^\n。；！？\"'“”‘’]{0,6}不可用"
+)
 
 
 def verify_research(reply: str) -> tuple[bool, str]:
     text = reply or ""
-    # 自报不可用=真实声称（不含否定/引用语境）；确定性规则：看"不可用"前8字有无否定词
-    claim = False
-    for m in re.finditer("不可用", text):
-        before = text[max(0, m.start() - 8): m.start()]
-        if not any(n in before for n in _NEG_CONTEXT):
-            claim = True
-            break
+    claim = bool(_UNAVAIL_CLAIM_RE.search(text))
     ok = "3.13" in text and len(text) > 30 and not claim
     return ok, (f"回复含'3.13'={'是' if '3.13' in text else '否'}、"
-                f"自报搜索不可用={'是' if claim else '否'}（否定/引用语境不计）、"
+                f"自报搜索不可用={'是' if claim else '否'}（主语邻接判据，引用不计）、"
                 f"长度{len(text)}字")
 
 
