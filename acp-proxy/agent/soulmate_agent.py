@@ -164,6 +164,10 @@ from agent.voice_generator import (  # 路线图7.3 TTS/语音（文本→mp3）
     VoiceGenerator,
     get_voice_generator as _get_voice_generator,
 )
+from agent.image_generator import (  # 路线图7.4 图像生成/编辑
+    ImageGenerator,
+    get_image_generator as _get_image_generator,
+)
 from agent.writer_fence import SessionWriterFence, WriteAction
 from agent.tool_exec_fencing import FileFenceTimeout, file_fence
 from agent.steering import (
@@ -1398,6 +1402,9 @@ class SoulMateAgent:
             # TTS语音（路线图 7.3）：批内同样可用（edge-tts/espeak 子进程+本地文件写）
             if func_name == "text_to_speech":
                 return self._tts_dispatch(func_args, session_id)
+            # 图像生成/编辑（路线图 7.4）：批内同样可用（Pillow 本地绘制+文件写）
+            if func_name == "image_act":
+                return self._image_dispatch(func_args, session_id)
             # kilocode #19 MCP resource三件套：批内同样可用（与主循环同款注入安全层）
             if func_name in MCP_RESOURCE_TOOL_NAMES:
                 return await self._call_mcp_resource_tool(func_name, func_args)
@@ -2047,6 +2054,43 @@ class SoulMateAgent:
             engine=func_args.get("engine", "auto"),
         )
 
+    def _image_dispatch(self, func_args: dict, session_id: str = "") -> str:
+        """image_act 分发（路线图 7.4：图像生成/编辑）。
+
+        主循环与 code-mode 内层共用此入口（Pillow 本地绘制 + 本地文件写，
+        无需 await）。生成/编辑全确定性不走 LLM；校验/依赖/绘制失败时
+        ImageGenerator 各方法已把报因文本化（"[错误] …"），不抛穿主循环。
+        与 _tts_dispatch 同款 lazy-init（__new__ 裸实例零感知）。
+        """
+        gen = getattr(self, "_image_generator", None)
+        if gen is None:
+            gen = _get_image_generator()
+            self._image_generator = gen
+        action = str(func_args.get("action") or "create").strip().lower()
+        if action == "create":
+            return gen.create(
+                width=func_args.get("width", 1024),
+                height=func_args.get("height", 768),
+                background=func_args.get("background"),
+                title=func_args.get("title"),
+                body=func_args.get("body"),
+                text_color=func_args.get("text_color"),
+                font=func_args.get("font"),
+                path=func_args.get("path"),
+            )
+        if action == "edit":
+            return gen.edit(
+                func_args.get("source"),
+                ops=func_args.get("ops"),
+                path=func_args.get("path"),
+                font=func_args.get("font"),
+            )
+        if action == "info":
+            return gen.info(func_args.get("source"))
+        return (
+            f"[错误] 图像操作失败: 未知 action: {action!r}"
+            f"（支持: create/edit/info）")
+
     def _skill_save_dispatch(self, func_args: dict, session_id: str = "") -> str:
         """skill_save 分发（路线图 6.1：把成功流程写成 SKILL.md）。
 
@@ -2260,6 +2304,7 @@ ACP代理目录: {cwd}/acp-proxy（后端 Python 代码在此）
 - browser_act: 浏览器自动化（CDP直连Chromium：打开网页/提取文本链接/点击/填字/截图/执行JS/关页）。需要操作网页（打开URL看内容、抓取页面文本或链接、点击按钮、填写表单、页面截图）时使用：action=open 打开URL、extract 提取（links=true 抓链接）、click 点击（selector或x+y，真实鼠标事件）、fill 填字（真实输入事件）、screenshot 截图（MEDIA标签发给用户）、eval 执行JS、tabs/close 标签页管理。⚠️ 浏览器未以远程调试模式运行时会显式报启动指引，如实告知用户
 - doc_generate: 文档生成（docx/pdf/xlsx，确定性）。需要生成 Word/PDF/Excel 文件时使用：format=docx（title+content段落+tables表格）、format=pdf（同docx内容，LibreOffice转换，中文可选中）、format=xlsx（sheets=[{{name,rows}}]多表数据）。成功结果带MEDIA标签可发给用户；失败显式报因（校验拒绝/依赖缺失），如实告知用户
 - text_to_speech: 语音合成（文本→mp3音频，确定性）。用户要求"读出来/语音/朗读/TTS"或需要把文字转成语音发给用户时使用：text 必填、voice 音色可选（预设 xiaoxiao/yunxi/xiaoyi/yunjian/jenny/aria/nanami/sunhi 或 *Neural 原始名）、rate 语速可选（-50..+50）、path 输出路径可选（缺省自动命名，仅允许 $HOME 与 /tmp 下）。成功结果带MEDIA标签发给用户；失败显式报因（校验拒绝/依赖缺失/合成失败），如实告知用户
+- image_act: 图像生成/编辑（确定性）。用户要求"生成图片/做张图/加水印/裁剪/缩放/旋转/调亮度/图片转格式"时使用：action=create 生成画布+标题/正文文本卡（background 纯色或 gradient:色1:色2 渐变）、action=edit 对已有图像做有序操作链 ops（resize/crop/rotate/flip/brightness/contrast/watermark）、action=info 查询图像信息。path 输出路径可选（扩展名 .png/.jpg/.jpeg/.webp/.bmp 决定格式）。成功结果带MEDIA标签发给用户；失败显式报因（参数校验拒绝/依赖缺失/绘制失败），如实告知用户
 
 You can send files to the user natively: to deliver a file, write a brief confirmation message (e.g. "文件已发送，请查收"), then include MEDIA:/absolute/path/to/file on a new line. The gateway extracts the tag, strips it, and sends the file as a download card. Always write some text before the MEDIA: tag — never output a bare MEDIA: tag alone. Use search_files first if you don't know the exact path. Do NOT paste file contents into chat."""
 
@@ -3530,6 +3575,88 @@ You can send files to the user natively: to deliver a file, write a brief confir
         }]
         builtin_tools.extend(text_to_speech_tool)
 
+        # ── 图像生成/编辑工具（路线图 7.4）────────────────────────
+        # Pillow 确定性绘制/编辑：create 画布+文本卡 / edit 操作链 / info 查询。
+        image_act_tool = [{
+            "type": "function",
+            "function": {
+                "name": "image_act",
+                "description": (
+                    "图像生成/编辑（确定性）：action=create 生成纯色/渐变画布+标题/"
+                    "正文文本卡；action=edit 对已有图像做有序操作链（resize/crop/"
+                    "rotate/flip/brightness/contrast/watermark）；action=info 查询"
+                    "图像信息。path 输出路径可选（缺省自动命名，仅允许 $HOME 与 /tmp "
+                    "下，扩展名 .png/.jpg/.jpeg/.webp/.bmp 决定输出格式）。成功结果"
+                    "带 MEDIA 标签可把图片发给用户。⚠️ 失败会显式报因（参数校验拒绝、"
+                    "依赖缺失、绘制失败），绝不静默"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["create", "edit", "info"],
+                            "description": "操作类型（缺省 create）",
+                        },
+                        "width": {
+                            "type": "integer",
+                            "description": "create：画布宽度（缺省 1024）",
+                        },
+                        "height": {
+                            "type": "integer",
+                            "description": "create：画布高度（缺省 768）",
+                        },
+                        "background": {
+                            "type": "string",
+                            "description": (
+                                "create：背景。纯色 #hex/rgb()/颜色名，或渐变 "
+                                "gradient:<颜色1>:<颜色2>（缺省纯白）"),
+                        },
+                        "title": {
+                            "type": "string",
+                            "description": "create：标题文本（可选，自动换行）",
+                        },
+                        "body": {
+                            "type": "string",
+                            "description": "create：正文文本（可选，自动换行）",
+                        },
+                        "text_color": {
+                            "type": "string",
+                            "description": "create：文本颜色（可选，缺省白色）",
+                        },
+                        "source": {
+                            "type": "string",
+                            "description": "edit/info：输入图像路径（$HOME 与 /tmp 下）",
+                        },
+                        "ops": {
+                            "type": "array",
+                            "description": (
+                                "edit：有序操作列表（≤20步），如 "
+                                "[{\"op\":\"resize\",\"width\":800,\"height\":600},"
+                                "{\"op\":\"watermark\",\"text\":\"水印\",\"position\":"
+                                "\"bottom-right\"}]；支持 resize/crop/rotate/flip/"
+                                "brightness/contrast/watermark"),
+                            "items": {"type": "object"},
+                        },
+                        "path": {
+                            "type": "string",
+                            "description": (
+                                "输出文件路径（可选，缺省自动命名 .png；扩展名决定"
+                                "输出格式）"),
+                        },
+                        "font": {
+                            "type": "string",
+                            "description": (
+                                "文本渲染字体路径（可选，缺省自动搜索中文字体；"
+                                "也可用 SOULMATE_IMAGE_FONT 配置）"),
+                        },
+                    },
+                    "required": [],
+                },
+            },
+        }]
+        builtin_tools.extend(image_act_tool)
+
         # 添加进化引擎工具（支持直接对象或HTTP API两种模式）
         evolution_tools = []
         has_evolution = self._evolution_engine is not None or hasattr(self, '_evolution_api_url')
@@ -4567,6 +4694,14 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             # ── TTS语音合成（路线图 7.3）───────────────────────
                             try:
                                 result = self._tts_dispatch(func_args, session_id)
+                            except Exception as e:
+                                te = self._tool_error_handler.handle_error(
+                                    session_id, func_name, e, func_args)
+                                result = te.to_model_message()
+                        elif func_name == "image_act":
+                            # ── 图像生成/编辑（路线图 7.4）─────────────────────
+                            try:
+                                result = self._image_dispatch(func_args, session_id)
                             except Exception as e:
                                 te = self._tool_error_handler.handle_error(
                                     session_id, func_name, e, func_args)
