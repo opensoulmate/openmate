@@ -160,6 +160,10 @@ from agent.doc_generator import (  # 路线图7.2 文档生成（docx/pdf/xlsx�
     DocGenerator,
     get_doc_generator as _get_doc_generator,
 )
+from agent.voice_generator import (  # 路线图7.3 TTS/语音（文本→mp3）
+    VoiceGenerator,
+    get_voice_generator as _get_voice_generator,
+)
 from agent.writer_fence import SessionWriterFence, WriteAction
 from agent.tool_exec_fencing import FileFenceTimeout, file_fence
 from agent.steering import (
@@ -1391,6 +1395,9 @@ class SoulMateAgent:
             # 文档生成（路线图 7.2）：批内同样可用（本地文件写+soffice子进程）
             if func_name == "doc_generate":
                 return self._doc_dispatch(func_args, session_id)
+            # TTS语音（路线图 7.3）：批内同样可用（edge-tts/espeak 子进程+本地文件写）
+            if func_name == "text_to_speech":
+                return self._tts_dispatch(func_args, session_id)
             # kilocode #19 MCP resource三件套：批内同样可用（与主循环同款注入安全层）
             if func_name in MCP_RESOURCE_TOOL_NAMES:
                 return await self._call_mcp_resource_tool(func_name, func_args)
@@ -2019,6 +2026,27 @@ class SoulMateAgent:
             sheets=func_args.get("sheets"),
         )
 
+    def _tts_dispatch(self, func_args: dict, session_id: str = "") -> str:
+        """text_to_speech 分发（路线图 7.3：TTS 语音合成 text→mp3）。
+
+        主循环与 code-mode 内层共用此入口（edge-tts 线程内 asyncio.run +
+        espeak-ng 子进程兜底 + 本地文件写，无需 await）。合成全确定性不走 LLM；
+        校验/依赖/合成失败时 VoiceGenerator.synthesize 已把报因文本化
+        （"[错误] …"），不抛穿主循环。与 _doc_dispatch 同款 lazy-init
+        （__new__ 裸实例零感知）。
+        """
+        gen = getattr(self, "_voice_generator", None)
+        if gen is None:
+            gen = _get_voice_generator()
+            self._voice_generator = gen
+        return gen.synthesize(
+            func_args.get("text"),
+            path=func_args.get("path"),
+            voice=func_args.get("voice"),
+            rate=func_args.get("rate"),
+            engine=func_args.get("engine", "auto"),
+        )
+
     def _skill_save_dispatch(self, func_args: dict, session_id: str = "") -> str:
         """skill_save 分发（路线图 6.1：把成功流程写成 SKILL.md）。
 
@@ -2231,6 +2259,7 @@ ACP代理目录: {cwd}/acp-proxy（后端 Python 代码在此）
 - skill_evolve: 技能进化（用执行结果反哺修正技能内容，saved技能库）。查看某技能待应用修正（执行中工具失败/需求遗漏反馈）→ action=pending；把修正合并进技能"坑"分区（revision递增+去重）→ action=apply；反馈统计→ action=stats。用户要求"更新/修正/进化某技能"或发现技能内容与实际执行不符时使用
 - browser_act: 浏览器自动化（CDP直连Chromium：打开网页/提取文本链接/点击/填字/截图/执行JS/关页）。需要操作网页（打开URL看内容、抓取页面文本或链接、点击按钮、填写表单、页面截图）时使用：action=open 打开URL、extract 提取（links=true 抓链接）、click 点击（selector或x+y，真实鼠标事件）、fill 填字（真实输入事件）、screenshot 截图（MEDIA标签发给用户）、eval 执行JS、tabs/close 标签页管理。⚠️ 浏览器未以远程调试模式运行时会显式报启动指引，如实告知用户
 - doc_generate: 文档生成（docx/pdf/xlsx，确定性）。需要生成 Word/PDF/Excel 文件时使用：format=docx（title+content段落+tables表格）、format=pdf（同docx内容，LibreOffice转换，中文可选中）、format=xlsx（sheets=[{{name,rows}}]多表数据）。成功结果带MEDIA标签可发给用户；失败显式报因（校验拒绝/依赖缺失），如实告知用户
+- text_to_speech: 语音合成（文本→mp3音频，确定性）。用户要求"读出来/语音/朗读/TTS"或需要把文字转成语音发给用户时使用：text 必填、voice 音色可选（预设 xiaoxiao/yunxi/xiaoyi/yunjian/jenny/aria/nanami/sunhi 或 *Neural 原始名）、rate 语速可选（-50..+50）、path 输出路径可选（缺省自动命名，仅允许 $HOME 与 /tmp 下）。成功结果带MEDIA标签发给用户；失败显式报因（校验拒绝/依赖缺失/合成失败），如实告知用户
 
 You can send files to the user natively: to deliver a file, write a brief confirmation message (e.g. "文件已发送，请查收"), then include MEDIA:/absolute/path/to/file on a new line. The gateway extracts the tag, strips it, and sends the file as a download card. Always write some text before the MEDIA: tag — never output a bare MEDIA: tag alone. Use search_files first if you don't know the exact path. Do NOT paste file contents into chat."""
 
@@ -3449,6 +3478,58 @@ You can send files to the user natively: to deliver a file, write a brief confir
         }]
         builtin_tools.extend(doc_generate_tool)
 
+        # ── TTS语音合成工具（路线图 7.3）────────────────────────
+        # 文本→mp3 语音（edge-tts 主引擎 + espeak-ng 离线兜底），确定性生成。
+        text_to_speech_tool = [{
+            "type": "function",
+            "function": {
+                "name": "text_to_speech",
+                "description": (
+                    "语音合成（文本→mp3 音频，确定性）：把文字转成语音文件发给用户。"
+                    "text 必填；voice 音色可选（预设 xiaoxiao/yunxi/xiaoyi/yunjian/"
+                    "jenny/aria/nanami/sunhi 或 *Neural 原始名）；rate 语速可选"
+                    "（-50..+50 相对基准百分比）；path 输出路径可选（缺省自动命名，"
+                    "仅允许 $HOME 与 /tmp 下，扩展名统一 .mp3）。成功结果带 MEDIA 标签"
+                    "可把音频发给用户。⚠️ 失败会显式报因（文本/音色/语速/路径校验拒绝、"
+                    "依赖缺失、合成失败），绝不静默"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "text": {
+                            "type": "string",
+                            "description": "要转成语音的文本（必填）",
+                        },
+                        "voice": {
+                            "type": "string",
+                            "description": (
+                                "音色（可选）：预设 xiaoxiao/yunxi/xiaoyi/yunjian/"
+                                "jenny/aria/nanami/sunhi 或 *Neural 原始名；缺省 xiaoxiao"),
+                        },
+                        "rate": {
+                            "type": "number",
+                            "description": "语速（可选，-50..+50 相对基准百分比；缺省 0）",
+                        },
+                        "path": {
+                            "type": "string",
+                            "description": (
+                                "输出文件路径（可选，缺省自动命名 .mp3；"
+                                "仅允许 $HOME 与 /tmp 下）"),
+                        },
+                        "engine": {
+                            "type": "string",
+                            "enum": ["auto", "edge", "espeak"],
+                            "description": (
+                                "合成引擎（可选）：auto=edge-tts 失败自动换离线兜底"
+                                "（默认）、edge=只用 edge-tts、espeak=只用离线兜底"),
+                        },
+                    },
+                    "required": ["text"],
+                },
+            },
+        }]
+        builtin_tools.extend(text_to_speech_tool)
+
         # 添加进化引擎工具（支持直接对象或HTTP API两种模式）
         evolution_tools = []
         has_evolution = self._evolution_engine is not None or hasattr(self, '_evolution_api_url')
@@ -4478,6 +4559,14 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             # ── 文档生成（路线图 7.2）──────────────────────────
                             try:
                                 result = self._doc_dispatch(func_args, session_id)
+                            except Exception as e:
+                                te = self._tool_error_handler.handle_error(
+                                    session_id, func_name, e, func_args)
+                                result = te.to_model_message()
+                        elif func_name == "text_to_speech":
+                            # ── TTS语音合成（路线图 7.3）───────────────────────
+                            try:
+                                result = self._tts_dispatch(func_args, session_id)
                             except Exception as e:
                                 te = self._tool_error_handler.handle_error(
                                     session_id, func_name, e, func_args)
