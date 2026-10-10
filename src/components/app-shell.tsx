@@ -1,5 +1,6 @@
 "use client";
 import { Plus, Trash2 } from "lucide-react";
+import { SOULMATE_LOGO, SOULMATE_ICON } from "@/lib/agent-brand";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -234,7 +235,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     // SoulMate (OpenMate platform) ALWAYS shows first
     const soulmateSessions = agentSessionMap['soulmate'] || [];
     agentMap.set('soulmate', {
-      id: 'soulmate', name: 'SoulMate', icon: '💫', logo: '/soulmate.svg', description: 'OpenMate Platform',
+      id: 'soulmate', name: 'SoulMate', icon: SOULMATE_ICON, logo: SOULMATE_LOGO, description: 'OpenMate Platform',
       installed: true, available: true, sessions: soulmateSessions,
       expanded: false, sourceGroups: buildSourceGroups(soulmateSessions, 'soulmate'),
     });

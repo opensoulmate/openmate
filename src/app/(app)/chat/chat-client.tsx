@@ -1,5 +1,6 @@
 'use client';
 import MarkdownContent from "@/components/markdown-content";
+import { SOULMATE_LOGO, SOULMATE_ICON } from "@/lib/agent-brand";
 import { SecretScanBadge } from "@/components/secret-scan-badge";
 import { MemoryMarkerBadge, type MemoryMarker } from "@/components/memory-marker-badge";
 import { MultiFileDiff, type FileChange } from "@/components/multi-file-diff";
@@ -1806,7 +1807,8 @@ export function ChatClient() {
       const minimalAgent: AgentInfo = {
         id: activeAgentIdFromStore || 'soulmate', // SoulMate 的 activeAgentId 为 null，fallback 到 'soulmate'
         name: storeAgentName,
-        icon: storeAgentIcon || '🤖',
+        icon: storeAgentIcon || SOULMATE_ICON,
+        logo: (!activeAgentIdFromStore || activeAgentIdFromStore === 'soulmate') ? SOULMATE_LOGO : undefined,
         description: '',
         installed: true,
         sessions: [],
@@ -2023,7 +2025,11 @@ export function ChatClient() {
             <button onClick={(e) => { e.stopPropagation(); toggleSidebar(); if (isMobile) { setRightPanelOpen(false); setShowCheckpoints(false); } }} className="shrink-0 p-2 hover:bg-muted/50 active:bg-muted transition-colors text-muted-foreground touch-manipulation" aria-label="Toggle Sidebar">
               <PanelLeft className="w-4 h-4" />
             </button>
-            {(selectedAgent || storeAgentIcon) && <span className="text-sm shrink-0">{selectedAgent?.icon || storeAgentIcon}</span>}
+            {(selectedAgent || storeAgentIcon) && (
+              (selectedAgent?.logo || (!selectedAgent && SOULMATE_LOGO))
+                ? <img src={selectedAgent?.logo || SOULMATE_LOGO} alt={selectedAgent?.name || 'SoulMate'} className="w-5 h-5 rounded object-contain shrink-0" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                : <span className="text-sm shrink-0">{selectedAgent?.icon || storeAgentIcon}</span>
+            )}
             <div className="min-w-0 flex-1">
               {editingTitle ? (
                 <input
