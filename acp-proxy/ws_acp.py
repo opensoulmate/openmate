@@ -20,6 +20,8 @@ from uuid import UUID
 import jwt
 import websockets
 from starlette.websockets import WebSocket, WebSocketDisconnect
+from fastapi import APIRouter
+import select
 
 logger = logging.getLogger("acp-proxy.ws_acp")
 
@@ -48,11 +50,19 @@ JWT_ALGORITHM = "HS256"
 # soulmate/default用sys.executable（proxy自身解释器=依赖齐全的venv python）：
 # 裸"python"在systemd环境下解析到系统python3.14（无aiohttp等依赖）→ agent子进程import即死
 AGENT_ROUTES = {
-    "soulmate": {"cmd": [sys.executable, "-m", "agent.start", "--stdio"], "cwd": _ACPPROXY_DIR},
-    "hermes": {"cmd": ["hermes", "acp"], "cwd": _USER_HOME},
-    "openclaw": {"cmd": ["openclaw", "acp"], "cwd": _USER_HOME},
-    "opencode": {"cmd": ["opencode", "acp"], "cwd": _USER_HOME},
-    "mimo": {"cmd": ["mimo", "acp"], "cwd": _USER_HOME},
+    # 原生 ACP（各自独立的大脑）
+    "soulmate":  {"cmd": [sys.executable, "-m", "agent.start", "--stdio"], "cwd": _ACPPROXY_DIR},
+    "hermes":    {"cmd": ["hermes", "acp"], "cwd": _USER_HOME},
+    "mimo":  {"cmd": ["mimo", "acp"], "cwd": _USER_HOME},
+    "opencode":  {"cmd": ["opencode", "acp"], "cwd": _USER_HOME},
+    # 自研适配器（ollama 无生态桥，已实测可用）
+    "ollama":    {"cmd": [sys.executable, "-m", "agent.ollama_acp"], "cwd": _ACPPROXY_DIR},
+    # 生态标准 ACP 桥包（AionUi 同款姿势：不逐一自写，用官方/社区桥）
+    "codex":       {"cmd": ["npx", "-y", "@zed-industries/codex-acp@0.16.0"], "cwd": _USER_HOME, "probe_timeout": 30},
+    "pi":          {"cmd": ["npx", "-y", "pi-acp@0.0.34"], "cwd": _USER_HOME, "probe_timeout": 30},
+    "claude-code": {"cmd": ["npx", "-y", "@agentclientprotocol/claude-agent-acp@0.89.1"], "cwd": _USER_HOME, "probe_timeout": 30},
+    # OpenClaw：自带ACP桥到其Gateway（探测/使用需gateway在线）
+    "openclaw":  {"cmd": ["openclaw", "acp"], "cwd": _USER_HOME},
 }
 
 # 默认路由
@@ -631,3 +641,102 @@ async def ws_acp_endpoint(client_ws: WebSocket):
         await client_ws.close(code=1000, reason="session ended")
     except Exception:
         pass
+
+
+# ============================================================
+# Agent 注册表 + 能力探测 HTTP 端点（注册表=唯一真源；
+# "测试连接"=真ACP握手，状态徽章不说谎；曾被git还原抹掉，已固化）
+# ============================================================
+agents_router = APIRouter()
+
+
+@agents_router.get("/agents")
+async def list_agents():
+    """注册表=唯一真源：返回已注册agent及其二进制安装状态。"""
+    import shutil as _sh
+    out = []
+    for aid, route in AGENT_ROUTES.items():
+        cmd = route["cmd"]
+        first = cmd[0]
+        # npx 桥包：检查 npm 生态而非本地二进制
+        if first in ("npx", "bun"):
+            installed = True  # 桥包按需下载
+        else:
+            installed = bool(_sh.which(first)) or first == sys.executable
+        out.append({"id": aid, "cmd": cmd, "installed": installed})
+    return {"agents": out}
+
+
+def _probe_agent(cmd: list) -> dict:
+    """真 ACP 能力探测：PTY 拉起 → 发 initialize → 认 JSON-RPC 应答（ACPen，不是"装没装"）。
+    支持 per-route probe_timeout（npx 桥包首次下载慢，30秒）。"""
+    import pty, termios
+    timeout = 8.0
+    for route in AGENT_ROUTES.values():
+        if route.get("cmd") == cmd:
+            timeout = float(route.get("probe_timeout", 8))
+            break
+    pid, fd = pty.fork()
+    if pid == 0:
+        try:
+            os.chdir(_USER_HOME)
+            os.execvp(cmd[0], cmd)
+        except Exception:
+            os._exit(127)
+    try:
+        attrs = termios.tcgetattr(fd)
+        attrs[3] &= ~termios.ECHO
+        termios.tcsetattr(fd, termios.TCSANOW, attrs)
+    except Exception:
+        pass
+    init = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                       "params": {"protocolVersion": 1}}) + "\n"
+    try:
+        os.write(fd, init.encode())
+    except Exception:
+        pass
+    out = b""
+    start = time.time()
+    while time.time() - start < timeout:
+        r, _, _ = select.select([fd], [], [], 0.5)
+        if r:
+            try:
+                chunk = os.read(fd, 8192)
+            except Exception:
+                break
+            if not chunk:
+                break
+            out += chunk
+            for line in out.splitlines():
+                if b'"jsonrpc"' in line and b'"result"' in line:
+                    os.close(fd)
+                    try:
+                        os.kill(pid, 9)
+                    except Exception:
+                        pass
+                    return {"ok": True, "detail": "ACP handshake OK"}
+    try:
+        os.close(fd)
+        os.kill(pid, 9)
+    except Exception:
+        pass
+    # 拉起失败 vs 起来了但不答 ACP
+    detail = "no ACP response (not an ACP agent)"
+    if not out:
+        detail = "spawn failed or no output"
+    return {"ok": False, "detail": detail}
+
+
+@agents_router.post("/agents/probe")
+async def probe_agent(payload: dict):
+    """对某个 agent 做真 ACP 握手探测（"测试连接"按钮的真身）。
+    payload: {agent_id?, cmd?: [..]} — 未注册的agent可显式给cmd探测。"""
+    agent_id = payload.get("agent_id", "")
+    cmd = payload.get("cmd")
+    if not cmd:
+        route = AGENT_ROUTES.get(agent_id)
+        if not route:
+            return {"agent_id": agent_id, "ok": False, "detail": "no command"}
+        cmd = route["cmd"]
+    result = await asyncio.to_thread(_probe_agent, cmd)
+    return {"agent_id": agent_id, "cmd": cmd, **result}
