@@ -154,6 +154,7 @@ from agent.group_orchestrator import (  # 路线图5.3 AI群组任务编排
 )
 from agent.skill_saver import get_skill_saver as _get_skill_saver  # 路线图6.1 技能保存
 from agent.browser_tools import BrowserTools  # 路线图7.1 浏览器自动化（Playwright/CDP）
+from agent.docgen_tools import DocGenTools  # 路线图7.2 文档生成（docx/pdf/xlsx）
 from agent.writer_fence import SessionWriterFence, WriteAction
 from agent.tool_exec_fencing import FileFenceTimeout, file_fence
 from agent.steering import (
@@ -1404,6 +1405,9 @@ class SoulMateAgent:
             # 浏览器自动化（路线图 7.1）：批内同样可用（有界子进程调用）
             if func_name == "browser":
                 return self._browser_dispatch(func_args, session_id)
+            # 文档生成（路线图 7.2）：批内同样可用（纯本地文件写 + 有界转换）
+            if func_name == "document":
+                return self._document_dispatch(func_args, session_id)
             # kilocode #19 MCP resource三件套：批内同样可用（与主循环同款注入安全层）
             if func_name in MCP_RESOURCE_TOOL_NAMES:
                 return await self._call_mcp_resource_tool(func_name, func_args)
@@ -1855,6 +1859,22 @@ class SoulMateAgent:
         except Exception as e:
             return f"[错误] 群组任务编排失败: {type(e).__name__}: {e}"
 
+    def _document_dispatch(self, func_args: dict, session_id: str = "") -> str:
+        """document 工具分发（路线图 7.2：文档生成 docx/pdf/xlsx）。
+
+        主循环与 code-mode 内层共用此入口（纯本地文件写 + 有界 LibreOffice
+        转换）。依赖缺失/转换失败由 DocGenTools 显式报因禁静默。
+        与 _browser_dispatch 同款 lazy-init（__new__ 裸实例零感知）。
+        """
+        tools = getattr(self, "_docgen_tools_inst", None)
+        if tools is None:
+            tools = DocGenTools()
+            self._docgen_tools_inst = tools
+        fmt = str(func_args.get("format", "") or "").strip().lower()
+        params = {k: v for k, v in func_args.items()
+                  if k != "format" and v is not None}
+        return tools.run(fmt, params)
+
     def _browser_dispatch(self, func_args: dict, session_id: str = "") -> str:
         """browser 工具分发（路线图 7.1：浏览器自动化 Playwright/CDP）。
 
@@ -2087,7 +2107,7 @@ ACP代理目录: {cwd}/acp-proxy（后端 Python 代码在此）
 - message_send: 统一消息出站（OpenMate/微信同一入口，支持media图片/文件附件收发）。channel='wechat'发给微信peer（拆块+限流），channel='openmate'落库到指定会话（正连前端实时可见）。用户要求"给某微信用户发消息/发文件发图片/通知某会话/主动推送"时使用；对方发来图片/截图时按消息内媒体提示块用vision_analyze/read_image理解（截图理解）
 - delegate_tasks: 子代理并行执行（拆分任务给并行worker，父代理收尾合并）。多个互不依赖的独立子任务（多路调研/多个互不依赖的问题/多份互不依赖的检查）→ delegate_tasks 拆给并行子代理并发执行（2-8个），合并结果后由你收尾总结论。⚠️ 有先后依赖的任务不要拆（会并行跑）；每个子任务 goal 必须自包含（子代理看不到当前对话，必要背景写进 goal/context）；失败/超时的子任务会在结果里标注原因，收尾时如实反映不要当成已完成
 - group_task: AI群组任务编排（接 ai-groups 多agent群组：自动分解→按角色分配→并行执行）。需要多agent分工协作的复杂目标（规划→执行→验证→审查）→ group_task(action=orchestrate) 交给群组执行并返回合并报告；查看群组→ action=list_groups；查任务进度→ action=task_status。⚠️ 失败/超时子任务在报告中标注原因，不要当成已完成
-- skill_save: 技能保存（把成功流程写成SKILL.md含触发条件/步骤/坑，存技能库供复用）。刚成功完成多步骤可复用任务、或用户要求"把XX流程保存为技能/记住怎么做"时使用；同名技能默认不覆盖（更新传 overwrite=true）。保存后同类任务命中触发词会自动加载该技能\n- browser: 浏览器自动化（Playwright/CDP，真实浏览器会话）。action=goto 打开URL / snapshot 读页面标题+正文+链接 / click 点元素 / type 输入（submit=true回车）/ fill 清空填入 / eval 执行JS / screenshot 截图（返回文件路径可MEDIA下发）/ back 后退 / close 关闭会话。selector 用 CSS 选择器。需要看页面真实渲染内容、登录态页面、自动化网页操作时使用；纯静态网页抓取优先 web_extract。⚠️ 页面过长截断并自报；失败返回具体原因；页面状态跨调用保留（连续操作无需重复goto）\n
+- skill_save: 技能保存（把成功流程写成SKILL.md含触发条件/步骤/坑，存技能库供复用）。刚成功完成多步骤可复用任务、或用户要求"把XX流程保存为技能/记住怎么做"时使用；同名技能默认不覆盖（更新传 overwrite=true）。保存后同类任务命中触发词会自动加载该技能\n- browser: 浏览器自动化（Playwright/CDP，真实浏览器会话）。action=goto 打开URL / snapshot 读页面标题+正文+链接 / click 点元素 / type 输入（submit=true回车）/ fill 清空填入 / eval 执行JS / screenshot 截图（返回文件路径可MEDIA下发）/ back 后退 / close 关闭会话。selector 用 CSS 选择器。需要看页面真实渲染内容、登录态页面、自动化网页操作时使用；纯静态网页抓取优先 web_extract。⚠️ 页面过长截断并自报；失败返回具体原因；页面状态跨调用保留（连续操作无需重复goto）\n- document: 文档生成（docx/pdf/xlsx，输出真实文件返回 MEDIA: 路径可直接下发）。format=docx|pdf 时 content 传块列表（heading/paragraph/bullet/table/pagebreak），format=xlsx 时传 sheets:[{{name, rows}}]。需要交付正式文档/报表/表格文件时使用；纯文本回答不需要生成文件\n
 You can send files to the user natively: to deliver a file, write a brief confirmation message (e.g. "文件已发送，请查收"), then include MEDIA:/absolute/path/to/file on a new line. The gateway extracts the tag, strips it, and sends the file as a download card. Always write some text before the MEDIA: tag — never output a bare MEDIA: tag alone. Use search_files first if you don't know the exact path. Do NOT paste file contents into chat."""
 
     async def _run_llm_with_tools(
@@ -3132,6 +3152,61 @@ You can send files to the user natively: to deliver a file, write a brief confir
         }]
         builtin_tools.extend(browser_tool)
 
+        # ── 文档生成工具（路线图 7.2：docx/pdf/xlsx）─────────────────
+        # 确定性生成（结构化 spec → 真实文件，不猜排版）；依赖缺失/转换失败
+        # 显式报因禁静默。输出落 ~/.hermes/soulmate/documents/，返回 MEDIA: 路径。
+        document_tool = [{
+            "type": "function",
+            "function": {
+                "name": "document",
+                "description": (
+                    "文档生成（docx/pdf/xlsx，确定性排版，输出真实文件并返回 "
+                    "MEDIA: 路径可直接下发）。format 取值：docx（Word 文档，content "
+                    "块列表）/ xlsx（Excel 表格，sheets 列表）/ pdf（先生成同款 docx "
+                    "再 LibreOffice 转换，中文友好）。docx/pdf 的 content 块类型："
+                    "heading{level,text} / paragraph{text} / bullet{text} / "
+                    "table{rows:[[...]]} / pagebreak；可选 title 作大标题。"
+                    "xlsx 的 sheets:[{name, rows:[[...]]}]，首行默认加粗表头"
+                    "（header_bold=false 关闭），也可只传 rows 单表。"
+                    "filename 可省略（自动命名），只允许文件名本身不含路径。"
+                    "需要交付正式文档/报表/表格文件时使用。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "format": {
+                            "type": "string",
+                            "enum": ["docx", "xlsx", "pdf"],
+                            "description": "文档格式",
+                        },
+                        "title": {"type": "string",
+                                  "description": "文档大标题（docx/pdf，可选）"},
+                        "content": {
+                            "type": "array",
+                            "items": {"type": "object"},
+                            "description": (
+                                "docx/pdf 内容块列表：{type: heading|paragraph|"
+                                "bullet|table|pagebreak, text 或 rows}"),
+                        },
+                        "sheets": {
+                            "type": "array",
+                            "items": {"type": "object"},
+                            "description": "xlsx 工作表列表：{name, rows:[[...]]}",
+                        },
+                        "rows": {
+                            "type": "array",
+                            "items": {"type": "array"},
+                            "description": "xlsx 单表行数据（sheets 的简写）",
+                        },
+                        "filename": {"type": "string",
+                                     "description": "输出文件名（可省略，不含路径）"},
+                    },
+                    "required": ["format"],
+                },
+            },
+        }]
+        builtin_tools.extend(document_tool)
+
         # 添加进化引擎工具（支持直接对象或HTTP API两种模式）
         evolution_tools = []
         has_evolution = self._evolution_engine is not None or hasattr(self, '_evolution_api_url')
@@ -4153,6 +4228,14 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             # ── 浏览器自动化（路线图 7.1，Playwright/CDP）──────
                             try:
                                 result = self._browser_dispatch(func_args, session_id)
+                            except Exception as e:
+                                te = self._tool_error_handler.handle_error(
+                                    session_id, func_name, e, func_args)
+                                result = te.to_model_message()
+                        elif func_name == "document":
+                            # ── 文档生成（路线图 7.2，docx/pdf/xlsx）────────────
+                            try:
+                                result = self._document_dispatch(func_args, session_id)
                             except Exception as e:
                                 te = self._tool_error_handler.handle_error(
                                     session_id, func_name, e, func_args)
