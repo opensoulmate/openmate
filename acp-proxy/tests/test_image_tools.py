@@ -146,11 +146,12 @@ def _PILopen(p):
     return Image.open(str(p))
 
 
-# ── 生成：双后端诚实多态 ─────────────────────────────────────────────
+# ── 生成：三级后端诚实多态 ───────────────────────────────────────────
 
 class TestGenerate:
-    def test_procedural_fallback_honest_label(self, tmp_path):
-        tools = _mk(tmp_path)  # 无 API 后端 → 程序化绘制
+    def test_procedural_fallback_honest_label(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("SOULMATE_IMAGEGEN_POLLINATIONS", "off")  # AI 后端全关闭 → 兜底
+        tools = _mk(tmp_path)  # 无 API 后端且 Pollinations 关闭 → 程序化绘制
         out = tools.run("generate", {"prompt": "一座雪山", "width": 200, "height": 120})
         assert "程序化绘制（非AI生成" in out and "不理解画面语义" in out  # 诚实标注，禁假称 AI
         assert "MEDIA:" in out and "generate(程序化绘制)" in out
@@ -193,6 +194,105 @@ class TestGenerate:
     def test_generate_requires_prompt(self, tmp_path):
         tools = _mk(tmp_path)
         assert "❌ 参数错误" in tools.run("generate", {})
+
+
+# ── 生成：Pollinations 真实 AI 后端（三级链第2级，周期#52 / 9.3）────────
+
+class _FakeResp:
+    def __init__(self, data: bytes):
+        self._data = data
+
+    def read(self):
+        return self._data
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+class TestGeneratePollinations:
+    def test_pollinations_success_real_http_path(self, tmp_path, monkeypatch):
+        import urllib.request
+        seen = {}
+
+        def fake_urlopen(req, timeout=None):
+            seen["url"] = req.full_url if hasattr(req, "full_url") else str(req)
+            seen["timeout"] = timeout
+            return _FakeResp(_gen_ok_png("", 64, 64))
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+        tools = _mk(tmp_path)  # 无 API URL → Pollinations（默认启用）
+        out = tools.run("generate", {"prompt": "一座雪山 mountain", "width": 64, "height": 64})
+        assert "generate(AI·Pollinations)" in out and "程序化绘制" not in out
+        with _PILopen(_out_path(out)) as im:
+            assert im.size == (64, 64)
+        assert "image.pollinations.ai/prompt/" in seen["url"]
+        assert "width=64" in seen["url"] and "height=64" in seen["url"] and "nologo=true" in seen["url"]
+        assert " " not in seen["url"]          # prompt 必须 URL 编码（空格/中文不裸拼）
+        assert seen["timeout"] == 90.0          # 有界超时禁挂死
+
+    def test_pollinations_model_env_appended(self, tmp_path, monkeypatch):
+        import urllib.request
+        seen = {}
+
+        def fake_urlopen(req, timeout=None):
+            seen["url"] = req.full_url if hasattr(req, "full_url") else str(req)
+            return _FakeResp(_gen_ok_png("", 32, 32))
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+        monkeypatch.setenv("SOULMATE_IMAGEGEN_POLLINATIONS_MODEL", "flux")
+        monkeypatch.setenv("SOULMATE_IMAGEGEN_POLLINATIONS_REFERRER", "openmate")
+        monkeypatch.setenv("SOULMATE_IMAGEGEN_POLLINATIONS_URL", "http://pn.local/")
+        out = _mk(tmp_path).run("generate", {"prompt": "猫", "width": 32, "height": 32})
+        assert "generate(AI·Pollinations)" in out
+        assert seen["url"].startswith("http://pn.local/prompt/")   # URL 覆盖+去尾斜杠
+        assert "model=flux" in seen["url"] and "referrer=openmate" in seen["url"]
+
+    def test_pollinations_failure_no_fake_success(self, tmp_path, monkeypatch):
+        import urllib.error
+        import urllib.request
+
+        def boom(req, timeout=None):
+            raise urllib.error.URLError("network down")
+        monkeypatch.setattr(urllib.request, "urlopen", boom)
+        out = _mk(tmp_path).run("generate", {"prompt": "x"})
+        assert out.startswith("❌ AI 图像生成失败") and "network down" in out
+        assert "✅" not in out                        # 不假称成功、不降级冒充
+        assert "程序化绘制" not in out.split("\n")[0]
+
+    def test_pollinations_empty_content_rejected(self, tmp_path, monkeypatch):
+        import urllib.request
+        monkeypatch.setattr(urllib.request, "urlopen",
+                            lambda req, timeout=None: _FakeResp(b""))
+        out = _mk(tmp_path).run("generate", {"prompt": "x"})
+        assert "❌" in out and "空内容" in out
+
+    def test_pollinations_optout_falls_to_procedural(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("SOULMATE_IMAGEGEN_POLLINATIONS", "off")
+        out = _mk(tmp_path).run("generate", {"prompt": "一座雪山", "width": 200, "height": 120})
+        assert "generate(程序化绘制)" in out and "generate(AI" not in out
+
+    def test_openai_config_wins_over_pollinations(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("SOULMATE_IMAGEGEN_API_URL", "http://fake")
+        out = _mk(tmp_path, generator=_gen_ok_png).run(
+            "generate", {"prompt": "一只猫", "width": 32, "height": 32})
+        assert "generate(AI)" in out and "generate(AI·Pollinations)" not in out
+
+    def test_jpeg_bytes_get_jpg_ext_not_png(self, tmp_path, monkeypatch):
+        # 实证坑（周期#52 e2e）：AI 后端返回 JPEG 字节不能落成 .png（mimeType 错配）
+        import io
+        from PIL import Image
+        monkeypatch.setenv("SOULMATE_IMAGEGEN_API_URL", "http://fake")
+
+        def gen_jpeg(prompt, w, h):
+            buf = io.BytesIO()
+            Image.new("RGB", (w, h), (5, 6, 7)).save(buf, format="JPEG")
+            return buf.getvalue()
+        out = _mk(tmp_path, generator=gen_jpeg).run("generate", {"prompt": "x", "width": 32, "height": 32})
+        p = _out_path(out)
+        assert p.suffix == ".jpg" and p.exists()       # 后缀对齐真实格式
+        with _PILopen(p) as im:
+            assert im.format == "JPEG" and im.size == (32, 32)
 
 
 # ── 参数拒绝 / 路径安全 / 0字节 ──────────────────────────────────────

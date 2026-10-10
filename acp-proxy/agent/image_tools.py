@@ -3,9 +3,12 @@
 ImageTools = 图像生成 + 确定性图像编辑（Pillow），输出落盘 ~/.hermes/soulmate/images/，
 返回 MEDIA: 路径可直接下发。
 - 编辑（确定性，不走 LLM 猜测）：resize/crop/rotate/flip/convert/annotate/compose/thumbnail；
-- 生成（双后端分层，对标 7.3 TTS 诚实多态纪律）：
-  1) AI 生成后端：SOULMATE_IMAGEGEN_API_URL 指向 OpenAI 兼容 images API 时真实生成；
-  2) 未配置 API 后端 → PIL 程序化绘制兜底（渐变底+文字卡），输出显式标注
+- 生成（三级后端分层，对标 7.3 TTS 诚实多态纪律）：
+  1) SOULMATE_IMAGEGEN_API_URL 指向 OpenAI 兼容 images API 时真实生成（自有/本地后端优先）；
+  2) 未配置 API → Pollinations 免费真实 AI 生成（默认启用，prompt 文本会发给
+     pollinations.ai 云服务；SOULMATE_IMAGEGEN_POLLINATIONS=off 关闭，
+     SOULMATE_IMAGEGEN_POLLINATIONS_URL/MODEL 可覆盖）；
+  3) 都关闭 → PIL 程序化绘制兜底（渐变底+文字卡），输出显式标注
      "⚠️ 程序化绘制（非AI生成）" 禁假称 AI 生成 + 文档化安装/配置方法。
 
 诚实状态语义（对标 browser_tools/docgen_tools 纪律，禁静默）：
@@ -22,6 +25,7 @@ import logging
 import os
 import re
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -37,10 +41,17 @@ GEN_TIMEOUT_S = 90.0
 
 _PIL_HINT = "安装方法：服务 venv 内 `pip install Pillow`（acp-proxy 服务所用 interpreter）。"
 _GEN_HINT = (
-    "AI 图像生成配置方法：设置 SOULMATE_IMAGEGEN_API_URL 指向 OpenAI 兼容 images API"
+    "AI 图像生成后端配置方法（优先级从高到低）："
+    "①SOULMATE_IMAGEGEN_API_URL 指向 OpenAI 兼容 images API"
     "（POST {url}/v1/images/generations 或完整端点，body {{prompt, size, n:1}}，"
-    "key 用 SOULMATE_IMAGEGEN_API_KEY），或本地部署 ComfyUI/SD WebUI 后填其 API 地址。"
+    "key 用 SOULMATE_IMAGEGEN_API_KEY），或本地部署 ComfyUI/SD WebUI 后填其 API 地址；"
+    "②未配置时默认走 Pollinations 免费真实 AI 生成（prompt 文本发给 pollinations.ai 云服务，"
+    "免费匿名额度间歇 402 限流属服务端配额非本机故障；SOULMATE_IMAGEGEN_POLLINATIONS=off 关闭，"
+    "SOULMATE_IMAGEGEN_POLLINATIONS_URL/MODEL/REFERRER 可覆盖，REFERRER 提额）；"
+    "③两级都不可用时程序化绘制兜底（显式标注非AI生成）。"
 )
+_POLLINATIONS_DEFAULT_URL = "https://image.pollinations.ai"
+_POLLINATIONS_OFF = ("off", "false", "0", "no")
 
 _SAFE_NAME_RE = re.compile(r"^[\w\u4e00-\u9fff][\w\u4e00-\u9fff.\-]*$")
 
@@ -99,22 +110,29 @@ class ImageTools:
             return f"⚠️ 图像后端不可用：Pillow 缺失（{e}）\n{_PIL_HINT}"
 
         api_url = str(params.get("api_url", "") or os.environ.get("SOULMATE_IMAGEGEN_API_URL", "") or "").strip()
+        # AI 后端三级链：①OpenAI 兼容 API（显式配置）②Pollinations 真实 AI（默认开）③PIL 兜底
         if api_url or params.get("_force_generator"):
+            backend, gen = "generate(AI)", lambda: self._generator(prompt, width, height)
+        elif self._pollinations_enabled():
+            backend, gen = "generate(AI·Pollinations)", lambda: self._pollinations_generate(prompt, width, height)
+        else:
+            backend, gen = "", lambda: b""  # 占位：backend 为空时不会被调用
+        if backend:
             try:
-                data = self._generator(prompt, width, height)
+                data = gen()
             except Exception as e:
                 # AI 后端失败 → 显式报因；不悄悄换兜底冒充 AI 生成
                 return (f"❌ AI 图像生成失败：{type(e).__name__}: {e}\n"
                         f"（未降级假称成功；如需程序化绘制请明确要求）\n{_GEN_HINT}")
             if not data or not isinstance(data, (bytes, bytearray)):
-                return f"❌ AI 图像生成返回空内容（后端: {api_url or 'injected'}）\n{_GEN_HINT}"
+                return f"❌ AI 图像生成返回空内容（后端: {api_url or backend}）\n{_GEN_HINT}"
             out_path.write_bytes(bytes(data))
             if not self._valid_output(out_path):
                 return f"❌ AI 图像生成产物无效（0字节/不可解码）: {out_path}"
             img = self._open(out_path)
-            return self._success("generate(AI)", out_path, img)
+            return self._success(backend, self._align_ext(out_path, img), img)
 
-        # 无 API 后端 → 程序化绘制兜底（诚实标注，禁假称 AI 生成）
+        # AI 后端全关闭 → 程序化绘制兜底（诚实标注，禁假称 AI 生成）
         img = self._procedural_render(prompt, width, height)
         img.save(str(out_path), format="PNG")
         if not self._valid_output(out_path):
@@ -185,6 +203,65 @@ class ImageTools:
             with urllib.request.urlopen(item["url"], timeout=GEN_TIMEOUT_S) as r2:
                 return r2.read()
         raise RuntimeError("images API 响应无 b64_json/url")
+
+    @staticmethod
+    def _align_ext(out_path: Path, img) -> Path:
+        """AI 后端产物实际格式与扩展名不符时改名对齐（FileViewer 按扩展名定 mimeType）。
+
+        实证（周期#52 e2e）：Pollinations 返回 JPEG 字节却落成 .png 文件名——预览按
+        image/png 嗅探会错。按 PIL 解码出的真实 format 改后缀，其余不动。
+        """
+        fmt = str(getattr(img, "format", "") or "").lower()
+        if not fmt:  # _open 返回的副本可能丢 format → 重新探文件头（确定性）
+            try:
+                from PIL import Image
+                with Image.open(str(out_path)) as probe:
+                    fmt = str(probe.format or "").lower()
+            except Exception:
+                fmt = ""
+        want = {"jpeg": ".jpg", "png": ".png", "gif": ".gif",
+                "webp": ".webp", "bmp": ".bmp"}.get(fmt, "")
+        if not want or out_path.suffix.lower() == want:
+            return out_path
+        new_path = out_path.with_suffix(want)
+        out_path.replace(new_path)
+        return new_path
+
+    @staticmethod
+    def _pollinations_enabled() -> bool:
+        """Pollinations 真实 AI 后端开关（默认启用；=off/false/0/no 关闭）。"""
+        return os.environ.get("SOULMATE_IMAGEGEN_POLLINATIONS", "on").strip().lower() not in _POLLINATIONS_OFF
+
+    def _pollinations_generate(self, prompt: str, width: int, height: int) -> bytes:
+        """Pollinations 免费真实 AI 生成（GET /prompt/{q} 返回图像字节）。有界超时禁挂死。
+
+        隐私边界：prompt 文本会发给 pollinations.ai 云服务；自有/本地后端请走
+        SOULMATE_IMAGEGEN_API_URL（优先级更高），不要外发可改 SOULMATE_IMAGEGEN_POLLINATIONS=off。
+        """
+        base = os.environ.get("SOULMATE_IMAGEGEN_POLLINATIONS_URL", _POLLINATIONS_DEFAULT_URL).strip().rstrip("/")
+        if not base:
+            raise RuntimeError("SOULMATE_IMAGEGEN_POLLINATIONS_URL 为空")
+        url = f"{base}/prompt/{urllib.parse.quote(prompt)}?width={int(width)}&height={int(height)}&nologo=true"
+        model = os.environ.get("SOULMATE_IMAGEGEN_POLLINATIONS_MODEL", "").strip()
+        if model:
+            url += f"&model={urllib.parse.quote(model)}"
+        referrer = os.environ.get("SOULMATE_IMAGEGEN_POLLINATIONS_REFERRER", "").strip()
+        if referrer:  # Pollinations 免费匿名额度间歇 402（实测 1/3），referrer/token 可提额
+            url += f"&referrer={urllib.parse.quote(referrer)}"
+        # 公共后端偶发 5xx（实测 500）：有界重试 2 次（对齐 MiMo 400 重试纪律），仍失败显式报因
+        last_err: Exception = RuntimeError("Pollinations 无响应")
+        for attempt in range(2):
+            try:
+                with urllib.request.urlopen(url, timeout=GEN_TIMEOUT_S) as resp:
+                    data = resp.read()
+                if not data:
+                    raise RuntimeError("Pollinations 返回空内容")
+                return data
+            except Exception as e:  # noqa: PERF203 — 重试边界即在此
+                last_err = e
+                if attempt == 0:
+                    time.sleep(2.0)
+        raise last_err
 
     # ── 编辑（确定性）─────────────────────────────────────────────────
 
