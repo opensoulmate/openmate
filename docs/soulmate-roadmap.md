@@ -43,7 +43,7 @@
 - **1.3 半缺**：consolidator/try_learn_skill 已有自动沉淀，但无"可复用经验"去重审计 → **1.3 已补（周期#4）**：ExperienceSink 可复用经验沉淀+两级去重+审计
 - ~~2.1 缺~~ **2.1 已补（周期#7）**：自验闭环（self_verify.py，收尾对照原始需求逐条核对+补做1轮+复检推送）
 - **2.2-2.4 全部已补**：失败恢复（周期#8）/复杂任务分解+逐步提交（周期#9）/系统状态一键体检（周期#10）
-- ~~3.x 缺~~ **3.1 已补（周期#11）**：cron引擎（agent/soulmate_scheduler.py，interval/cron周期调度+SQLite持久化+CAS到点执行+执行日志，区别于schedule_wakeup一次性唤醒）；**3.2-3.3 缺**：定时汇报/监控告警；⚠️3.1遗留：调度循环宿主=存活的SoulMateAgent进程（stdio子进程自举），无agent进程时任务不执行（错过不补跑），常驻托管（独立daemon）待后续；cron回合turn_origin=cron已落库但wakeup_relay只推wakeup标记行，实时推送归3.2
+- ~~3.x 缺~~ **3.1 已补（周期#11）**：cron引擎（agent/soulmate_scheduler.py，interval/cron周期调度+SQLite持久化+CAS到点执行+执行日志，区别于schedule_wakeup一次性唤醒）；**3.2 已补（周期#13）**：定时汇报（agent/cron_reporter.py，执行结果📊汇报行落opensoul.db+wakeup_relay推送面扩到{wakeup,cron,cron_report}即时推送）；**3.3 缺**：监控告警；⚠️3.1遗留：调度循环宿主=存活的SoulMateAgent进程（stdio子进程自举），无agent进程时任务不执行（错过不补跑），常驻托管（独立daemon）待后续
 - **4.x 全缺**：微信桥、消息路由、媒体收发（sense_* 只有感知无收发）
 - **5.x 全缺**：子代理并行、群组任务编排
 - **6.x 半缺**：技能保存/检索/学习已有大半，6.3 用执行结果反哺修正待实测
@@ -77,7 +77,15 @@
 
 ### 阶段3 · 定时任务与主动服务
 - [x] 3.1 cron 引擎：SoulMate 自己的任务调度（schedule+执行+日志）——周期#11实装agent/soulmate_scheduler.py（SoulMateScheduler：tasks/runs两表SQLite持久化+确定性5字段cron解析（`*`/`*/n`/`a-b`/列表+Vixie dom/dow语义+7=周日，字段跳进next_after非逐分钟盲扫）+interval:<秒|5m|1h>两形态调度串+到点CAS领取（UPDATE rowcount==1多进程/双实例不双跑，错过不补跑不积压重放）+默认执行体default_cron_fire复用wakeup_executor无客户端回合与LLM级失败/零输出判定+失败可见（failed落runs日志+fail_streak累计+周期任务照常排下一次不搞即时重试风暴）+周期表损坏自动停用+snapshot观测）+soulmate_agent四点接线（schedule_task/schedule_list/schedule_cancel工具定义+主dispatch+code-mode批内dispatch+_cron_dispatch共用入口lazy-init+系统提示工具清单）+start.py stdio入口有存活任务才自举调度循环（979bb241）
-- [ ] 3.2 定时汇报：主动向 OpenMate 推送任务进展/异常
+- [x] 3.2 定时汇报：主动向 OpenMate 推送任务进展/异常——周期#13实装agent/cron_reporter.py
+  （CronReporter：每次定时任务执行完成功/失败都产出确定性📊汇报行（任务名/✅❌/
+  结果或异常/执行与下次时间/连续失败≥3次提醒，不走LLM）写入该任务会话的
+  agent_messages（role=assistant，metadata.turn_origin=cron_report）——失败回合
+  零输出形态下异常也有可见产物；无session_id显式跳过不写野行；汇报失败绝不阻塞
+  调度主链路）+wakeup_relay推送面扩到RELAYED_TURN_ORIGINS={wakeup,cron,cron_report}
+  （cron回合行=任务进展、cron_report行=📊结果/异常都补推给正连前端；普通回合行
+  依旧零推送不与流式重复）+soulmate_scheduler.run_due接线_report_run（汇报行
+  含fail_streak）；3.1遗留"实时推送归3.2"销账
 - [ ] 3.3 监控告警：对指定服务/网站做周期健康检查
 
 ### 阶段4 · 多渠道（替代 Hermes 的"触达能力"）
@@ -119,3 +127,4 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 [2026-10-10 08:10] 周期#10 | 2.4系统状态感知：新增agent/system_health.py（SystemHealthChecker只读六分区体检services/ports/disk/memory/load/processes——systemd五态映射+socket端口监听+磁盘/内存85%/95%双阈值+load对cpu核数三档+ps内存TopN+僵尸计数；HealthReport.overall最差值；采集器全可注入+SOULMATE_HEALTH_SERVICES/PATHS/PORTS可配；单项异常降级unknown不炸整轮——测试实证该缺口后补的per-item try/except）+soulmate_agent四点接线（工具定义/主dispatch/共享_system_health_dispatch(lazy-init)/code-mode批内+系统提示清单） | ✅ | e3751d5e | 2.4勾选（阶段2全部完成）；tests/test_system_health.py 21/21+回归250全过(1.x/2.x记忆恢复链142+plan_execution/plan_tool_ledger/task_judge/code_mode/tool_output 108)+真实机器烟测13项全ok（4服务active/8090+8092监听/磁盘80.1%/mem 44%/load 4.21@8核/367进程0僵尸）+__new__构造lazy-init烟测PASS；下周期做3.1 cron引擎（SoulMate自己的任务调度：schedule+执行+日志）
 [2026-10-10 08:33] 周期#11 | 3.1 cron引擎：新增agent/soulmate_scheduler.py（SoulMateScheduler：tasks/runs两表SQLite持久化+确定性5字段cron解析（*/n/a-b/列表+Vixie dom/dow语义+7=周日，字段跳进next_after）+interval/cron两形态调度串+到点CAS领取（UPDATE rowcount==1多进程不双跑、错过不补跑不积压重放）+默认执行体default_cron_fire复用wakeup_executor无客户端回合+LLM级失败/零输出判定+失败可见（runs日志+fail_streak+周期任务照常排下次）+周期表损坏自动停用+snapshot观测）+soulmate_agent四点接线（schedule_task/schedule_list/schedule_cancel工具定义+主dispatch+code-mode批内+_cron_dispatch共用入口lazy-init+系统提示清单）+start.py stdio入口有存活任务才自举循环 | ✅ | 979bb241 | 3.1勾选；tests/test_soulmate_scheduler.py 24/24（cron解析7例+调度串拒绝+CRUD+interval/cron执行日志重排+失败重排+async fire+CAS输家确定性验证+停用/错过不补跑+损坏停用+接线护栏4例）+回归339全过(1.x/2.x记忆链+plan/task_judge/code_mode/tool_output)+SoulMateAgent真实dispatch烟测（创建/列表/不存在/停用/删除/坏调度串全态输出实证）；⚠️遗留：调度循环宿主=存活agent进程（无进程时不执行错过不补跑），常驻托管待后续；cron回合实时推送归3.2；下周期做3.2定时汇报（主动向OpenMate推送任务进展/异常）
 [2026-10-10 09:01] 周期#12 | ⚡0.1紧急插队·simple chat流式路径增量落库：soulmate_agent.py加_progress_saver节流器（≥800字或≥2秒取先到，模块级阈值可测）+stream_progress开关（仅simple调用点4605行传True，任务管线/补做保持per-step落库零变化）+流式积累/round尾flush双挂钩节流落库+_prompt_inner回合开始_reset_progress_row（防接管串行：上回合中断残留_progress_id会让本回合UPDATE旧行覆盖丢失，改为旧行保留+新回合自建新行） | ✅ | f94067b5 | 0.1勾选；tests/test_stream_progress_persist.py 13/13（节流双阈值/时间阈值fake clock/中途被杀部分行/最终接管同行无重复/陈旧指针不劫持旧行/接线护栏4例）+回归271全过(cache_replay_persist/message_tree/plan_execution/plan_tool_ledger/task_judge/code_mode/tool_output/self_verify/1.x记忆链/session_source/stream_continuation/turn_lifecycle)+py_compile+SoulMateAgent导入烟测；下周期做3.2定时汇报（主动向OpenMate推送任务进展/异常）
+[2026-10-10 09:27] 周期#13 | 3.2定时汇报：新增agent/cron_reporter.py（CronReporter：每次定时任务执行完成功/失败都产出确定性📊汇报行（任务名/✅❌/结果或异常/执行与下次时间/连续失败≥3次提醒，不走LLM）写入任务会话agent_messages（role=assistant, turn_origin=cron_report）——失败回合零输出形态异常也可见；无session_id显式跳过不写野行；写库失败计数不抛）+wakeup_relay推送面扩到RELAYED_TURN_ORIGINS={wakeup,cron,cron_report}（turn_origin_of/is_relayed_meta，fetch_rows双标记is_wakeup+is_relayed兼容旧键，普通回合行依旧零推送）+soulmate_scheduler.run_due接线_report_run（汇报失败绝不阻塞fire/日志/排下次） | ✅ | 051d2615 | 3.2勾选+3.1遗留"实时推送归3.2"销账；tests/test_cron_reporter.py 16/16（汇报形状5+落库4+relay推送3+调度接线4）+回归119全过(wakeup_relay/soulmate_scheduler/wakeup_executor/schedule_wakeup_wiring 78+observability/relay_traj 41)+py_compile+SoulMateAgent导入烟测（relayed origins=['cron','cron_report','wakeup']）；⚠️诚实边界：推送粒度=消息级（relay 2s轮询），仅正连前端实时、未连接时历史加载可见；汇报行落任务会话属会话内消息；下周期做3.3监控告警（对指定服务/网站做周期健康检查）
