@@ -151,6 +151,7 @@ from agent.group_orchestrator import (  # 路线图5.3 AI群组任务编排
 )
 from agent.skill_saver import get_skill_saver as _get_skill_saver  # 路线图6.1 技能保存
 from agent.skill_matcher import get_skill_matcher as _get_skill_matcher  # 路线图6.2 技能检索与加载
+from agent.skill_evolver import get_skill_evolver as _get_skill_evolver  # 路线图6.3 技能进化
 from agent.writer_fence import SessionWriterFence, WriteAction
 from agent.tool_exec_fencing import FileFenceTimeout, file_fence
 from agent.steering import (
@@ -1373,6 +1374,9 @@ class SoulMateAgent:
             # 技能保存（路线图 6.1）：批内同样可用（纯本地文件写）
             if func_name == "skill_save":
                 return self._skill_save_dispatch(func_args, session_id)
+            # 技能进化（路线图 6.3）：批内同样可用（纯本地文件读写）
+            if func_name == "skill_evolve":
+                return self._skill_evolve_dispatch(func_args, session_id)
             # kilocode #19 MCP resource三件套：批内同样可用（与主循环同款注入安全层）
             if func_name in MCP_RESOURCE_TOOL_NAMES:
                 return await self._call_mcp_resource_tool(func_name, func_args)
@@ -1402,6 +1406,19 @@ class SoulMateAgent:
         kind = mgr.classify(first_result)
         if kind in (FailureKind.OK, FailureKind.BLOCKED):
             return first_result
+        # 路线图6.3 技能进化反哺源①：工具失败进会话缓冲（BLOCKED 不计——
+        # 权限拦截不是技能内容问题；旁路异常绝不阻断恢复流程）
+        try:
+            _sev = getattr(self, "_skill_evolver_inst", None)
+            if _sev is None:
+                _sev = _get_skill_evolver()
+                self._skill_evolver_inst = _sev
+            _sev.note_event(
+                session_id, func_name, kind.value,
+                (str(first_result).splitlines() or [""])[0].strip(),
+            )
+        except Exception:
+            pass
         _cwd = str(
             cwd
             or getattr(self, "_session_cwds", {}).get(session_id, "")
@@ -1824,6 +1841,125 @@ class SoulMateAgent:
         except Exception as e:
             return f"[错误] 群组任务编排失败: {type(e).__name__}: {e}"
 
+    def _skill_evolve_dispatch(self, func_args: dict, session_id: str = "") -> str:
+        """skill_evolve 分发（路线图 6.3：执行结果反哺技能内容）。
+
+        主循环与 code-mode 内层共用此入口（纯本地文件读写，无需 await）。
+        apply 后强刷 saved 层扫描缓存（60s TTL 会藏住新 revision）。
+        与 _skill_save_dispatch 同款 lazy-init（__new__ 裸实例零感知）。
+        """
+        evolver = getattr(self, "_skill_evolver_inst", None)
+        if evolver is None:
+            evolver = _get_skill_evolver()
+            self._skill_evolver_inst = evolver
+        action = str(func_args.get("action", "") or "pending").strip().lower()
+        if action == "stats":
+            stats = evolver.stats(str(func_args.get("slug", "") or ""))
+            if not stats:
+                return "（暂无技能反馈记录）"
+            lines = []
+            for slug, s in stats.items():
+                lines.append(
+                    f"- {slug}: 反馈{s['feedback']}条（已应用{s['applied']}/"
+                    f"待应用{s['pending']}），累计命中{s['times_seen']}次"
+                )
+            return "技能反馈统计：\n" + "\n".join(lines)
+        slug_raw = str(func_args.get("slug", "") or "").strip()
+        if not slug_raw:
+            return "错误: slug 不能为空（技能 slug 或技能名）"
+        slug = evolver.resolve_slug(slug_raw)
+        if action == "pending":
+            rows = evolver.pending_rows(slug)
+            if not rows:
+                return f"技能「{slug_raw}」暂无待应用修正（执行反馈均已被消化或无失败记录）"
+            lines = [
+                f"- {evolver.render_amendment(r['tool'], r['kind'], r['detail'])}"
+                f"（命中{r['times_seen']}次）"
+                for r in rows
+            ]
+            return (
+                f"技能「{slug_raw}」待应用修正 {len(rows)} 条：\n" + "\n".join(lines)
+                + "\n（确认合并进技能『坑』分区时用 action=apply）"
+            )
+        if action == "apply":
+            try:
+                result = evolver.apply(slug, max_items=func_args.get("max_items", 3))
+            except ValueError as e:
+                return f"错误: {e}"
+            # 合并后强刷 saved 层缓存（与 skill_save 同款：新 revision 不被 TTL 藏住）
+            mgr = getattr(self, "_skill_manager", None)
+            if mgr is not None:
+                try:
+                    mgr.scan_saved_skills(force_refresh=True)
+                except Exception as e:
+                    logger.debug(f"[skill_evolve] saved层缓存刷新失败（不阻塞结果）: {e}")
+            if not result.get("updated"):
+                reason = result.get("reason", "")
+                if reason == "cooldown":
+                    return (
+                        f"⚠️ 技能「{slug_raw}」近24h已进化 "
+                        f"{result.get('applied_24h')}/{result.get('limit_24h')} 次，"
+                        f"冷却中（防 revision 抖动），稍后再试。"
+                    )
+                if reason == "all_duplicated":
+                    return (
+                        f"技能「{slug_raw}」待应用修正与既有坑条目全部重复，"
+                        f"未改文件（不产生空 revision）"
+                    )
+                return f"技能「{slug_raw}」暂无待应用修正"
+            added = "\n".join(f"+ {a}" for a in result.get("added", []))
+            return (
+                f"✅ 已进化技能「{slug_raw}」→ revision {result['revision']}，"
+                f"新增坑条目 {len(result.get('added', []))} 条：\n{added}\n"
+                f"SKILL.md: {result.get('skill_md', '')}"
+            )
+        return f"错误: action 必须是 pending/apply/stats，收到: {action!r}"
+
+    def _skill_feedback_flush(
+        self, session_id: str, matched_skills: list[dict] | None, verify_report=None
+    ) -> None:
+        """路线图 6.3 回合收尾反哺：执行事件按命中过的 saved: 技能落反馈库。
+
+        事件源（确定性，不走 LLM）：①本回合工具失败缓冲（_tool_recovery_execute
+        路径 note_event）②自验未覆盖项（2.1 self_verify 最终报告）。
+        观测旁路：任何异常只记 debug 日志，绝不阻断回合收尾。
+        """
+        evolver = getattr(self, "_skill_evolver_inst", None)
+        if evolver is None:
+            evolver = _get_skill_evolver()
+            self._skill_evolver_inst = evolver
+        # 先 drain：无命中技能也不把失败残留归因到下一回合
+        events = evolver.drain_events(session_id)
+        unmet: list[str] = []
+        try:
+            if verify_report is not None:
+                unmet = list(verify_report.missing_requirements())
+        except Exception:
+            unmet = []
+        saved = [
+            s for s in (matched_skills or [])
+            if str(s.get("id", "")).startswith("saved:")
+        ]
+        if not saved:
+            return
+        evs = list(events) + [
+            {"tool": "self_verify", "kind": "unmet", "detail": u} for u in unmet
+        ]
+        if not evs:
+            return
+        for s in saved:
+            slug = str(s.get("id", "")).split(":", 1)[1]
+            try:
+                r = evolver.record_outcome(
+                    slug, success=not unmet, events=evs,
+                    task_text=str(s.get("name", "")),
+                )
+                logger.info(
+                    f"[skill-evolve] 反哺 {slug}: recorded={r['recorded']} "
+                    f"deduped={r['deduped']} events={len(evs)}")
+            except Exception as e:
+                logger.debug(f"[skill-evolve] 反哺 {slug} 失败(非致命): {e}")
+
     def _skill_save_dispatch(self, func_args: dict, session_id: str = "") -> str:
         """skill_save 分发（路线图 6.1：把成功流程写成 SKILL.md）。
 
@@ -2033,6 +2169,7 @@ ACP代理目录: {cwd}/acp-proxy（后端 Python 代码在此）
 - delegate_tasks: 子代理并行执行（拆分任务给并行worker，父代理收尾合并）。多个互不依赖的独立子任务（多路调研/多个互不依赖的问题/多份互不依赖的检查）→ delegate_tasks 拆给并行子代理并发执行（2-8个），合并结果后由你收尾总结论。⚠️ 有先后依赖的任务不要拆（会并行跑）；每个子任务 goal 必须自包含（子代理看不到当前对话，必要背景写进 goal/context）；失败/超时的子任务会在结果里标注原因，收尾时如实反映不要当成已完成
 - group_task: AI群组任务编排（接 ai-groups 多agent群组：自动分解→按角色分配→并行执行）。需要多agent分工协作的复杂目标（规划→执行→验证→审查）→ group_task(action=orchestrate) 交给群组执行并返回合并报告；查看群组→ action=list_groups；查任务进度→ action=task_status。⚠️ 失败/超时子任务在报告中标注原因，不要当成已完成
 - skill_save: 技能保存（把成功流程写成SKILL.md含触发条件/步骤/坑，存技能库供复用）。刚成功完成多步骤可复用任务、或用户要求"把XX流程保存为技能/记住怎么做"时使用；同名技能默认不覆盖（更新传 overwrite=true）。保存后同类任务命中触发词会自动加载该技能
+- skill_evolve: 技能进化（用执行结果反哺修正技能内容，saved技能库）。查看某技能待应用修正（执行中工具失败/需求遗漏反馈）→ action=pending；把修正合并进技能"坑"分区（revision递增+去重）→ action=apply；反馈统计→ action=stats。用户要求"更新/修正/进化某技能"或发现技能内容与实际执行不符时使用
 
 You can send files to the user natively: to deliver a file, write a brief confirmation message (e.g. "文件已发送，请查收"), then include MEDIA:/absolute/path/to/file on a new line. The gateway extracts the tag, strips it, and sends the file as a download card. Always write some text before the MEDIA: tag — never output a bare MEDIA: tag alone. Use search_files first if you don't know the exact path. Do NOT paste file contents into chat."""
 
@@ -3067,6 +3204,43 @@ You can send files to the user natively: to deliver a file, write a brief confir
         }]
         builtin_tools.extend(skill_save_tool)
 
+        # ── 技能进化工具（路线图 6.3）──────────────────────────
+        # 执行结果反哺技能内容：查看待应用反馈 / 把反馈合并进技能「坑」分区。
+        skill_evolve_tool = [{
+            "type": "function",
+            "function": {
+                "name": "skill_evolve",
+                "description": (
+                    "技能进化：用执行结果反哺修正技能内容（saved 技能库）。"
+                    "action=pending 查看某技能的待应用修正（执行中工具失败/需求遗漏"
+                    "的反馈）；action=apply 把待应用修正合并进该技能的「坑」分区"
+                    "（revision 递增、条目去重、单次最多 max_items 条）；"
+                    "action=stats 查看反馈统计。适用时机：用户要求"
+                    "\"更新/修正/进化某技能\"、或发现技能内容与实际执行不符时。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["pending", "apply", "stats"],
+                            "description": "pending=查看待应用修正；apply=合并进技能；stats=反馈统计",
+                        },
+                        "slug": {
+                            "type": "string",
+                            "description": "技能 slug 或技能名（action=stats 可省略=全部技能）",
+                        },
+                        "max_items": {
+                            "type": "integer",
+                            "description": "apply 时本次最多合并条数（默认 3，上限 10）",
+                        },
+                    },
+                    "required": ["action"],
+                },
+            },
+        }]
+        builtin_tools.extend(skill_evolve_tool)
+
         # 添加进化引擎工具（支持直接对象或HTTP API两种模式）
         evolution_tools = []
         has_evolution = self._evolution_engine is not None or hasattr(self, '_evolution_api_url')
@@ -4072,6 +4246,14 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             # ── 技能保存（路线图 6.1）──────────────────────────
                             try:
                                 result = self._skill_save_dispatch(func_args, session_id)
+                            except Exception as e:
+                                te = self._tool_error_handler.handle_error(
+                                    session_id, func_name, e, func_args)
+                                result = te.to_model_message()
+                        elif func_name == "skill_evolve":
+                            # ── 技能进化（路线图 6.3）──────────────────────────
+                            try:
+                                result = self._skill_evolve_dispatch(func_args, session_id)
                             except Exception as e:
                                 te = self._tool_error_handler.handle_error(
                                     session_id, func_name, e, func_args)
@@ -5643,6 +5825,13 @@ You can send files to the user natively: to deliver a file, write a brief confir
         # ── 记录技能使用 ──────────────────────────────────
         for skill in matched_skills:
             self._skill_manager.record_usage(skill["id"])
+
+        # ── 技能进化反哺（路线图6.3）：执行结果按命中技能落反馈库 ──
+        # verify_report 由上方 2.1 自验块必赋值（异常分支=None），直接引用
+        try:
+            self._skill_feedback_flush(session_id, matched_skills, verify_report)
+        except Exception as e:
+            logger.debug(f"[skill-evolve] 回合反哺失败(非致命): {e}")
 
         # ── 自动学习 ──────────────────────────────────────
         try:
