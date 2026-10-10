@@ -228,6 +228,63 @@
 拿 Hermes 日常被使用的 10 类任务（开发/调试/运维/调研/发布/办公/定时/多渠道/记忆/协作），
 SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对标实测并记录。
 
+### 2026-10-10 对标实测（周期#30，阶段1-7完成时）——可复跑 `acp-proxy/acceptance_benchmark.py`
+
+**两轮实测实录（含 harness 事故，如实入档）**：
+- **v1 走错入口（10 回合全打偏）**：用 HTTP `/acp/send` 驱动 → proxy.py L97/L141 自证
+  "本文件硬编码 hermes acp 路由"（spawn `hermes acp`，空响应兜底 `hermes -z`）——测的全是
+  Hermes 不是 SoulMate。教训固化：**验收/SoulMate 测试禁走 /acp/send，必须走 `/ws/acp` +
+  `session/new{agent_id:"soulmate"}`**（前端 src 零处调用 /acp/send，用户路径的"禁顶替"红线
+  未破；hermes -z 兜底只存在于该测试端点链）。
+- **v2 正确路径（下表）**：WS 真实链路（AGENT_ROUTES["soulmate"]→`python -m agent.start
+  --stdio`→SoulMateAgent 真实 LLM+真实工具）。中途被 sibling/evo `systemctl restart
+  acp-proxy-a/b`（17:44:48 SIGKILL 全部子进程）打断一轮，重跑取全。
+- harness 自身两坑（已修进脚本）：同一 WS 连接上前一超时回合的在途帧会串进下一任务的回复
+  采集（必须按 sessionId 过滤）；240s 回合上限偏紧（改 300s）。
+
+| # | 类别 | 结果 | 耗时 | 证据（服务端副作用优先） |
+|---|------|------|------|--------------------------|
+| 1 | 开发 | ❌ | 86s/1.4s 两轮 | 文件未创建。run1 journal 实证 infection-guard `verdict=clarify`"用户请求缺失…疑似验收标记"→`verdict=terminate`→"TERMINATE，工具调用未执行"；run2 1.38s 合成"任务执行报告"零工具执行（短路报告，见 R2） |
+| 2 | 调试 | ✅ | 146s | buggy.py 内容回读：`return a - b`→`return a + b` + FIXED 标记（修得对） |
+| 3 | 运维 | ✅ | 13s | system_checkup 真实体检（磁盘 80.6%/8090 监听） |
+| 4 | 调研 | ❌ | 15s | web_search 硬依赖 SearXNG:8888 未启动→归零；agent 诚实自报"搜索后端未启动"（补了既有知识，不冒充搜索结果） |
+| 5 | 发布 | ✅ | 18s | message_send→opensoul.db agent_messages 命中探针行=3 |
+| 6 | 办公 | ✅ | 71s | report.xlsx 真实产物 4.9KB 有效 xlsx + execute_code 回读自验 |
+| 7 | 定时 | ❌ | >240s | schedule 3 工具链超时且最终无落库（cron_tasks.db tasks 空，无 accept_probe）——慢/卡待查（R3） |
+| 8 | 多渠道 | ⚠️ | 106s | 回合跑了且回"任务执行报告"，但回复采集被任务7在途帧污染（harness 坑，已修）；wechat 回环出站无独立可查痕迹→待复测 |
+| 9 | 记忆 | ❌ | >240s | MEMORY.md 无标记。journal 实证 infection-guard `verdict=clarify`"用户请求为空却单方面向持久化记忆写入…请说明触发依据"→拦死（与 #1 同根因 R1） |
+| 10 | 协作 | ✅ | 31s | journal 级实证 delegate_tasks 真执行（permission=allow + provenance + 两 worker 真实产出 ALPHA_DONE/BETA_DONE 各 13.3s）+ subagent_runs.db 2 行 |
+
+**判定：真实达标 5/10（调试/运维/发布/办公/协作），1 待复测（多渠道），4 未达标
+（开发/调研/定时/记忆）——距"完全替代"仍有实差距，缺口高度聚类在 R1。**
+
+**根因聚类（journal/代码实证，非猜测）**：
+- **R1 InfectionGate 误杀（P0，#1/#9）**：注入审计门的"用户请求"上下文传参断链（detail 自述
+  "用户请求缺失/为空"），把用户明确点名的 write_file/memory_append 判成疑似注入；clarify
+  在无人值守路径又升级 terminate→工具不执行。与用户防护哲学"根据用户语意来防护"直接冲突。
+- **R2 说了≠做了（#1 run2）**：工具被拦/短路后合成"任务执行报告"声称完成，违反 2.1 护栏
+  语义（报告必须以工具执行证据为前提）。
+- **R3 长回合可靠性（#7）**：多工具链回合 240s+ 不落终态也不落库。
+- **R4 调研单点依赖（#4）**：web_search 无后端可用性兜底（SearXNG 未启动=归零）。
+
+## 阶段8 · 验收缺口修复（下一批切片，按优先级）
+- [ ] ⚡8.1 InfectionGate 误杀修复（P0 用户可见缺陷，先于一切）：①审计门必须拿到本回合
+  用户原始 prompt（修上下文传参断链，验收断言=journal 不再出现"用户请求缺失/为空"）
+  ②用户明确点名的动作（prompt 明文要求的工具/路径/内容）给语义豁免——防护看用户意图
+  而非模式匹配（禁一刀切白名单守卫，用户反感守卫类防御）③无人值守路径 clarify 不得
+  升级 terminate（放行+留痕或按模式配置）。验收=重跑 acceptance_benchmark.py 开发/记忆两类。
+- [ ] ⚡8.2 短路合成报告治理：任务执行报告/自检结论必须以工具执行证据为前提（工具被拦时
+  报"被拦截+原因"，禁报"完成"）；锁定 run2 1.38s 秒合成"任务执行报告"的短路路径。
+- [ ] 8.3 长回合治理：schedule 3 工具链 >240s 无终态根因（LLM 慢 or dispatch 卡死）+
+  回合级进度/超时可见（禁静默）。
+- [ ] 8.4 调研兜底：web_search 后端可用性探测 + SearXNG 未启动时显式降级路径（替代后端
+  或启动文档化），禁静默归零。
+- [ ] 8.5 验收复测：多渠道/定时两类（harness 已修 sessionId 过滤）；每完成一个 ⚡项即
+  重跑对应类别对标。
+- [ ] 后续（非紧急，另案）：微信 iLink 真实传输 4.1b（接入形态待用户拍板，绝不双消费
+  hermes 会话）、调度/监控常驻托管（3.1 遗留）、ASR 语音输入（多模态路由另案）、文生图
+  大模型 API、AI 群组真实成员端到端。
+
 ## 周期日志
 [2026-10-09 19:00] 周期#0 | 路线图建立+cron流水线上线 | ✅ | (本文档创建) | 首个自动周期15分钟后启动
 [2026-10-10 01:20] 周期#1 | 阶段0盘点：核实21工具/3记忆引擎/三层技能机制+缺口图；清理soulmate_agent.py损坏WIP（截断import`AgentCheckpointMan`+`return clsager`致ImportError，且属用户已否决的防双开守卫类，diff留证docs/devlog/2026-10-10-broken-idempotent-guard-wip.patch后还原HEAD，import实测恢复） | ⚠️ | 1ea328ce | 附带实测tests/test_skill_standard_layer.py 34 passed；下周期做1.1 MEMORY.md型持久记忆
