@@ -308,8 +308,20 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
   _stop_turn_watchdog lazy-init 兼容 __new__ 测试 agent+工具循环前 start+轮次/工具
   节点 beat+turn.close 订阅收口——所有 close 路径必发事件，孤儿心跳不残留）。
   ⚠️诚实边界：耗时本身治理（单工具链审计 LLM 往返开销优化）未做，另案切片
-- [ ] 8.4 调研兜底：web_search 后端可用性探测 + SearXNG 未启动时显式降级路径（替代后端
+- [x] 8.4 调研兜底：web_search 后端可用性探测 + SearXNG 未启动时显式降级路径（替代后端
   或启动文档化），禁静默归零。
+  ——周期#34实装：新增agent/search_backend.py（SearXNG JSON主后端+Bing HTML兜底
+  降级链[unified-search技能已验证的中间层兜底，SOULMATE_SEARCH_BING_FALLBACK=0 可关]
+  +probe()连通性探测+四态语义严格区分——ok/empty/inconclusive/unavailable：可信空
+  只认searx JSON results:[]（报"非故障"），bing HTML 0块=反爬拦截与真无结果不可区分
+  →inconclusive"不足以断言无资料"禁冒充可信空，全挂=显式逐后端报因+启动文档化
+  [start.sh/searx.webapp，SOULMATE_SEARXNG_URL 可配]）。修静默归零双根因：①后端挂了/
+  非JSON/缺results键被报成"无搜索结果"②query裸拼URL未编码（空格/中文截断→假零）→
+  统一quote()；soulmate_agent两执行点（主循环+code-mode批内）收口run_search单一真源，
+  内联curl-SearXNG清零（接线护栏断言全仓无残留调用点）。
+  真实机器实证（SearXNG恰好未启动）：searxng❌不可达+bing✅0块（疑似反爬）→输出
+  "⚠️未获得搜索结果…不足以断言无资料…启动方法start.sh"——旧实现同场景会报
+  "搜索不可用: curl stderr"或假"无搜索结果"，现四态诚实成文
 - [ ] 8.5 验收复测：多渠道/定时两类（harness 已修 sessionId 过滤）；每完成一个 ⚡项即
   重跑对应类别对标。⚠️复测铁律（周期#31 实证）：验收 prompt 必须带唯一防缓存标记——
   semantic-cache EXACT 命中会回放旧响应（假跑 0.98s 级），且文件存在性验证会被
@@ -355,3 +367,4 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 [2026-10-10 18:45] 周期#31（main镜像；#25-#30 日志在真实工作链 evo/exp-1791613018） | ⚡8.1 InfectionGate误杀修复（验收R1）+⚡8.6双链处置准备：根因实证=任务管线首试/重试两个_run_llm_with_tools调用点漏传user_text→审计门"## 用户请求（未提供）"→用户明文点名的write_file/memory_append被误判注入（验收#1/#9死因）；修复①管线两调用点补传user_text+check()空user_text留痕告警②用户明文内容溯源豁免（签名命中文本逐字来自用户请求=用户自己写的内容豁免，夹带照常拦）+JUDGE_PROMPT补"用户意图优先/请求缺失不构成拦截理由"③无人值守clarify超限放行+留痕（clarify_exhausted_pass+infection:pass_with_trace），有人值守保持terminate，INFECTION_CLARIFY_EXHAUSTED按模式配置 | ✅ | 98d6025f(main)/9d17ebdc(evo链cherry-pick) | tests/test_infection_guard.py 47/47（新增8.1三组17例+既有terminate用例改有人值守前提）+回归252全过+evo链worktree复测47/47+149全过；真实验收=acceptance_benchmark开发/记忆 2/2✅（83s/91s真实LLM+工具，dev_hello.py+MEMORY.md服务端副作用实证，journal零infection-guard拦截零空user_text告警）；⚠️复测发现semantic-cache污染验收（v1两回合Cache EXACT命中回放旧响应假跑+记忆假阳性=周期#30被杀轮残留stale marker）→8.5复测铁律：prompt带唯一防缓存标记+验证前清陈旧产物；⚠️诚实边界：R2短路合成报告（缓存回放里仍在）归⚡8.2待做（→周期#32已治理销账）；⚡8.6最终取舍待用户拍板（对比+建议已写入8.6条目）
 [2026-10-10 19:04] 周期#32 | ⚡8.2 短路合成报告治理（验收R2）：新增agent/report_evidence.py（执行证据前提确定性治理——parse_ledger账本拆"真实执行vs被拦截"（permission单一真源：allow/ask-approved/degraded-allow/cached-allow/infection:pass_with_trace=执行证据；deny/ask-denied/sandbox-restricted/loop_guard:*/其余infection:*=被拦截；[xxx]伪条目两头不计）+assess四态(no-claim/grounded/blocked/unsupported)+amend_response报告标题降级"## 任务执行报告（⚠️ 未经执行验证）"+governance_banner被拦截报"被拦截+原因"禁报完成+is_cacheable_request语义缓存准入）；短路根因实证=语义缓存exact命中回放旧"任务执行报告"（跳过LLM/工具=run2 1.38s形态）→soulmate_agent三处接线（缓存get侧执行类请求不读缓存、put侧执行类回复不入缓存、回复治理收口先于自检且落库=治理后文本+banner推前端）；self_verify收紧"说了≠做了"（动作类met必须以工具执行证据为前提——原has_marker自证漏洞"回复自称已完成即给met"封死，被拦工具evidence报⛔被拦截+原因不计证据） | ✅ | (本次提交) | 8.2勾选+R2销账；tests/test_report_evidence.py 22/22+回归426全过（self_verify 13 + cache_replay/turn_outcome/output_guard/plan/plan_tool_ledger/task_judge_wiring/stream_progress/session_recall/experience_sink/persistent_memory 169 + code_mode/tool_output_wiring/turn_lifecycle/message_router/wechat_bridge/prompt_prefetch/infection_guard/tool_recovery/token_attribution 222）；真实验收=毒丸探针3/3✅（语义缓存埋exact命中的合成"任务执行报告"毒丸→WS真实用户路径/soulmate发同请求：毒丸FAKE标记未回放+journal实证"[semantic-cache] 执行类请求不走缓存"+dev_hello.py真实创建且内容/标记命中（执行证据），latency 51.95s≠1.38s短路形态，自检2/2基于真实工具）；⚠️诚实边界：治理负路径（工具真被拦时banner）以单测实证，真实拦截场景未在探针触发；下周期做8.3长回合治理（schedule 3工具链>240s无终态根因+回合级进度/超时可见）
 [2026-10-10 19:45] 周期#33 | ⚡8.3 长回合治理（R3）：根因实证=**非dispatch卡死**（journal 17:52-17:57 验收#7复盘，回合在真实推进），每工具一次注入审计LLM往返+R1误杀失败/重试轮把3工具链拉到5-8分钟级，harness 240s到点放弃即"无终态无落库"；实装agent/turn_watchdog.py（TurnWatchdog：后台心跳默认60s SOULMATE_TURN_HEARTBEAT_S推快照[已用时/轮次/工具数/最近工具]给客户端+journal不依赖轮次边界LLM单轮慢也照发+软预算240s SOULMATE_TURN_SOFT_BUDGET_S单次⚠️"继续执行不中断"禁硬杀+notify旁路纪律只计数不冒泡+960s自过期防孤儿心跳）+soulmate_agent五点接线（import+_watchdog_for/_stop_turn_watchdog lazy-init兼容__new__测试agent+工具循环前start+轮次/工具节点beat+turn.close订阅收口） | ✅ | (本次提交) | 8.3勾选；tests/test_turn_watchdog.py 8/8+回归169全过（turn_lifecycle/turn_outcome/loop_guard/prompt_prefetch/infection_guard/report_evidence/stream_progress）+py_compile+导入烟测+双实例重启health OK；真实验收=WS用户路径探针（schedule 3工具链+唯一防缓存标记，复用acceptance_benchmark采集器含sessionId过滤）：78.1s end_turn、需求自检3/3 met、journal实证心跳"[turn-watchdog] session=om-13507ea2b926 ⏳ 回合进行中：已用 60s｜第 2/15 轮｜已执行工具 1 个（最近：schedule_cancel）"、cron_tasks.db实证任务#2(wd_probe_1791631)创建后按要求停用(enabled=0)——R1修复后同链路从">240s无终态"变78s完整终态（8.5定时类预热通过，探针脚本wd_probe_ws.py留库可复跑）；⚠️诚实边界：耗时本身治理（单工具链审计LLM往返开销优化）未做另案；下周期做8.4调研兜底（web_search后端可用性探测+SearXNG未启动显式降级，禁静默归零）
+[2026-10-10 19:57] 周期#34 | 8.4 调研兜底（R4）：web_search 后端可用性探测+显式降级禁静默归零——新增agent/search_backend.py（SearXNG主后端+Bing HTML兜底降级链+probe()+四态语义：可信空只认searx JSON results:[]报"非故障"、bing 0块=inconclusive疑似反爬禁断言"无资料"、全挂=逐后端报因+启动文档化start.sh/searx.webapp）+修静默归零双根因（①后端挂了/非JSON/缺results键误报"无搜索结果"②query裸拼URL未编码空格/中文截断假零→quote()）+soulmate_agent两执行点收口run_search单一真源内联curl-SearXNG清零 | ✅ | e4e25c13 | 8.4勾选；tests/test_search_backend.py 24/24+回归109全过(code_mode/sandbox_policy/tool_recovery/tool_output)+真实机器实证（SearXNG未启动场景旧报"搜索不可用:curl stderr"/假零→现"⚠️未获得搜索结果…不足以断言无资料…启动方法"）+SoulMateAgent导入烟测；⚠️诚实边界：Bing兜底实测被反爬拦截0块（inconclusive已如实标注，SearXNG启动后主链路即恢复多引擎聚合）；8.5验收复测/⚡8.6双链合并（待用户拍板）仍未做；下周期做8.5验收复测（多渠道/定时两类，prompt带唯一防缓存标记+先清陈旧产物）
