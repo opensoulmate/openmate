@@ -18,6 +18,10 @@ logger = logging.getLogger("acp-proxy.skill_manager")
 
 SKILLS_DIR = os.path.join(os.path.dirname(__file__), "skills")
 
+# saved: 可写技能库目录（路线图6.1 技能保存）——agent/skill_saver.py 唯一写入源，
+# 本模块只读扫描（update/delete 拒绝 saved: 条目，单写入者纪律）
+SKILL_LIBRARY_DIR = os.path.join(str(Path.home()), ".openmate", "skill-library")
+
 # .agents/skills 跨agent技能目录标准（五方定案：goose/ChatDev2.0/FastGPT/OpenHands/Warp，
 # SUMMARY.md行业信号#3"无可争议事实标准"，路线图第三阶段第10项）。
 # 运行时消费层：opensoul API列表层此前已对齐，但真实聊天路径
@@ -73,13 +77,19 @@ class SkillManager:
         self,
         skills_dir: str = SKILLS_DIR,
         standard_dirs: list[tuple[str, str]] | None = None,
+        saved_dir: str | None = None,
     ):
         self.skills_dir = skills_dir
         os.makedirs(self.skills_dir, exist_ok=True)
         # .agents/skills标准层目录（测试可注入隔离目录，None=生产目录）
         self.standard_dirs = STANDARD_SKILL_DIRS if standard_dirs is None else standard_dirs
+        # saved: 可写技能库（agent/skill_saver.py 唯一写入源，本类只读扫描）——
+        # 路线图6.1 技能保存：成功流程写成SKILL.md后经此层进运行时技能面（search命中）
+        self.saved_dir = saved_dir if saved_dir is not None else SKILL_LIBRARY_DIR
         self._std_cache: list[dict] | None = None
         self._std_cache_ts: float = 0.0
+        self._saved_cache: list[dict] | None = None
+        self._saved_cache_ts: float = 0.0
 
     # ── .agents/skills 标准层（只读） ──────────────────────────
 
@@ -261,6 +271,58 @@ class SkillManager:
     def _is_std_id(skill_id: str) -> bool:
         return skill_id.startswith("std:")
 
+    # ── saved: 可写技能库（只读扫描；唯一写入源=agent/skill_saver.py） ──
+
+    @staticmethod
+    def _is_saved_id(skill_id: str) -> bool:
+        return skill_id.startswith("saved:")
+
+    def scan_saved_skills(self, force_refresh: bool = False) -> list[dict]:
+        """扫描 saved: 可写技能库（skill_saver 保存的 SKILL.md）
+
+        复用标准层解析（frontmatter+触发词派生+正文截断），但语义不同：
+        read_only=False（可经 skill_save 覆盖更新）、id=saved:<slug>、revision 透传。
+        同款 60s TTL 缓存（聊天路径每条消息都 search_skills）。
+        """
+        now = time.monotonic()
+        if (
+            not force_refresh
+            and self._saved_cache is not None
+            and (now - self._saved_cache_ts) < _STDLAYER_CACHE_TTL
+        ):
+            return [dict(s) for s in self._saved_cache]
+        skills: list[dict] = []
+        base_path = Path(self.saved_dir)
+        try:
+            if base_path.exists():
+                for d in sorted(base_path.iterdir()):
+                    try:
+                        if not d.is_dir() or d.name.startswith(".") or not (d / "SKILL.md").exists():
+                            continue
+                    except OSError:
+                        continue
+                    skill = self._parse_standard_skill("saved", d)
+                    if not skill:
+                        continue
+                    skill["id"] = f"saved:{d.name}"
+                    skill["read_only"] = False
+                    skill["tags"] = ["saved"] + [
+                        t for t in skill.get("tags", []) if t not in ("standard", "saved")
+                    ]
+                    skill["content"] = skill["content"].replace(
+                        "[标准技能·saved]", "[已保存技能]", 1)
+                    meta, _body = self._parse_standard_skill_md(d / "SKILL.md")
+                    try:
+                        skill["revision"] = int(meta.get("revision", 1) or 1)
+                    except (TypeError, ValueError):
+                        skill["revision"] = 1
+                    skills.append(skill)
+        except OSError as e:
+            logger.warning("saved技能库不可读 %s: %s", self.saved_dir, e)
+        self._saved_cache = [dict(s) for s in skills]
+        self._saved_cache_ts = now
+        return skills
+
     # ── CRUD ──────────────────────────────────────────────────
 
     def list_skills(self) -> list[dict]:
@@ -272,6 +334,12 @@ class SkillManager:
         skills: list[dict] = []
         seen: set = set()
         for s in self.scan_standard_skills():
+            if s["name"] in seen:
+                continue
+            seen.add(s["name"])
+            skills.append(s)
+        # saved: 可写库（skill_saver 保存的SKILL.md）进运行时技能面——保存即被检索命中
+        for s in self.scan_saved_skills():
             if s["name"] in seen:
                 continue
             seen.add(s["name"])
@@ -319,9 +387,14 @@ class SkillManager:
         return skill
 
     def get_skill(self, skill_id: str) -> Optional[dict]:
-        """按 ID 获取技能（std: 前缀=只读标准层条目）"""
+        """按 ID 获取技能（std: 前缀=只读标准层条目；saved: 前缀=可写库条目）"""
         if self._is_std_id(skill_id):
             for s in self.scan_standard_skills():
+                if s["id"] == skill_id:
+                    return dict(s)
+            return None
+        if self._is_saved_id(skill_id):
+            for s in self.scan_saved_skills():
                 if s["id"] == skill_id:
                     return dict(s)
             return None
@@ -338,6 +411,10 @@ class SkillManager:
             # （skill_guard供应链管线/人工），agent CRUD路径绝不写标准目录
             logger.warning("拒绝更新只读标准技能: %s", skill_id)
             return None
+        if self._is_saved_id(skill_id):
+            # 单写入者纪律：saved库唯一写入源=skill_saver.save_flow(overwrite=True)
+            logger.warning("saved技能请经 skill_save 覆盖保存（skill_saver单一写入源）: %s", skill_id)
+            return None
         skill = self.get_skill(skill_id)
         if not skill:
             return None
@@ -353,6 +430,10 @@ class SkillManager:
         """删除技能（std: 标准层条目拒绝删除——目录由外部管理）"""
         if self._is_std_id(skill_id):
             logger.warning("拒绝删除只读标准技能: %s", skill_id)
+            return False
+        if self._is_saved_id(skill_id):
+            # 单写入者纪律：saved库不走本类删除（skill_saver单一写入源，防误删既有技能）
+            logger.warning("saved技能拒绝经SkillManager删除: %s", skill_id)
             return False
         filepath = os.path.join(self.skills_dir, f"{skill_id}.json")
         if os.path.exists(filepath):
@@ -421,6 +502,10 @@ class SkillManager:
         """
         if self._is_std_id(skill_id):
             logger.debug("标准技能使用不记账（只读层）: %s", skill_id)
+            return
+        if self._is_saved_id(skill_id):
+            # saved库条目使用统计归本地JSON层无意义——与std同款不记账（不落库不炸）
+            logger.debug("saved技能使用不记账: %s", skill_id)
             return
         skill = self.get_skill(skill_id)
         if not skill:

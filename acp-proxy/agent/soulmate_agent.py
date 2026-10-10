@@ -149,6 +149,7 @@ from agent.group_orchestrator import (  # 路线图5.3 AI群组任务编排
     GroupOrchestrator,
     get_group_orchestrator as _get_group_orchestrator,
 )
+from agent.skill_saver import get_skill_saver as _get_skill_saver  # 路线图6.1 技能保存
 from agent.writer_fence import SessionWriterFence, WriteAction
 from agent.tool_exec_fencing import FileFenceTimeout, file_fence
 from agent.steering import (
@@ -1368,6 +1369,9 @@ class SoulMateAgent:
             # AI群组任务编排（路线图 5.3）：批内同样可用（编排HTTP IO，需await）
             if func_name == "group_task":
                 return await self._group_dispatch(func_args, session_id)
+            # 技能保存（路线图 6.1）：批内同样可用（纯本地文件写）
+            if func_name == "skill_save":
+                return self._skill_save_dispatch(func_args, session_id)
             # kilocode #19 MCP resource三件套：批内同样可用（与主循环同款注入安全层）
             if func_name in MCP_RESOURCE_TOOL_NAMES:
                 return await self._call_mcp_resource_tool(func_name, func_args)
@@ -1819,6 +1823,56 @@ class SoulMateAgent:
         except Exception as e:
             return f"[错误] 群组任务编排失败: {type(e).__name__}: {e}"
 
+    def _skill_save_dispatch(self, func_args: dict, session_id: str = "") -> str:
+        """skill_save 分发（路线图 6.1：把成功流程写成 SKILL.md）。
+
+        主循环与 code-mode 内层共用此入口（纯本地文件写，无需 await）。
+        同名已存在且 overwrite=false 时拒绝静默覆盖（显式提示）；
+        保存成功后强刷 saved 层扫描缓存——保存即被 search_skills 命中。
+        与 _group_dispatch 同款 lazy-init（__new__ 裸实例零感知）。
+        """
+        saver = getattr(self, "_skill_saver_inst", None)
+        if saver is None:
+            saver = _get_skill_saver()
+            self._skill_saver_inst = saver
+        try:
+            result = saver.save_flow(
+                name=str(func_args.get("name", "") or ""),
+                description=str(func_args.get("description", "") or ""),
+                triggers=func_args.get("triggers") or [],
+                steps=func_args.get("steps") or [],
+                pitfalls=func_args.get("pitfalls"),
+                verify=str(func_args.get("verify", "") or ""),
+                category=str(func_args.get("category", "") or "general"),
+                overwrite=bool(func_args.get("overwrite", False)),
+            )
+        except ValueError as e:
+            return f"错误: {e}"
+        except Exception as e:
+            return f"[错误] 技能保存失败: {type(e).__name__}: {e}"
+
+        # 保存即进检索面：强刷 SkillManager saved 层缓存（60s TTL 会藏住刚保存的技能）
+        mgr = getattr(self, "_skill_manager", None)
+        if mgr is not None:
+            try:
+                mgr.scan_saved_skills(force_refresh=True)
+            except Exception as e:
+                logger.debug(f"[skill_save] saved层缓存刷新失败（不阻塞保存结果）: {e}")
+
+        if result.get("exists") and not result.get("updated"):
+            return (
+                f"⚠️ 已存在同名技能「{result['name']}」"
+                f"（revision {result['revision']}），未覆盖。"
+                f"确认要更新该技能时传 overwrite=true 重新保存。\n"
+                f"SKILL.md: {result['skill_md']}"
+            )
+        verb = "已更新" if result.get("updated") else "已保存"
+        return (
+            f"✅ {verb}技能「{result['name']}」（revision {result['revision']}）\n"
+            f"SKILL.md: {result['skill_md']}\n"
+            f"触发条件/步骤/坑已写入标准格式，后续任务匹配触发词时自动加载。"
+        )
+
     async def _traj_record_round(
         self,
         session_id: str,
@@ -1977,6 +2031,7 @@ ACP代理目录: {cwd}/acp-proxy（后端 Python 代码在此）
 - message_send: 统一消息出站（OpenMate/微信同一入口，支持media图片/文件附件收发）。channel='wechat'发给微信peer（拆块+限流），channel='openmate'落库到指定会话（正连前端实时可见）。用户要求"给某微信用户发消息/发文件发图片/通知某会话/主动推送"时使用；对方发来图片/截图时按消息内媒体提示块用vision_analyze/read_image理解（截图理解）
 - delegate_tasks: 子代理并行执行（拆分任务给并行worker，父代理收尾合并）。多个互不依赖的独立子任务（多路调研/多个互不依赖的问题/多份互不依赖的检查）→ delegate_tasks 拆给并行子代理并发执行（2-8个），合并结果后由你收尾总结论。⚠️ 有先后依赖的任务不要拆（会并行跑）；每个子任务 goal 必须自包含（子代理看不到当前对话，必要背景写进 goal/context）；失败/超时的子任务会在结果里标注原因，收尾时如实反映不要当成已完成
 - group_task: AI群组任务编排（接 ai-groups 多agent群组：自动分解→按角色分配→并行执行）。需要多agent分工协作的复杂目标（规划→执行→验证→审查）→ group_task(action=orchestrate) 交给群组执行并返回合并报告；查看群组→ action=list_groups；查任务进度→ action=task_status。⚠️ 失败/超时子任务在报告中标注原因，不要当成已完成
+- skill_save: 技能保存（把成功流程写成SKILL.md含触发条件/步骤/坑，存技能库供复用）。刚成功完成多步骤可复用任务、或用户要求"把XX流程保存为技能/记住怎么做"时使用；同名技能默认不覆盖（更新传 overwrite=true）。保存后同类任务命中触发词会自动加载该技能
 
 You can send files to the user natively: to deliver a file, write a brief confirmation message (e.g. "文件已发送，请查收"), then include MEDIA:/absolute/path/to/file on a new line. The gateway extracts the tag, strips it, and sends the file as a download card. Always write some text before the MEDIA: tag — never output a bare MEDIA: tag alone. Use search_files first if you don't know the exact path. Do NOT paste file contents into chat."""
 
@@ -2918,6 +2973,67 @@ You can send files to the user natively: to deliver a file, write a brief confir
             },
         }]
         builtin_tools.extend(group_task_tool)
+
+        # ── 技能保存工具（路线图 6.1）──────────────────────────
+        # 成功流程写成标准 SKILL.md（触发条件/步骤/坑），存入可写技能库；
+        # 保存后自动进技能检索面（search_skills 命中→系统提示注入复用）。
+        skill_save_tool = [{
+            "type": "function",
+            "function": {
+                "name": "skill_save",
+                "description": (
+                    "技能保存：把一个成功完成的任务流程写成标准 SKILL.md"
+                    "（含触发条件/步骤/坑），存入技能库供未来同类任务复用。"
+                    "适用时机：刚成功完成一个多步骤任务且流程可复用、或用户要求"
+                    "\"把XX流程保存为技能/记住怎么做\"。triggers 写未来会命中该技能的"
+                    "关键词（中文2字词可用）；steps 写可照做的具体步骤；pitfalls 写本次"
+                    "踩过的坑（没有可省略）。同名技能默认不覆盖（overwrite=false），"
+                    "确认要更新已有技能时传 overwrite=true。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "技能名（简洁、可辨识，如\"发票OCR识别入库\"）",
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "一句话说明这个技能解决什么问题（必填，用于检索）",
+                        },
+                        "triggers": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "触发条件关键词（≥1个，未来任务命中即自动加载该技能）",
+                        },
+                        "steps": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "操作步骤（≥1条，按顺序写可照做的具体动作）",
+                        },
+                        "pitfalls": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "坑/注意事项（可选，本次执行中踩过的坑和规避方法）",
+                        },
+                        "verify": {
+                            "type": "string",
+                            "description": "验证方法（可选，做完后如何确认成功）",
+                        },
+                        "category": {
+                            "type": "string",
+                            "description": "分类（可选，默认 general）",
+                        },
+                        "overwrite": {
+                            "type": "boolean",
+                            "description": "同名技能已存在时是否覆盖更新（默认 false 不覆盖）",
+                        },
+                    },
+                    "required": ["name", "description", "triggers", "steps"],
+                },
+            },
+        }]
+        builtin_tools.extend(skill_save_tool)
 
         # 添加进化引擎工具（支持直接对象或HTTP API两种模式）
         evolution_tools = []
@@ -3913,9 +4029,17 @@ You can send files to the user natively: to deliver a file, write a brief confir
                                     session_id, func_name, e, func_args)
                                 result = te.to_model_message()
                         elif func_name == "group_task":
-                            # ── AI群组任务编排（路线图 5.3）────────────────
+                            # ── AI群组任务编排（路线图 5.3）────────────────────
                             try:
                                 result = await self._group_dispatch(func_args, session_id)
+                            except Exception as e:
+                                te = self._tool_error_handler.handle_error(
+                                    session_id, func_name, e, func_args)
+                                result = te.to_model_message()
+                        elif func_name == "skill_save":
+                            # ── 技能保存（路线图 6.1）──────────────────────────
+                            try:
+                                result = self._skill_save_dispatch(func_args, session_id)
                             except Exception as e:
                                 te = self._tool_error_handler.handle_error(
                                     session_id, func_name, e, func_args)
