@@ -389,6 +389,39 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
   =非缓存假跑；测试产物复核清理归零（accept_probe 行 0）。
   ⚠️诚实边界：每类单次样本（同机低负载）；多渠道 verify 为 reply_assisted（微信通道
   loopback 传输，真实 iLink 归 4.1b 待拍板）；8.6 双链合并落地后建议全量 10 类复测。
+- [x] 8.5b 全量 10 类验收对标实测（周期#41）：分批 5+5 真实跑完 10 类（tag=FULL10_A/B），
+  9/10 当场过；调研类失败连环挖出 3 个真根因并逐一修复后类别复测转✅（tag=FULL10_I）：
+  ①环境根因=SearXNG 未启动（启动后仍挂）→②search_backend 15s 超时 < SearXNG 冷查询
+  实测 20s（curl exit 28 被误报"不可达"→模型误称"SearXNG 未启动"）→③semantic-cache
+  88% SEMANTIC 命中回放旧误报（复测标记只防 EXACT；根因=动作类判据不认"用 <工具名>"
+  点名与搜索类动词）→④verify_research 裸子串"不可用"判据把正确回答假阴性杀掉
+  （补做说明引用提示语/心跳粘连）。修复三连：report_evidence 动作类判据补搜索动词+
+  工具点名（5a8a16a3）、search_backend 超时 30s+exit28 措辞（0aab4f8c）、
+  verify_research 主答区语义判据+须含被搜事实+剥心跳（ce1ec4c4/23fa4f94）。
+  最终形态：调研类真实 75.66s 回合、web_search 真实执行、答案正确（2024-10-07）。
+  全量 10 类单轮确认跑（tag=FULL10_FINAL）台面 10/10，但发布类经行归属取证为
+  **陈旧行假阳性**（om-aa107108ab94 只有 user 行无投递行，模型误报 message_send
+  "未注入"拒发）——harness cleanup 漏清 agent_messages 探针行（复测铁律②漏网形态）；
+  修复（89013b1a：cleanup 预清探针行+verify 只认 accept-pub-target 投递行）后
+  发布类真复测✅（tag=FULL10_J，投递行=1 真实落库，message_send 本次正常调用）。
+  ⚠️诚实边界：10 类均有真实通过证据（9 类在 FINAL 轮、调研/发布为修复后类别复测），
+  但非同一轮全量全绿；同机低负载单样本/类；发布类"工具未注入"误报为间歇性
+  模型行为（8.5c-②），非确定性缺失。
+- [ ] 8.5c 验收发现遗留（周期#41 实证，优先级高）：
+  ①回复风格：任务类回答尾部固定带"补做结果/逐项说明"元叙事（违反验收 prompt
+  "简短回答一句话"，self_verify 补做把条件子句逐条复盘）——待治理；
+  ②可用性误报（**本日两次实证，最高优先**）：模型谎称工具"不在工具列表/运行时未注入"
+  ——run-A 称"没有 web_search"（账本实证同回合已成功调用 web_search）、FINAL 轮
+  发布类称"message_send 运行时未注入"并拒发（代码实证 builtin_tools 无条件装配+
+  系统提示有清单，且下一回合同工具正常调用=间歇性模型行为非确定性缺失）。
+  治理方向=可用性声称对照工具账本/self._active_tool_names 确定性核验（8.2 延伸：
+  "说了≠做了"的镜像"做了说没做"），amend_response 同款降级修正；
+  ③InfectionGate 把模型自主 `bash ~/searxng-data/start.sh` 自愈环境判 infection:clarify
+  （有人值守回合中断自愈链）——自愈类低危命令豁免语义待评估；
+  ④SearXNG 常驻托管：本轮手动启动（bash ~/searxng-data/start.sh），无 systemd 托管
+  重启即丢——建议 searxng.service（systemd --user）或 agent 自启路径打通；
+  ⑤turn_watchdog 心跳帧会被 harness 并进回复文本采集（⏳ 快照与答案粘连）——
+  采集侧按 sessionId 过滤仍会混入同 session 心跳，需按 turn_origin/帧类型过滤。
 - [ ] ⚡8.6 双链分叉事故处置（见周期#30日志）：main(1b63f2ac) 与 evo/exp-1791613018
   (d431bcc0) 在 6.2 处分叉成两套实现（skill_loader vs skill_matcher），#25-#29 只在
   evo/exp 链——链合并/取舍决策涉及取舍**待用户拍板**。周期#31 已做非破坏处置准备：
@@ -440,3 +473,5 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 [2026-10-10 22:40] 周期#39 | 7.4图像生成/编辑（阶段顺序下一刀，阶段7全部完成；⚡区0.1/0.2已完、8.6待用户拍板）：新增agent/image_tools.py（ImageTools：编辑=确定性Pillow八动作resize/crop/rotate/flip/convert/annotate/compose/thumbnail——RGBA→JPG白底合成/CJK字体确定性查找(Noto Sans CJK+SOULMATE_IMAGE_FONT覆盖)/overlay越界拒绝；生成=双后端诚实多态对标7.3：SOULMATE_IMAGEGEN_API_URL→OpenAI兼容images API真实AI生成（b64_json/url+90s有界超时）或未配置→PIL程序化绘制兜底（渐变底+文字卡）显式标注"⚠️程序化绘制（非AI生成…）"禁假称AI+配置文档化、AI失败显式报因禁降级冒充、0字节/不可解码不算成功、filename白名单禁穿越）+sandbox NETWORK_TOOL_NAMES归类image+soulmate_agent五点接线（image工具定义/主dispatch/_image_dispatch共享lazy-init/code-mode批内+系统提示） | ✅ | fde10dea | 7.4勾选（阶段7工具生态补齐全部完成）；tests/test_image_tools.py 23/23（编辑八动作尺寸与像素实证/JPG白底/文字上画/拼接三态/生成兜底诚实标注/AI后端成功·失败·空内容·垃圾字节四态/参数拒绝与路径穿越/0字节/接线护栏+__new__真实dispatch烟测+lazy-init构造）+全量回归2199 passed零失败（18m32s全库）+py_compile+_build_base_system_prompt运行时实证image行进系统提示（fuzzy patch误伤tts描述行已按脚本法修复，py_compile过）；真实机器烟测全绿（服务同款interpreter PIL 12.3.0：程序化绘制400x240→resize→annotate金色水印→convert jpg→compose纵向拼接→thumbnail 64x38，PIL独立回读全部产物尺寸/mode一致，负路径显式报因）+双实例重启health OK；实现中测试暴露并修复1个真缺口（_size默认值分支在generate未传尺寸时误判"尺寸非法"）+1个输出契约修正（兜底提示曾拼在MEDIA:行后，改前置保持MEDIA末行供网关按行提取）；⚠️诚实边界：AI图像生成API后端未实测（无真实API配置，走注入fake单测实证，代码就绪待用户配置SOULMATE_IMAGEGEN_API_URL）；程序化绘制是兜底非语义生成；下周期做8.5验收复测（多渠道/定时两类，prompt带唯一防缓存标记+先清陈旧产物）或8.6双链合并（待用户拍板）
 
 [2026-10-10 22:55] 周期#40 | 8.5验收复测（多渠道/定时两类；⚡区0.1/0.2已完、8.6待用户拍板）：acceptance_benchmark.py增量改造三件套——①ACCEPT_CATEGORIES类别过滤（"每完成一个⚡项即重跑对应类别对标"能力落地，ACCEPT_CATEGORIES=定时,多渠道实测只跑2任务）②每运行注入唯一RUN_TAG防缓存标记进prompt（复测铁律①：semantic-cache EXACT命中回放旧响应假跑0.98s级）③setup()先cleanup()清陈旧产物（复测铁律②：上次被打断轮的accept_probe行/记忆标记会假阳性）+summary记run_tag/categories | ✅ | (本次提交) | 8.5勾选；真实复测2/2✅（tag=RETEST85_1791643501，真实WS用户路径session/new→session/prompt，每类独立session）：定时76.57s end_turn server_side（cron_tasks.db accept_probe行=1+journal实证schedule_task真实创建#3「accept_probe」interval:1h含持久化回执）、多渠道40.56s end_turn reply_assisted（journal实证wechat_route_list+message_send真实工具账本permission=allow"已发文本1块给微信peer「accept_peer」"，response_len=859）；非缓存假跑三证（延迟76s/40s≠0.98s短路形态、journal零semantic-cache回放、工具账本带真实result_preview）；Gate1 git diff三处改动落盘、Gate2 类别过滤/RUN_TAG/setup预清理均被本次真实运行走中（只跑2类+tag打印+预清理生效）、Gate3 2/2真实产出（DB行+journal工具账本）；测试产物复核清理归零（accept_probe行0）；py_compile过 | ⚠️诚实边界：每类单次样本（同机低负载）；多渠道verify为reply_assisted（微信通道loopback传输，真实iLink归4.1b待用户拍板）；8.6双链合并落地后建议全量10类复测；下周期做全量10类验收对标实测（harness已支持类别过滤，超时则分批5+5跑，结果写进路线图）并规划下一批切片（当前阶段1-7+⚡8.1-8.5全完，余项全为待用户拍板/另案）
+
+[2026-10-10 23:55] 周期#41 | 8.5b 全量10类验收对标实测（分批5+5+修复链+复测）：分批真实跑完10类（tag=FULL10_A/B）9/10当场过、调研类连环挖出4真根因逐修后转✅+全量单轮FINAL台面10/10但发布类经行归属取证为陈旧行假阳性（模型误报message_send"未注入"拒发，旧cleanup漏清agent_messages探针行）修复后真复测✅——修复五连：①report_evidence动作类判据补搜索/检索/抓取/爬取动词+_TOOL_NAMED_RE显式工具点名（5a8a16a3，根因：调研回合被判非执行类→semantic-cache 88% SEMANTIC命中回放旧误报，复测标记只防EXACT）②search_backend超时15s→30s SOULMATE_SEARCH_TIMEOUT_S可配+exit28措辞"响应超时…勿断言未启动"（0aab4f8c，根因：SearXNG冷查询实测20.0s>15s→curl exit 28误报"不可达"→模型误称"SearXNG未启动"）③verify_research语义收敛=剥心跳快照+主答区判自报（引号内引用不计）+须含被搜事实3.13+2024（ce1ec4c4/23fa4f94，根因：裸子串"不可用"判据被补做说明引用提示语/心跳粘连假阴性杀正确回答，全文regex打地鼠E/G/H三轮不收敛）④cleanup补清agent_messages探针行+verify_publish只认accept-pub-target投递行（89013b1a，复测铁律②漏网形态）⑤SearXNG手动启动（start.sh，20s冷聚合实证） | ✅ | 5a8a16a3/0aab4f8c/c6abf31e/23fa4f94/89013b1a | 8.5b勾选；tests：report_evidence+self_verify 35、search_backend+report_evidence 48、回归126（cache_replay/turn_outcome/output_guard/infection_guard/skill_evolution）全绿+verify判据7历史形态离线判别全对；真实验收=10类全有真实通过证据（开发59.95s/调试64.39s/运维23.14s/调研75.66s web_search真实执行答案2024-10-07/发布33.76s投递行真实落库/办公151.9s xlsx 4964B/定时116.32s cron_tasks.db行/多渠道53.87s工具账本/记忆63.16s MEMORY.md标记/协作61.66s subagent_runs双worker），journal工具账本permission=allow实证；⚠️诚实边界：调研/发布为修复后类别复测形态（非同一轮全量全绿），每类单样本同机低负载；新发现入8.5c待办5项（①回答尾部"补做结果/逐项说明"元叙事违反"简短一句话"②**可用性误报本日两次实证最高优先**：run-A谎称没有web_search（账本证同回合已调用）、FINAL轮谎称message_send未注入拒发（代码证无条件装配+下回合正常）→治理=可用性声称对照工具账本/_active_tool_names确定性核验③InfectionGate拦模型自启SearXNG自愈④SearXNG无常驻托管重启即丢⑤心跳帧混入harness回复采集）；下周期做8.5c-②可用性误报治理（工具面确定性核验+amend降级修正，用户可见缺陷最高优先）
