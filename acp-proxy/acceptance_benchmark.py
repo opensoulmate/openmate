@@ -125,12 +125,16 @@ def verify_research(reply: str) -> tuple[bool, str]:
 
 
 def verify_publish(reply: str) -> tuple[bool, str]:
+    # 只认真实投递行（session_id='accept-pub-target' 的落库行=服务端副作用），
+    # 不认 user 提示行；cleanup() 预清探针行保证行数只来自本 run（复测铁律②补全：
+    # 周期#41实证旧 cleanup 漏清 agent_messages 探针行→陈旧行假阳性放过了真实失败的run）
     rows = _query(
         os.path.expanduser("~/opensoul/data/opensoul.db"),
-        "SELECT content FROM agent_messages WHERE content LIKE ? ORDER BY rowid DESC LIMIT 5",
+        "SELECT content FROM agent_messages WHERE session_id = 'accept-pub-target' "
+        "AND content LIKE ? ORDER BY rowid DESC LIMIT 5",
         ("%SOULMATE_PUBLISH_PROBE%",),
     )
-    return bool(rows), f"opensoul.db agent_messages 命中 SOULMATE_PUBLISH_PROBE 行数={len(rows)}"
+    return bool(rows), f"opensoul.db 投递行（accept-pub-target）数={len(rows)}"
 
 
 def verify_office(reply: str) -> tuple[bool, str]:
@@ -275,6 +279,19 @@ def cleanup() -> None:
     try:
         conn = sqlite3.connect(CRON_DB, timeout=10)
         conn.execute("DELETE FROM tasks WHERE name = ?", ("accept_probe",))
+        conn.commit()
+        conn.close()
+    except sqlite3.Error:
+        pass
+    # 复测铁律②补全（周期#41）：发布类探针行同样要预清——旧 cleanup 只清 MEMORY
+    # 标记和 cron 行，agent_messages 探针行跨 run 累积→陈旧行假阳性（实证放过了
+    # 一个真实未发送的 run）
+    try:
+        conn = sqlite3.connect(
+            os.path.expanduser("~/opensoul/data/opensoul.db"), timeout=10)
+        conn.execute(
+            "DELETE FROM agent_messages WHERE content LIKE ?",
+            ("%SOULMATE_PUBLISH_PROBE%",))
         conn.commit()
         conn.close()
     except sqlite3.Error:
