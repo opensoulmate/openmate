@@ -99,7 +99,14 @@ _UNAVAIL_CLAIM_RE = re.compile(
 
 def verify_research(reply: str) -> tuple[bool, str]:
     text = reply or ""
-    claim = bool(_UNAVAIL_CLAIM_RE.search(text))
+    # 引号奇偶校验：引号内的引用（如补做说明里逐字引用提示语
+    # "如果搜索工具不可用，明确说明不可用"）不计自报——周期#41 G轮实证形态
+    claim = False
+    for m in _UNAVAIL_CLAIM_RE.finditer(text):
+        if text[:m.start()].count('"') % 2 == 1:
+            continue
+        claim = True
+        break
     ok = "3.13" in text and len(text) > 30 and not claim
     return ok, (f"回复含'3.13'={'是' if '3.13' in text else '否'}、"
                 f"自报搜索不可用={'是' if claim else '否'}（主语邻接判据，引用不计）、"
