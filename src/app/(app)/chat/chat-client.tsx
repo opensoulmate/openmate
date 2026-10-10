@@ -622,6 +622,9 @@ function useAcpWebSocket(params: {
             } catch (saveErr) {
               console.warn('[ACP] 保存session到OpenSoul失败:', saveErr);
             }
+            // 注册行已落库，此刻再刷新侧边栏（此前 refreshSidebar 发生在注册前，
+            // 拉列表时行还不存在 → 新会话不刷新页面永远不显示）
+            useAppStore.getState().refreshSidebar();
           }
         }
         state.resolveAcpReady?.();
