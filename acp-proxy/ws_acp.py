@@ -50,13 +50,13 @@ JWT_ALGORITHM = "HS256"
 AGENT_ROUTES = {
     "soulmate": {"cmd": [sys.executable, "-m", "agent.start", "--stdio"], "cwd": _ACPPROXY_DIR},
     "hermes": {"cmd": ["hermes", "acp"], "cwd": _USER_HOME},
-    "openclaw": {"cmd": ["openclaw", "acp"], "cwd": _USER_HOME},
-    "opencode": {"cmd": ["opencode", "acp"], "cwd": _USER_HOME},
     "mimo": {"cmd": ["mimo", "acp"], "cwd": _USER_HOME},
+    "opencode": {"cmd": ["opencode", "acp"], "cwd": _USER_HOME},
+    "ollama": {"cmd": [sys.executable, "-m", "agent.ollama_acp"], "cwd": _ACPPROXY_DIR},
 }
 
-# 默认路由
-DEFAULT_ROUTE = {"cmd": [sys.executable, "-m", "agent.start", "--stdio"], "cwd": _ACPPROXY_DIR}
+# 独立性铁律（用户规格）：每个 agent 必须独立。未注册 agent 响亮报错，
+# 绝不静默顶替成另一个 agent 的大脑（曾发生 pi 会话回的是 SoulMate 的低级事故）。
 
 
 def decode_token(token: str) -> str | None:
@@ -196,14 +196,9 @@ async def ws_acp_endpoint(client_ws: WebSocket):
     agent_id = params.get("agent_id") or params.get("agentId") or "soulmate"
     route = AGENT_ROUTES.get(agent_id)
     if route is None:
-        # 未知agent自动尝试 {agent_id} acp，fallback到soulmate
-        import shutil
-        if shutil.which(agent_id):
-            route = {"cmd": [agent_id, "acp"], "cwd": _USER_HOME}
-            logger.info(f"Dynamic route for '{agent_id}': {route['cmd']}")
-        else:
-            route = DEFAULT_ROUTE
-            logger.warning(f"Agent '{agent_id}' not found, falling back to soulmate")
+        logger.error(f"[ACP] agent '{agent_id}' 未注册（无ACP路由）——拒绝创建会话，绝不冒名顶替")
+        await _send_acp(client_ws, {"jsonrpc": "2.0", "id": session_msg.get("id"), "error": {"code": -32601, "message": f"agent '{agent_id}' 不支持 ACP 会话（未注册）"}})
+        return
     logger.info(f"[ACP] user {user_id} → agent {agent_id} → {route['cmd']}")
 
     # ACP sessionId捕获 + 重启重放过滤（子进程重启session/load恢复用）
@@ -227,7 +222,7 @@ async def ws_acp_endpoint(client_ws: WebSocket):
         logger.warning(f"[ACP] trajectory recorder init failed (非致命): {e}")
 
     traj_relay = None
-    if route["cmd"] != DEFAULT_ROUTE["cmd"]:
+    if agent_id != "soulmate":
         try:
             from agent.relay_trajectory import RelayTrajectory
 
@@ -412,11 +407,16 @@ async def ws_acp_endpoint(client_ws: WebSocket):
             init_ids.discard(parsed["id"])
             return
         # 捕获session/new响应中的ACP sessionId（一次性；子进程重启重放用）
-        if acp_state["acp_sid"] is None:
-            _sid = _extract_acp_session_id(parsed, session_new_id)
-            if _sid:
-                acp_state["acp_sid"] = _sid
-                logger.info(f"[{agent_id}] captured ACP sessionId: {_sid}")
+        _sid = _extract_acp_session_id(parsed, session_new_id)
+        if _sid and acp_state["acp_sid"] is None:
+            acp_state["acp_sid"] = _sid
+            logger.info(f"[{agent_id}] captured ACP sessionId: {_sid}")
+        # 应答形状归一：各agent的sessionId字段名不一（hermes曾因此"创建会话不好使"），
+        # 统一注入 result.session_id/sessionId，前端固定按这两个字段解析
+        if _sid and parsed.get("id") == session_new_id and isinstance(parsed.get("result"), dict):
+            parsed["result"]["session_id"] = _sid
+            parsed["result"]["sessionId"] = _sid
+            msg = json.dumps(parsed, ensure_ascii=False)
         # 记录并转发给客户端
         logger.info(f"[{agent_id}] → client: id={parsed.get('id')} method={parsed.get('method')} has_result={'result' in parsed}")
         if traj_relay is not None:
