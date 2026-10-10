@@ -174,6 +174,15 @@ def test_cache_gate_blocks_execution_requests():
         "删除/tmp下的临时文件",
         "安装 playwright 并运行测试",
         "更新配置文件里的端口",
+        # 周期#41：搜索/检索类动作动词（漏网形态）
+        "用 web_search 搜索 Python 3.13 的正式发布时间，简短回答（一句话）。",
+        "搜索 Python 3.13 的正式发布时间",
+        "抓取 https://example.com 的页面内容",
+        # 周期#41：显式点名工具＝动作类（即使无动作动词）
+        "调用 schedule_list 看看任务列表",
+        "用 message_send 发一条测试消息",
+        "通过 memory_read 读出记忆末尾",
+        "使用 web_extract 处理这个URL",
     ):
         assert not is_cacheable_request(q), q
 

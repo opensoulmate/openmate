@@ -46,7 +46,15 @@ _EXEC_REQ_RE = re.compile(
     r"(创建|新建|写一|写个|写入|帮我写|帮我改|帮我修|帮我建|帮我删|帮我装|"
     r"修复|修一|修改|改一|改下|改动|删除|删掉|生成|安装|运行|执行|部署|"
     r"提交|推送|下载|上传|发送|更新|配置|迁移|重构|清理|整理|实现|"
-    r"替换|移动|重命名|建一|建个|搭一|补一)"
+    r"替换|移动|重命名|建一|建个|搭一|补一|搜索|检索|抓取|爬取)"
+)
+
+# 显式点名工具（"用 web_search 搜索"、"调用 schedule_list"、"用 xxx 工具"）＝动作类。
+# 周期#41实证漏网形态：动词白名单不含"搜索"且不认工具点名→调研回合被判非执行类→
+# semantic-cache 88%相似命中回放旧"工具不可用"误报（复测标记只防EXACT不防SEMANTIC）。
+# 工具点名是确定性高精度信号：请求显式要求调某个工具＝必须真实执行才算完成。
+_TOOL_NAMED_RE = re.compile(
+    r"(用|使用|调用|通过)\s*[`'\"]?[A-Za-z][A-Za-z0-9_\-]{1,}"
 )
 
 
@@ -115,8 +123,12 @@ def claims_completion(response: str) -> bool:
 
 
 def is_action_request(user_text: str) -> bool:
-    """用户请求是否为动作类（需要真实工具执行才算完成）。"""
-    return bool(_EXEC_REQ_RE.search(user_text or ""))
+    """用户请求是否为动作类（需要真实工具执行才算完成）。
+
+    两种确定性形态：①动作动词（创建/修复/搜索…）②显式点名工具（"用 web_search"）。
+    """
+    text = user_text or ""
+    return bool(_EXEC_REQ_RE.search(text) or _TOOL_NAMED_RE.search(text))
 
 
 def is_cacheable_request(user_text: str) -> bool:
