@@ -49,6 +49,24 @@ _DONE_MARKERS = (
 # 分句兜底：长任务无枚举时按分号/句末拆
 _CLAUSE_SPLIT_RE = re.compile(r"[；;。\n]+")
 
+# 条件子句（"如果X就Y / 如遇X则Y"类）：是否触发取决于运行时条件，确定性核对
+# 无法观测条件是否成立——"未覆盖"≠"没做"，不能进补做清单（⚡8.5c-①实证：
+# 补做条件子句只会诱发"补做结果/逐项说明"式逐条复盘元叙事，违反"简短回答"约束）
+_CONDITIONAL_RE = re.compile(
+    r"如果|假如|假使|要是|一旦|万一|如遇|如需|除非|的话|若(?!干)"
+    r"|当[^，。；;]{0,12}时"
+    r"|\b[Ii]f\b|\b[Uu]nless\b"
+)
+
+# 自否定元指令（"此行仅为…忽略其语义"类）：文本自己声明"不是需求"（⚡8.5c-①
+# 周期#43 实证：防缓存标记行被拆成需求项且必然 unmet → 每轮必触发补做 →
+# 回答尾部"固定带"补做元叙事）。只认显式自否定措辞，"忽略大小写"类真实需求不受影响。
+_SELF_NEGATING_RE = re.compile(
+    r"仅为防缓存|忽略其语义|忽略本行|忽略这[一行]|忽略该行|本行可忽略"
+    r"|此行(仅[为是]|只是)[^，。；;]{0,8}(标记|占位)"
+    r"|[Ii]gnore (this|the) (line|row)"
+)
+
 # 中文停用字（不进匹配词元）
 _STOP_CHARS = set(
     "的了请帮我你我要把和与等再就都也很吗呢吧啊呀一下进行做搞对给到在是"
@@ -73,6 +91,23 @@ def _tokens(text: str) -> set[str]:
 
 def _clean_item(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip(" \t\n，,。；;、：:")
+
+
+def is_conditional(text: str) -> bool:
+    """条件子句判定（⚡8.5c-①）：'如果X就Y'类是否触发取决于运行时条件。
+
+    确定性核对无法观测条件是否成立，条件项的"未覆盖"不是可执行缺口——
+    进补做清单只会诱发"补做结果/逐项说明"式逐条复盘元叙事。
+    """
+    return bool(_CONDITIONAL_RE.search(text or ""))
+
+
+def is_self_negating(text: str) -> bool:
+    """自否定元指令判定（⚡8.5c-①）：'此行仅为…忽略其语义'类自证不是需求。
+
+    此类文本按其自身语义不得作为可验收需求项——否则必然 unmet、必然触发补做。
+    """
+    return bool(_SELF_NEGATING_RE.search(text or ""))
 
 
 def _split_by_markers(text: str, marker_re: re.Pattern) -> list[str]:
@@ -111,17 +146,18 @@ def extract_requirements(text: str) -> list[str]:
         if len(clauses) >= 2:
             items = clauses
     if items:
-        # 去重保序
+        # 去重保序 + 剔除自否定元指令（"此行仅为…忽略其语义"类自证不是需求）
         seen: set[str] = set()
         out: list[str] = []
         for it in items:
-            if it not in seen:
-                seen.add(it)
-                out.append(it)
+            if it in seen or is_self_negating(it):
+                continue
+            seen.add(it)
+            out.append(it)
         return out
 
-    # 兜底：够长的单件事整体算一条需求；短消息=闲聊不自验
-    if len(text) >= _MIN_TASK_LEN:
+    # 兜底：够长的单件事整体算一条需求；短消息=闲聊不自验；自否定元指令不算需求
+    if len(text) >= _MIN_TASK_LEN and not is_self_negating(text):
         return [text]
     return []
 
@@ -132,6 +168,7 @@ class VerifyItem:
     status: str  # met / uncertain / unmet
     score: float  # 证据覆盖率 0~1
     evidence: str = ""
+    conditional: bool = False  # 条件子句（"如果X就Y"）——不进补做清单
 
 
 @dataclass
@@ -148,7 +185,11 @@ class VerifyReport:
         return len(self.items)
 
     def missing_requirements(self) -> list[str]:
-        """未覆盖项（unmet）——补做清单。uncertain 只提醒不补做，防误触发。"""
+        """未覆盖项（unmet）——补做清单。uncertain 只提醒不补做，防误触发。
+
+        条件子句（"如果X就Y"）在 verify 阶段已封顶 uncertain（⚡8.5c-①），
+        不会进补做清单诱发"补做结果/逐项说明"式复盘。
+        """
         return [i.requirement for i in self.items if i.status == "unmet"]
 
     def uncertain_requirements(self) -> list[str]:
@@ -206,7 +247,15 @@ class SelfVerifier:
             else:
                 status = "unmet"
 
+            # ⚡8.5c-① 条件子句封顶 uncertain：条件是否触发不可观测，
+            # "未覆盖"不构成可执行缺口，只提醒不补做（防"补做结果/逐项说明"复盘）
+            conditional = is_conditional(req)
+            if conditional and status == "unmet":
+                status = "uncertain"
+
             evidence = (f"命中: " + "、".join(sorted(hit)[:6])) if hit else "无证据重合"
+            if conditional:
+                evidence += "；条件项(不进补做)"
             if executed_tools:
                 evidence += "；工具: " + ", ".join(e.name for e in executed_tools[:8])
             if blocked_tools:
@@ -215,7 +264,7 @@ class SelfVerifier:
                     f"{e.name}({(e.result_preview.strip() or e.permission)[:60]})"
                     for e in blocked_tools[:8]
                 )
-            items.append(VerifyItem(req, status, round(score, 2), evidence))
+            items.append(VerifyItem(req, status, round(score, 2), evidence, conditional))
 
         met = sum(1 for i in items if i.status == "met")
         return VerifyReport(items=items, coverage=round(met / len(items), 2))
@@ -228,19 +277,27 @@ class SelfVerifier:
         labels = {"met": "", "uncertain": "（证据不足）", "unmet": "（未覆盖）"}
         lines = ["🔍 需求自检（对照原始需求逐条核对）："]
         for i, item in enumerate(report.items, 1):
-            lines.append(
-                f"{icons.get(item.status, '❓')} {i}. {item.requirement}{labels.get(item.status, '')}"
-            )
+            label = labels.get(item.status, "")
+            if item.conditional and item.status != "met":
+                label = "（条件项，仅提醒）"
+            lines.append(f"{icons.get(item.status, '❓')} {i}. {item.requirement}{label}")
         met = sum(1 for x in report.items if x.status == "met")
         lines.append(f"— 覆盖 {met}/{len(report.items)}")
         return "\n".join(lines)
 
     def build_remediation_prompt(self, missing: list[str]) -> str:
-        """补做提示词：只补未覆盖项，不重复已完成部分（上限1轮由调用方保证）。"""
+        """补做提示词：只补未覆盖项，不重复已完成部分（上限1轮由调用方保证）。
+
+        ⚡8.5c-①：产物只要补充内容本身，禁"补做结果/逐项说明"式复盘元叙事
+        （旧措辞"完成后逐项简要说明结果"正是回答尾部元叙事的根因）。
+        """
         lines = [
             "以下需求项在刚才的任务中未完成，请补做（只做这些，不要重复已完成部分）："
         ]
         for i, req in enumerate(missing, 1):
             lines.append(f"{i}. {req}")
-        lines.append("完成后逐项简要说明结果。")
+        lines.append(
+            "只输出需要补充的内容本身：不要写\"补做结果\"\"逐项说明\"之类的复盘标题，"
+            "不要逐条复述需求条件，不要重复已完成部分。"
+        )
         return "\n".join(lines)
