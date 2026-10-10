@@ -152,6 +152,12 @@ from agent.schema_doctor import SchemaDoctor
 
 logger = logging.getLogger("acp-agent.soulmate")
 
+# 0.1 简单对话流式增量落库节流阈值（取先到）：每积累≥_PROGRESS_SAVE_CHARS字或
+# 距上次落库≥_PROGRESS_SAVE_INTERVAL_S秒，存一次当前已生成内容——生成中任意时刻
+# 切页/断连/取消都能从库重建已生成部分。测试可monkeypatch本模块全局。
+_PROGRESS_SAVE_CHARS = 800
+_PROGRESS_SAVE_INTERVAL_S = 2.0
+
 
 class SoulMateAgent:
     """SoulMate Agent — 实现官方 acp.Agent 协议
@@ -465,6 +471,35 @@ class SoulMateAgent:
             except Exception as e:
                 logger.warning(f"[progress] 接管增量行失败，回退新插: {e}")
         self._save_message(session_id, "assistant", text, metadata=metadata)
+
+    def _reset_progress_row(self, session_id: str) -> None:
+        """回合开始时作废上一回合遗留的增量落库行指针（只清内存指针，不动库）。
+
+        上一回合生成中途被杀会残留 _progress_id；若不清，本回合的增量落库/最终
+        接管会UPDATE那条旧行——上一回合的部分内容被覆盖丢失、本回合还顶着旧时间
+        戳的位置。清掉后本回合自建新行，旧行的部分内容原样保留在库（正是恢复语义）。"""
+        sess = self.sessions.get(session_id)
+        if sess is not None:
+            sess.pop("_progress_id", None)
+
+    def _progress_saver(self, session_id: str):
+        """0.1 流式增量落库节流器：返回 callable(text)，按节奏调用 _save_progress。
+
+        节流规则=每积累≥_PROGRESS_SAVE_CHARS字或距上次落库≥_PROGRESS_SAVE_INTERVAL_S
+        秒（取先到）；低于双阈值不落库（避免每chunk一写）。text是累计全文（非增量）。"""
+        state = {"ts": time.time(), "len": 0}
+
+        def _maybe_save(text: str) -> None:
+            now = time.time()
+            if (
+                len(text) - state["len"] >= _PROGRESS_SAVE_CHARS
+                or now - state["ts"] >= _PROGRESS_SAVE_INTERVAL_S
+            ):
+                self._save_progress(session_id, text)
+                state["ts"] = now
+                state["len"] = len(text)
+
+        return _maybe_save
 
 
     def _save_message(
@@ -1521,12 +1556,17 @@ class SoulMateAgent:
         matched_skills: list[dict] | None = None,
         user_text: str = "",
         traj_seg_id: str = "",
+        stream_progress: bool = False,
     ) -> tuple[str, list[dict]]:
         """LLM推理 + 工具调用循环。模型返回tool_calls就执行，纯文本就结束。
 
         traj_seg_id：trajectory llm段span id（调用方start_llm_span先建）——非空时
         每轮落一个round子span（root→llm段→round→tool_call四级树），空=不落
-        （向后兼容：既有测试/纯调用方零感知）。"""
+        （向后兼容：既有测试/纯调用方零感知）。
+
+        stream_progress：0.1简单对话流式增量落库（simple路径传True）——流式积累
+        处按节奏节流调用_save_progress，生成中途被杀已生成内容不丢；任务管线
+        走per-step落库（调用方4425行），不开启此开关。"""
         MAX_ROUNDS = 15
         cwd = self._session_cwds.get(session_id, self._project_root)
         system_prompt = f"""你是SoulMate，OpenMate内置的AI助手。请用简洁清晰的中文回答。
@@ -1688,6 +1728,8 @@ You can send files to the user natively: to deliver a file, write a brief confir
 
         full_response = ""
         all_tool_calls = []  # 收集所有工具调用
+        # 0.1 流式增量落库节流器（仅simple路径开启）
+        _stream_save = self._progress_saver(session_id) if stream_progress else None
 
         # 获取 MCP 工具 + 进化引擎工具
         mcp_tools = await self._fetch_mcp_tools()
@@ -3303,6 +3345,8 @@ You can send files to the user natively: to deliver a file, write a brief confir
                         safe_text = redactor.feed(chunk_text)
                         if safe_text:
                             full_response += safe_text
+                            if _stream_save is not None:
+                                _stream_save(full_response)
                             if self._client is not None:
                                 await self._client.session_update(
                                     session_id=session_id,
@@ -3330,6 +3374,8 @@ You can send files to the user natively: to deliver a file, write a brief confir
             _round_tail = redactor.flush()
             if _round_tail:
                 full_response += _round_tail
+                if _stream_save is not None:
+                    _stream_save(full_response)
                 if self._client is not None:
                     await self._client.session_update(
                         session_id=session_id,
@@ -3788,6 +3834,10 @@ You can send files to the user natively: to deliver a file, write a brief confir
                 "⚠️ 会话已失效：该会话在服务端不存在（可能已被清理），请新建会话后重试。",
             )
             return PromptResponse(stop_reason="refusal")
+
+        # 0.1 流式增量落库：新回合开始，作废上回合遗留的增量行指针（防接管串行——
+        # 旧行部分内容保留，新回合自建新行）
+        self._reset_progress_row(session_id)
 
         # ── 可观测性：开始run span ──
         run_span = self._observability.start_span(
@@ -4555,7 +4605,11 @@ You can send files to the user natively: to deliver a file, write a brief confir
                 _traj_seg = await self._traj_recorder.start_llm_span(
                     session_id, traj_root_id,
                     content=f"chat_turn: {(user_text or '')[:100]}")
-                full_response, tool_calls_log = await self._run_llm_with_tools(messages, session_id, matched_skills=matched_skills, user_text=user_text, traj_seg_id=_traj_seg)
+                full_response, tool_calls_log = await self._run_llm_with_tools(
+                    messages, session_id, matched_skills=matched_skills,
+                    user_text=user_text, traj_seg_id=_traj_seg,
+                    stream_progress=True,  # 0.1 simple路径流式增量落库
+                )
                 llm_duration = time.time() - llm_start
                 self._tracer.end_span(span_id, {"response_len": len(full_response), "tool_calls": len(tool_calls_log)})
                 # Token分析（估算）
