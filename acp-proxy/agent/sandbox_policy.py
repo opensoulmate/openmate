@@ -56,6 +56,7 @@ NETWORK_TOOL_NAMES = frozenset({
     "batch_execute",
     "browser",  # 路线图7.1：浏览器自动化直接出网，受限会话同款收缩
     "text_to_speech",  # 路线图7.3：edge-tts 主后端出网（离线兜底espeak-ng不受影响）
+    "image",  # 路线图7.4：AI 图像生成 API 后端出网（Pillow 本地编辑/程序化绘制不受影响）
 })
 
 
