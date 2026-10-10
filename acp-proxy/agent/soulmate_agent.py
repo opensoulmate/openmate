@@ -1846,27 +1846,62 @@ class SoulMateAgent:
         except Exception as e:
             logger.debug(f"[trajectory] round span failed (non-fatal): {e}")
 
-    async def _run_llm_with_tools(
-        self,
-        messages: list[dict],
-        session_id: str,
-        matched_skills: list[dict] | None = None,
-        user_text: str = "",
-        traj_seg_id: str = "",
-        stream_progress: bool = False,
-    ) -> tuple[str, list[dict]]:
-        """LLM推理 + 工具调用循环。模型返回tool_calls就执行，纯文本就结束。
+    # ── ⚡0.2 首条消息提速：new_session 预热引擎 + 微小预热 LLM 请求 ──────
+    def _prompt_prefetcher(self):
+        """预热器 lazy-init（__new__ 裸实例/老会话零感知，缺属性不炸）。"""
+        pf = getattr(self, "_prefetcher_inst", None)
+        if pf is None:
+            from agent.prompt_prefetch import PromptPrefetcher
+            pf = PromptPrefetcher(
+                gatherers={
+                    # 上下文源并行预取（0.2a：记忆检索/画像，用户打字时间覆盖）
+                    "pref_context": lambda sid: self._pref_learner.get_context_prompt(),
+                    "memory_md": lambda sid: self._persistent_memory.load_prompt_section(),
+                    "improvement": lambda sid: self._reflection_engine.get_improvement_context(sid),
+                    # 工具装配预热：_fetch_mcp_tools 自带 60s 缓存，这里触发即暖其缓存
+                    "mcp_tools": lambda sid: self._fetch_mcp_tools(),
+                },
+                prefill_fn=self._prefill_warm,
+                ttl_s=float(os.environ.get("SOULMATE_PREFETCH_TTL_S", "120")),
+            )
+            self._prefetcher_inst = pf
+        return pf
 
-        traj_seg_id：trajectory llm段span id（调用方start_llm_span先建）——非空时
-        每轮落一个round子span（root→llm段→round→tool_call四级树），空=不落
-        （向后兼容：既有测试/纯调用方零感知）。
+    async def _prefill_warm(self, session_id: str, base_system_prompt: str) -> None:
+        """⚡0.2(b) 微小预热 LLM 请求：同系统提示前缀+同工具面，回复丢弃。
 
-        stream_progress：0.1简单对话流式增量落库（simple路径传True）——流式积累
-        处按节奏节流调用_save_progress，生成中途被杀已生成内容不丢；任务管线
-        走per-step落库（调用方4425行），不开启此开关。"""
-        MAX_ROUNDS = 15
-        cwd = self._session_cwds.get(session_id, self._project_root)
-        system_prompt = f"""你是SoulMate，OpenMate内置的AI助手。请用简洁清晰的中文回答。
+        首个流式 chunk 到达 = 服务端已处理完完整前缀（前缀/KV 缓存已暖），
+        立即断开省输出 token。预热请求不进会话历史、不落库。"""
+        if not base_system_prompt:
+            return
+        tools = await self._fetch_mcp_tools()
+        agen = self.llm_engine.chat_stream_with_tools(
+            messages=[{"role": "user", "content": "你好"}],
+            tools=tools or None,
+            system_prompt=base_system_prompt,
+        )
+        try:
+            async for _chunk in agen:
+                break  # 首 chunk 即暖完前缀，后续丢弃
+        finally:
+            await agen.aclose()
+
+    def _schedule_prefetch(self, session_id: str, cwd: str | None = None) -> None:
+        """new_session 即调度预热（fire-and-forget 旁路，失败只记日志绝不阻塞）。"""
+        try:
+            pf = self._prompt_prefetcher()
+            base = self._build_base_system_prompt(
+                cwd or self._session_cwds.get(session_id, self._project_root)
+            )
+            pf.schedule_warm(session_id, base_system_prompt=base)
+            logger.info(f"[prefetch] warm scheduled for {session_id}")
+        except Exception as e:
+            logger.warning(f"[prefetch] schedule failed (non-fatal): {e}")
+
+    def _build_base_system_prompt(self, cwd: str) -> str:
+        """⚡0.2 首条消息提速：基础系统提示单一真源。_run_llm_with_tools 与预热
+        prefill 共用同一前缀——暖服务端前缀缓存必须逐字同前缀才有效。"""
+        return f"""你是SoulMate，OpenMate内置的AI助手。请用简洁清晰的中文回答。
 
 ## 环境
 当前工作目录: {cwd}
@@ -1945,6 +1980,28 @@ ACP代理目录: {cwd}/acp-proxy（后端 Python 代码在此）
 
 You can send files to the user natively: to deliver a file, write a brief confirmation message (e.g. "文件已发送，请查收"), then include MEDIA:/absolute/path/to/file on a new line. The gateway extracts the tag, strips it, and sends the file as a download card. Always write some text before the MEDIA: tag — never output a bare MEDIA: tag alone. Use search_files first if you don't know the exact path. Do NOT paste file contents into chat."""
 
+    async def _run_llm_with_tools(
+        self,
+        messages: list[dict],
+        session_id: str,
+        matched_skills: list[dict] | None = None,
+        user_text: str = "",
+        traj_seg_id: str = "",
+        stream_progress: bool = False,
+    ) -> tuple[str, list[dict]]:
+        """LLM推理 + 工具调用循环。模型返回tool_calls就执行，纯文本就结束。
+
+        traj_seg_id：trajectory llm段span id（调用方start_llm_span先建）——非空时
+        每轮落一个round子span（root→llm段→round→tool_call四级树），空=不落
+        （向后兼容：既有测试/纯调用方零感知）。
+
+        stream_progress：0.1简单对话流式增量落库（simple路径传True）——流式积累
+        处按节奏节流调用_save_progress，生成中途被杀已生成内容不丢；任务管线
+        走per-step落库（调用方4425行），不开启此开关。"""
+        MAX_ROUNDS = 15
+        cwd = self._session_cwds.get(session_id, self._project_root)
+        system_prompt = self._build_base_system_prompt(cwd)
+
         # ── P1: 上下文逐项token归因（claude-code SDKContextUsage移植）──
         # 每个注入段/每个工具定义/每条记忆逐项记账——"上下文被什么吃掉了"直接答案。
         # 观测性旁路：任一环节失败仅debug日志，绝不阻断agent执行路径。
@@ -1968,8 +2025,18 @@ You can send files to the user natively: to deliver a file, write a brief confir
                     source="skill_manager.search", tokens=estimate_tokens(skill_body),
                 ))
 
+        # ⚡0.2 首条消息提速：new_session 预热产物（TTL 内）直接复用；
+        # 未预热/超时回退现场计算——两条路径产出同一内容，仅省首条消息的准备时延
+        _prewarm: dict = {}
+        _pf = getattr(self, "_prefetcher_inst", None)
+        if _pf is not None:
+            try:
+                _prewarm = _pf.take(session_id)
+            except Exception:
+                _prewarm = {}
+
         # 注入用户画像（路线图 1.4：偏好/环境事实/身份，UserPreferenceLearner存储）
-        pref_context = self._pref_learner.get_context_prompt()
+        pref_context = _prewarm.get("pref_context") or self._pref_learner.get_context_prompt()
         if pref_context:
             system_prompt += f"\n\n## 用户画像（偏好/环境事实/身份，请遵守）\n{pref_context}\n"
             attr_items.append(ContextItem(
@@ -1979,7 +2046,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
 
         # 注入 MEMORY.md 型人类可读持久记忆（路线图 1.1，跨会话加载）
         try:
-            mem_md = self._persistent_memory.load_prompt_section()
+            mem_md = _prewarm.get("memory_md") or self._persistent_memory.load_prompt_section()
             if mem_md:
                 system_prompt += f"\n\n## 持久记忆（MEMORY.md，跨会话，可用 memory_read/memory_write/memory_append 维护）\n{mem_md}\n"
                 attr_items.append(ContextItem(
@@ -1990,7 +2057,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
             logger.debug(f"[persistent_memory] load error: {e}")
 
         # 注入反思改进建议
-        improvement_ctx = self._reflection_engine.get_improvement_context(session_id)
+        improvement_ctx = _prewarm.get("improvement") or self._reflection_engine.get_improvement_context(session_id)
         if improvement_ctx:
             system_prompt += f"\n\n## 历史改进经验（避免重复错误）\n{improvement_ctx}\n"
             attr_items.append(ContextItem(
@@ -4358,6 +4425,8 @@ You can send files to the user natively: to deliver a file, write a brief confir
         logger.info(f"New session: {sid}, cwd={cwd}")
         self._session_cwds[sid] = cwd
         self._bind_session_source(sid, field_meta, kwargs)
+        # ⚡0.2 首条消息提速：会话创建即预热引擎+微小预热LLM（旁路，fire-and-forget）
+        self._schedule_prefetch(sid, cwd)
         return acp.NewSessionResponse(session_id=sid)
 
     async def prompt(
