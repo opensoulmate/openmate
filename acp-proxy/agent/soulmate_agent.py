@@ -3728,11 +3728,13 @@ You can send files to the user natively: to deliver a file, write a brief confir
                         messages.append({"role": "assistant", "content": None, "tool_calls": tool_calls})
                         messages.extend(tool_results)
                         break
-                    elif infection_verdict.source == "clarify_exhausted_pass":
-                        # 8.1③ 无人值守放行+留痕：clarify 超限不再升级 terminate，
-                        # 工具照常执行，但放行原因进轨迹账本+日志（"为什么放行"可查）
+                    elif infection_verdict.source in ("clarify_exhausted_pass",
+                                                      "self_heal_pass_with_trace"):
+                        # 8.1③/8.5c-③ 放行+留痕（clarify超限无人值守放行 / 自愈类低危
+                        # 命令豁免降级放行）：工具照常执行，但放行原因进轨迹账本+日志
                         logger.warning(
-                            f"[infection-guard] session={session_id} clarify超限·无人值守放行留痕 "
+                            f"[infection-guard] session={session_id} 放行+留痕 "
+                            f"source={infection_verdict.source} "
                             f"evidence={infection_verdict.evidence[:120]}")
                         all_tool_calls.append({
                             "name": "[infection-guard]",
