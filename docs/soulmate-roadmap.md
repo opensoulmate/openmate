@@ -47,7 +47,7 @@
 - **4.x 半缺**：~~微信桥全缺~~ **4.1a 已补（周期#15）**：微信桥核心（agent/wechat_bridge.py，收发回路+去重+会话映射+失败纪律，loopback传输实证；iLink真实传输=4.1b待做）；**4.2 已补（周期#17）**：统一消息路由（agent/message_router.py，OpenMate/微信统一收发出入口+message_send工具）；**4.3 已补（周期#18）**：媒体收发（agent/media_channel.py，图片/文件收发+截图理解提示块，sense_*感知之外补齐收发形态）
 - **5.x 已补全**：~~子代理并行、群组任务编排全缺~~ **5.1 已补（周期#19）**子代理并行、**5.2 已补（周期#20）**工具执行层并发隔离、**5.3 已补（周期#21）**群组任务编排（接ai_groups）
 - **6.x 半缺**：6.1/6.2/6.3 已补（技能保存+检索加载注入+执行结果反哺坑沉淀，周期#35）
-- **7.x 半缺**：~~浏览器自动化~~ **7.1 已补（周期#36）**：browser 工具面（Playwright/CDP）；仍缺 docx/pdf/xlsx 生成、TTS、图像生成；另有 send_file/进程管理(text_to_speech等Hermes工具)缺口
+- **7.x 半缺**：~~浏览器自动化/docx/pdf/xlsx生成/TTS~~ **7.1 已补（周期#36）**：browser 工具面（Playwright/CDP）；**7.2 已补（周期#37）**：document 文档生成（docx/pdf/xlsx）；**7.3 已补（周期#38）**：text_to_speech 语音合成（edge-tts+espeak-ng双后端）；仍缺图像生成；另有 send_file/进程管理(text_to_speech等Hermes工具)缺口中 text_to_speech 已销账
 
 ## 阶段规划（每阶段内拆成 15 分钟可完成的切片）
 
@@ -254,7 +254,17 @@
   白名单校验禁路径穿越+依赖缺失/转换失败/超时四态显式报因禁静默（PDF失败时
   同内容docx保留可交付））+soulmate_agent四点接线（document工具定义/主dispatch/
   _document_dispatch共享lazy-init/code-mode批内+系统提示清单）
-- [ ] 7.3 TTS/语音
+- [x] 7.3 TTS/语音——周期#38实装agent/tts_worker.py（edge-tts独立子进程worker
+  JSON单发协议——主agent进程可能已有事件循环，进程内asyncio.run不可用故子进程隔离+
+  有界超时；合成失败退出码+JSON报因回传禁静默）+agent/tts_tools.py（TTSTools文本→
+  真实音频文件落~/.hermes/soulmate/audio/返回MEDIA:路径可直接播放下发；双后端分层：
+  主后端edge-tts在线神经语音（服务venv实测带edge_tts）+离线兜底espeak-ng（系统实测
+  可用，在线不可用时降级本地合成）；诚实多态：在线失败离线成功显式"⚠️在线语音不可用
+  <原因>+已用espeak-ng离线合成（音质较机械）"禁假称edge-tts成功、双后端全失败逐后端
+  报因+安装提示、超时显式、0字节文件不算成功、空text/过长>5000字/非法voice/rate/文件名
+  越界显式拒绝；voice→espeak语言确定性映射zh→cmn）+sandbox NETWORK_TOOL_NAMES归类
+  text_to_speech（edge-tts出网）+soulmate_agent五点接线（text_to_speech工具定义/
+  主dispatch/_tts_dispatch共享lazy-init/code-mode批内+系统提示清单）
 - [ ] 7.4 图像生成/编辑
 
 ## 验收总标准（"完全替代"的判定）
@@ -405,3 +415,4 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 [2026-10-10 21:05] 周期#36 | 7.1浏览器自动化（阶段顺序下一刀；⚡区0.1/0.2已完、8.6待用户拍板）：新增agent/browser_worker.py（独立子进程JSONL协议驱动playwright——服务venv无playwright故走子进程隔离，默认SOULMATE_BROWSER_PYTHON=/usr/bin/python实测带playwright 1.60；常驻浏览器会话页面状态跨调用保留；launch本地chromium或SOULMATE_BROWSER_CDP_URL附加既有浏览器；单动作失败ok:false不杀会话）+agent/browser_tools.py（BrowserTools有界调用+诚实三态：后端不可用显式报因+启动文档化/超时显式+状态丢失如实告知/崩溃重建提示一次；截断自报；screenshot自动落盘返回路径可MEDIA下发）+sandbox NETWORK_TOOL_NAMES归类browser+soulmate_agent四点接线（browser工具定义9动作goto/snapshot/click/type/fill/eval/screenshot/back/close+主dispatch+_browser_dispatch共享lazy-init+code-mode批内+系统提示清单） | ✅ | (本次提交) | 7.1勾选；tests/test_browser_tools.py 15/15（JSONL真子进程往返/崩溃重建/超时/不可用双形态interpreter缺失+playwright缺失stderr尾部如实报因/截断自报/screenshot自动落盘/接线护栏+__new__真实dispatch烟测+lazy-init构造）+回归191全过（browser+sandbox_policy+skill_saver/loader/standard_layer+self_verify/report_evidence/search_backend）+code_mode/tool_output/tool_recovery/infection_guard 121全过+运行时_build_base_system_prompt实证browser行进系统提示；真实机器smoke全绿（真实chromium：goto/snapshot标题正文链接/type后eval回读'ni hao'证明状态跨调用/坏选择器干净报因/截图11.4KB真实PNG/close）；实现中真实smoke暴露并修复1个真缺口：动作级timeout_ms与请求级硬超时等长时watchdog先开火把"选择器没找到"误报成"会话超时重建"→动作级自动留5s余量；⚠️诚实边界：单测走fake worker（真实playwright成本放smoke），CDP附加模式代码就绪未实测（无既有9222会话），JS eval任意副作用属工具固有能力（过permission_gate）；下周期做7.2文档生成（docx/pdf/xlsx）或8.5验收复测
 
 [2026-10-10 21:29] 周期#37 | 7.2文档生成（阶段顺序下一刀；⚡区0.1/0.2已完、8.6待用户拍板）：新增agent/docgen_tools.py（DocGenTools确定性生成结构化spec→真实文件：docx=python-docx（heading/paragraph/bullet/table/pagebreak+title）、xlsx=openpyxl（多表+首行加粗表头+按内容估列宽+rows简写）、pdf=同款docx经LibreOffice headless转换（服务venv无reportlab，独立UserInstallation防抢profile锁）；输出落~/.hermes/soulmate/documents/返回MEDIA:路径；filename白名单禁路径穿越；依赖缺失/转换失败/超时四态显式报因禁静默，PDF失败时同内容docx保留）+soulmate_agent四点接线（document工具定义/主dispatch/_document_dispatch共享lazy-init/code-mode批内+系统提示清单） | ✅ | (本次提交) | 7.2勾选；tests/test_docgen_tools.py 12/12（docx全块型回读/xlsx多表+表头加粗+列宽+rows简写/pdf四态含后端不可用·失败·超时均保留docx/文件名越界拒绝/自动命名落盘/MEDIA输出/接线护栏+__new__真实dispatch烟测+lazy-init构造）+回归185全过（docgen+browser+skill_saver/loader+code_mode+tool_output_wiring+infection_guard+prompt_prefetch）+py_compile+导入烟测+_build_base_system_prompt运行时实证document行进系统提示（f-string花括号转义坑：插值区写{name,rows}会NameError，已转义{{}}）；真实机器烟测三格式全绿（服务同款interpreter：docx 36940B/xlsx 5474B双表/PDF 84713B真实LibreOffice转换pdftotext中文可提取'PDF烟测/第一章概述'，独立回读docx段落+表格单元+xlsx B3/加粗属性一致）+双实例重启health OK；⚠️诚实边界：PDF走docx中转（复杂排版保真度受LibreOffice转换限制）、xlsx不支持公式/样式定制；下周期做7.3 TTS/语音或8.5验收复测
+[2026-10-10 21:47] 周期#38 | 7.3 TTS/语音（阶段顺序下一刀；⚡区0.1/0.2已完、8.6待用户拍板）：新增agent/tts_worker.py（edge-tts独立子进程worker JSON单发协议——主agent进程可能已有事件循环，进程内asyncio.run不可用故子进程隔离+有界超时，失败退出码+JSON报因回传禁静默）+agent/tts_tools.py（TTSTools文本→真实音频落~/.hermes/soulmate/audio/返回MEDIA:路径；双后端分层：edge-tts在线神经语音（服务venv实测带edge_tts）主后端+espeak-ng离线兜底（系统实测可用）；诚实多态：在线失败离线成功显式⚠️报因禁假称edge-tts成功/双后端全失败逐后端报因+安装提示/超时显式/0字节不算成功/空text·过长>5000字·非法voice·rate·文件名越界显式拒绝；voice→espeak语言确定性映射zh→cmn）+sandbox NETWORK_TOOL_NAMES归类text_to_speech（edge-tts出网）+soulmate_agent五点接线（工具定义/主dispatch/_tts_dispatch共享lazy-init/code-mode批内/系统提示清单） | ✅ | (本次提交) | 7.3勾选；tests/test_tts_tools.py 22/22（成功/MEDIA行/自定义文件名/voice·rate透传与默认值/参数拒绝6例含路径穿越与拒绝不落盘/在线失败·超时→离线兜底/双后端失败双因齐报/0字节不算成功/后缀mp3→wav切换/语言映射4例/JSON尾行解析）+py_compile+SoulMateAgent导入烟测（__new__裸实例_tts_dispatch真实dispatch四态）+回归全量tests/ 2176全过（403s全库零失败）+_build_base_system_prompt运行时实证text_to_speech行进系统提示；真实机器验收双后端全绿：edge-tts真实合成acceptance.mp3 21168字节ffprobe实证mp3可播3.528s（服务同款interpreter）+espeak-ng离线兜底offline.wav 114688字节ffprobe实证wav 2.600s（⚠️文案+MEDIA正常）；⚠️诚实边界：语音输入/ASR（听懂语音）不在本切片（只做TTS输出方向）、edge-tts需联网（离线自动降级espeak-ng音质机械）；下周期做7.4图像生成/编辑或8.5验收复测

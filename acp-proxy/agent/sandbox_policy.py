@@ -55,6 +55,7 @@ NETWORK_TOOL_NAMES = frozenset({
     "web_extract",
     "batch_execute",
     "browser",  # 路线图7.1：浏览器自动化直接出网，受限会话同款收缩
+    "text_to_speech",  # 路线图7.3：edge-tts 主后端出网（离线兜底espeak-ng不受影响）
 })
 
 
