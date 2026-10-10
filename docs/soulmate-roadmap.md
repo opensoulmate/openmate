@@ -327,11 +327,19 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 - **R4 调研单点依赖（#4）**：web_search 无后端可用性兜底（SearXNG 未启动=归零）。
 
 ## 阶段8 · 验收缺口修复（下一批切片，按优先级）
-- [ ] ⚡8.1 InfectionGate 误杀修复（P0 用户可见缺陷，先于一切）：①审计门必须拿到本回合
+- [x] ⚡8.1 InfectionGate 误杀修复（P0 用户可见缺陷，先于一切）：①审计门必须拿到本回合
   用户原始 prompt（修上下文传参断链，验收断言=journal 不再出现"用户请求缺失/为空"）
   ②用户明确点名的动作（prompt 明文要求的工具/路径/内容）给语义豁免——防护看用户意图
   而非模式匹配（禁一刀切白名单守卫，用户反感守卫类防御）③无人值守路径 clarify 不得
   升级 terminate（放行+留痕或按模式配置）。验收=重跑 acceptance_benchmark.py 开发/记忆两类。
+  ——周期#31实装：根因实证=任务管线首试/重试两个 _run_llm_with_tools 调用点漏传
+  user_text→审计门拿到"## 用户请求（未提供）"→用户明文点名的动作被误判注入。
+  ①两调用点补传 user_text + check() 空 user_text 留痕告警；②溯源豁免（签名命中文本
+  逐字来自用户请求=用户自己写的内容豁免，夹带内容照常拦）+JUDGE_PROMPT 补
+  "用户意图优先/用户请求缺失不构成拦截理由"两条判据；③无人值守 clarify 超限
+  放行+留痕（source=clarify_exhausted_pass+轨迹账本 infection:pass_with_trace），
+  有人值守保持 terminate；INFECTION_CLARIFY_EXHAUSTED=terminate|pass_with_trace
+  按模式配置。真实验收=开发/记忆两类 2/2 ✅（详见周期#31日志）
 - [ ] ⚡8.2 短路合成报告治理：任务执行报告/自检结论必须以工具执行证据为前提（工具被拦时
   报"被拦截+原因"，禁报"完成"）；锁定 run2 1.38s 秒合成"任务执行报告"的短路路径。
 - [ ] 8.3 长回合治理：schedule 3 工具链 >240s 无终态根因（LLM 慢 or dispatch 卡死）+
@@ -339,10 +347,17 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 - [ ] 8.4 调研兜底：web_search 后端可用性探测 + SearXNG 未启动时显式降级路径（替代后端
   或启动文档化），禁静默归零。
 - [ ] 8.5 验收复测：多渠道/定时两类（harness 已修 sessionId 过滤）；每完成一个 ⚡项即
-  重跑对应类别对标。
+  重跑对应类别对标。⚠️复测铁律（周期#31 实证）：验收 prompt 必须带唯一防缓存标记——
+  semantic-cache EXACT 命中会回放旧响应（假跑 0.98s 级），且文件存在性验证会被
+  上次被打断轮的陈旧产物骗过（假阳性）——验证前先清理陈旧产物。
 - [ ] ⚡8.6 双链分叉事故处置（见周期#30日志）：main(1b63f2ac) 与 evo/exp-1791613018
   (d431bcc0) 在 6.2 处分叉成两套实现（skill_loader vs skill_matcher），#25-#29 只在
-  evo/exp 链——下周期开工前必须先核对 HEAD 所在链并做链合并/取舍决策（涉及取舍请用户拍板）。
+  evo/exp 链——链合并/取舍决策涉及取舍**待用户拍板**。周期#31 已做非破坏处置准备：
+  两实现对比（main skill_loader 248行13函数：步骤级 match_for_step/gene 推荐载荷
+  render_recommended/预算截断自报/stats 观测 vs evo 链 skill_matcher 192行：match/
+  render_bodies，已被 6.3-7.4 依赖）+合并建议=以 evo 链为主干（唯一含 #25-#29）、
+  移植 skill_loader 独有增量、main 快进到合并结果（恢复生产树全特性）；8.1 修复已
+  双链双落地（98d6025f main / 9d17ebdc evo 链）零丢失。
 - [ ] 后续（非紧急，另案）：微信 iLink 真实传输 4.1b（接入形态待用户拍板，绝不双消费
   hermes 会话）、调度/监控常驻托管（3.1 遗留）、ASR 语音输入（多模态路由另案）、文生图
   大模型 API、AI 群组真实成员端到端。
@@ -381,3 +396,4 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 [2026-10-10 16:55] 周期#28 | 7.3 TTS/语音（文本→mp3）：新增agent/voice_generator.py（VoiceGenerator 确定性合成不走LLM——edge-tts主引擎（异步API统一线程内asyncio.run，宿主在事件循环内/ACP·stdio常态同样安全不炸宿主loop）+espeak-ng→ffmpeg离线兜底（edge失败auto自动接管，输出统一.mp3）；8音色预设中英日韩（xiaoxiao/yunxi/xiaoyi/yunjian/jenny/aria/nanami/sunhi）+*Neural原始名透传；语速-50..+50归一（edge '+N%'/espeak wpm双映射+夹取）；校验面全显式报因（空文本/超长5000字SOULMATE_TTS_MAX_CHARS可配/未知音色列预设/语速非法/扩展名错配统一.mp3/越界拒绝默认仅$HOME与/tmp可SOULMATE_VOICE_ROOTS配）；edge+兜底双失败报因叠加绝不假装成功、空音频视同失败；tmp+os.replace原子落盘不留半截；edge_runner/fallback_runner接缝可注入零依赖测试；缺省自动命名~/.openmate/voice/tts_<ts>.mp3；成功带MEDIA标签音频下载卡片）+soulmate_agent四点接线（text_to_speech工具定义+主dispatch+_tts_dispatch共用入口lazy-init+code-mode批内+系统提示清单） | ✅ | (本次提交) | 7.3勾选；tests/test_voice_generator.py 25/25（校验面9例+合成面8例含edge失败自动兜底/engine=edge不兜底/双失败报因叠加/engine=espeak只走兜底/空音频视同失败/无半截残留/事件循环内合成+线程asyncio.run+原子写失败无残留/单例+接线护栏+__new__真实dispatch烟测三态+系统提示f-string构造）+回归322全过（7.2/7.1/6.x skill链214+code_mode/tool_output/plan/tool_ledger/task_judge链108）+py_compile+真实运行时hermes venv烟测（真edge-tts中文合成19KB mp3帧头0xFF3、真espeak-ng+ffmpeg兜底19KB ID3、__new__真实_tts_dispatch lazy-init 9KB，产物已清理）+key扫描干净；⚠️诚实边界：ASR/语音输入识别未做（faster-whisper在hermes venv非acp-proxy运行时venv，且用户要求语音输入路由多模态模型属另案）；音频播放UI走MEDIA下载卡片既有链路（前端音频播放器未做）；本周期遇sibling并行会话写soulmate_agent.py警报，核实为#27已提交改动（mtime 16:10与HEAD一致）后按增量patch接线，diff复核90行纯本周期改动；下周期做7.4图像生成/编辑
 [2026-10-10 17:20] 周期#29 | 7.4图像生成/编辑：新增agent/image_generator.py（ImageGenerator确定性绘制/编辑不走LLM——create=纯色/渐变画布（逐行线性插值）+标题/正文文本卡（CJK逐字测量确定性换行，字体SOULMATE_IMAGE_FONT/参数/候选路径三级解析，无字体画文本显式报因）、edit=有序操作链resize/crop/rotate/flip/brightness/contrast/watermark（≤20步，未知op/参数非法带步序号报因；watermark=RGBA overlay+alpha合成5位置）、info=只读查询；输出格式由扩展名决定.png/.jpg/.jpeg/.webp/.bmp（无扩展名补.png，JPEG无alpha显式转RGB）；校验面全显式报因（单边/总像素上限、颜色/渐变解析、crop越界、因子/角度/不透明度范围、越界拒绝默认$HOME与/tmp可SOULMATE_IMAGE_ROOTS配输入输出同口径）；tmp+os.replace原子落盘不留半截；font_loader接缝可注入零依赖测试）+soulmate_agent四点接线（image_act工具定义action=create|edit|info+主dispatch+_image_dispatch共用入口lazy-init+code-mode批内+系统提示清单） | ✅ | (本次提交) | 7.4勾选（路线图阶段1-7全部切片完成）；tests/test_image_generator.py 28/28（生成面真实产物回读纯色像素/渐变两端/文本卡非背景像素、编辑面7步链真实产物+JPEG转换+rotate expand换维、校验面9例操作参数+路径/扩展名/字体/规模、原子落盘失败无半截残留、单例、接线护栏+__new__真实dispatch烟测四态+系统提示f-string构造）+回归253全过（7.2/7.1/6.x skill链+self_verify/tool_recovery/persistent_memory/experience/code_mode/tool_output）+py_compile+SoulMateAgent真实导入烟测+真实运行时hermes venv烟测（真Pillow中文文本卡640x400渐变30KB、水印+缩放转JPEG 12KB、__new__真实_image_dispatch 152B，产物已清理）+key扫描干净；⚠️诚实边界：文生图大模型未接（本地无SD权重且禁随意动运行时venv，接外部图像API属另案）——当前为确定性绘制/编辑面（海报文本卡/水印/裁剪缩放/转格式）；字体候选含用户机器Noto CJK实测命中；⚠️sibling并行会话并发改ws_acp/ws_group/app.py（AI群组链路WIP未提交）与soulmate_agent.py/roadmap触碰警报，本周期git diff复核soulmate_agent.py纯本周期7处改动、commit仅限本周期4文件（image_generator/soulmate_agent/tests/roadmap）不碰sibling的ws_acp/ws_group/app.py未提交WIP；下周期起路线图全部完成→跑验收总标准对标实测（10类任务）并规划下一批切片
 [2026-10-10 18:30] 周期#30 | 验收总标准对标实测（10类任务）+阶段8规划：新增acp-proxy/acceptance_benchmark.py（WS /ws/acp+agent_id=soulmate真实链路驱动、服务端副作用优先验证、测试产物显式清理、在途帧按sessionId过滤防跨任务污染、回合上限300s）；两轮实测——v1走错入口（HTTP /acp/send=proxy.py硬编码hermes acp路由L97/L141，10回合全测到Hermes非SoulMate，教训固化禁走该端点）、v2真实SoulMate链路（中途被sibling/evo systemctl restart双实例SIGKILL打断一轮重跑取全）；结果真实达标5/10（调试/运维/发布/办公/协作✅）+多渠道⚠️待复测+4❌（开发/记忆被InfectionGate误杀、调研SearXNG未启动、定时3工具链>240s无落库）；根因聚类R1-R4（R1=注入审计门"用户请求缺失/为空"上下文断链→用户明确要求的write_file/memory_append被clarify→terminate拦死，journal实证"TERMINATE，工具调用未执行"） | ⚠️ | (本次提交) | 验收表+根因聚类+阶段8六切片（⚡8.1 InfectionGate误杀/⚡8.2短路合成报告/8.3长回合/8.4调研兜底/8.5复测/⚡8.6双链分叉处置）写进路线图；⚠️git双链分叉事故实录：本周期中途主树被checkout回main(1b63f2ac)——reflog实证#25-#29工作链全在evo/exp-1791613018(d431bcc0)且main与真实链在6.2处分叉成两套实现（skill_loader vs skill_matcher），按纪律禁checkout/reset，用git worktree /tmp/wt30隔离提交本周期成果到真实链；⚠️另实录sibling并行会话17:44:48重启双实例打断验收run1；下周期做⚡8.6双链合并/取舍处置（涉及取舍请用户拍板）→⚡8.1 InfectionGate误杀修复
+[2026-10-10 18:45] 周期#31 | ⚡8.1 InfectionGate误杀修复（验收R1）+⚡8.6双链处置准备：根因实证=任务管线首试/重试两个_run_llm_with_tools调用点漏传user_text→审计门"## 用户请求（未提供）"→用户明文点名的write_file/memory_append被误判注入（验收#1/#9死因）；修复①管线两调用点补传user_text+check()空user_text留痕告警②用户明文内容溯源豁免（签名命中文本逐字来自用户请求=用户自己写的内容豁免，夹带照常拦）+JUDGE_PROMPT补"用户意图优先/请求缺失不构成拦截理由"③无人值守clarify超限放行+留痕（clarify_exhausted_pass+infection:pass_with_trace），有人值守保持terminate，INFECTION_CLARIFY_EXHAUSTED按模式配置 | ✅ | 9d17ebdc(本链)/98d6025f(main镜像) | tests/test_infection_guard.py 47/47（新增8.1三组17例+既有terminate用例改有人值守前提）+回归149全过（loop_guard/steering/self_verify/tool_recovery/plan_execution/code_mode）+main树同修复回归252全过；真实验收=acceptance_benchmark开发/记忆 2/2✅（83s/91s真实LLM+工具，dev_hello.py+MEMORY.md服务端副作用实证，journal零infection-guard拦截零空user_text告警）；⚠️复测发现semantic-cache污染验收（v1两回合Cache EXACT命中回放旧响应假跑+记忆假阳性=周期#30被杀轮残留stale marker）→8.5复测铁律：prompt带唯一防缓存标记+验证前清陈旧产物；⚠️诚实边界：R2短路合成报告（缓存回放里仍在）归⚡8.2待做；⚠️git实录：主树在main（被checkout回main），本周期按纪律worktree /tmp/wt81隔离cherry-pick+测试+提交到真实链，soulmate_agent.py两处管线调用冲突按本链语义保留matched_skills=matched_skills仅补user_text；⚡8.6最终取舍待用户拍板（对比+建议已写入8.6条目）；下周期做⚡8.2短路合成报告治理
