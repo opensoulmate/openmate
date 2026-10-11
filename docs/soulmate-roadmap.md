@@ -321,6 +321,30 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 - **R3 长回合可靠性（#7）**：多工具链回合 240s+ 不落终态也不落库。
 - **R4 调研单点依赖（#4）**：web_search 无后端可用性兜底（SearXNG 未启动=归零）。
 
+### 2026-10-11 抽样对标实测（周期#64，阶段11 完成后）——可复跑
+`ACCEPT_CATEGORIES="开发,办公,定时,协作,记忆" ACCEPT_RUN_TAG=<tag> python acceptance_benchmark.py`
+
+| # | 类别 | 结果 | 耗时 | 证据（服务端副作用优先） |
+|---|------|------|------|--------------------------|
+| 1 | 开发 | ✅ | 301.74s | dev_hello.py 存在+marker 命中；**WS 300s 超时→10.4 后到回读恢复**（0.0s/1次），verify_mode=server_side_late |
+| 2 | 办公 | ✅ | 65.26s | report.xlsx 4963B 有效 xlsx（11.5 治理回归目标：全窗口零注入审计终止） |
+| 3 | 定时 | ✅ | 74.53s | cron_tasks.db accept_probe 行=1 |
+| 4 | 记忆 | ✅ | 106.81s | MEMORY.md 含 ACCEPT_MEM_MARK_9 |
+| 5 | 协作 | ✅ | 27.4s | 回复含双 worker 产出+subagent_runs 行 |
+
+**判定：抽样 5/5 通过**（4 类 server_side + 1 类 server_side_late，本抽样无 reply_assisted 弱项）。
+新证据/新发现：
+- **10.4 后到回读路径首次在非构造场景真实触发**（ws_timeouts=1/recovered=1）——11.1 遗留④
+  "late_readback 未触发"边界部分销账（仍单样本）。
+- **开发类 301.74s 显著变慢**（11.1 同任务 48.2s）：dev_hello.py 在开跑 1 分钟内即落盘，
+  超时发生在回复回收侧（后到回读 0.0s=产出早已就绪），疑上游延迟波动/冷启动首回合，
+  单样本待归因 → 12.3。
+- 采集侧系统帧过滤照常生效（self_check×3/heartbeat×2）；办公类 65s 干净通过=11.5
+  溯源治理无回归。
+- harness 收尾清理边界：cleanup() 只清 MEMORY 标记/accept_probe 行/发布探针行，
+  /tmp 工作目录仅在**开跑前** rmtree（docstring 承诺"测试产物显式清理"未完全兑现），
+  本轮残留 3 件已手动清理 → 12.5。
+
 ## 阶段8 · 验收缺口修复（下一批切片，按优先级）
 - [x] ⚡8.1 InfectionGate 误杀修复（P0 用户可见缺陷，先于一切）：①审计门必须拿到本回合
   用户原始 prompt（修上下文传参断链，验收断言=journal 不再出现"用户请求缺失/为空"）
@@ -674,6 +698,28 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
   或判词另有外发/篡改类行为指控→保持原判（宁不纠不误放）④docgen 越界回显限制说明
   （请求路径越界时显式说明输出目录受限+解法：basename 生成后按用户指定路径复制，
   不再只有"filename 非法"一句）
+### 阶段12 · 下一批切片（周期#64 规划——阶段11 清零+抽样实测 5/5 后的续刀，按优先级）
+- [ ] 12.1 多渠道出站独立可查痕迹 + 多渠道 verify 升级 server_side（周期#30 遗留
+  "wechat 回环出站无独立可查痕迹→待复测" + 11.1 reply_assisted 弱项）：wechat 往返
+  出站留确定性审计行（发送方/通道/去重键/时间），验收 harness 多渠道类判据从回复辅证
+  改服务端痕迹回读；iLink 真实传输仍待用户拍板不动，只做 loopback/现有通道留痕。
+- [ ] 12.2 运维/调研 verify 升级 server_side（11.1 两类 reply_assisted 弱项）：为两类
+  找确定性服务端判据（运维=体检结果落账/审计行，调研=检索调用账本+引用来源行），
+  提升"完全替代"判定可信度；不为凑判据造新落库负担，优先复用工具账本/journal 真源。
+- [ ] 12.3 开发类回合 301.74s 超时复核归因（周期#64 新发现，用户重视速度）：journal
+  复盘该轮耗时构成（LLM 首包/注入审计往返/工具执行/回复回收四段计时），区分上游延迟
+  波动 vs 本地可控耗时；若本地可控（如每工具注入审计 LLM 往返）→ 与 12.4 合并治理；
+  多样本（≥3 轮）复测禁单样本定论。
+- [ ] 12.4 单工具链注入审计 LLM 往返开销治理（8.3 诚实边界另案）：确定性预筛先行——
+  来源干净（用户明文点名+本回合工具产出可溯源）的工具调用不走 LLM 判词往返，可疑才
+  升级 LLM 审计；判据是溯源不是模式白名单（禁"守卫化"变味），防护语义零放松，
+  同场景回归测试证明拦截面不缩水。
+- [ ] 12.5 harness 收尾清理 + late_readback 扩测：run 末补 rmtree 工作目录对齐 docstring
+  "测试产物显式清理"；ACCEPT_PROMPT_TIMEOUT_S 人为压短构造多类别后到产出场景
+  （开发/办公/记忆 3 类），销 10.4 单样本边界 + 11.1 遗留④二次回读路径扩证。
+- [ ] 12.6 轨迹/审计闭环抽查（可观测性，用户重视）：tool_failures.db 抽查探针
+  （失败分类行完整性/无孤儿行/llm:dna 归因不串线）+ 11.5 溯源降级真实判词触发观察
+  （自然发生时复核留痕行）+ llm:dna 真实降级审计行闭环（周期#61 遗留③）。
 - [ ] 待用户拍板（不占阶段顺序）：⚡8.6 双链合并取舍、4.1b iLink 接入形态、
   ASR 语音输入多模态路由
 
@@ -741,3 +787,5 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 [2026-10-11 09:45] 周期#62 | 11.4 soulmate-daemon 常驻托管覆盖面真实验收（周期#48遗留销账）：新增 acp-proxy/acceptance_daemon_coverage.py 可复跑探针（生产单例同一写入路径建探针→轮询服务端真源 runs/monitor_events 行且时间戳>创建时刻防陈旧行假阳性→journal 归因执行者→清理归零回读），真实跑 8/8✅——daemon（01:51:53启动 PID 515550）存活7.5h后新建 task#11(interval:30s)+target#2(port 8090)：21s 后监控拾取真实检查（ok"端口 8090 监听中"）、52s 后 cron 拾取真实 LLM 回合执行成功（runs status=ok end_turn+journal "✅ 执行 #11 accept114_cron → end_turn"+真源"Response: OK"），ps 实证无其他轮询宿主=daemon 独占拾取；代码佐证 claim_due/_due_targets 每 poll 重新查库无启动快照；产物清理归零（runs/monitor_events/session/messages 全 0）；回归 tests/test_soulmate_daemon+soulmate_scheduler+health_monitor 56/56 过 | ✅ | (本次提交) | 11.4勾选；⚠️诚实边界：同机低负载单样本×2轮；首轮空 session_id 探针触发"拒绝给消失的会话造回合"既有失败纪律（failed 行可见=失败不假装成功语义照常，真实用户路径 schedule_task 恒带 session_id 不受影响）；⚠️并发警示：utils/llm_transport.py+llm_gateway.py 09:30-09:31 被其他会话改动（幂等记账 _record_failure_safe WIP，非本周期工作，单写入者纪律未动未提交）；下周期做11.5 注入审计误杀良性文档任务治理（审计判据区分"路径越界"与"注入劫持"，越界回显限制说明不升级终止）
 
 [2026-10-11 10:05] 周期#63 | 11.5 注入审计误杀良性文档任务治理（"路径越界"与"注入劫持"区分）：journal 08:20 实录还原真实根因（比路线图初稿更具体）——用户明文指定 /tmp/soulmate_accept/report.xlsx，doc_generate 输出目录受限产物落 ~/.hermes/soulmate/documents/report.xlsx（工具结果"✅ 文档已生成…4962 字节"即来源证明），助手 cp 到用户指定路径；审计员只看输出文本+待执行调用**看不到工具结果**，把本回合刚生成的文件当"来源不明的既有文件"→clarify 反复→超限升级 terminate 杀整轮（"[注入审计终止]"）。治理四件套：①审计输入附"本回合已执行的工具结果（来源证明）"快照（check() 新参 prior_tool_results≤12条×500B）②JUDGE_PROMPT 判据第7条（路径越界≠注入劫持+同回合工具产出有来源证明）③确定性溯源降级 resolve_path_claims（每个被质路径真源自证：用户明文指定/工具结果生成语义行→降级放行+留痕 provenance_pass_with_trace 不升级终止；不可自证或另有外发/篡改指控→保持原判）④docgen 越界回显限制说明（输出目录受限+解法显式报出）；实测踩坑一处：判词标签残片 "</clarify>" 的 "/clarify" 曾被误当路径 token 拖垮降级核验（extract_claimed_paths 剥 XML 标签+要求≥1级目录，回归测试钉死） | ✅ | (本次提交) | 11.5勾选；Gate1 git diff 六文件真实落盘（infection_guard.py +111/soulmate_agent.py +15/docgen_tools.py +10/新测试 22 例/self_heal 测试断言随三元组扩展修正/路线图）；Gate2 grep prior_tool_results= 真实调用点+resolve_path_claims 在 check() 降级分支+留痕分支含 provenance_pass_with_trace，真实回合经真实调用路径无 TypeError 即接线实证；Gate3 tests/test_infection_provenance.py 22/22（事故判词逐字回归/terminate 同语义降级/反复 clarify 不再升级 terminate/负控制外发指控·不可自证路径·非来源类 terminate 均保持原判/审计输入含来源证明行/JUDGE_PROMPT 判据钉死/接线护栏+docgen 越界回显）+同域回归 188 全过（infection_guard 47+self_heal 20+docgen 12+report_evidence/self_verify/tool_availability/remediation_style/frame_origin/turn_watchdog）+py_compile；真实验收=办公类事故场景原样复测（acceptance_benchmark ACCEPT_CATEGORIES=办公 tag=PROV115_1791703400，WS 真实用户路径）**1/1✅ 37.77s end_turn**（对照事故轮 96s+弯路）：report.xlsx 4963B 有效 xlsx 落 /tmp/soulmate_accept/report.xlsx、工具账本实证 doc_generate→terminal cp→openpyxl 回读 ('名称','数量')/('苹果',3)/('香蕉',5) permission=allow、journal 全窗口零"[注入审计终止]"零 clarify 判词（判词直接 ok，来源证明+判据让审计员不再误判）、回复"已用文档工具生成 Excel，并复制到指定路径"（docgen 限制说明引导生效）；测试产物清理归零；双实例重启 health 200/200 | ⚠️诚实边界：①真实复测中审计员直接判 ok，确定性降级路径未在真 LLM 判词下触发（以事故判词逐字注入单测实证，真判词误报时的降级留待自然发生观察）②单样本同机低负载③降级负过滤按行为词窄签名（外发/篡改类），新形态混合判词漏网时回到正常审计不误放；⚠️并发警示：utils/llm_transport.py+llm_gateway.py 仍为他会话 WIP 未动未提交（周期#62 同警示）；下周期：路线图切片再次清零（余项仅待用户拍板 ⚡8.6/4.1b/ASR）→跑验收对标抽样或规划新一批切片（候选：用户实测反馈优先/常驻托管覆盖面扩测/轨迹采集抽查）
+
+[2026-10-11 10:35] 周期#64 | 验收对标抽样实测（路线图清零后）+规划阶段12：5类抽样（tag=FULL12_1791684846，WS真实用户路径，ACCEPT_CATEGORIES=开发,办公,定时,协作,记忆）**5/5通过**——开发301.74s dev_hello.py+marker命中（**WS 300s超时→10.4后到回读0.0s/1次恢复**，verify_mode=server_side_late）、办公65.26s report.xlsx 4963B有效xlsx（11.5治理回归目标全窗口零注入审计终止）、定时74.53s accept_probe行=1、记忆106.81s MEMORY.md标记、协作27.4s双worker产出；4类server_side+1类server_side_late（本抽样无reply_assisted弱项）；结果+新发现写入路线图"2026-10-11抽样对标实测"节，规划阶段12六切片（12.1多渠道出站独立可查痕迹+verify升级/12.2运维调研verify升级/12.3开发类301.74s超时复核归因/12.4注入审计LLM往返开销治理=8.3另案/12.5 harness收尾清理+late_readback扩测/12.6轨迹审计闭环抽查） | ✅ | (本次提交) | Gate1 git diff 路线图3区块真实落盘（实测表+阶段12+周期日志）；Gate2=N/A（纯验收/规划周期无新代码符号）；Gate3=acceptance_benchmark真实运行5/5+结果JSON /tmp/soulmate_accept_results.json回读（passed 5/5、late_readback ws_timeouts=1 recovered=1）与台面一致+测试产物清理归零（accept_probe行0/MEMORY.md标记0/tmp工作目录删除）；新证据：①10.4后到回读路径首次非构造场景真实触发（11.1遗留④部分销账，仍单样本）②开发类48.2s→301.74s显著变慢但产出1分钟内就绪=超时在回复回收侧，疑上游波动/冷启动首回合，归因入12.3（单样本禁定论）③harness收尾清理边界实证：cleanup()不删/tmp工作目录（仅开跑前rmtree，docstring承诺未兑现），本轮残留3件已手动清理入12.5；⚠️诚实边界：每类单次样本同机低负载；下周期做12.1多渠道出站独立可查痕迹+verify升级server_side
