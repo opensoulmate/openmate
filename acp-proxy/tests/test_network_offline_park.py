@@ -645,8 +645,9 @@ class TestWiringPins:
     def test_llm_engine_three_paths_consume_maybe_park(self):
         src = _src("agent/llm_engine.py")
         assert src.count("network_state.maybe_park") == 3  # chat/chat_stream/with_tools
-        # 三处都在except httpx.TransportError分支内（真实传输错误路径）
-        assert src.count("except httpx.TransportError as e:") == 3
+        # 三处都在传输/解码异常分支内（真实传输错误路径）；14.5 catch 面扩到
+        # DecodingError，钉随规格更新
+        assert src.count("except (httpx.TransportError, httpx.DecodingError) as e:") == 3
 
     def test_app_exposes_network_status_endpoint(self):
         src = _src("app.py")

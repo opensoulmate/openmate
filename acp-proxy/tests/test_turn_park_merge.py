@@ -457,10 +457,11 @@ class TestWiringPins:
         assert src.count("turn_lifecycle.EVENT_TURN_CLOSE") >= 2  # 记忆采集+park清场
 
     def test_maybe_park_consumers_unchanged(self):
-        # 消费面零改动：llm_engine三处+llm_transport一处（语义不变只加合并）
+        # 消费面零改动：llm_engine三处+llm_transport一处（语义不变只加合并）；
+        # 14.5 catch 面扩到 DecodingError，钉随规格更新
         eng = _src("agent/llm_engine.py")
         assert eng.count("network_state.maybe_park(") == 3
-        assert eng.count("except httpx.TransportError as e:") == 3
+        assert eng.count("except (httpx.TransportError, httpx.DecodingError) as e:") == 3
         tr = _src("utils/llm_transport.py")
         assert tr.count("network_state.maybe_park(") >= 1
 

@@ -184,7 +184,13 @@ class LLMEngine:
         """
         return httpx.AsyncClient(
             base_url=self.base_url,
-            headers={"Authorization": f"Bearer {self.api_key}"} if self.api_key else {},
+            # Accept-Encoding: identity（14.5）——禁透明压缩：LLM 响应体小，
+            # gzip 透明解码是 DecodingError "incorrect header check" 的温床
+            # （请求族异常，实证间歇高发），不请求压缩则解码错误类无从发生
+            headers={
+                "Accept-Encoding": "identity",
+                **({"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}),
+            },
             timeout=httpx.Timeout(connect=10, read=120, write=10, pool=10),
         )
 
@@ -293,7 +299,12 @@ class LLMEngine:
         # 使用解析后的配置创建客户端
         client = httpx.AsyncClient(
             base_url=resolved_base_url,
-            headers={"Authorization": f"Bearer {resolved_api_key}"} if resolved_api_key else {},
+            # Accept-Encoding: identity（14.5）——禁透明压缩（同 _make_client），
+            # 不请求压缩则 gzip 解码错误类（DecodingError）无从发生
+            headers={
+                "Accept-Encoding": "identity",
+                **({"Authorization": f"Bearer {resolved_api_key}"} if resolved_api_key else {}),
+            },
             timeout=httpx.Timeout(connect=10, read=120, write=10, pool=10),
         )
         payload = {
@@ -475,7 +486,7 @@ class LLMEngine:
                     return
                 finally:
                     await response.aclose()
-        except httpx.TransportError as e:
+        except (httpx.TransportError, httpx.DecodingError) as e:
             # 网络离线三态（utils.network_state，kilocode SessionNetwork）：
             # 全局断连→park等恢复（3s轮询探测+10s宽限自动续跑，有界）；恢复/非离线
             # 走下方原有重试记账，aborted也回落原失败契约——原有语义不变只加等待
@@ -591,7 +602,12 @@ class LLMEngine:
         # 使用解析后的配置创建客户端
         client = httpx.AsyncClient(
             base_url=resolved_base_url,
-            headers={"Authorization": f"Bearer {resolved_api_key}"} if resolved_api_key else {},
+            # Accept-Encoding: identity（14.5）——禁透明压缩（同 _make_client），
+            # 不请求压缩则 gzip 解码错误类（DecodingError）无从发生
+            headers={
+                "Accept-Encoding": "identity",
+                **({"Authorization": f"Bearer {resolved_api_key}"} if resolved_api_key else {}),
+            },
             timeout=httpx.Timeout(connect=10, read=120, write=10, pool=10),
         )
         payload = {
@@ -625,7 +641,12 @@ class LLMEngine:
                 # "重试"从未真实生效的隐性死路径）
                 client = httpx.AsyncClient(
                     base_url=resolved_base_url,
-                    headers={"Authorization": f"Bearer {resolved_api_key}"} if resolved_api_key else {},
+                    # Accept-Encoding: identity（14.5）——禁透明压缩（同 _make_client），
+                    # 不请求压缩则 gzip 解码错误类（DecodingError）无从发生
+                    headers={
+                        "Accept-Encoding": "identity",
+                        **({"Authorization": f"Bearer {resolved_api_key}"} if resolved_api_key else {}),
+                    },
                     timeout=httpx.Timeout(connect=10, read=120, write=10, pool=10),
                 )
                 async with client:
@@ -865,7 +886,7 @@ class LLMEngine:
                     finally:
                         await response.aclose()
                 break  # 成功，退出重试循环
-            except httpx.TransportError as e:
+            except (httpx.TransportError, httpx.DecodingError) as e:
                 # 网络离线三态（utils.network_state，kilocode SessionNetwork）：
                 # 全局断连→park等恢复（3s轮询探测+10s宽限自动续跑，有界）；恢复/
                 # 非离线走下方原有重试记账，aborted回落原失败契约——语义不变只加等待
@@ -963,7 +984,12 @@ class LLMEngine:
 
         client = httpx.AsyncClient(
             base_url=resolved_base_url,
-            headers={"Authorization": f"Bearer {resolved_api_key}"} if resolved_api_key else {},
+            # Accept-Encoding: identity（14.5）——禁透明压缩（同 _make_client），
+            # 不请求压缩则 gzip 解码错误类（DecodingError）无从发生
+            headers={
+                "Accept-Encoding": "identity",
+                **({"Authorization": f"Bearer {resolved_api_key}"} if resolved_api_key else {}),
+            },
             timeout=httpx.Timeout(connect=10, read=120, write=10, pool=10),
         )
         current_history = list(messages)  # 不含system（每次请求由_build_messages统一注入）
@@ -1005,7 +1031,7 @@ class LLMEngine:
                                 resp = await send_with_stall_guard(
                                     client, "POST", "/chat/completions", json=payload
                                 )
-                            except httpx.TransportError as e:
+                            except (httpx.TransportError, httpx.DecodingError) as e:
                                 # 网络离线三态（utils.network_state，kilocode SessionNetwork）：
                                 # 全局断连→park等恢复（3s竞速探测+10s宽限自动续跑，有界）；
                                 # 恢复/非离线走下方原有重试记账（chat()无cancel_event）

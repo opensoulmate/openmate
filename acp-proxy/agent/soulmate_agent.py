@@ -45,6 +45,7 @@ from skill_manager import SkillManager, is_injectable_trigger
 from evolution import EvolutionEngine
 from dna_evolution import DNAEvolutionEngine
 from utils.token_manager import truncate_tool_result
+from utils.llm_retry import is_llm_error_text
 from agent.tool_output_handler import ToolOutputHandler, degraded_spill
 from agent.architecture_enhanced import EnhancedArchitecture
 from agent import arch_monitor
@@ -6685,6 +6686,16 @@ You can send files to the user natively: to deliver a file, write a brief confir
             )
             # 清洗LLM输出：去掉markdown、代码块、换行等垃圾
             title = (title or "").strip()
+            # 失败契约文本判定（14.5）：LLM 往返失败时 _aux_llm_chat 按契约返回
+            # "[LLM错误: …]"/"[LLM响应超时]"——错误文本是失败信号不是标题内容，
+            # 绝不写进会话标题（14.2 实证污染："Session title generated: … ->
+            # [LLM错误: …]"）；保留 user_text[:30] 临时标题不动
+            if is_llm_error_text(title):
+                logger.warning(
+                    f"Session title generation failed ({title[:80]}), "
+                    f"keeping fallback title for {session_id}"
+                )
+                return
             if "```" in title:
                 title = title.split("```")[0]
             title = title.split("\n")[0]  # 只取第一行

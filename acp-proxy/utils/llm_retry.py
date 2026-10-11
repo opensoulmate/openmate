@@ -168,9 +168,13 @@ def is_retryable_status(status: int) -> bool:
 def is_transient_error(exc: BaseException) -> bool:
     """瞬时传输错误判定（网络层，重试有望自愈）：
     httpx.TransportError家族（ConnectError/ReadTimeout/RemoteProtocolError等）
-    无条件瞬时 + kilocode TRANSIENT_MESSAGES文案匹配兜底。
+    无条件瞬时 + httpx.DecodingError（14.5：压缩体损坏"incorrect header check"，
+    请求族异常非 TransportError 兄弟类——重发新响应大概率自愈，属瞬时）+
+    kilocode TRANSIENT_MESSAGES文案匹配兜底。
     """
     if isinstance(exc, httpx.TransportError):
+        return True
+    if isinstance(exc, httpx.DecodingError):
         return True
     msg = str(exc).lower()
     return any(m in msg for m in TRANSIENT_MESSAGES)
@@ -280,3 +284,19 @@ def classify_failure(source) -> str:
             return "transient_message"
         return "unknown"
     return "unknown"
+
+
+# ── 失败契约文本判定（14.5：错误文本禁进会话标题） ──────────────────────
+LLM_ERROR_PREFIXES = ("[LLM错误", "[LLM响应超时")
+
+
+def is_llm_error_text(text) -> bool:
+    """判定 llm_engine 失败契约文本（"[LLM错误: …]"/"[LLM响应超时]"）。
+
+    失败契约要求"失败必须可见"——LLM 往返失败时 chat() 返回该契约文本而非
+    抛异常。消费侧（如会话标题生成）必须先过此判定：错误文本是失败信号，
+    不是 LLM 产出内容，绝不能当作正常回复消费（14.2 实证：错误文本污染
+    会话标题 "Session title generated: … -> [LLM错误: …]"）。
+    """
+    t = (text or "").strip()
+    return any(t.startswith(p) for p in LLM_ERROR_PREFIXES)

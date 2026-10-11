@@ -168,7 +168,9 @@ async def _post_single_link(
                 client,
                 "POST",
                 f"{base_url}/chat/completions",
-                headers=headers,
+                # Accept-Encoding: identity（14.5）——禁透明压缩：调用方 headers
+                # 以显式值优先，缺省禁压缩（DecodingError 温床消除）
+                headers={"Accept-Encoding": "identity", **headers},
                 json={
                     "model": model,
                     "messages": messages,
@@ -176,7 +178,7 @@ async def _post_single_link(
                     "max_tokens": max_tokens,
                 },
             )
-        except httpx.TransportError as e:
+        except (httpx.TransportError, httpx.DecodingError) as e:
             # 网络离线三态（utils.network_state，kilocode SessionNetwork）：
             # 全局断连→park等恢复自动续跑；非离线/恢复后走下方重试记账
             await network_state.maybe_park(e)
@@ -398,9 +400,10 @@ async def complete_with_protection(
         raise
     except Exception as e:
         logger.error(f"[{strand_id}] LLM call exception: {e}")
-        if not isinstance(e, httpx.TransportError):
+        if not isinstance(e, (httpx.TransportError, httpx.DecodingError)):
             # 传输错误已在 _post_single_link 放弃点记账（防双行重复）；
-            # 此处记防护层自身异常（JSON解析/防护循环等）
+            # 此处记防护层自身异常（JSON解析/防护循环等）；DecodingError（14.5）
+            # 同属 _post_single_link 重试环已记账面，不双记
             _record_failure(
                 path, e, "llm_give_up", 1, "failed", _fail_detail(strand_id, e)
             )

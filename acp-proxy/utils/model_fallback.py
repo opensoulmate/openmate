@@ -72,7 +72,9 @@ class FallbackLink:
 
     def headers(self) -> dict:
         """该link的请求头（独立凭据——备胎是不同provider，鉴权跟着link走）"""
-        h = {"Content-Type": "application/json"}
+        # Accept-Encoding: identity（14.5）——禁透明压缩（同 llm_engine）；
+        # _apply_link 整体替换 client.headers，此处漏了即降级链 link 压缩复活
+        h = {"Content-Type": "application/json", "Accept-Encoding": "identity"}
         if self.api_key:
             h["Authorization"] = f"Bearer {self.api_key}"
         return h
