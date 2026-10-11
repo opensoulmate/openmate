@@ -1096,6 +1096,33 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 - [ ] ⏳ 待用户拍板后落地：⚡8.6 双链合并、4.1b iLink 形态、ASR 语音输入、
   13.3② provenance 取舍、13.2 签名误伤豁免语义。
 
+### 阶段15 · 下一批切片（周期#89 规划——路线图切片清零后按遗留实证排序）
+- [ ] 15.1 调度常驻托管（3.1 遗留销账）：SoulMateScheduler 调度循环宿主=存活的
+  SoulMateAgent stdio 子进程（start.py 有存活任务才自举），无 agent 进程时定时任务
+  不执行（错过不补跑）。真解=独立常驻托管（systemd --user service 跑 run_forever），
+  多进程 CAS 到点领取（3.1 已有）天然不双跑；错过语义保持"不补跑"但显式留痕
+  （missed 落 runs 日志可见）。验收：杀掉全部 agent 进程期间到点任务 → daemon 独立
+  执行+3.2 CronReporter 📊汇报行落库。
+- [ ] 15.2 工具执行时长落账（14.4 诚实边界③销账）：trajectory_events 全库 542 行
+  tool_call 事件 duration_ms **全为 0.0**（周期#89 真实库实证）——工具执行段在
+  四段归因（12.3/14.2）里是盲段。修=工具执行点计时进 all_tool_calls 账本条目
+  → record_llm_call 透传落 tool_call 事件 duration_ms → turn_timing_report 增
+  "工具执行段"独立列，⑤未归属空洞进一步收窄。验收：真实 WS 回合 tool_call 行
+  duration_ms>0 且四段拆分工具段独立可见。
+- [ ] 15.3 aux LLM 延迟治理（14.4 量化：标题生成/规划单次 35-40s）：先归因哪些
+  aux 在首字回复关键路径上（标题=fire-and-forget 不阻塞？规划=串行前置？），关键
+  路径 aux 做 prompt 瘦身+短超时回退（失败走既有 14.5 临时标题/确定性规划回退），
+  0.2 首条消息提速成果不回退。验收：首字回复时间对比+aux 计时账本不变差。
+- [ ] 15.4 工作区遗留清理（开发期数据删前备份铁律）：untracked 杂物归位——根目录
+  游离 chat-client.tsx（964 行≠真实 src/app/(app)/chat/chat-client.tsx 2900 行，
+  疑旧拷贝）、agent/tool_infra.py（零引用死模块，周期#82 起未动未提交）、
+  fault_degradation_*（10-06 旧产物）。备份到 devlog 附件后删除或补齐接线。
+- [ ] 15.5 flaky 断言观察（周期#87②遗留）：test_llm_stall_guard::
+  test_head_stall_aborts_fast 3.3s vs 3.0s 时序边际——持续复现才放宽上限，
+  不预防性改。
+- [ ] 验收对标轮转例行（15 区内）：每周期抽 2 类轮转覆盖 10 类全集（周期#89
+  调试+运维 2/2✅ 起步），14.3 三探针手法沿用。
+
 ## 周期日志
 [2026-10-09 19:00] 周期#0 | 路线图建立+cron流水线上线 | ✅ | (本文档创建) | 首个自动周期15分钟后启动
 [2026-10-10 01:20] 周期#1 | 阶段0盘点：核实21工具/3记忆引擎/三层技能机制+缺口图；清理soulmate_agent.py损坏WIP（截断import`AgentCheckpointMan`+`return clsager`致ImportError，且属用户已否决的防双开守卫类，diff留证docs/devlog/2026-10-10-broken-idempotent-guard-wip.patch后还原HEAD，import实测恢复） | ⚠️ | 1ea328ce | 附带实测tests/test_skill_standard_layer.py 34 passed；下周期做1.1 MEMORY.md型持久记忆
@@ -1197,3 +1224,4 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 [2026-10-11 21:57] 周期#87 | 14.5 上游传输错误韧性（DecodingError 重试链覆盖+禁透明压缩+标题禁错误文本）：核实结论=**重试链此前不覆盖**——httpx.DecodingError 属 RequestError 族非 TransportError 兄弟类，llm_engine 三路+llm_transport 四个 `except httpx.TransportError` 重试 catch 面全部漏掉它（一次坏压缩体即落外层 except 零重试直落"[LLM错误: …]"，14.2 解压错误实证形态根因）；修三件①请求禁透明压缩（根因消除）：llm_engine 五处 client 构造（_make_client/chat_stream/chat_stream_with_tools×2/chat）+model_fallback.link.headers()（_apply_link 整体替换 headers 漏了即降级链压缩复活）+llm_transport._post_single_link 发送面统一 `Accept-Encoding: identity`（调用方显式值优先）②重试链覆盖：is_transient_error 认 DecodingError（重发可自愈=瞬时）+四 catch 面扩 `(httpx.TransportError, httpx.DecodingError)`（plan_error_retry/has_output/降级链/记账语义零变化）③is_llm_error_text 失败契约前缀判定单一真源（utils/llm_retry）+_generate_session_title 检出错误契约文本即保留 user_text[:30] 临时标题不写库不同步（14.2"Session title generated: … -> [LLM错误: …]"污染形态销账） | ✅ | (本次提交) | 14.5勾选；Gate1 git diff 8文件90+/24-+新测试文件真实落盘+key扫描0命中；Gate2 grep 四 catch 面+五 client 构造+link.headers+is_llm_error_text 消费点在 _generate_session_title 真实路径+真实 WS 回合经新代码跑通（真实上游对 identity 编码正常响应）；Gate3 tests/test_llm_decoding_resilience.py 14/14（真实socket坏gzip故障注入非mock：chat()/chat_stream 坏gzip→重试→恢复、持续坏gzip 有界重试后失败契约逐字、identity 接线钉×3、错误契约判定含"正文提及不误伤"负控制、标题三态含 PATCH 载荷断言）+受影响面回归 314/314（stall×2/stream_stall/resilience/retry_policy/error_contract/send_budget/park×2/output_protection/aux_ledger/transport_accounting/fallback×2）——其中 3 个 wiring pin（test_llm_error_contract/test_turn_park_merge/test_network_offline_park 锚定旧 except 字面量）钉随规格更新；py_compile×5+服务同款 interpreter 烟测 SMOKE87_IMPORT_OK+双实例重启 health 200/200；真实验收=WS 用户路径开发类 1/1✅ 31.42s（verify_dev 三判据命中，tag=DEC145_1791727600），journal 实证干净标题"创建并运行测试脚本文件"+全窗口零 DecodingError；测试产物清理归零（/tmp/soulmate_accept 已删）；⚠️诚实边界①坏gzip→重试恢复以故障注入实证，真实上游自然解压错误未在本轮触发（禁压缩后该类应绝迹；残余=上游无视 identity 强发压缩且体损坏的极端形态，由重试面覆盖）②一次性 flaky 观察：test_llm_stall_guard::test_head_stall_aborts_fast（3.3s vs 3.0s 上限）首轮 10 文件批跑偶发超限，单跑 3/3 过+复批 314 全过+HEAD worktree 单跑同过=机器负载型时序边际非本切片引入（若持续出现应放宽该断言上限）③并发纪律核实：与真实服务并存期间工作树仅本周期 8 文件改动（git status 核实，他会话未跟踪 WIP 未动未提交）；下周期做存量缺陷修钉（test_trajectory_rounds::test_infection_terminate_early_return_still_records_round 断言跟上 verdict_basis 账本条目，HEAD 即红）+14.3 例行观察探针复跑
 
 [2026-10-11 22:25] 周期#88 | 存量测试修钉+两项实证缺口根因修复（配对terminate判词fail-open+empty_output分类缺口）+14.3例行观察复跑：①**存量缺陷修钉**（周期#86遗留）：test_trajectory_rounds::test_infection_terminate_early_return_still_records_round 断言跟上 verdict_basis 账本条目（tools 1→2=周期#74 设计行为，判词依据伪条目 report_evidence 两头不计）+纯标签诚实标记钉死+配对判词形态伴生 e2e 用例②**实证缺口A·配对terminate判词形态 fail-open**（写伴生用例时实证）：JUDGE_PROMPT 契约=自闭合 `<terminate/>`+依据写标签外，但审计员 LLM 按习惯写 `<terminate>依据</terminate>` 时 _RE_TERMINATE 不匹配任何正则→parse_verdict 误判 **ok→工具照常执行 fail-open 放行**（安全门漏检）；修=_RE_TERMINATE 兼容配对形态（内文=终止依据，与 clarify 标签内文同语义）+_RE_VERDICT_TAG 整体剥离+parse_verdict group(1) 承接 detail+回归钉 4 例（配对识别/空内文/last-tag-wins/extract_rationale 不重复内文）+e2e round 账本落真实依据③**实证缺口B·empty_output 分类缺口**（14.3 探针复跑暴露）：llm_transport 空输出失败以 "empty_output" 串记账但不在 _LLM_KIND_CODES 九态码集→classify 落 unknown（探针实证 id=142 新行 ts=毫秒=修复后代码所记仍缺分类=活缺口）；修=生产码集+探针 LLM_KINDS 双真源补 empty_output（HTTP 200 空输出独立失败形态）+回归钉 2 例（classify 透传/真实记账路径 kind 断言）④**14.3 例行观察三探针复跑**：免审命中率 62.9%（44免审/26升级/70批，双通道 44vs38 如实报）+审计往返 14 次均值 3.84s p50 2.65s p95 6.72s 全 verdict=ok 零失败+同签名复现率 0%（9样本）+chars↔耗时 pearson 0.391 仍无稳定相关+audit_trail_probe 七面（孤儿0/llm:dna 闭环11/verdict_basis 落账21行全真实依据零缺口/provenance self_heal 0行如实报） | ✅ | 2d3214c2+84c3ea4c | Gate1 git diff 8文件真实落盘（两commit）+key扫描0命中；Gate2 grep parse_verdict/extract_rationale 消费点在 _llm_audit 真实路径（L547/L555）+classify_failure 透传在 _record_failure 真实记账路径（test_empty_output_recorded 真实临时库落行非stub）+真实库探针回读；Gate3 tests 分批全过 506 例零回归（infection/audit 面 235+trajectory/aux/acceptance 78+llm transport/accounting/probe 193，其中改动面 35 例复跑）+py_compile+双实例重启 health 200/200；⚠️诚实边界：①配对形态为 parse 契约扩展（此前 fail-open），真 LLM 审计员自然产出该形态未观察到（自然触发待 13.2 同款观察）②empty_output 修复只影响新行，存量 unknown 9 行（115/119=周期#69 WIP 错位 2 行+120-133=13:23-14:42 旧码 DecodingError 6 行+142=修复前最后 1 行）按"不改写历史"纪律保留，探针持续如实报③14.3 数据 24h 窗口小样本（复现率 9 样本仍不足评 13.3②）④action 越界 2 行=WIP 错位历史产物非活缺口；⚠️并发纪律核实：git diff 全程仅本周期 8 文件改动（sibling 修改告警为 mtime 级假警，逐文件 git diff 核实无他会话混入）；下周期=14.3 例行观察探针持续+规划阶段15（或待拍板项落地：⚡8.6/4.1b/ASR/13.3②/13.2豁免语义）
+[2026-10-11 22:47] 周期#89 | 验收对标实测（2类轮转抽测）+阶段15规划（路线图切片清零后按预案"跑验收+规划下一批"）：①真实WS用户路径验收 tag=ACCEPT89_1791729385 **2/2✅**（调试59.41s buggy.py 修复=return a+b+FIXED标记、运维12.63s system_checkup 账本真源落账命中+8090/磁盘信息），采集侧系统帧过滤实证生效（self_check×1 被过滤）；测试产物清理归零（/tmp/soulmate_accept 已删/ACCEPT_MEM_MARK_9 标记0/accept_probe 行0）②**15.2 缺口实证**：trajectory_events 全库 542 行 tool_call 事件 duration_ms 全为 0.0（工具执行段=四段归因盲段，14.4 诚实边界③量化坐实）③阶段15 规划落盘（15.1 调度常驻托管=3.1 遗留销账/15.2 工具时长落账/15.3 aux 延迟治理/15.4 工作区遗留清理/15.5 flaky 观察/验收轮转例行），14.3 三探针 7 分钟前刚复跑不重复跑（窗口需积累）| ✅ | (本次提交) | Gate1 git diff 路线图（阶段15 新段+本条目）真实落盘+key扫描0命中；Gate2 本周期为测量+规划（无产品代码改动）：验收探针真实消费真实链路（WS→ws_acp→soulmate stdio→真实LLM回合），tool_call duration 实证=真实库回读（542 行 query）非自报；Gate3 真实产出证据=/tmp/soulmate_accept_results.json（2/2 结果+verify_mode）+acceptance stdout 摘要+真实库 542 行统计；⚠️诚实边界：①验收 2 类各 1 次同机低负载（调试 59.41s/运维 12.63s），轮转例行按每周期 2 类积累全集覆盖②阶段15 为规划未实施，下周期起按序做 15.1（或按用户插队指令优先级调整）③工作区遗留清理（15.4）未动 untracked 文件（单写入者纪律：tool_infra.py 等非本流水线产物）；下周期做 15.1 调度常驻托管（或待拍板项落地：⚡8.6/4.1b/ASR/13.3②）
