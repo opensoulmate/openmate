@@ -124,6 +124,7 @@ from agent.token_attribution import (
     AttributionLedger,
     ContextItem,
     build_context_usage,
+    estimate_content_tokens,
     estimate_tokens,
     items_from_openai_tools,
 )
@@ -3783,7 +3784,9 @@ You can send files to the user natively: to deliver a file, write a brief confir
                 _conv = 0
                 _tres = 0
                 for _m in messages:
-                    _tok = estimate_tokens(str(_m.get("content", "") or ""))
+                    # 19.1：多模态 block 列表按块语义估算（音频秒×6.25），
+                    # 旧 str() 形态把 base64 载荷当文本计（归因虚高）。
+                    _tok = estimate_content_tokens(_m.get("content"))
                     if _m.get("role") == "tool":
                         _tres += _tok
                     else:

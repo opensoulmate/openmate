@@ -1278,6 +1278,21 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
   标签"（感知类元指令，无法核验）"+覆盖行"另 N 项…不计覆盖"（不冒进修覆盖率
   阈值，_MET_MIN/_UNCERTAIN_MIN 未动）；真实 WS audio e2e 复测 PASS 见周期#103
 
+### 阶段19 · 部署后观察与估算收口（周期#104 规划——18.x 部署上线后的诚实边界销账+长窗观察）
+- [ ] 19.1 音频 token 估算纳入（17.1 诚实边界③销账）：estimate_tokens 只看 str
+  content，attach_audio_parts 挂进 wire 的 input_audio 块零计入 → ①token 归因报表
+  conversation_history/tool_results 少算音频（长录音可观：60s≈375tok、10min≈3750tok，
+  秒×6.25=MiMo 官方 audio token 计量，16.3 查实）②上下文预算裁剪判据偏差（音频回合
+  裁剪时机偏晚）。修=音频部件按秒×6.25 折算计入估算与归因（时长 WAV 头解析，其他
+  容器解析不出按字节保守下界估计并显式标注，不假称精确）
+- [ ] 19.2 拒做复发率多轮采样（18.1 诚实边界②销账）：部署后调研/开发类自然触发
+  多轮采样（每类≥3轮），统计自然拒做率+8.5c-②b 补做自愈率，数据落 devlog 趋势行
+  （当前样本：调研类部署后 1/1 无自然拒做，样本量不足定论）
+- [ ] 19.3 候选·感知类元指令英文形态扩展（18.3 诚实边界③：当前仅覆盖
+  repeat/what you hear 常见形）——低优先，观察到真实漏判形态再补，不造无依据需求
+- 常设观察（不占阶段顺序）：15.5 flaky 断言（3.3s 边际四轮未复现，上限 3.0s 不动）、
+  16.3 反馈挖掘（每周期先查四触点，有真实反馈即优先补）
+
 ## 周期日志
 [2026-10-09 19:00] 周期#0 | 路线图建立+cron流水线上线 | ✅ | (本文档创建) | 首个自动周期15分钟后启动
 [2026-10-10 01:20] 周期#1 | 阶段0盘点：核实21工具/3记忆引擎/三层技能机制+缺口图；清理soulmate_agent.py损坏WIP（截断import`AgentCheckpointMan`+`return clsager`致ImportError，且属用户已否决的防双开守卫类，diff留证docs/devlog/2026-10-10-broken-idempotent-guard-wip.patch后还原HEAD，import实测恢复） | ⚠️ | 1ea328ce | 附带实测tests/test_skill_standard_layer.py 34 passed；下周期做1.1 MEMORY.md型持久记忆

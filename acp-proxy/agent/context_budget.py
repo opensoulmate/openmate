@@ -160,7 +160,7 @@ class ContextBudgetManager:
         """
         if not messages:
             return []
-        from agent.token_attribution import estimate_tokens as _canonical_estimate
+        from agent.token_attribution import estimate_content_tokens as _canonical_estimate
 
         target = max_tokens or self.budget.available_for_history
         factor = (
@@ -170,8 +170,9 @@ class ContextBudgetManager:
         )
 
         def _calibrated(msg) -> int:
-            content = str((msg or {}).get("content", "") or "")
-            return int(_canonical_estimate(content) * factor)
+            # 19.1：content 可能是多模态 block 列表（input_audio 等），
+            # 用块语义估算——旧 str() 形态把 base64 载荷当文本计（虚高致裁剪提前）。
+            return int(_canonical_estimate((msg or {}).get("content", "")) * factor)
 
         last_idx = len(messages) - 1
         must_keep = {

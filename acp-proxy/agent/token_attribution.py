@@ -152,6 +152,99 @@ def estimate_tokens(text: str) -> int:
     return cjk + (len(text) - cjk) // 4
 
 
+# ── 19.1 多模态内容估算（17.1 诚实边界③销账）────────────────────────
+# MiMo 官方 audio token 计量：约 秒×6.25（mimo.mi.com token-plan pricing，周期#98查实）。
+AUDIO_TOKENS_PER_SECOND = 6.25
+# 未压缩参考密度：16kHz 16bit 单声道 PCM = 32000 字节/秒。压缩格式每秒字节更少，
+# 按此折算秒数只会低估不会虚高（保守下界，显式不假称精确）。
+_PCM_BYTES_PER_SECOND = 32000
+# 图像块无可本地折算的官方公式（精确计数需解码像素），按业界低细节近似常量计；
+# 绝不把 base64 载荷当文本计（旧 str(list) 形态每图虚高数万 token）。
+IMAGE_TOKENS_FALLBACK = 1100
+
+
+def _b64_payload(data: str) -> str:
+    """剥 data URL 前缀取裸 base64 载荷。"""
+    if not data:
+        return ""
+    if data.startswith("data:") and "," in data:
+        return data.split(",", 1)[1]
+    return data
+
+
+def estimate_audio_tokens(data: str) -> int:
+    """音频载荷→token 估算（秒×6.25，19.1）。
+
+    WAV 头解析真实时长（byte_rate@28）；其他容器/解析失败按字节保守下界
+    （PCM 密度折算秒数）——估算口径不假称精确。
+    """
+    payload = _b64_payload(data)
+    if not payload:
+        return 0
+    total_bytes = (len(payload) * 3) // 4
+    seconds = None
+    try:
+        import base64
+        head = payload[:96]
+        head += "=" * (-len(head) % 4)
+        raw = base64.b64decode(head)[:64]  # 只解码头部，防整段大 blob 解码
+        if raw[:4] == b"RIFF" and raw[8:12] == b"WAVE" and len(raw) >= 32:
+            byte_rate = int.from_bytes(raw[28:32], "little")
+            if byte_rate > 0:
+                seconds = max(0.0, total_bytes / byte_rate)
+    except Exception:
+        seconds = None
+    if seconds is None:
+        seconds = total_bytes / _PCM_BYTES_PER_SECOND
+    return int(seconds * AUDIO_TOKENS_PER_SECOND)
+
+
+def _strip_payload(obj):
+    """递归剥掉 base64/blob 载荷字段（未知块估算只计元数据文本）。"""
+    if isinstance(obj, dict):
+        return {k: _strip_payload(v) for k, v in obj.items()
+                if k not in ("data", "blob")}
+    return obj
+
+
+def _estimate_block(block) -> int:
+    """单个内容块估算：text→文本公式、input_audio→秒×6.25、image→近似常量，
+    未知块只计非载荷元数据文本（base64/blob 载荷绝不当文本计）。"""
+    if isinstance(block, dict):
+        btype = str(block.get("type") or "")
+        if btype == "text":
+            return estimate_tokens(str(block.get("text") or ""))
+        if btype == "input_audio":
+            ia = block.get("input_audio") or {}
+            return estimate_audio_tokens(str(ia.get("data") or ""))
+        if btype == "image":
+            return IMAGE_TOKENS_FALLBACK
+        return estimate_tokens(str(_strip_payload(block)))
+    # SDK 对象形态（acp Pydantic block）兜底，同语义按属性取
+    btype = str(getattr(block, "type", "") or "")
+    if btype == "text":
+        return estimate_tokens(str(getattr(block, "text", "") or ""))
+    if btype == "input_audio":
+        return estimate_audio_tokens(str(getattr(block, "data", "") or ""))
+    if btype == "image":
+        return IMAGE_TOKENS_FALLBACK
+    return estimate_tokens(str(btype))
+
+
+def estimate_content_tokens(content) -> int:
+    """消息 content 估算——兼容 str 与多模态 block 列表（19.1）。
+
+    旧形态 str(content) 对 list 会把整段 base64 载荷当文本计 token（音频/图像
+    虚高数万，裁剪提前+归因失真），此处按块语义计。"""
+    if content is None:
+        return 0
+    if isinstance(content, str):
+        return estimate_tokens(content)
+    if isinstance(content, (list, tuple)):
+        return sum(_estimate_block(b) for b in content)
+    return estimate_tokens(str(content))
+
+
 @dataclass
 class ContextItem:
     kind: str
