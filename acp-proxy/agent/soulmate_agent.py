@@ -4099,6 +4099,8 @@ You can send files to the user natively: to deliver a file, write a brief confir
                                     "arguments": func_args,
                                     "result_preview": redact_secrets(str(result))[0][:200],
                                     "cached": True,
+                                    # 15.2 工具执行时长落账（缓存命中=查找耗时，如实近0）
+                                    "duration_ms": (time.time() - tool_start) * 1000,
                                     "permission": gate_result.behavior,
                                     "permission_provenance": gate_provenance,
                                 })
@@ -4671,6 +4673,9 @@ You can send files to the user natively: to deliver a file, write a brief confir
                                                 "blocked" if _e.get("blocked")
                                                 else ("ok" if _e.get("ok") else "failed")
                                             ) + f" {_e['duration_ms']}ms len={_e['result_len']}",
+                                            # 15.2：批内每次调用自身执行时长（含于 batch_execute 行，
+                                            # 观察面独立可见、汇总不重复计）
+                                            "duration_ms": float(_e.get("duration_ms", 0.0) or 0.0),
                                         })
                                 except Exception as _cm_err:
                                     result = f"[CODE_MODE] 批量执行失败: {_cm_err}"
@@ -4695,6 +4700,9 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             "name": func_name,
                             "arguments": func_args,
                             "result_preview": (redact_secrets(str(result))[0][:200] if result else ""),
+                            # 15.2 工具执行时长落账：执行点计时进账本条目
+                            # （tool_start=权限门后执行段起点，含缓存检查/恢复重试全程）
+                            "duration_ms": (time.time() - tool_start) * 1000,
                             "permission": gate_result.behavior,
                             "permission_provenance": gate_provenance,
                         })

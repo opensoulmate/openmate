@@ -5,14 +5,16 @@
   - user_input 行：created_at=回合开始，end_at=回合结束（duration_ms=回合总时长）
   - llm_call 带 end_at：plan_step/chat_turn 步骤跨度（created_at=步开始）
   - llm_call 无 end_at：轮内 LLM 往返（created_at=轮结束，start=created_at-duration_ms）
-  - tool_call 行：工具执行点（duration_ms 目前恒 0——工具执行时长未落账，如实报缺口）
+  - tool_call 行：工具执行点（15.2 起 duration_ms=工具执行时长；修复前恒 0 的历史行
+    如实按 0 计，不改写历史）
 
 四段归因（用户/路线图 12.3 口径）：
   ① LLM 往返（含首包）= 轮内 llm_call 时长合计 + 每轮明细
   ②b 辅助LLM往返（14.4 落账补洞）= "[aux]" 前缀行（planner任务拆解/任务裁决/
     注入审计判词/标题生成/技能语义改写），与主轮同口径计入时间覆盖
   ② 注入审计往返 = journal 同窗口"注入审计/clarify/terminate"判词行扫描（有则计数+归入空洞解释）
-  ③ 工具执行 = tool_call 行（时长未落账→用相邻轮间隙做上界代理，如实标注）
+  ③ 工具执行段（15.2 独立列）= tool_call 行 duration_ms 合计（batch: 批内子调用已含于
+    batch_execute 行，明细可见但汇总不重复计）；计时跨度计入空洞覆盖，⑤进一步收窄
   ④ 回复回收 = 回合结束 - 最后一个事件结束
   ⑤ 未归属空洞 = 上述四段之外 >2s 的静默区间（含 journal 传输错误/重试行做归因解释）
 
@@ -110,21 +112,34 @@ def report(session_id: str, conn: sqlite3.Connection) -> dict:
             else:
                 rounds.append(entry)
         elif etype == "tool_call":
-            tools.append({"ts": _ts(c0), "name": (content or "")[:20],
-                          "dur_s": round(dur / 1000, 2)})
+            ts = _ts(c0)
+            entry = {"ts": ts, "name": (content or "")[:20], "raw_name": (content or ""),
+                     "dur_s": round(dur / 1000, 2)}
+            if dur > 0:
+                # 计时跨度（记录时刻=执行结束，回推执行起点）——计入空洞覆盖
+                entry["start"] = ts - timedelta(milliseconds=dur)
+                entry["end"] = ts
+            tools.append(entry)
 
     llm_total = round(sum(r["dur_s"] for r in rounds), 2)
     aux_total = round(sum(r["dur_s"] for r in aux_rounds), 2)
-    tool_instrumented = round(sum(t["dur_s"] for t in tools), 2)
+    # 15.2 工具执行段独立列：batch: 批内子调用时长已含于 batch_execute 行（其
+    # duration=整批），汇总不重复计——明细逐条可见，合计取非子调用行
+    primary_tools = [t for t in tools if not t["raw_name"].startswith("batch:")]
+    batch_children = [t for t in tools if t["raw_name"].startswith("batch:")]
+    tool_instrumented = round(sum(t["dur_s"] for t in primary_tools), 2)
+    tool_batch_child = round(sum(t["dur_s"] for t in batch_children), 2)
+    metered = sum(1 for t in tools if t["dur_s"] > 0)
 
-    # 空洞 = 回合窗口内未被 [轮跨度 ∪ 辅助轮跨度 ∪ 步骤跨度] 覆盖的区间
+    # 空洞 = 回合窗口内未被 [轮跨度 ∪ 辅助轮跨度 ∪ 步骤跨度 ∪ 工具执行跨度] 覆盖的区间
     covered = sorted(
         [r["start"] for r in rounds] + [r["start"] for r in aux_rounds] + [s["start"] for s in steps],
     )
     spans = sorted(
         [(r["start"], r["end"]) for r in rounds]
         + [(r["start"], r["end"]) for r in aux_rounds]
-        + [(s["start"], s["end"]) for s in steps],
+        + [(s["start"], s["end"]) for s in steps]
+        + [(t["start"], t["end"]) for t in tools if t["dur_s"] > 0],
     )
     gaps = []
     cur = t_start
@@ -159,7 +174,16 @@ def report(session_id: str, conn: sqlite3.Connection) -> dict:
         "steps": [{"t": _fmt(s["start"]), "dur_s": s["dur_s"], "label": s["label"]} for s in steps],
         "tools": [{"t": _fmt(t["ts"]), "name": t["name"], "dur_s": t["dur_s"]} for t in tools],
         "tool_instrumented_s": tool_instrumented,
-        "tool_timing_gap": "tool_call.duration_ms 恒 0（执行时长未落账）" if tools and tool_instrumented == 0 else "",
+        # 15.2 工具执行段独立列（四段拆分工具段独立可见）
+        "tool_exec_s": tool_instrumented,
+        "tool_exec_calls": len(primary_tools),
+        "tool_batch_child_s": tool_batch_child,
+        "tool_exec_metered": f"{metered}/{len(tools)}",
+        "tool_timing_gap": (
+            "tool_call.duration_ms 全 0（历史行/未计时行）" if tools and metered == 0
+            else (f"{len(tools) - metered}/{len(tools)} 行 duration_ms=0（拦截/缓存/历史行未计时）"
+                  if tools and metered < len(tools) else "")
+        ),
         "reply_recovery_s": reply_recovery,
         "gaps": gaps,
         "gap_total_s": round(sum(g["dur_s"] for g in gaps), 2),
@@ -196,8 +220,12 @@ def main() -> None:
             print(f"  ②b 辅助LLM往返（14.4落账）: {rep['aux_total_s']}s（{len(rep['aux_rounds'])} 次）")
             for r in rep["aux_rounds"]:
                 print(f"     - {r['t']}  {r['dur_s']:>7}s  {r['preview']!r}")
-        print(f"  ③ 工具执行: {len(rep['tools'])} 次，落账 {rep['tool_instrumented_s']}s"
+        print(f"  ③ 工具执行段（独立列）: {rep['tool_exec_s']}s"
+              f"（{rep['tool_exec_calls']} 次调用，计时 {rep['tool_exec_metered']}）"
               + (f"（{rep['tool_timing_gap']}）" if rep["tool_timing_gap"] else ""))
+        if rep.get("tool_batch_child_s"):
+            print(f"     批内子调用合计 {rep['tool_batch_child_s']}s"
+                  f"（含于 batch_execute 行，汇总不重复计）")
         for t in rep["tools"]:
             print(f"     - {t['t']}  {t['name']}  {t['dur_s']}s")
         print(f"  ④ 回复回收: {rep['reply_recovery_s']}s")

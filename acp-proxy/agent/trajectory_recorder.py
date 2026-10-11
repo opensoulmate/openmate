@@ -283,7 +283,8 @@ class TrajectoryRecorder:
 
         tools=all_tool_calls条目（soulmate _run_llm_with_tools轨迹账本形状），
         每条一个tool_call事件：name/arguments/result_preview/permission进metadata
-        （截断防爆：观察面只需要轮廓），失败/拦截status=error（失败必须可见）。
+        （截断防爆：观察面只需要轮廓），失败/拦截status=error（失败必须可见）；
+        duration_ms（15.2 工具执行时长）透传落事件列（_tool_child_events 单一真源）。
 
         agent_id/source（relay轨迹轮新增，默认值=既有soulmate路径零变化）：非
         soulmate引擎（hermes/openclaw/opencode/mimo）的回合由ws_acp纯透传层的
@@ -380,6 +381,9 @@ class TrajectoryRecorder:
                     },
                     "parent_event_id": parent_span_id,
                     "status": self._tool_status(t),
+                    # 15.2 工具执行时长透传（账本条目 duration_ms → tool_call 事件列，
+                    # turn_timing_report ③工具执行段独立列的单一真源；旧条目缺省 0 如实）
+                    "duration_ms": float(t.get("duration_ms", 0.0) or 0.0),
                 }
             )
         return events
