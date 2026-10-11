@@ -1154,17 +1154,33 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
   MF 首帧=任务拆解推送（用户可见但非最终回复首字，主回复首字未单独计时），
   SF 首字 16.9s 含工具执行轮非纯 LLM TTFT；超时回退真实触发仍未实测（单测
   覆盖，需造慢 LLM），title 峰值 62.6s 后台任务按设计不设限。
-- [ ] 15.4 工作区遗留清理（开发期数据删前备份铁律）：untracked 杂物归位——根目录
+- [x] 15.4 工作区遗留清理（开发期数据删前备份铁律）：untracked 杂物归位——根目录
   游离 chat-client.tsx（964 行≠真实 src/app/(app)/chat/chat-client.tsx 2900 行，
   疑旧拷贝）、agent/tool_infra.py（零引用死模块，周期#82 起未动未提交）、
   fault_degradation_*（10-06 旧产物）。备份到 devlog 附件后删除或补齐接线。
+  ——周期#94 实装：4 文件字节级备份至
+  docs/devlog/attachments/2026-10-12-workspace-cleanup-154/（sha256 双侧一致后
+  删原文件；root-chat-client.tsx=964行旧拷贝经 diff 实证与真实客户端无共同结构，
+  tool_infra.py=零引用死模块（docstring 所称 image_generator 等模块实名
+  image_tools/docgen_tools/tts_tools 且各自有 MEDIA 实现，接线=纯重构零用户价值
+  →按"删除"分支处置），fault_degradation_test.py+results.json=10-06 旧探针产物
+  零引用）+周期#90 顺延项一并处置：cron_tasks.db disabled 遗留探针任务 #2
+  wd_probe_1791631（周期#33 产物）备份 JSON 后删除（tasks 表清零，8 行 runs 历史
+  审计行不改写）；清理后 grep 零引用+docgen/image/tts 64 测试全过（被删模块无
+  被依赖实证）；未动非本清单 untracked（docs/agent-architecture/*-wechat-preview.html
+  ×2=他线产物、src/app/api/trace/=已注册路由 trace 信标）。
 - [ ] 15.5 flaky 断言观察（周期#87②遗留）：test_llm_stall_guard::
   test_head_stall_aborts_fast 3.3s vs 3.0s 时序边际——持续复现才放宽上限，
-  不预防性改。
+  不预防性改。——周期#94 观察：该测试已更名为
+  TestStallAbortAndRecover::test_head_stall_aborts_fast_and_retry_recovers（周期
+  #87 断言随规格更新），单跑 5/5 过（call 1.25-1.27s）+32 例批跑过（1.26s），
+  3.3s 形态未复现→按约不放宽上限，持续观察。
 - [ ] 验收对标轮转例行（15 区内）：每周期抽 2 类轮转覆盖 10 类全集（周期#89
   调试+运维 2/2✅、周期#91 调研+发布 2/2✅、周期#93 开发+办公 2/2✅（开发
-  22.46s dev_hello.py+运行账本命中、办公 38.03s report.xlsx 4978字节有效），
-  累计 6/10——余 定时/多渠道/记忆/协作），14.3 三探针手法沿用。
+  22.46s dev_hello.py+运行账本命中、办公 38.03s report.xlsx 4978字节有效）、
+  周期#94 定时+多渠道 2/2✅（定时 83.65s accept_probe 行=1、多渠道 162.54s
+  出站审计行 wechat→accept_peer 含探针文案），累计 8/10——余 记忆/协作），
+  14.3 三探针手法沿用。
 
 ## 周期日志
 [2026-10-09 19:00] 周期#0 | 路线图建立+cron流水线上线 | ✅ | (本文档创建) | 首个自动周期15分钟后启动
@@ -1272,3 +1288,4 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 [2026-10-11 23:38] 周期#91 | 15.2 工具执行时长落账（14.4 诚实边界③销账）：soulmate_agent 三落账点执行计时（主执行路径/缓存命中路径 (time.time()-tool_start)*1000 + batch call_log 自身 duration_ms）→ all_tool_calls 账本条目 duration_ms + trajectory_recorder._tool_child_events 透传落 tool_call 事件列（record_llm_call/record_round 两批共用单一真源，旧条目缺省 0 不改写历史）+ turn_timing_report ③工具执行段独立列（tool_exec_s/tool_exec_calls/tool_exec_metered；batch: 子调用含于 batch_execute 行汇总不重复计、明细独立可见；工具计时跨度计入空洞覆盖⑤收窄；未计时行按行数诚实标注） | ✅ | (本次提交) | 15.2勾选；Gate1 git diff 3文件51+11行+新测试文件真实落盘；Gate2 grep 三落账点+_tool_child_events 透传在 record_round/record_llm_call 真实批量路径+真实 WS 回合经真实链路产出 duration_ms>0 真库行（web_search=20092ms/message_send=52ms，[infection-guard] 伪条目如实 0=无执行不编造）；Gate3 tests/test_tool_duration_ledger.py 18/18（透传4+落账路径2+E2E真实执行3（terminal echo 子进程/缓存命中/拦截诚实边界）+报告6（独立列/batch不重复计/空洞收窄 10→5s/全0与部分计时诚实标注/旧字段零回归）+接线护栏3）+受影响面回归 334/334（trajectory/aux/relay/loop_guard/infection_verdict/rounds/steering/report_evidence/self_verify 186+code_mode×2/tool_recovery/proxy_relay/tool_output/task_judge/plan_execution 148）+py_compile+双实例重启 health 200/200；真实验收=验收对标轮转 调研+发布 2/2✅（tag=ACC91_1791732358，调研 39.44s web_search 账本命中/发布 8.34s 投递行#1613，10 类轮转累计 4/10）+turn_timing_report 真实双会话四段拆分（om-a53a3fea04d8/om-86a7050f20f5）③工具执行段独立列 20.09s/0.05s 可见、⑤空洞 0s，证据 /tmp/turn_timing_152.json；测试产物清理归零（/tmp/soulmate_accept 已删）；⚠️诚实边界：①修复只影响新行，存量 543 行 duration_ms=0 历史行不改写（全库 545 行中 >0 者=本周期 2 行）②batch_execute 外层行=整批时长、batch: 子行=批内自身时长，报表汇总不重复计但明细并列可见③拦截/伪条目不计时，未计时行按行数如实标注（本轮 1/2 形态实证）④工具计时起点为回推近似（事件记录时刻=执行结束，跨度=记录时刻-dur）；下周期做 15.3 aux LLM 延迟治理（标题/规划 35-40s 归因关键路径后瘦身+短超时回退，0.2 提速成果不回退）
 [2026-10-11 23:58] 周期#92 | 15.3 aux LLM 延迟治理（归因+关键路径治理）：真实库归因（aux_llm 30行）title 17.1s均值/峰值62.6s但fire-and-forget不在首字关键路径、plan 11.2s均值/35.1s峰值**串行挡首字**（旧顺序TaskPlanner.plan先LLM规划完即被decomposer覆盖丢弃=纯浪费）→治理两刀：①task_engine.plan decomposer pre-gate前移（多文件确定性拆步先于LLM规划，多文件目标完全跳过规划往返，decomposer结果本就覆盖LLM计划=语义面不变）②_aux_llm_chat关键路径label{plan,task_judge}短预算SOULMATE_AUX_CRITICAL_BUDGET_S默认12s（<=0关闭）到点TimeoutError走调用点既有确定性回退（plan"简单任务"/task_judge"new"）+账本status="timeout"如实；prompt瘦身经归因不需要（标题小prompt同形态均值17s→TTFT主导，体积非变量）；0.2提速不回退（prefetch零改动）；存量修钉：test_no_silent_truncation[:3000]守护 vs 周期#86 _aux_llm_label取样两车道相撞（HEAD已挂非本刀引入）→取样上限命名常量_AUX_LABEL_SAMPLE_CHARS显式化（非数据截断，守护不弱化） | ⚠️ | (本次提交) | 实现+测试全过但15.3验收（真实首字回复时间对比）未跑→checkbox不勾下拍补测后勾；Gate1 git diff 3文件真实落盘（task_engine pre-gate前移+soulmate_agent预算/常量/等价重构+tests新文件8用例）；Gate2 grep _aux_critical_budget_s→_aux_llm_chat运行路径L1115/_AUX_LABEL_SAMPLE_CHARS→_aux_llm_label L1085/pre-gate→plan()运行路径L370；Gate3 tests/test_aux_latency_budget.py 8/8+全量2713/2713全过（含2存量失败修复后归零）；⚠️诚实边界：①task_judge预算回退依赖调用点既有except（_prompt_inner"defaulting new"），端到端真实触发未做②非多文件目标仍付规划往返但有12s硬帽（均值11.2s不变差、峰值35.1s→≤12s）③title 62.6s峰值后台任务不动（不修没坏的）④真实首字对比未跑，0.2提速不回退仅代码级证明；下周期：15.3验收轮转补测（首字对比+aux账本不变差）后勾选，否则按序15.4工作区遗留清理
 [2026-10-12 00:20] 周期#93 | 15.3 验收补测销账 + 验收轮转 开发+办公：①15.3 真实验收（新探针 probe_first_token_153.py，真实 WS 用户路径 initialize→session/new→模拟打字8s→prompt→首帧计时+aux账本回读）**4/4✅勾选**：MF多文件目标（a.py+b.py）[aux] plan 行=0=pre-gate 完全跳过 LLM 规划往返、首个用户可见输出 0.59s（📋任务拆解确定性推送，旧形态被 plan 往返 11.2s均值/35.1s峰值挡首字）；SF单文件任务 [aux] plan=2.48s status=ok（≤12s预算帽内）、首字16.9s/18.4s end_turn；服务端副作用=a.py/b.py/c.py FIXED 标记真实落盘；aux 账本不变差（新行 plan 2.48s vs 基线均值 11.2s、title 12.5s/reflect 11.0s/infection_audit 4.4s≈基线、全 status 诚实零超预算记 ok）；0.2 提速不回退（MF 首个可见输出 0.59s ≤ 基线 6.00s 口径）②验收对标轮转 开发+办公 2/2✅（tag=ACC93_1791735068：开发 22.46s dev_hello.py+terminal 运行账本命中、办公 38.03s report.xlsx 4978字节有效xlsx），累计 6/10（余 定时/多渠道/记忆/协作）；测试产物清理（/tmp/ft153 已删、acceptance cleanup 归零，/tmp/probe_first_token_153.json+accept_results.json 留证） | ✅ | (本次提交) | 15.3勾选；Gate1 git diff 3处路线图真实落盘+新探针文件；Gate2 本周期为验收测量（无产品代码改动）：探针真实消费生产链路（ws_acp→soulmate stdio→真实LLM回合+工具执行），aux 行=trajectory_events 真库回读非自报，FIXED 标记=文件真源；Gate3 真实产出=/tmp/probe_first_token_153.json（4 checks 全过 verdict=PASS）+/tmp/soulmate_accept_results.json（2/2）+真库 aux 行回读（MF session om-f0b440140e36 无 plan 行/SF session om-cbf975fc3b4e plan 2.48s）；⚠️诚实边界：①MF 首帧=任务拆解推送（用户可见但非最终回复首字，主回复首字未单独计时）②SF 首字 16.9s 含工具执行轮非纯 LLM TTFT（与 0.2 简单消息口径不可直接比）③超时回退真实触发未实测（单测覆盖，需慢 LLM 环境）④本周期未跑 pytest 全量回归（无产品代码改动，周期#92 已 2713/2713）；下周期做 15.4 工作区遗留清理（untracked 归位，删前备份铁律）+验收轮转 定时+多渠道
+[2026-10-12 00:45] 周期#94 | 15.4 工作区遗留清理销账 + 15.5 flaky 观察 + 验收轮转 定时+多渠道：①15.4（删前备份铁律）：4 件 untracked 杂物字节级备份至 docs/devlog/attachments/2026-10-12-workspace-cleanup-154/（sha256 双侧逐一比对一致）后删除——根目录游离 chat-client.tsx（964 行旧拷贝，diff 与真实 2900 行客户端无共同结构）、agent/tool_infra.py（零引用死模块；docstring 所称 image_generator/voice_generator/doc_generator 实名 image_tools/tts_tools/docgen_tools 且各自已有 MEDIA 实现，接线=纯重构零用户价值→按"删除"分支）、fault_degradation_test.py+results.json（10-06 旧故障注入探针产物零引用）；周期#90 顺延项一并处置：cron_tasks.db disabled 遗留探针任务 #2 wd_probe_1791631（周期#33 产物）备份 JSON 后删除（tasks 表清零、8 行 runs 历史审计行不改写）；未动非本清单 untracked（docs/agent-architecture/*-wechat-preview.html ×2=他线产物、src/app/api/trace/=已注册路由 trace 信标）②15.5 flaky 观察：test_head_stall_aborts_fast 已更名 test_head_stall_aborts_fast_and_retry_recovers（周期#87 断言随规格更新），单跑 5/5 过 call 1.25-1.27s + 32 例批跑过 1.26s，3.3s 边际形态未复现→按约不预防性放宽上限，持续观察③验收对标轮转 定时+多渠道 2/2✅（tag=ACC94_1791735959：定时 83.65s cron_tasks.db accept_probe 行=1、多渠道 162.54s 出站审计行 wechat→accept_peer 含探针文案、双双 end_turn），累计 8/10（余 记忆/协作）；测试产物清理归零（/tmp/soulmate_accept 已删、MEMORY 标记 0、accept_probe 任务行 harness cleanup 后 0） | ✅ | (本次提交) | 15.4勾选；Gate1 git diff 路线图 2 区块+备份附件 5 文件真实落盘（4 原件 sha256 与备份逐一一致+wd_probe JSON 含完整行数据）；Gate2 grep tool_infra/fault_degradation 清理后全仓零引用（被删模块无被依赖）+被依赖面反证=docgen/image/tts 工具测试 64/64 全过（若有隐性依赖则 ImportError 红）；Gate3 真实产出证据=git status 清理后 4 件 untracked 消失（余 3 件非本清单如实留）+cron_tasks.db 回读 tasks=0（DELETE changes()=1 实证）+/tmp/soulmate_accept_results.json 2/2 回读+验收 harness 服务端副作用判据（accept_probe 行/出站审计行均为真库行非探针自报）；⚠️诚实边界：①备份文件随本次提交进 git（devlog 附件=文档化备份位，历史可追溯），原件删除不可逆但字节级副本可随时还原②tool_infra"接线"分支未选=判断依据已记录（三工具模块各有实现+零引用），若后续要做胶水统一属重构另案③15.5 未复现=当前机器负载下未复现，非"证明不 flaky"，断言上限维持 3.0s 不动④验收 2 类各 1 次同机低负载，多渠道 162.54s 属该类历史常态区间；下周期做 15.5 持续观察+验收轮转 记忆+协作（收尾 10/10）或待拍板项落地（⚡8.6/4.1b/ASR/13.3②/13.2豁免语义）

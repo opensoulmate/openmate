@@ -1,0 +1,177 @@
+{
+  "summary": {
+    "total": 24,
+    "passed": 21,
+    "failed": 3
+  },
+  "results": [
+    {
+      "suite": "P0",
+      "name": "基线chat全链路",
+      "passed": true,
+      "detail": "status=200, has_answer=True",
+      "latency_s": 8.01
+    },
+    {
+      "suite": "P0",
+      "name": "基线hybrid搜索(预算20s)",
+      "passed": true,
+      "detail": "status=200",
+      "latency_s": 12.01
+    },
+    {
+      "suite": "P0",
+      "name": "基线fulltext搜索(预算20s)",
+      "passed": true,
+      "detail": "status=200",
+      "latency_s": 0.01
+    },
+    {
+      "suite": "P0",
+      "name": "依赖服务状态",
+      "passed": true,
+      "detail": "meili=True, acp_a=True, acp_b=True, qdrant=6333未运行(天然故障态)",
+      "latency_s": 0
+    },
+    {
+      "suite": "P1",
+      "name": "semantic搜索降级(禁500/禁挂起)",
+      "passed": true,
+      "detail": "status=200",
+      "latency_s": 12.01
+    },
+    {
+      "suite": "P1",
+      "name": "hybrid搜索降级(fulltext兜底)",
+      "passed": true,
+      "detail": "status=200",
+      "latency_s": 12.01
+    },
+    {
+      "suite": "P1",
+      "name": "chat不受向量层故障阻塞",
+      "passed": true,
+      "detail": "status=200, has_answer=True",
+      "latency_s": 8.0
+    },
+    {
+      "suite": "P2",
+      "name": "运维契约: meilisearch优雅停机<10s",
+      "passed": true,
+      "detail": "stopped=True, took=0.0s",
+      "latency_s": 0.01
+    },
+    {
+      "suite": "P2",
+      "name": "fulltext搜索降级(禁500/禁挂起)",
+      "passed": false,
+      "detail": "status=500",
+      "latency_s": 0.01
+    },
+    {
+      "suite": "P2",
+      "name": "hybrid搜索降级",
+      "passed": false,
+      "detail": "status=500",
+      "latency_s": 12.02
+    },
+    {
+      "suite": "P2",
+      "name": "chat不受搜索层故障阻塞",
+      "passed": true,
+      "detail": "status=200, has_answer=True",
+      "latency_s": 8.01
+    },
+    {
+      "suite": "P2",
+      "name": "故障期间跨模块并发11路(搜索x3+权限x4+作业x3+队列健康)",
+      "passed": false,
+      "detail": "ok=8/11, total=0.4s, fails=['status=500', 'status=500', 'status=500']",
+      "latency_s": 0.38
+    },
+    {
+      "suite": "P2",
+      "name": "meilisearch恢复后fulltext复原",
+      "passed": true,
+      "detail": "meili_ready=True, status=200",
+      "latency_s": 0.01
+    },
+    {
+      "suite": "P3",
+      "name": "运维契约: acp-proxy优雅停机<10s",
+      "passed": true,
+      "detail": "stopped=True, took=0.2s",
+      "latency_s": 0.16
+    },
+    {
+      "suite": "P3",
+      "name": "opensoul chat不受acp-proxy故障影响",
+      "passed": true,
+      "detail": "status=200, has_answer=True",
+      "latency_s": 8.01
+    },
+    {
+      "suite": "P3",
+      "name": "acp调用快速失败不挂起",
+      "passed": true,
+      "detail": "ConnectError(fast-fail 0.0s)",
+      "latency_s": 0.0
+    },
+    {
+      "suite": "P3",
+      "name": "acp health快速失败不挂起",
+      "passed": true,
+      "detail": "ConnectError(fast-fail 0.0s)",
+      "latency_s": 0.0
+    },
+    {
+      "suite": "P3",
+      "name": "acp-proxy-a恢复后复原(running,30s内)",
+      "passed": true,
+      "detail": "ready=True, running=True, warmup=2s",
+      "latency_s": 0
+    },
+    {
+      "suite": "P4",
+      "name": "30并发作业提交(接受或优雅拒绝)",
+      "passed": true,
+      "detail": "ok=30/30, total=2.2s",
+      "latency_s": 2.18
+    },
+    {
+      "suite": "P4",
+      "name": "压力后队列健康",
+      "passed": true,
+      "detail": "status=200",
+      "latency_s": 0.07
+    },
+    {
+      "suite": "P5",
+      "name": "全部器官健康",
+      "passed": true,
+      "detail": "healthy=6/6",
+      "latency_s": 0
+    },
+    {
+      "suite": "P5",
+      "name": "依赖服务全部复原",
+      "passed": true,
+      "detail": "meili=True, acp_a=True, acp_b=True, opensoul=True",
+      "latency_s": 0
+    },
+    {
+      "suite": "P5",
+      "name": "终验chat全链路",
+      "passed": true,
+      "detail": "status=200, has_answer=True",
+      "latency_s": 8.01
+    },
+    {
+      "suite": "P5",
+      "name": "终验hybrid搜索",
+      "passed": true,
+      "detail": "status=200",
+      "latency_s": 12.01
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "note": "周期#94 15.4 清理前备份：disabled 遗留探针任务 wd_probe_1791631（周期#33 产物）",
+  "tasks": [
+    {
+      "id": 2,
+      "name": "wd_probe_1791631",
+      "schedule_kind": "interval",
+      "schedule_expr": "interval:1h",
+      "payload": "看门狗心跳探针",
+      "session_id": "om-13507ea2b926",
+      "enabled": 0,
+      "next_run_at_ms": 1791635440194,
+      "last_run_at_ms": null,
+      "run_count": 0,
+      "fail_streak": 0,
+      "created_at_ms": 1791631840194
+    }
+  ],
+  "runs": []
+}
