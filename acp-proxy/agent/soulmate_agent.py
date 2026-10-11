@@ -3886,6 +3886,19 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             "result_preview": infection_verdict.detail[:200],
                             "permission": "infection:pass_with_trace",
                         })
+                    elif infection_verdict.source in ("prescreen_user_verbatim",
+                                                      "prescreen_exec_verb"):
+                        # 12.4③ 免审命中率留痕：预筛免 LLM 判词批次进轨迹账本。
+                        # [infection-guard] 伪条目 report_evidence.parse_ledger 两头不计
+                        # （纯可观测，不影响执行证据判定）；permission=infection:prescreen_exempt
+                        # 供 prescreen_hitrate_report.py 从账本回读命中率分子。
+                        all_tool_calls.append({
+                            "name": "[infection-guard]",
+                            "arguments": {"action": "prescreen_exempt",
+                                          "source": infection_verdict.source},
+                            "result_preview": infection_verdict.detail[:200],
+                            "permission": "infection:prescreen_exempt",
+                        })
 
                     # 推送工具调用状态给前端
                     for tc in tool_calls:

@@ -367,6 +367,24 @@ class InfectionGate:
         self.checked = 0
         self.llm_skipped_after_trip = False
         self.prescreen_skipped = 0  # 12.4 确定性预筛免审批次计数（可观测）
+        self.prescreen_escalated = 0  # 12.4③ 到达预筛但含自造文本→升级审计批次（命中率分母）
+        self.llm_audits = 0  # 12.4③ 实际发生的 LLM 判词往返次数
+
+    def stats(self) -> dict:
+        """12.4③ 免审命中率可观测快照（进程内计数）。
+
+        跨进程/跨重启真源 = journal '[infection-guard] 预筛免审/预筛升级审计' 行
+        （prescreen_hitrate_report.py 扫描统计），本方法供回合内/测试即时观察。
+        """
+        batches = self.prescreen_skipped + self.prescreen_escalated
+        return {
+            "checked": self.checked,
+            "tool_batches": batches,
+            "prescreen_exempt": self.prescreen_skipped,
+            "prescreen_escalated": self.prescreen_escalated,
+            "llm_audits": self.llm_audits,
+            "exempt_hit_rate": (self.prescreen_skipped / batches) if batches else None,
+        }
 
     def _exhausted(self, detail: str, evidence: str = "", hits: list[str] | None = None) -> Verdict:
         """clarify 超限的统一出口（8.1③：无人值守不 terminate，放行+留痕）。"""
@@ -400,6 +418,7 @@ class InfectionGate:
 
     async def _llm_audit(self, output_text: str, tool_calls: list[dict], user_text: str,
                          prior_tool_results: list[str] | None = None) -> Verdict:
+        self.llm_audits += 1  # 12.4③ 判词往返计数（免审省下的就是这个开销）
         llm_call = self._llm_call
         if llm_call is None:  # 防御：_llm_available已判，这里满足类型收窄
             return Verdict(source="llm_error_fail_safe", evidence="no llm_call")
@@ -475,11 +494,24 @@ class InfectionGate:
         clean, clean_note, clean_source = prescreen_batch_ex(tool_calls, user_text=user_text)
         if clean and tool_calls:
             self.prescreen_skipped += 1
-            logger.info(f"[infection-guard] 预筛免审（{clean_source}）: {clean_note[:160]}")
+            _s = self.stats()
+            logger.info(
+                f"[infection-guard] 预筛免审（{clean_source}）: {clean_note[:160]} "
+                f"（累计命中率 {_s['prescreen_exempt']}/{_s['tool_batches']}="
+                f"{'%.0f%%' % (_s['exempt_hit_rate'] * 100) if _s['exempt_hit_rate'] is not None else 'n/a'}）")
             return Verdict(
                 action=VERDICT_OK,
                 detail=f"工具调用内容溯源到用户明文请求（{clean_note}），免语义审计",
                 source=clean_source)
+        if tool_calls:
+            # 12.4③ 命中率分母：批次到达预筛但含用户明文之外自造文本 → 升级审计留痕
+            # （journal 行与"预筛免审"行配对，prescreen_hitrate_report.py 扫描统计）
+            self.prescreen_escalated += 1
+            _s = self.stats()
+            logger.info(
+                f"[infection-guard] 预筛升级审计: {clean_note[:160]} "
+                f"（累计命中率 {_s['prescreen_exempt']}/{_s['tool_batches']}="
+                f"{'%.0f%%' % (_s['exempt_hit_rate'] * 100) if _s['exempt_hit_rate'] is not None else 'n/a'}）")
         # 2) LLM 语义审计（可用时）；8.5c-③ 自愈类低危命令豁免：纯自愈批次的
         # "可疑不确定（clarify）"降级放行+留痕（明确劫持 terminate 照常终止）
         self_heal, self_heal_note = classify_self_heal(tool_calls)
