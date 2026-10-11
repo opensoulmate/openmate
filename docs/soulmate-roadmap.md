@@ -815,7 +815,7 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
   开发 0.0s/1次产出已就绪、办公 20.0s/5次 report.xlsx 4979B 有效、记忆 5.0s/2次
   MEMORY.md 标记）；run 末 /tmp/soulmate_accept 实证已删除（12.5a 销账）、测试
   产物清理归零（MEMORY 标记 0/accept_probe 行 0）。
-- [ ] 12.6 轨迹/审计闭环抽查（可观测性，用户重视）：tool_failures.db 抽查探针
+- [x] 12.6 轨迹/审计闭环抽查（可观测性，用户重视）：tool_failures.db 抽查探针
   （失败分类行完整性/无孤儿行/llm:dna 归因不串线）+ 11.5 溯源降级真实判词触发观察
   （自然发生时复核留痕行）+ llm:dna 真实降级审计行闭环（周期#61 遗留③）+
   12.3 新增两项：①infection-guard 判词依据不落账（verdict=terminate detail=空
@@ -857,8 +857,18 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
   不存在的 arguments_json（真实列 metadata_json）对 [infection-guard] 伪条目
   全盲→_traj_text_columns PRAGMA 实存列容缺；新增第7面 check_verdict_basis
   （落账行/真实依据/诚实标记/空依据三形态正则判空/拦截行历史缺口如实计数）。
-  余项下拍第一优先：②verify_dev 判据弱项（只查文件 marker 不查"用 terminal 运行它"，
-  S1 被审计误杀的 terminal 步骤仍判 pass）；11.5 观察=探针持续复跑（当前 0 行=未自然触发如实报）。
+  ——周期#75实装②verify_dev 判据弱项（12.6 余项清零）：根因=开发类只查文件
+  marker 不查"用 terminal 运行它"，S1 被审计误杀的 terminal 步骤（未执行）仍判
+  pass=假过（真实库 15 条 dev_hello 轨迹行实证运行证据本来就在账本里：name=terminal
+  +args 引用 dev_hello+result_preview=程序输出）。修=verify_dev 三判据（文件 marker
+  +运行账本+回复报告输出）：运行证据=_tool_ledger(("terminal","execute_code"))
+  执行行（parse_ledger 单一真源，被拦行不计）args/name/result 含 dev_hello 且
+  result_preview 含程序输出 SOULMATE_DEV_OK 且非源码回显（print( 正则——cat/echo
+  源码不算运行）；_tool_ledger 扩多名字一次回读+名字容忍"terminal: <cmd>"冒号前缀
+  形态（CLI 轨迹行实证）；账本不可用诚实降级文件+回复（mode_note=ledger_unavailable
+  不假称 server_side）。
+  11.5 观察=探针持续复跑（周期#75 复跑：provenance 0/self_heal 0 未自然触发如实报；
+  verdict_basis 落账行 0=修复后尚无新拦截，历史 33 条不改写如实报）。
 - [ ] 待用户拍板（不占阶段顺序）：⚡8.6 双链合并取舍、4.1b iLink 接入形态、
   ASR 语音输入多模态路由
 

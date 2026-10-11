@@ -94,8 +94,12 @@ _LEDGER_WAIT_S = float(os.environ.get("ACCEPT_LEDGER_WAIT_S", "4"))
 _LEDGER_POLL_S = 1.0
 
 
-def _tool_ledger(tool_name: str) -> tuple[list, str]:
+def _tool_ledger(tool_name: str | tuple[str, ...]) -> tuple[list, str]:
     """会话级工具账本回读。返回 (executed_hits, state)。
+
+    tool_name 可为单名或多名字面量（12.6-②：dev 运行判据要认 terminal 与
+    execute_code 两条真实执行路径，一次回读不双倍轮询）；名字匹配容忍
+    "terminal: <cmd>" 冒号前缀形态（CLI 轨迹行实证形态）。
 
     - executed_hits：该工具的真实执行条目（report_evidence.parse_ledger 单一
       真源判执行/拦截 + 行 status=ok），条目含 result_preview（体检结果落账/
@@ -105,6 +109,8 @@ def _tool_ledger(tool_name: str) -> tuple[list, str]:
       判据诚实降级回复辅证，不假失败也绝不假称 server_side）。
     """
     from agent.report_evidence import parse_ledger
+
+    names = (tool_name,) if isinstance(tool_name, str) else tuple(tool_name)
 
     sid = str(_VERIFY_CTX.get("session_id") or "")
     poll = max(0.0, _LEDGER_WAIT_S) if sid else 0.0  # 无会话上下文=离线调用，不空等
@@ -134,7 +140,12 @@ def _tool_ledger(tool_name: str) -> tuple[list, str]:
                     "permission": str(meta.get("permission", "")),
                 })
         executed, _blocked = parse_ledger(entries)
-        hits = [e for e in executed if e.name == tool_name]
+
+        def _match(n: str) -> bool:
+            n = (n or "").strip()
+            return n in names or n.split(":", 1)[0].strip() in names
+
+        hits = [e for e in executed if _match(e.name)]
         if hits or time.monotonic() >= deadline:
             if hits:
                 return hits, "ok"
@@ -267,11 +278,55 @@ async def late_readback(verify, get_reply, ws=None, collect_sid: str = "",
 # ── 各类别独立验证（服务端副作用优先）────────────────────────────
 
 
+# 12.6-②（周期#75）："用 terminal 运行它"判据——运行证据必须来自执行类工具账本行
+# （terminal/execute_code），write_file 的内容行不算运行。真实库实证形态：
+# name=terminal、args={'command': 'python3 /tmp/soulmate_accept/dev_hello.py'}、
+# result_preview='SOULMATE_DEV_OK'（程序输出）。
+_DEV_RUN_TOOLS = ("terminal", "execute_code")
+_DEV_RUN_OUTPUT = "SOULMATE_DEV_OK"
+# 源码回显不算运行（cat/echo dev_hello.py 的输出含 print(，真实运行输出只有标记行）
+_DEV_SRC_ECHO_RE = re.compile(r"print\s*\(")
+
+
 def verify_dev(reply: str) -> tuple[bool, str]:
+    """路线图12.6-②：开发类判据=文件 marker + "用 terminal 运行它" 运行账本双判据。
+
+    弱项根因（S1 实证）：只查文件 marker，terminal 步骤被审计误杀（未执行）仍判
+    pass = 假过。升级：运行证据=terminal/execute_code 执行行（parse_ledger 单一
+    真源）args 引用 dev_hello 且 result_preview 含程序输出、且非源码回显；
+    回复辅证=报告输出。账本不可用诚实降级文件+回复（mode_note=ledger_unavailable，
+    不假称 server_side）。
+    """
     path = os.path.join(WORKDIR, "dev_hello.py")
+    exists = os.path.exists(path)
     content = _read(path)
-    ok = os.path.exists(path) and "SOULMATE_DEV_OK" in content
-    return ok, f"dev_hello.py {'存在' if os.path.exists(path) else '不存在'}，marker={'命中' if 'SOULMATE_DEV_OK' in content else '未命中'}"
+    file_ok = exists and _DEV_RUN_OUTPUT in content
+    file_part = (f"dev_hello.py {'存在' if exists else '不存在'}，"
+                 f"marker={'命中' if _DEV_RUN_OUTPUT in content else '未命中'}")
+    reply_ok = _DEV_RUN_OUTPUT in (reply or "")
+    reply_part = f"回复报告输出={'是' if reply_ok else '否'}"
+
+    _VERIFY_CTX["mode_note"] = ""
+    hits, state = _tool_ledger(_DEV_RUN_TOOLS)
+    # 引用判定覆盖 name（"terminal: <cmd>" 冒号前缀形态的命令活在 name 里，
+    # CLI 轨迹行实证）+ arguments + result_preview
+    ran = [h for h in hits
+           if "dev_hello" in f"{h.name} {h.arguments} {h.result_preview}"]
+    run_ok = any(
+        _DEV_RUN_OUTPUT in (h.result_preview or "")
+        and not _DEV_SRC_ECHO_RE.search(h.result_preview or "")
+        for h in ran
+    )
+    run_part = (f"运行账本={'命中' if run_ok else '未命中'}"
+                f"（terminal/execute_code 引用 dev_hello 的执行行={len(ran)}，"
+                f"其中含程序输出且非源码回显={'是' if run_ok else '否'}）")
+    if state == "unavailable":
+        _VERIFY_CTX["mode_note"] = "ledger_unavailable"
+        return file_ok and reply_ok, (
+            f"⚠️轨迹账本无本会话行（记账链路未写入），判据降级文件marker+回复辅证；"
+            f"{file_part}；{reply_part}")
+    return file_ok and run_ok and reply_ok, (
+        f"{file_part}；{run_part}（真源=trajectory_events）；{reply_part}")
 
 
 def verify_debug(reply: str) -> tuple[bool, str]:
