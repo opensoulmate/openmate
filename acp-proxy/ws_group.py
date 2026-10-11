@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 import jwt
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Body, Request, WebSocket, WebSocketDisconnect
 
 # 讨论编排器 — 自动化群组 Agent 讨论
 from discussion_engine import (
@@ -276,6 +276,70 @@ async def _safe_send(ws: WebSocket, data: dict) -> bool:
         return True
     except Exception:
         return False
+
+
+# ============================================================
+# 内部推送端点 — 任务链结果实时进群聊流（agent_message 帧）
+# ============================================================
+
+@router.post("/internal/group-message")
+async def internal_group_message(request: Request, payload: dict = Body(...)):
+    """内部推送：把 Agent 回复广播成 agent_message 帧给群组房间的正连客户端。
+
+    调用方=opensoul ai_groups._notify_group_chat（GROUP_MSG_PUSH），用于任务链
+    "每步结果回群聊"的实时可见性——聊天流前端只认 agent_message 帧
+    （ai-groups-e2e.md 验收行4）。
+
+    契约（单一写入源纪律）：落库由 opensoul _notify_group_chat 直写
+    discussion_messages 完成，本端点**只广播不落库**（payload.persist=true 时才写，
+    供无落库能力的调用方用）；仅接受 loopback 调用（内部面，不对外开注入口）。
+    房间无人在线=delivered 0 不算错（消息已在库里，客户端连上后走历史加载）。
+    """
+    client_host = request.client.host if request.client else ""
+    if client_host not in ("127.0.0.1", "::1", "localhost"):
+        return {"ok": False, "error": f"internal endpoint拒绝非loopback调用: {client_host}"}
+
+    group_id = str(payload.get("group_id") or "").strip()
+    content = str(payload.get("content") or "")
+    if not group_id or not content:
+        return {"ok": False, "error": "缺少 group_id 或 content"}
+
+    agent_id = str(payload.get("agent_id") or "soulmate")
+    agent_name = str(payload.get("agent_name") or agent_id)
+    intent = str(payload.get("intent") or "agent_reply")
+    task_id = str(payload.get("task_id") or "")
+
+    msg_id = None
+    if payload.get("persist"):
+        msg_id = _persist_message(
+            group_id,
+            agent_id,
+            agent_name,
+            content,
+            intent=intent,
+            task_id=task_id,
+            round_num=int(payload.get("round_num") or 1),
+            metadata=payload.get("metadata") or {"source": "internal_push"},
+        )
+    if not msg_id:
+        msg_id = f"push-{uuid4()}"
+
+    room = _get_room_connections(group_id)
+    frame = {
+        "type": "agent_message",
+        "data": {
+            "id": msg_id,
+            "agent_id": agent_id,
+            "agent_name": agent_name,
+            "agent_role": str(payload.get("agent_role") or "executor"),
+            "content": content,
+            "intent": intent,
+            "task_id": task_id,
+            "timestamp": time.time(),
+        },
+    }
+    await _broadcast(group_id, frame)
+    return {"ok": True, "delivered": len(room), "msg_id": msg_id}
 
 
 # ============================================================
