@@ -729,20 +729,36 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
   抽取盲区（事故句"当前会话的工具列表中没有 web_search"容器在前形态漏抽注册类，
   只抽到须执行证明的 availability 类→模型拒不调用即无法证伪→更正声明未触发）：
   report_evidence 增 _REG_LIST_CONTAINER+放宽名字在后形态"会话的"间隔词
-- [ ] 12.3 开发类回合 301.74s 超时复核归因（周期#64 新发现，用户重视速度）：journal
-  复盘该轮耗时构成（LLM 首包/注入审计往返/工具执行/回复回收四段计时），区分上游延迟
-  波动 vs 本地可控耗时；若本地可控（如每工具注入审计 LLM 往返）→ 与 12.4 合并治理；
-  多样本（≥3 轮）复测禁单样本定论。
+- [x] 12.3 开发类回合 301.74s 超时复核归因（周期#64 新发现，用户重视速度）：四段计时
+  （LLM 首包/注入审计往返/工具执行/回复回收）+区分上游延迟波动 vs 本地可控耗时+
+  多样本（≥3 轮）复测。——周期#67实装：新增 acp-proxy/turn_timing_report.py（单一真源
+  =trajectory_events+journal 错误行扫描+未归属空洞检测，可复跑）+补 step 自省 LLM 往返
+  落账（`_self_reflector.reflect` 首试/重试两处 segment span——此前静默零行，323.7s
+  空洞归因全靠 journal 才定位到）。归因实锤（5 样本禁单样本定论）：①正常开发回合
+  34-47s 构成=规划/预步 4.4-8.8s（TaskState+计划 LLM）+工具循环 LLM 19.4-31.8s
+  （3-4 轮，首包 5-8s/轮）+step 自省 0.03-9s+工具执行毫秒级+回复回收 0.3-0.4s，
+  注入审计仅 1/5 轮触发一次判词（约16s）②事故轮 380.73s 的 323.69s 空洞=step1 自省
+  调用上游传输挂死：静默约313s 后 RemoteProtocolError（peer closed connection）→
+  llm_transport 重试(1/5) 8s 成功。结论：**触发=上游波动（5 样本 0 复发）、放大=本地
+  传输层无 stall 超时（本地可控，挂死约293s 才见错）**→治理并入 12.4；修复落点
+  utils/llm_transport.py 为他会话 WIP，单写入者纪律解禁后实施。
 - [ ] 12.4 单工具链注入审计 LLM 往返开销治理（8.3 诚实边界另案）：确定性预筛先行——
   来源干净（用户明文点名+本回合工具产出可溯源）的工具调用不走 LLM 判词往返，可疑才
   升级 LLM 审计；判据是溯源不是模式白名单（禁"守卫化"变味），防护语义零放松，
-  同场景回归测试证明拦截面不缩水。
+  同场景回归测试证明拦截面不缩水。**12.3 并入项**：①LLM 传输 stall 超时（无流停顿
+  检测→挂死约293s 才见错，重试本可 8s 恢复；落点 utils/llm_transport.py=WIP 解禁后）
+  ②注入审计误杀证据：良性 dev 回合 1/5 次 terminal 被 LLM 判"疑似提示词注入劫持"
+  terminate（工具未执行），疑触发=harness 防缓存行"（此行仅为防缓存标记，忽略其语义）"
+  措辞像注入指令——确定性预筛正应先放行该类（用户明文点名命令+可溯源），治理时同题回归。
 - [ ] 12.5 harness 收尾清理 + late_readback 扩测：run 末补 rmtree 工作目录对齐 docstring
   "测试产物显式清理"；ACCEPT_PROMPT_TIMEOUT_S 人为压短构造多类别后到产出场景
   （开发/办公/记忆 3 类），销 10.4 单样本边界 + 11.1 遗留④二次回读路径扩证。
 - [ ] 12.6 轨迹/审计闭环抽查（可观测性，用户重视）：tool_failures.db 抽查探针
   （失败分类行完整性/无孤儿行/llm:dna 归因不串线）+ 11.5 溯源降级真实判词触发观察
-  （自然发生时复核留痕行）+ llm:dna 真实降级审计行闭环（周期#61 遗留③）。
+  （自然发生时复核留痕行）+ llm:dna 真实降级审计行闭环（周期#61 遗留③）+
+  12.3 新增两项：①infection-guard 判词依据不落账（verdict=terminate detail=空
+  ——判了什么全靠猜）②verify_dev 判据弱项（只查文件 marker 不查"用 terminal 运行它"，
+  S1 被审计误杀的 terminal 步骤仍判 pass）。
 - [ ] 待用户拍板（不占阶段顺序）：⚡8.6 双链合并取舍、4.1b iLink 接入形态、
   ASR 语音输入多模态路由
 
@@ -815,3 +831,4 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 
 [2026-10-11 10:50] 周期#65 | 12.1 多渠道出站独立可查痕迹+verify升级server_side（阶段12第一刀）：新增agent/outbound_audit.py（OutboundAudit：outbound_log表单一写入源=ts/channel/target/kind/status/blocks/sender/dedup_key/text_preview九字段，record旁路纪律写失败只计数返回''绝不阻塞发送、recent四维过滤回读、clear拒绝全表清空防误删审计）+wechat_bridge三条出站路径留痕（_send_blocks回复路径dedup_key=入站msg_id、send_proactive主动文本、send_media_proactive媒体，失败态照留status=failed/blocks=0，_record_out lazy注入可测）+message_router openmate出站留痕（成功dedup_key=om-rowid/失败照留；wechat经桥留痕一次=单一真源不双份记账，实测恰1行）+acceptance_benchmark三件（多渠道verify从回复辅证改服务端痕迹回读=channel=wechat+target=accept_peer+status=sent+text_preview含探针文案，空回复也判过、多渠道进SERVER_SIDE、cleanup预清痕迹探针行） | ✅ | (本次提交) | 12.1勾选；Gate1 git diff 5文件528行真实落盘；Gate2 grep接线点（_record_out×3发送路径+message_router接线+verify服务端读路径）+真机全链路实证（真实router→桥→审计库→verify_multichannel空回复=True「出站痕迹行=1」→清理归零）；Gate3 tests/test_outbound_audit.py 14/14（行形状/过滤回读/clear守卫/跨实例持久/写失败旁路/微信三路径留痕含失败态/openmate成败双留/统一出站不双份记账/接线护栏harness服务端判据）+同域回归77全过（wechat_bridge/message_router/wechat_router/media_channel）+双实例重启health OK（8092/8095）；⚠️诚实边界：iLink真实传输仍loopback（4.1b待用户拍板不动）；痕迹只覆盖出站（入站去重已有BridgeStore/RouterStore）；本切片未跑真LLM回合多渠道类验收（harness判据改造+全链路smoke已证，全量复测归12.5扩测轮）；下周期做12.2 运维/调研verify升级server_side
 [2026-10-11 11:15] 周期#66 | 12.2 运维/调研 verify 升级 server_side（11.1 两类 reply_assisted 弱项销账，10/10 类全部 server_side）：真源=opensoul.db trajectory_events 工具账本（trajectory_recorder 真实回合既有落账，零新增落库）——运维=体检结果落账（system_checkup 行 result_preview 含 8090+磁盘结论）、调研=检索调用账本+来源行（web_search 行 result_preview 含来源 URL）；acceptance_benchmark 增 _tool_ledger（parse_ledger 单一真源+会话上下文 _VERIFY_CTX 注入+异步落账有界轮询4s+ok/missing/unavailable 三态）+verify_ops/verify_research 双判据+账本不可用诚实降级 reply_assisted；连带修2真缺口（①周期#59 快照读取器漏传 db_path/硬依赖 created_at 列致 _read_back_reply 既有测试红——补参+去依赖+"\n\n"行间契约还原 ②8.5c-② 治理抽取盲区：事故句"当前会话的工具列表中没有 web_search"容器在前形态漏抽注册类→更正声明未触发——report_evidence 增 _REG_LIST_CONTAINER+"会话的"间隔词放宽） | ✅ | (本次提交) | 12.2勾选；Gate1 git diff 真实落盘（acceptance_benchmark +111行/report_evidence +11行/双测试文件）；Gate2 inspect 接线护栏（main 注入会话上下文+降级标注≥2处）+新抽取正则被 find_availability_claims 真实循环走中；Gate3 tests/test_acceptance_verify_ledger.py 12/12（账本命中/missing 不假过/unavailable 降级/双判据都要/来源行/会话隔离/被拦行不计/迟到落账轮询/接线护栏/全局态隔离fixture）+test_tool_availability_claims 22/22（含事故句逐字回归+registry 证伪+负控制）+同域回归 108+89 全过+真实WS验收两次实证：运维 ✅20.71s 体检结果落账=命中（账本行=1）、调研首轮 ❌诚实失败（账本 web_search 行=0+回复自报不可用——新判据正确拒绝假过，同时暴露上述治理盲区）→修复后复测 ✅46.74s 检索账本+来源行=命中（web_search 行=1）回复"web_search 可用：Python 3.13 于 2024 年 10 月 7 日正式发布"；⚠️诚实边界：①模型拒做+伪报"工具列表中没有 web_search"属 LLM 行为（sandbox 未受限零裁剪+_active_tool_names 在册实证为假话），治理只能事后更正不能强制调用——本轮复测模型自行正常调用，同题复发率待用户实际使用观察 ②账本判据依赖 trajectory 写入链路存活（fire-safe 异步，未写入时诚实降级不假过不假失败）③每类单样本同机低负载；下周期做12.3 开发类回合 301.74s 超时复核归因（journal 四段计时+≥3 轮样本禁单样本定论）
+[2026-10-11 12:10] 周期#67 | 12.3 开发类回合 301.74s 超时复核归因（四段计时+5样本复测）：新增 acp-proxy/turn_timing_report.py（trajectory_events+journal 错误行扫描+未归属空洞检测的四段归因工具，实测跑通事故轮+5样本会话）+soulmate_agent step 自省 LLM 往返补 segment span（`_self_reflector.reflect` 首试/重试两处——此前静默零行，323.7s 空洞全靠 journal 才定位）。归因实锤：事故轮 380.73s 中 323.69s 空洞=step1 自省调用上游传输挂死（静默约313s 后 RemoteProtocolError peer closed→llm_transport 重试(1/5) 8s 成功），**触发=上游波动（5样本0复发）、放大=本地传输层无 stall 超时（本地可控）**；正常开发回合 34-47s 构成=规划/预步 4.4-8.8s+工具循环 LLM 19.4-31.8s（首包 5-8s/轮）+step 自省 0.03-9s+工具执行毫秒级+回复回收 0.3-0.4s，注入审计仅 1/5 轮触发一次判词约16s。顺带发现三项（已入 12.4/12.6）：①注入审计误杀良性 dev 回合 1/5（terminal 被判"疑似提示词注入劫持"terminate 工具未执行，疑触发=harness 防缓存行"（此行仅为防缓存标记，忽略其语义）"措辞像注入指令，judge detail=空=判词依据不落账）②verify_dev 只查文件 marker 不查"用 terminal 运行它"（S1 被误杀步骤仍判 pass）③tool_call.duration_ms 恒 0=工具执行时长未落账 | ✅ | (本次提交) | Gate1 git diff 真实落盘（soulmate_agent.py +28/-2+turn_timing_report.py 新增 225 行）；Gate2 grep step_reflect 两处接线点+真实回合经真实调用路径落账（opensoul.db step_reflect 行 4 条带真实时长 7.57/3.77/8.98/0.03s=接线实证，非测试stub）；Gate3 5 次开发类真实 WS 验收 36-47s 全过（S1-S5，含 2 次插桩后样本）+step_reflect 行回读+turn_timing_report 五会话 JSON 与台面一致+回归 69 全过（trajectory_rounds/plan_execution 23+task_decomposer/self_verify/tool_output 46）+py_compile+双实例重启 health 200/200；⚠️诚实边界：①S1"pass"仅文件判据成立（terminal 步骤被审计误杀未执行，判据弱项如实报入 12.6）②5 样本同机低负载，0 复发≠不复发（上游波动偶发性）③stall 超时修复未实施（utils/llm_transport.py 他会话 WIP，单写入者纪律不动，归 12.4 解禁后）；下周期做 12.4 单工具链注入审计 LLM 往返开销治理（12.3 已并入 stall 超时+误杀证据）
