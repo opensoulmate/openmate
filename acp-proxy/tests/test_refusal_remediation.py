@@ -280,3 +280,113 @@ class TestPromptInnerRemediationE2E:
         assert INCIDENT_REPLY in joined
         # 补做未成功 → 搜索后端零调用
         assert seen_queries == []
+
+
+# ════════════════════════════════════════════════════════════════
+# 7. 补做轮工具账本落账（19.2 周期#105——REJ192_调研_1 实测缺口）
+# ════════════════════════════════════════════════════════════════
+# 实测（2026-10-12 REJ192_调研_1）：拒做→补做 web_search 真执行成功，但
+# trajectory_events web_search 执行行=0——补做轮不传 traj_seg_id →
+# _traj_record_round 全跳过，工具账本真源（验收判据/归因/审计）对补做轮全盲。
+
+class _CaptureTraj:
+    """捕获式 trajectory 替身：span id 非空 → round 级落账链路真实走通。"""
+
+    def __init__(self):
+        self.calls = []
+        self.spans = []  # (content, span_id)
+        self._n = 0
+
+    async def start_turn(self, *a, **k):
+        self.calls.append(("start_turn", a, k))
+        return "root-1"
+
+    async def start_llm_span(self, *a, **k):
+        self.calls.append(("start_llm_span", a, k))
+        self._n += 1
+        sid = f"seg-{self._n}"
+        content = k.get("content", a[2] if len(a) > 2 else "")
+        self.spans.append((str(content), sid))
+        return sid
+
+    async def record_round(self, *a, **k):
+        self.calls.append(("record_round", a, k))
+        return ""
+
+    async def end_llm_span(self, *a, **k):
+        self.calls.append(("end_llm_span", a, k))
+        return None
+
+    async def record_llm_call(self, *a, **k):
+        self.calls.append(("record_llm_call", a, k))
+        return ""
+
+    async def end_turn(self, *a, **k):
+        self.calls.append(("end_turn", a, k))
+        return None
+
+    async def record_aux_llm_call(self, *a, **k):
+        self.calls.append(("record_aux_llm_call", a, k))
+        return ""
+
+
+class TestRemediationTrajLedger:
+    def test_fix_round_tools_land_in_traj_ledger(self, tmp_path, monkeypatch):
+        """拒做补做轮真执行的 web_search 必须落 trajectory（round 子 span 带工具行）"""
+        agent, seen_queries = _e2e_agent(tmp_path, monkeypatch, [
+            [INCIDENT_REPLY],                                                     # 首轮：拒做
+            [_tc(name="web_search", args={"query": "Python 3.13 发布时间"},
+                 tc_id="t1")],                                                    # 补做轮：真调用
+            [FIX_ANSWER],                                                         # 补做轮：作答
+        ])
+        traj = _CaptureTraj()
+        agent._traj_recorder = traj  # type: ignore[assignment]
+        run(agent._prompt_inner(
+            [{"type": "text", "text": E2E_USER_TEXT}], "s1"))
+        # ①补做轮专属 llm 段 span 建立（remediation_turn: 标签）
+        segs = [sid for (content, sid) in traj.spans
+                if "remediation_turn: web_search" in content]
+        assert segs, f"补做轮未建 llm 段 span: {traj.spans}"
+        fix_seg = segs[0]
+        # ②round 子 span 挂在补做段下，且工具行含 web_search（真源=record_round tools）
+        rounds = [(a, k) for (_n, a, k) in traj.calls if _n == "record_round"]
+        fix_rounds = [(a, k) for (a, k) in rounds if fix_seg in a]
+        assert fix_rounds, f"补做轮无 record_round 落账: {rounds}"
+        tool_names = []
+        for _a, k in fix_rounds:
+            for t in (k.get("tools") or []):
+                tool_names.append(t.get("name") or t.get("tool_name"))
+        assert "web_search" in tool_names, f"补做轮工具行缺 web_search: {tool_names}"
+        # ③段 span 收口（end 盖总账）
+        assert any(_n == "end_llm_span" and fix_seg in a
+                   for (_n, a, _k) in traj.calls)
+
+    def test_fix_round_seg_empty_recording_skips_but_no_crash(self, tmp_path, monkeypatch):
+        """span 建立失败（fail-safe 空 id）时行为不回退不崩（旧语义保持）"""
+        agent, _ = _e2e_agent(tmp_path, monkeypatch, [
+            [INCIDENT_REPLY],
+            [_tc(name="web_search", args={"query": "Python 3.13 发布时间"},
+                 tc_id="t1")],
+            [FIX_ANSWER],
+        ])
+        # build_env 默认 _NoopTraj（start_llm_span 返回 ""）→ 落账链路跳过
+        run(agent._prompt_inner(
+            [{"type": "text", "text": E2E_USER_TEXT}], "s1"))
+        joined = " ".join(
+            str(m.get("content", "")) for m in agent.sessions["s1"]["messages"])
+        assert FIX_ANSWER in joined  # 落账跳过不影响补做语义
+
+    def test_both_fix_call_sites_pass_traj_seg_id(self):
+        """接线钉：拒做补做+自验补做两处 _run_llm_with_tools 都传 traj_seg_id"""
+        src = (Path(__file__).resolve().parent.parent
+               / "agent" / "soulmate_agent.py").read_text(encoding="utf-8")
+        assert src.count("traj_seg_id=_fix_seg") == 2
+        assert "remediation_turn: " in src
+        assert "selfverify_remediation: " in src
+
+    def test_acceptance_verify_uses_persisted_final_reply_for_remediation_form(self):
+        """接线钉：验收判据对拒做补做形态按落库最终回复判定（防流式留档假阳性）"""
+        src = (Path(__file__).resolve().parent.parent
+               / "acceptance_benchmark.py").read_text(encoding="utf-8")
+        assert 'if "可用性更正声明（首轮）" in reply' in src
+        assert 'task["verify"](_verify_reply)' in src

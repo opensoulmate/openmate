@@ -211,8 +211,9 @@ def test_soulmate_wiring_pins():
     # round级嵌套（04:20轮遗留#3）：3条LLM路径（简单分支/plan步骤/plan重试）
     # 先建段span拿id再收口；每条路径异常分支同样收口（段span不悬挂）
     # 周期#67 12.3 补 step 自省 LLM 往返落账：+2 自省段（plan步骤自省/重试自省）→ 5/10
-    assert src.count("await self._traj_recorder.start_llm_span(") == 5  # 3 LLM路径+2 step自省
-    assert src.count("await self._traj_recorder.end_llm_span(") == 10  # 5段×(正常+异常)双收口
+    # 周期#105 19.2 补做轮落账：+2 补做段（拒做补做/自验补做）→ 7/12
+    assert src.count("await self._traj_recorder.start_llm_span(") == 7  # 3 LLM路径+2 step自省+2补做
+    assert src.count("await self._traj_recorder.end_llm_span(") == 12  # 5段双收口+2补做段finally收口
     # 平面tool批退役：record_llm_call只剩"段未建"的失败兜底1处
     assert src.count("await self._traj_recorder.record_llm_call(") == 1
     assert 'content="llm_call failed", status="error"' in src
@@ -225,8 +226,8 @@ def test_soulmate_wiring_pins():
     # 收口：正常回合end_turn + 缓存命中回合end_turn
     assert src.count("self._traj_recorder.end_turn(") == 2
     # 失败必须可见：llm段/回合status按llm_outcome_status单一真源判定（非无条件ok）
-    # 周期#67 +2 自省段同享该判定 → 6
-    assert src.count("status=llm_outcome_status(") == 6
+    # 周期#67 +2 自省段同享该判定 → 6；周期#105 +2 补做段 → 8
+    assert src.count("status=llm_outcome_status(") == 8
     # 简单分支的段span带user_text标签（工具计数由Σrollup承载，不再写死进label）
     assert "content=f\"chat_turn: {(user_text or '')[:100]}\"" in src
     # import在文件顶部（仓库铁律）
