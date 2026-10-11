@@ -742,7 +742,7 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
   llm_transport 重试(1/5) 8s 成功。结论：**触发=上游波动（5 样本 0 复发）、放大=本地
   传输层无 stall 超时（本地可控，挂死约293s 才见错）**→治理并入 12.4；修复落点
   utils/llm_transport.py 为他会话 WIP，单写入者纪律解禁后实施。
-- [ ] 12.4 单工具链注入审计 LLM 往返开销治理（8.3 诚实边界另案）：确定性预筛先行——
+- [x] 12.4 单工具链注入审计 LLM 往返开销治理（8.3 诚实边界另案）：确定性预筛先行——
   来源干净（用户明文点名+本回合工具产出可溯源）的工具调用不走 LLM 判词往返，可疑才
   升级 LLM 审计；判据是溯源不是模式白名单（禁"守卫化"变味），防护语义零放松，
   同场景回归测试证明拦截面不缩水。**12.3 并入项**：①LLM 传输 stall 超时（无流停顿
@@ -777,7 +777,7 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
   误并=审计丢行，模块级缓存跨测试误抑制"no such table"实证）。tests/
   test_llm_stall_guard.py 16/16 + test_llm_transport_accounting 9/9（6红转绿）
   + 受影响面 359/359。
-  **12.4 未完**：仅剩③免审命中率 stats 实测观察（②已实装见下）。
+  **12.4 ③已实装（周期#72）**：免审命中率 stats 实测观察——见下。
   ——周期#70实装②：audit_prescreen 增 _EXEC_VERB_RE 窄名单（python/python2/python3/
   python3.N/node/bash/sh）+residue_is_exec_verb（残渣**恰好单 token**=解释器名才豁免）
   +value_exempt_from_audit（溯源类型 user_verbatim/exec_verb:<tok>）+prescreen_batch_ex
@@ -790,6 +790,20 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
   签名仍在预筛之前零缩水。tests/test_audit_prescreen.py 24/24（新增 10 例：7 解释器
   正例/破坏动词 7 例/flag链式 8 例/多 token 4 例/工具结果/批次级/启发式/包装兼容）
   + 同域回归 192/192。
+  ——周期#72实装③（免审命中率 stats 实测观察，12.4 全部完成）：InfectionGate 增
+  prescreen_escalated/llm_audits 计数+stats() 快照（checked/tool_batches/命中率，
+  无数据报 None 禁假 100%），两 journal 留痕行（"预筛免审（source）"/"预筛升级审计"）
+  带累计命中率、soulmate_agent 免审批次账本留痕（[infection-guard] 伪条目
+  permission=infection:prescreen_exempt，parse_ledger 两头不计零缩水测试钉死）+
+  可复跑探针 acp-proxy/prescreen_hitrate_report.py（journal+opensoul.db 轨迹账本
+  双通道交叉核对，不一致如实报差异）。**真实实测**（3 类真实 WS 验收 3/3✅：
+  开发 20.01s/调研 33.43s/办公 55.27s）：接线后干净窗口 6 工具批次命中率 50%
+  （免审 3=user_verbatim 2+exec_verb 1，升级审计 3=办公类模型自造 xlsx 内容），
+  journal 与账本双通道计数一致（3=3）。实测暴露并修复 1 真缺陷：子进程 stderr 被
+  ws_acp 中继双份记账 journal→探针样本翻倍，按内层日志行去重（测试钉死）。
+  tests/test_prescreen_stats.py 12/12（计数器/命中率/空批次不进分母/零缩水
+  terminate 保留/账本伪条目两头不计/探针正则契约/双份去重/repr 参数解析）
+  +同域回归 147/147。
 - [x] 12.5 harness 收尾清理 + late_readback 扩测：run 末补 rmtree 工作目录对齐 docstring
   "测试产物显式清理"；ACCEPT_PROMPT_TIMEOUT_S 人为压短构造多类别后到产出场景
   （开发/办公/记忆 3 类），销 10.4 单样本边界 + 11.1 遗留④二次回读路径扩证。
@@ -890,3 +904,5 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 [2026-10-11 13:45] 周期#70 | 12.4② 注入审计免审面扩展·执行动词残渣窄名单（先证零缩水）：audit_prescreen 增 _EXEC_VERB_RE 窄名单（python/python2/python3/python3.N/node/bash/sh）+residue_is_exec_verb（残渣**恰好单 token**=解释器名才豁免，多余任何字符即升级）+value_exempt_from_audit（溯源类型 user_verbatim/exec_verb:<tok>）+prescreen_batch_ex（source 三态，批次内含执行动词豁免则整批如实标 prescreen_exec_verb 不冒充全明文；prescreen_batch 保持 2 元组薄包装兼容）+InfectionGate.check 接线 source 按溯源类型留痕。零缩水论证=新增豁免面仅"模型自选解释器名"一个 token（运行用户点名的脚本文件，无注入语义；用户明文部分语义与 8.1② 逐字一致），负控制钉死：破坏性动词 rm/sudo/curl/awk/sed/xargs/env、flag 逃逸 -c/-m/-e、链式 ;/&&/|、重定向 >、多 token、大小写/版本形态变体、工具结果溯源、批次内一个脏调用→全部照常升级 LLM 审计；启发式劫持签名仍在预筛之前。真机 smoke：12.3 事故形态 python3+明文路径→免审（source=prescreen_exec_verb，LLM 零调用）、链式拼装/rm 负控制照常 terminate+LLM 往返=1 | ✅ | (本次提交) | 12.4②勾选（12.4 仅剩③免审命中率实测）；Gate1 git diff 4 文件真实落盘；Gate2 grep prescreen_batch_ex 接线点（infection_guard import+check() 真实路径）+服务同款 interpreter（~/.hermes/hermes-agent/venv）导入烟测+真机 smoke 经真实判定路径；Gate3 tests/test_audit_prescreen.py 24/24（新增 10 例含零缩水负控制）+同域回归 192/192（infection_guard/self_heal/provenance/report_evidence/self_verify/tool_availability/remediation_style/frame_origin/turn_watchdog/docgen）+py_compile+双实例重启 health 200/200；⚠️诚实边界：豁免只覆盖注入审计维度（内容溯源），意图/执行权限维度不在此门（permission_gate 照常）；名单窄收（perl/ruby/三段版本号不纳入，漏网回到 LLM 审计不误放）；exec-verb 免审对真 LLM 回合的实效（12.3 误杀同题复发率）待自然 dev 回合观察；⚠️并发警示：infection_guard.py 编辑中收到 sibling 修改告警，git diff 核实工作树仅本周期改动无他会话混入；下周期做 12.5 harness 收尾清理+late_readback 扩测（或 12.4③ 免审命中率实测）
 
 [2026-10-11 13:58] 周期#71 | 12.5 harness收尾清理+late_readback三类别扩测（10.4单样本边界+11.1遗留④销账）：acceptance_benchmark.py 增量两件——①cleanup() 末尾 rmtree(WORKDIR)（run 末产物显式清理，兑现 docstring"测试产物显式清理"承诺=周期#64 实证残留 3 件形态根治；setup() 预清路径幂等；cleanup 的 agent_messages 探针行清理改走 AGENT_MESSAGES_DB 模块常量单一真源=测试可隔离不摸真实库）②真实扩测 tag=LR125_1791716400（ACCEPT_PROMPT_TIMEOUT_S=20 人为压短 WS 口径构造多类别后到产出场景，ACCEPT_CATEGORIES=开发,办公,记忆）：**3/3 全部 WS 超时→后到回读 3/3 恢复**（ws_timeouts=3 recovered=3，verify_mode=server_side_late×3）——开发 20.98s（后到回读 0.0s/1次，超时时刻产出已就绪 dev_hello.py+marker）、办公 40.02s（20.0s/5次，report.xlsx 4979B 有效 xlsx 落 /tmp/soulmate_accept）、记忆 25.01s（5.0s/2次，MEMORY.md 含 ACCEPT_MEM_MARK_9）；run 末 /tmp/soulmate_accept 实证已删除（ls 报 No such file）、测试产物清理归零（MEMORY 标记 0/accept_probe 行 0） | ✅ | a1a0a903 | 12.5勾选；Gate1 git diff 5插入2删除+新测试文件真实落盘；Gate2 grep cleanup() 在 main 真实路径（L705）+rmtree 落 cleanup 末尾（本次真实 run 走中=run 末目录消失即实证）；Gate3 tests/test_acceptance_cleanup.py 5/5（rmtree 核心契约/缺失幂等/setup 重建 buggy.py/模块常量隔离真库探针行清理/接线护栏）+既有 harness 双测试 23/23（late_readback 11+verify_ledger 12）零回归+py_compile+结果 JSON /tmp/soulmate_accept_results.json 回读与台面一致；⚠️诚实边界：①late_readback 三类别均构造场景（人为压短 WS 口径），自然超时场景的三类别恢复仍待上游降级期自然发生复核②开发类 0.0s/1次=产出先于超时就绪（非轮询恢复形态，恢复多样性由办公/记忆 20.0s/5次、5.0s/2次补证）③每类单样本同机低负载；下周期做 12.6 轨迹/审计闭环抽查（tool_failures.db 抽查探针+llm:dna 归因不串线+12.4③ 免审命中率实测）
+
+[2026-10-11 14:21] 周期#72 | 12.4③ 免审命中率stats实测观察（12.4全部完成）：InfectionGate 增 prescreen_escalated/llm_audits 计数+stats() 快照（命中率无数据报 None 禁假 100%），journal 双留痕行"预筛免审（source）/预筛升级审计"带累计命中率（stats() 真实接线进日志路径非死代码），soulmate_agent 免审批次账本留痕（[infection-guard] 伪条目 permission=infection:prescreen_exempt，report_evidence.parse_ledger 两头不计零缩水钉死）+可复跑探针 acp-proxy/prescreen_hitrate_report.py（journal+trajectory_events 双通道交叉核对不一致如实报差异；实证两坑：账本列名 metadata_json 非 metadata、arguments 落库为 Python repr 非 JSON→双形态解析）。**真实实测** 3 类真实 WS 验收 3/3✅（开发 20.01s/调研 33.43s/办公 55.27s，本切片门改动零破坏）：接线后干净窗口 6 工具批次命中率 50%（免审 3=user_verbatim 2+exec_verb 1；升级 3=办公类模型自造 xlsx 内容照常走 LLM 审计），journal 与账本双通道计数一致 3=3；实测暴露并修复 1 真缺陷=子进程 stderr 被 ws_acp 中继双份记账 journal 致样本翻倍，探针按内层日志行去重（测试钉死） | ✅ | 001918de | 12.4③勾选（12.4 ✅ 全完）；Gate1 git diff 46插入（infection_guard+soulmate_agent）+2 新文件真实落盘；Gate2 grep stats() 调用点=journal 日志行真实路径+账本留痕实证 3 行真库回读（om-9c042303d473 等）+探针消费 journal 行契约测试互相咬合；Gate3 tests/test_prescreen_stats.py 12/12+同域回归 147/147（audit_prescreen/infection_guard/provenance/self_heal/report_evidence）+3 次真实验收 3/3+探针真实输出（双通道+去重后口径）；⚠️诚实边界：①窗口内命中率 50% 为 3 次真实运行小样本，长窗口自然分布待后续周期探针持续观察（探针可复跑）②接线前批次（13:56 前）只有 journal 行无账本行，宽窗口双通道计数差异=接线时间边界所致（探针如实报警不取其一）③免审仅省注入审计 LLM 往返，权限门/启发式签名零变化；下周期做 12.6 轨迹/审计闭环抽查（阶段12最后一片）
