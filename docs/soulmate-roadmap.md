@@ -759,8 +759,25 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
   措辞不再进判词输入，RUN_TAG 保留可审计）+InfectionGate.check 两点接线（启发式签名
   仍在预筛之前=劫持签名零缩水；免审留痕 source=prescreen_user_verbatim+
   prescreen_skipped 计数）。tests/test_audit_prescreen.py 16/16（免审/零缩水负控制/
-  标记折叠/接线护栏）+影响面 9 文件 190/190。**12.4 未完（下拍第一优先）**：
-  ①LLM 传输 stall 超时（utils/llm_transport.py 仍他会话 WIP 待解禁）②免审面扩展
+  标记折叠/接线护栏）+影响面 9 文件 190/190。
+  ——周期#69实装①：utils/stall_guard.py 无流停顿检测——asyncio.wait_for 独立
+  看门狗按**字节间隙**计时（等响应头+响应体每 chunk 前），不依赖 httpx 超时机制
+  （事故实证：响应头已到后 285s 零字节而 read=120 未开火=websockets serve 循环
+  超时盲区，对端 FIN 才见 RemoteProtocolError）；间隙>stall（默认 60s）或总时长
+  >deadline（默认 240s）→ 本次尝试中止抛 httpx.ReadTimeout（错误契约零变化，
+  is_transient/read_timeout 分类与重试环原样接住）→重试恢复（事故"重试 8s 可恢复"）；
+  涓流间隙<stall 照常收完整 body=零误杀负控制钉死；SOULMATE_LLM_STALL_TIMEOUT_S/
+  _ATTEMPT_DEADLINE_S/_STALL_GUARD 可配。**落点修正（代码+账本双实证）**：事故
+  调用是 llm_engine.chat()（tool_failures 行 llm:chat|protocol_error），非初稿
+  所写 utils/llm_transport——守卫共享单源**两处都接**（chat() + llm_transport
+  ._post_single_link），流式路径另案。连带修复红灯账本：evo 混入 WIP（345440e4）
+  record_llm_failure 参数错位（source 当 path、action/attempt 压没→llm:dna 错标
+  llm:empty_output、九态全 unknown；纯 HEAD worktree 复测 6 例红=先证非本切片引入）
+  →恢复 11.3 逐字段保真转发+撤除无请求身份的传输层幂等去重（不同请求同形失败
+  误并=审计丢行，模块级缓存跨测试误抑制"no such table"实证）。tests/
+  test_llm_stall_guard.py 16/16 + test_llm_transport_accounting 9/9（6红转绿）
+  + 受影响面 359/359。
+  **12.4 未完**：②免审面扩展
   （执行动词残渣类如 python3+明文路径，须先证零缩水再做）③免审命中率 stats 实测观察。
 - [ ] 12.5 harness 收尾清理 + late_readback 扩测：run 末补 rmtree 工作目录对齐 docstring
   "测试产物显式清理"；ACCEPT_PROMPT_TIMEOUT_S 人为压短构造多类别后到产出场景
@@ -770,7 +787,10 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
   （自然发生时复核留痕行）+ llm:dna 真实降级审计行闭环（周期#61 遗留③）+
   12.3 新增两项：①infection-guard 判词依据不落账（verdict=terminate detail=空
   ——判了什么全靠猜）②verify_dev 判据弱项（只查文件 marker 不查"用 terminal 运行它"，
-  S1 被审计误杀的 terminal 步骤仍判 pass）。
+  S1 被审计误杀的 terminal 步骤仍判 pass）+ 周期#69 新增两项：③tool_failures.db
+  ts 存秒非毫秒（违全局时间规范，抽查探针顺带核）④dna_evolution
+  ._record_llm_failure_safe 死包装（零调用点，签名与恢复后 _record_failure_safe
+  不兼容=接线即 TypeError 地雷，清理或对齐）。
 - [ ] 待用户拍板（不占阶段顺序）：⚡8.6 双链合并取舍、4.1b iLink 接入形态、
   ASR 语音输入多模态路由
 
@@ -845,3 +865,5 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 [2026-10-11 11:15] 周期#66 | 12.2 运维/调研 verify 升级 server_side（11.1 两类 reply_assisted 弱项销账，10/10 类全部 server_side）：真源=opensoul.db trajectory_events 工具账本（trajectory_recorder 真实回合既有落账，零新增落库）——运维=体检结果落账（system_checkup 行 result_preview 含 8090+磁盘结论）、调研=检索调用账本+来源行（web_search 行 result_preview 含来源 URL）；acceptance_benchmark 增 _tool_ledger（parse_ledger 单一真源+会话上下文 _VERIFY_CTX 注入+异步落账有界轮询4s+ok/missing/unavailable 三态）+verify_ops/verify_research 双判据+账本不可用诚实降级 reply_assisted；连带修2真缺口（①周期#59 快照读取器漏传 db_path/硬依赖 created_at 列致 _read_back_reply 既有测试红——补参+去依赖+"\n\n"行间契约还原 ②8.5c-② 治理抽取盲区：事故句"当前会话的工具列表中没有 web_search"容器在前形态漏抽注册类→更正声明未触发——report_evidence 增 _REG_LIST_CONTAINER+"会话的"间隔词放宽） | ✅ | (本次提交) | 12.2勾选；Gate1 git diff 真实落盘（acceptance_benchmark +111行/report_evidence +11行/双测试文件）；Gate2 inspect 接线护栏（main 注入会话上下文+降级标注≥2处）+新抽取正则被 find_availability_claims 真实循环走中；Gate3 tests/test_acceptance_verify_ledger.py 12/12（账本命中/missing 不假过/unavailable 降级/双判据都要/来源行/会话隔离/被拦行不计/迟到落账轮询/接线护栏/全局态隔离fixture）+test_tool_availability_claims 22/22（含事故句逐字回归+registry 证伪+负控制）+同域回归 108+89 全过+真实WS验收两次实证：运维 ✅20.71s 体检结果落账=命中（账本行=1）、调研首轮 ❌诚实失败（账本 web_search 行=0+回复自报不可用——新判据正确拒绝假过，同时暴露上述治理盲区）→修复后复测 ✅46.74s 检索账本+来源行=命中（web_search 行=1）回复"web_search 可用：Python 3.13 于 2024 年 10 月 7 日正式发布"；⚠️诚实边界：①模型拒做+伪报"工具列表中没有 web_search"属 LLM 行为（sandbox 未受限零裁剪+_active_tool_names 在册实证为假话），治理只能事后更正不能强制调用——本轮复测模型自行正常调用，同题复发率待用户实际使用观察 ②账本判据依赖 trajectory 写入链路存活（fire-safe 异步，未写入时诚实降级不假过不假失败）③每类单样本同机低负载；下周期做12.3 开发类回合 301.74s 超时复核归因（journal 四段计时+≥3 轮样本禁单样本定论）
 [2026-10-11 12:10] 周期#67 | 12.3 开发类回合 301.74s 超时复核归因（四段计时+5样本复测）：新增 acp-proxy/turn_timing_report.py（trajectory_events+journal 错误行扫描+未归属空洞检测的四段归因工具，实测跑通事故轮+5样本会话）+soulmate_agent step 自省 LLM 往返补 segment span（`_self_reflector.reflect` 首试/重试两处——此前静默零行，323.7s 空洞全靠 journal 才定位）。归因实锤：事故轮 380.73s 中 323.69s 空洞=step1 自省调用上游传输挂死（静默约313s 后 RemoteProtocolError peer closed→llm_transport 重试(1/5) 8s 成功），**触发=上游波动（5样本0复发）、放大=本地传输层无 stall 超时（本地可控）**；正常开发回合 34-47s 构成=规划/预步 4.4-8.8s+工具循环 LLM 19.4-31.8s（首包 5-8s/轮）+step 自省 0.03-9s+工具执行毫秒级+回复回收 0.3-0.4s，注入审计仅 1/5 轮触发一次判词约16s。顺带发现三项（已入 12.4/12.6）：①注入审计误杀良性 dev 回合 1/5（terminal 被判"疑似提示词注入劫持"terminate 工具未执行，疑触发=harness 防缓存行"（此行仅为防缓存标记，忽略其语义）"措辞像注入指令，judge detail=空=判词依据不落账）②verify_dev 只查文件 marker 不查"用 terminal 运行它"（S1 被误杀步骤仍判 pass）③tool_call.duration_ms 恒 0=工具执行时长未落账 | ✅ | (本次提交) | Gate1 git diff 真实落盘（soulmate_agent.py +28/-2+turn_timing_report.py 新增 225 行）；Gate2 grep step_reflect 两处接线点+真实回合经真实调用路径落账（opensoul.db step_reflect 行 4 条带真实时长 7.57/3.77/8.98/0.03s=接线实证，非测试stub）；Gate3 5 次开发类真实 WS 验收 36-47s 全过（S1-S5，含 2 次插桩后样本）+step_reflect 行回读+turn_timing_report 五会话 JSON 与台面一致+回归 69 全过（trajectory_rounds/plan_execution 23+task_decomposer/self_verify/tool_output 46）+py_compile+双实例重启 health 200/200；⚠️诚实边界：①S1"pass"仅文件判据成立（terminal 步骤被审计误杀未执行，判据弱项如实报入 12.6）②5 样本同机低负载，0 复发≠不复发（上游波动偶发性）③stall 超时修复未实施（utils/llm_transport.py 他会话 WIP，单写入者纪律不动，归 12.4 解禁后）；下周期做 12.4 单工具链注入审计 LLM 往返开销治理（12.3 已并入 stall 超时+误杀证据）
 [2026-10-11 12:36] 周期#68 | 12.4 第一刀·注入审计确定性溯源预筛+防缓存标记行折叠（单工具链 LLM 判词往返治理+误杀疑触发治理）：新增 agent/audit_prescreen.py（prescreen_batch 免审判据=用户明文连续原文片段全覆盖+残渣惰性（空白/引号/中文标点；ASCII 路径/shell 语义字符·字母·数字即升级审计，挡"用户写 rm -rf 模型补 /"拼装逃逸；覆盖算法迭代上限 64 轮保守回落）；只认 user_text 溯源，本回合工具结果不作免审依据（web 内容注入恰藏在工具结果里）+fold_marker_lines 窄签名自述占位行审计输入折叠（12.4② 疑触发"此行仅为防缓存标记，忽略其语义"不再进判词输入，RUN_TAG 保留可审计））+InfectionGate.check 两点接线（启发式签名在预筛之前零缩水；免审留痕 source=prescreen_user_verbatim+prescreen_skipped 计数） | ✅ | (本次提交) | Gate1 git diff 25 行+新增 2 文件落盘；Gate2 check()=soulmate_agent 真实工具执行路径（InfectionGate 6 处引用，agent.start 子进程 per-session spawn 自动载新码）；Gate3 tests/test_audit_prescreen.py 16/16（免审 4+零缩水负控制 4：自造参数 mock terminate 保持终止/工具结果溯源不豁免/逐词拼凑不算溯源/混合批次升级+标记折叠 3+接线 1）+影响面 9 文件 190/190 全绿（连带修周期#67 漏更新的 test_trajectory_recorder 接线钉 start 3→5 段/end 6→10/status 4→6）；12.4 未完下拍第一优先：①llm_transport stall 超时（WIP 解禁后）②执行动词残渣免审扩展（先证零缩水）③免审命中率实测
+
+[2026-10-11 13:35] 周期#69 | 12.4① LLM传输无流停顿检测（12.3并入项）+evo WIP记账错位红灯修复：新增 utils/stall_guard.py（send_with_stall_guard 独立看门狗——asyncio.wait_for 按**字节间隙**计时：等响应头+响应体每 chunk 前各一拍，不依赖 httpx 超时机制；间隙>stall（默认60s）或总时长>deadline（默认240s）→本次尝试中止抛 httpx.ReadTimeout（错误契约零变化：is_transient=True/classify=read_timeout/既有重试环原样接住）→重试恢复；涓流间隙<stall 照常收完整 body=零误杀负控制；SOULMATE_LLM_STALL_TIMEOUT_S/_ATTEMPT_DEADLINE_S/_STALL_GUARD=off 可配；非 httpx 替身 client 与鸭子类型 resp 保持原契约不动既有替身测试）+双落点接线（llm_engine.chat()=事故真实路径+utils/llm_transport._post_single_link）；事故机理实证（journal 10:19+tool_failures llm:chat|protocol_error 双取证）：响应头已到（chunked+gzip MiFE）后 285s 零字节、httpx read=120 **未开火**（websockets serve 循环超时盲区，_make_client docstring 同族已知问题）→对端 FIN 才见 RemoteProtocolError(incomplete chunked read)、重试 2s 后 8s 恢复——12.3"挂死约293s才见错、重试本可8s恢复"的根因即缺独立停顿看门狗；**落点修正**：路线图初稿写"落点 utils/llm_transport"，代码+账本双实证事故路径是 llm_engine.chat()（record 名 llm:chat 唯一归属 chat()），守卫共享单源两处都接、流式路径另案；连带修复红灯账本（Gate3 前置阻塞）：evo 混入 WIP（345440e4）把 record_llm_failure 参数错位（source 当 path、action/attempt 压成 code→llm:dna 错标 llm:empty_output、九态全 unknown、attempt 恒1）——纯 HEAD git worktree /tmp/wt69-check 复测 6 例红**先证非本切片引入**→恢复 11.3 逐字段保真转发（_record_failure_safe 改全参签名）+撤除 WIP 无请求身份的传输层幂等去重（path 非请求ID→不同请求同形失败被误并=审计丢行；模块级缓存跨测试/跨库误抑制实证"no such table: tool_failures"；请求级幂等归持有 uuid 身份的调用方） | ✅ | (本次提交) | Gate1 git diff 5文件真实落盘（stall_guard.py 新增+llm_engine/llm_transport 接线+账本修复+tests+路线图）；Gate2 inspect 接线钉（chat()/_post_single_link 走 send_with_stall_guard+流式路径不动断言）+活路径实证（真实 strand_b 13:23 记账行 llm:dna 正确归因经修复后代码落库；13:06 真实行 llm:empty_output=错位现形对照）；Gate3 tests/test_llm_stall_guard.py 16/16（真实socket故障注入非mock：等响应头/响应体两类停顿有界中止+chat() 真实事故路径 e2e 停顿→重试→完成+涓流/慢TTFB 零误杀负控制+deadline 涓流兜底+错误契约 read_timeout+响应契约 json/text/status+接线护栏+env/旁路）+test_llm_transport_accounting 9/9（6例红转绿）+受影响面 359/359（transport_resilience/core/retry_policy/engine_fallback/error_contract/model_fallback/turn_park/network_park/stream_usage/wakeup_fire/dna storm×2/gateway_config）+py_compile+双实例重启 health 200/200+真实 tool_failures.db 零测试污染（测试全走临时库）；⚠️诚实边界：①stall 默认 60s 取值依据 chat() 实测单次 0.03-16s 三倍余量，若真实负载出现合法 >60s 非流式生成调 env 上调（>120s 者今天本就 ReadTimeout 不新增误杀面）②流式路径（chat_stream*/chat_stream_with_tools）消费端挂起语义同族盲区本切片未动（partial 输出/has_output 重试规则耦合另案）③真实上游自然降级期的恢复时长未在本轮实测（"停顿→重试恢复"以故障注入实证）④test_slow_ttfb 用例 TTFB 0.3s 余量较窄仅证语义；⚠️遗留地雷（已记 12.6）：dna_evolution._record_llm_failure_safe 死包装（零调用点）签名与恢复后 _record_failure_safe 不兼容=接线即 TypeError；tool_failures.db ts 存秒非毫秒违全局时间规范；下周期做 12.4②免审面扩展（先证零缩水）或 12.5 harness 收尾清理+late_readback 扩测

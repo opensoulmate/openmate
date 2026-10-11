@@ -32,8 +32,6 @@ complete_with_protection调用（含续写轮）内停在应答的link上。链=
 
 import asyncio
 import logging
-import uuid
-from collections import OrderedDict
 
 import httpx
 
@@ -46,6 +44,7 @@ from utils.llm_retry import (
     is_transient_error,
 )
 from utils.llm_safety import build_continuation_messages, check_omission
+from utils.stall_guard import send_with_stall_guard
 from utils.model_fallback import (
     FallbackChain,
     chain_failure_message,
@@ -68,43 +67,35 @@ def _fail_detail(strand_id: str, info) -> str:
     return f"[{strand_id}] {text}" if strand_id else text
 
 
-# 幂等键→None，容量上限 4096，超出 FIFO 淘汰，防长跑内存膨胀。
-# 键= f"{request_id}:{code}"（请求ID+九态码），同一请求同一九态码只入账一次，
-# 阻断重复入账/半写后重入；半写（入账前抛异常）不写键，允许下次重试。
-_RECORDED_KEYS = OrderedDict()
-_RECORDED_KEYS_MAX = 4096
+def _record_failure_safe(path: str, source, action: str, attempt: int,
+                         outcome: str, detail: str = "") -> bool:
+    """传输故障记账 best-effort 化（阻断记账异常反噬 LLM 主链路，记账单一真源）。
 
-
-def _record_failure_safe(strand_id: str, request_id: str, code: str, detail: str) -> bool:
-    """传输故障记账 best-effort 化 + 幂等键去重（阻断记账异常反噬 LLM 主链路）。
-
-    - 幂等键 = f"{request_id}:{code}"（请求ID+九态码）；键已存在直接 return False，
-      防止重复入账 / 半写后重入；
-    - record_llm_failure(...) 放在 try: ... except Exception: 内，except 分支仅
-      logger.warning('llm failure accounting degraded (best-effort): %s', exc,
-      exc_info=True)，绝不 raise、绝不吞掉主流程异常；
-    - 仅当入账成功才把幂等键写入 _RECORDED_KEYS（半写不入 set，允许下次重试）；
-      返回 True=已入账 / False=幂等跳过或记账降级。
+    - record_llm_failure(path, source, action, attempt, outcome, detail) 原样转发
+      （tool_name=llm:{path}、kind=classify_failure(source)、action/attempt/outcome
+      逐字段保真）——周期#69 修复 evo 混入 WIP（345440e4）的参数错位：曾把 source
+      当 path、action/outcome 压成单个 code，致 llm:dna 记账错标 llm:empty_output、
+      九态分类全落 unknown、动作/尝试数丢失（test_llm_transport_accounting 6 例红）。
+    - **不在此层做幂等去重**（周期#69 撤除 WIP 去重集）：本函数收不到请求身份
+      （path 非请求 ID），按 path:action:attempt:outcome 去重会把**不同请求**的
+      同形失败误并成一行=审计丢行，且模块级缓存跨测试/跨库误抑制（实证"no such
+      table"）。请求级幂等归持有真实请求身份的调用方（如 dna 的 request_id=uuid）。
+    - record_llm_failure(...) 放在 try/except 内，except 分支仅 logger.warning
+      （best-effort），绝不 raise、绝不吞掉主流程异常。
+    - 返回 True=已记账 / False=记账降级。
 
     与 transport 业务路径解耦：本函数自身不改变 post_chat_completion /
     complete_with_protection 的返回值、异常类型、重试与 park 策略。
     """
-    key = f"{request_id}:{code}"
-    if key in _RECORDED_KEYS:
-        return False
     try:
         from agent.llm_engine import record_llm_failure
-        record_llm_failure(strand_id, request_id, code, 1, code, detail)
+        record_llm_failure(path, source, action, attempt, outcome, detail)
+        return True
     except Exception as exc:
         logger.warning(
             'llm failure accounting degraded (best-effort): %s', exc, exc_info=True
         )
         return False
-    # 入账成功才写键；容量超限 FIFO 淘汰最旧一条。
-    if len(_RECORDED_KEYS) >= _RECORDED_KEYS_MAX:
-        _RECORDED_KEYS.popitem(last=False)
-    _RECORDED_KEYS[key] = None
-    return True
 
 
 def _record_failure(path: str, source, action: str, attempt: int,
@@ -118,9 +109,11 @@ def _record_failure(path: str, source, action: str, attempt: int,
     """
     try:
         _record_failure_safe(
-            strand_id=str(source or ""),
-            request_id=str(path or "") or str(uuid.uuid4()),
-            code=str(outcome or ""),
+            path=str(path or ""),
+            source=source,
+            action=str(action or ""),
+            attempt=int(attempt or 1),
+            outcome=str(outcome or ""),
             detail=detail,
         )
     except Exception as exc:
@@ -168,7 +161,12 @@ async def _post_single_link(
     resp = None
     for _http_retry in range(attempts):
         try:
-            resp = await client.post(
+            # 无流停顿检测（12.4①，utils.stall_guard）：与 llm_engine.chat() 同源
+            # 事故面（挂死 285s 零字节而 httpx read 超时未开火）——独立看门狗按
+            # 字节间隙计时中止本次尝试，上层重试环照常重试
+            resp = await send_with_stall_guard(
+                client,
+                "POST",
                 f"{base_url}/chat/completions",
                 headers=headers,
                 json={

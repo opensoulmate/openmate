@@ -39,6 +39,7 @@ from utils.llm_retry import (
 # 链耗尽报错列出所有试过的模型。opt-in：LLM_FALLBACK_CHAIN未配置=空链=行为与
 # 接线前逐字一致
 from utils.model_fallback import FallbackChain, FallbackLink, load_fallback_chain
+from utils.stall_guard import send_with_stall_guard
 
 # ── 传输故障可观测（路线图10.1）：分类入tool_failures.db ──────────────────
 _llm_fail_log = None
@@ -980,7 +981,13 @@ class LLMEngine:
                                     raise RuntimeError(
                                         "本回合HTTP发送预算已用尽（续写×重试联合封顶）"
                                     )
-                                resp = await client.post("/chat/completions", json=payload)
+                                # 无流停顿检测（12.4①，utils.stall_guard）：2026-10-11
+                                # 事故实证——本调用上游挂死 285s 零字节而 httpx read=120
+                                # 超时未开火（websockets serve 循环超时盲区），独立看门狗
+                                # 按字节间隙计时中止本次尝试→上层重试环照常重试（8s 可恢复）
+                                resp = await send_with_stall_guard(
+                                    client, "POST", "/chat/completions", json=payload
+                                )
                             except httpx.TransportError as e:
                                 # 网络离线三态（utils.network_state，kilocode SessionNetwork）：
                                 # 全局断连→park等恢复（3s竞速探测+10s宽限自动续跑，有界）；
