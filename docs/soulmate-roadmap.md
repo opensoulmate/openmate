@@ -640,9 +640,22 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
   dna._call_llm 传 path="dna"→tool_name=llm:dna、llm_gateway 传 path="gateway"
   →llm:gateway），strand_id 进 error 行归因到具体 strand；降级链换 link 成功也
   留上游失败审计行（可审计≠只记最终失败）
-- [ ] 11.4 soulmate-daemon 常驻托管覆盖面真实验收（周期#48 遗留）：实证"后建
+- [x] 11.4 soulmate-daemon 常驻托管覆盖面真实验收（周期#48 遗留）：实证"后建
   任务/目标也被轮询拾取"（daemon 启动后新建 schedule_task/监控目标在周期内真被
   执行/检查，而非只有启动时存量在跑）
+  ——周期#62验收落地（可复跑 acp-proxy/acceptance_daemon_coverage.py，8/8✅）：
+  daemon（01:51:53 启动，PID 515550）存活 7.5h 后新建探针 task#11（interval:30s）
+  与 target#2（port 127.0.0.1:8090）→ 21s 后监控目标被拾取真实检查（monitor_events
+  行 ok"端口 8090 监听中"）、52s 后 cron 任务被拾取并真实 LLM 回合执行成功
+  （runs 行 status=ok detail=end_turn + journal daemon 进程 "✅ 执行 #11
+  accept114_cron → end_turn" + 真源 "Response [accept114-session-*]: OK"）；
+  执行者归因=journal 仅 daemon 进程行且 ps 实证无其他轮询宿主（agent stdio 进程
+  不在跑=daemon 独占拾取）；探针产物清理归零（runs/monitor_events/session/
+  messages 回读全 0）。代码级佐证：claim_due/_due_targets 每次 poll 重新查库
+  （无启动时快照）。⚠️诚实边界：①同机低负载单样本×2轮 ②首轮空 session_id 探针
+  触发"拒绝给消失的会话造回合"既有失败纪律（runs 行 failed 可见=失败不假装成功
+  语义照常；真实用户路径 schedule_task 恒带当前 session_id 不受影响）③3.1 遗留
+  语义"错过不补跑"未变（本次只验覆盖面不改语义）
 - [ ] 11.5（周期#59 新发现，候选）注入审计误杀良性文档任务：办公类验收回合中
   InfectionGate "[注入审计终止]"打断一轮工具执行（文档生成工具输出目录受限 vs
   任务要求 /tmp/soulmate_accept/report.xlsx 绝对路径被判疑似劫持），产物最终生成
@@ -712,3 +725,4 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 [2026-10-11 08:30] 周期#59 | 11.1 全量10类验收对标实测（阶段11第一刀）：上游MiMo token-plan 恢复后全量单轮真实重跑（tag=FULL11_1791677778，WS /ws/acp 真实用户路径，每类独立session）**10/10 当场全过**——开发48.2s dev_hello.py真实落盘+marker命中/调试38.0s buggy.py修复return a+b+FIXED标记/运维14.4s 8090+磁盘信息/调研32.1s web_search真实执行答案Python 3.13发布日2024-10-07+主答区零自报不可用/发布21.6s opensoul.db投递行=1/办公96.1s report.xlsx 4962B有效xlsx/定时87.1s cron_tasks.db accept_probe行=1/多渠道46.0s/记忆78.0s MEMORY.md标记真实写入/协作37.6s subagent_runs双worker产出；verify_mode=server_side 7类+reply_assisted 3类（运维/调研/多渠道）；本轮WS超时0个（late_readback未触发——10.4降级口径留待下次上游降级期复核）；采集侧系统帧过滤实证生效（heartbeat×3+self_check×7被过滤）；测试产物清理归零（accept_probe行0/MEMORY.md标记0/tmp探针产物删除） | ✅ | (本次提交) | 11.1勾选；Gate1=git diff路线图11.1勾选+11.5新增+本条目真实落盘；Gate2=N/A（纯验收/文档周期，无新代码符号）；Gate3=acceptance_benchmark真实运行10/10通过（server_side者均有文件/SQLite行/MEMORY.md数据工件回读）+结果JSON /tmp/soulmate_accept_results.json回读复核与台面一致；⚠️诚实边界：①每类单次样本（同机低负载）②运维/调研/多渠道3类verify为reply_assisted（回复文本辅证）③late_readback在本轮未被触发（无WS超时），降级期二次回读路径的实证仍在周期#58单任务样本④新发现入11.5候选：办公回合InfectionGate"[注入审计终止]"误杀一轮良性工具执行（文档工具输出目录受限vs /tmp绝对路径被判劫持），产物仍生成但回合多走弯路；下周期做11.2 _run_soulmate_turn挂死可见性（10.3三件套扩到群组soulmate ACP回合通道）
 [2026-10-11 08:58] 周期#60 | 11.2 _run_soulmate_turn挂死可见性（10.3三件套扩到群组soulmate ACP回合通道，周期#57诚实边界①销账）：opensoul d1b85151——ws_chat.py抽register_proxy_run/finish_proxy_run共用登记表（channel=cli/acp_ws快照带channel）+cancel_proxy_run通道感知（acp_ws=cancel_cb摘观察窗停等，会话生命周期归系统不杀远端生成，绝无到点自动杀；CLI=killpg信号链原样）+ai_groups._run_soulmate_turn接线（登记表→exec-status/exec-cancel同套语义、心跳30s走on_event→_emit_exec_event群组事件流、返回(text,source,success)对齐run_agent_proxy取消直通不重试不评分）+诚实超时（等待预算耗尽如实报"回合未完成"+已收部分保留禁把超时当成功） | ✅ | d1b85151 | 11.2勾选；Gate1=git diff 251+265行两仓真实落盘+key扫描0命中；Gate2=grep实证_run_soulmate_turn真实调用点(_execute_task_impl传on_event/task_ref)+register_proxy_run双通道接线+exec-status/exec-cancel端点测试真调用；Gate3=新测试6/6+10.3回归8/8+agent_proxy 3/3+ai_groups 46全过（真实websockets服务端非mock）+真机live :8092真实SoulMate回合24.0s回"OK"心跳×2+快照逐秒可查+done收口；opensoul.service已重启加载新代码（/api/ai-groups/health ok）；下拍=11.3 LLM故障分类记账补链
 [2026-10-11 09:19] 周期#61 | 11.3 LLM故障分类记账补链（周期#55诚实边界①销账）：utils/llm_transport 增 _record_failure（lazy import 复用 agent.llm_engine.record_llm_failure 单一真源）——记账点=重试排程/放弃双接×状态与传输两分支+底部链路放弃点+防护层两出口（自身异常/HTTP 200空输出=dna"静默返空"历史形态），TransportError 不双行重复记；path 归因线程化（dna→llm:dna、gateway→llm:gateway，strand_id 进 error 行），降级链换 link 成功也留上游失败审计行 | ✅ | (本次提交) | 11.3勾选；Gate1 git diff 3仓文件+新测试真实落盘（61行+新增测试文件）；Gate2 grep/接线钉测试（_record_failure≥5记账点、path="dna"/"gateway" 真实调用点、llm:gateway 归因不串 llm:dna）；Gate3 tests/test_llm_transport_accounting.py 9/9（真实HTTP注入故障非mock：429抖动→rate_limit retry行+成功/持续503→server_error give_up行/incomplete chunked read→protocol_error行[实测坑：fault handler 不置 close_connection=True 则 FIN 不达客户端变 ReadTimeout，已修进测试]/降级链备胎成功上游失败仍留审计行/200空输出记账含"空内容"/记账器炸不阻塞链路）+同域回归 281 全过（llm_transport_resilience/core/engine_fallback/model_fallback/error_contract/turn_park_merge/network_park_hitl/tool_recovery 198+dna breaker/storm/gateway_config 83）；真机 smoke（服务同款 interpreter ~/.hermes/hermes-agent/venv）：真 503 故障服务器→llm:dna 5行记账（4 retry+1 give_up，kind=server_error，[strand_a] 归因）SMOKE113_PASS；⚠️诚实边界：①记账器居 agent 层为 10.1 既有形态（lazy import 解耦，未搬 utils）②降级链成功后上游失败行 outcome=failed 属"该 link 失败"语义（整体调用成功不改写审计行）③真实进化回合的失败审计待下次 evo 真实降级事件在 ~/.hermes/soulmate/memory/tool_failures.db 出现 llm:dna 行即闭环（本切片未跑真实 evo 周期）；下周期做11.4 soulmate-daemon 常驻托管覆盖面真实验收（后建任务/目标也被轮询拾取）
+[2026-10-11 09:45] 周期#62 | 11.4 soulmate-daemon 常驻托管覆盖面真实验收（周期#48遗留销账）：新增 acp-proxy/acceptance_daemon_coverage.py 可复跑探针（生产单例同一写入路径建探针→轮询服务端真源 runs/monitor_events 行且时间戳>创建时刻防陈旧行假阳性→journal 归因执行者→清理归零回读），真实跑 8/8✅——daemon（01:51:53启动 PID 515550）存活7.5h后新建 task#11(interval:30s)+target#2(port 8090)：21s 后监控拾取真实检查（ok"端口 8090 监听中"）、52s 后 cron 拾取真实 LLM 回合执行成功（runs status=ok end_turn+journal "✅ 执行 #11 accept114_cron → end_turn"+真源"Response: OK"），ps 实证无其他轮询宿主=daemon 独占拾取；代码佐证 claim_due/_due_targets 每 poll 重新查库无启动快照；产物清理归零（runs/monitor_events/session/messages 全 0）；回归 tests/test_soulmate_daemon+soulmate_scheduler+health_monitor 56/56 过 | ✅ | (本次提交) | 11.4勾选；⚠️诚实边界：同机低负载单样本×2轮；首轮空 session_id 探针触发"拒绝给消失的会话造回合"既有失败纪律（failed 行可见=失败不假装成功语义照常，真实用户路径 schedule_task 恒带 session_id 不受影响）；⚠️并发警示：utils/llm_transport.py+llm_gateway.py 09:30-09:31 被其他会话改动（幂等记账 _record_failure_safe WIP，非本周期工作，单写入者纪律未动未提交）；下周期做11.5 注入审计误杀良性文档任务治理（审计判据区分"路径越界"与"注入劫持"，越界回显限制说明不升级终止）
