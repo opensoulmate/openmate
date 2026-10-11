@@ -6288,10 +6288,26 @@ You can send files to the user natively: to deliver a file, write a brief confir
                     {"role": "user", "content":
                         report_evidence.build_execution_remediation_prompt(_tool)},
                 ]
-                fix_resp, fix_tools = await self._run_llm_with_tools(
-                    fix_messages, session_id,
-                    matched_skills=matched_skills, user_text=user_text,
-                )
+                # 19.2（周期#105）：补做轮必须进工具账本真源——不传 traj_seg_id 时
+                # _traj_record_round 全跳过，补做真执行的工具行永不落 trajectory_events
+                # （实测 REJ192_调研_1：拒做→补做 web_search 真执行成功，但账本
+                # web_search 执行行=0，验收判据/归因/审计对补做轮全盲）。与主轮同款：
+                # 先建 llm 段 span，收尾 end 盖总账。
+                fix_resp, fix_tools = "", []
+                _fix_seg = await self._traj_recorder.start_llm_span(
+                    session_id, traj_root_id,
+                    content=f"remediation_turn: {_tool}")
+                try:
+                    fix_resp, fix_tools = await self._run_llm_with_tools(
+                        fix_messages, session_id,
+                        matched_skills=matched_skills, user_text=user_text,
+                        traj_seg_id=_fix_seg,
+                    )
+                finally:
+                    if _fix_seg:
+                        await self._traj_recorder.end_llm_span(
+                            session_id, _fix_seg,
+                            status=llm_outcome_status(fix_resp or ""))
                 if fix_tools:
                     tool_calls_log.extend(fix_tools)
                 if fix_resp and report_evidence.remediation_succeeded(_tool, tool_calls_log):
@@ -6370,10 +6386,23 @@ You can send files to the user natively: to deliver a file, write a brief confir
                         {"role": "assistant", "content": full_response[:2000]},
                         {"role": "user", "content": fix_prompt},
                     ]
-                    fix_resp, fix_tools = await self._run_llm_with_tools(
-                        fix_messages, session_id,
-                        matched_skills=matched_skills, user_text=user_text,
-                    )
+                    # 19.2（周期#105）：自验补做轮同款进工具账本真源（拒做补做同病
+                    # 第二形态：缺 traj_seg_id → 补做工具行不落 trajectory_events）
+                    fix_resp, fix_tools = "", []
+                    _fix_seg = await self._traj_recorder.start_llm_span(
+                        session_id, traj_root_id,
+                        content=f"selfverify_remediation: {len(missing)}项")
+                    try:
+                        fix_resp, fix_tools = await self._run_llm_with_tools(
+                            fix_messages, session_id,
+                            matched_skills=matched_skills, user_text=user_text,
+                            traj_seg_id=_fix_seg,
+                        )
+                    finally:
+                        if _fix_seg:
+                            await self._traj_recorder.end_llm_span(
+                                session_id, _fix_seg,
+                                status=llm_outcome_status(fix_resp or ""))
                     if fix_resp:
                         full_response = full_response + "\n\n" + fix_resp
                     if fix_tools:

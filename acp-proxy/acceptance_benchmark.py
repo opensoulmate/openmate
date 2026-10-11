@@ -744,8 +744,19 @@ async def main() -> None:
             latency = round(time.monotonic() - t0, 2)
             entry["reply_excerpt"] = re.sub(r"\s+", " ", reply)[:200]
             entry["latency_s"] = latency
+            # 19.2（周期#105）：拒做补做形态（8.5c-②b）的最终回复契约="补做答案+
+            # 可用性更正声明（首轮）"，首轮拒做原文按设计留档流式帧——WS 并帧采集把
+            # 留档原文并进 reply，主答区判据被打假阳性（实测 REJ192_调研_1：落库最终
+            # 回复干净却判"主答区自报搜索不可用"）。验证按"落库回复=最终回复"单一
+            # 真源回读；帧文本只作 excerpt 透明留证（含首轮留档，不删改采集）。
+            _verify_reply = reply
+            if "可用性更正声明（首轮）" in reply:
+                _persisted = _read_back_reply(sid)
+                if _persisted.strip():
+                    _verify_reply = _persisted
+                    entry["verify_source"] = "persisted_final_reply"
             try:
-                ok, detail = task["verify"](reply)
+                ok, detail = task["verify"](_verify_reply)
             except Exception as e:  # noqa: BLE001
                 ok, detail = False, f"验证器异常: {type(e).__name__}: {e}"
             entry["ok"] = bool(ok) and entry.get("http_ok", False)
