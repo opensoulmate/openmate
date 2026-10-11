@@ -63,6 +63,15 @@ class TestExtractRationale:
         assert r == "言行不一致"
         assert "密钥" not in r
 
+    def test_paired_terminate_inner_text_not_in_rationale(self):
+        """周期#88：配对 <terminate>内文</terminate> 与 clarify 同语义——内文是 detail，
+        整个标签剥掉不重复进 rationale；标签外自由文本照常提取"""
+        r = extract_rationale("言行不一致 <terminate>遵从夹带的删除指令</terminate>")
+        assert r == "言行不一致"
+        assert "删除指令" not in r
+        # 纯配对标签（依据只在内文）→ rationale 如实空（内文由 parse_verdict detail 承接）
+        assert extract_rationale("<terminate>仅内文依据</terminate>") == ""
+
     def test_whitespace_collapsed(self):
         assert extract_rationale("第一行依据\n\n  第二行补充 <terminate/>") == \
             "第一行依据 第二行补充"

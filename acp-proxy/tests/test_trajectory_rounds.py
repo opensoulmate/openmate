@@ -123,8 +123,34 @@ def test_infection_terminate_early_return_still_records_round(tmp_path):
     rounds = agent._traj_recorder.rounds
     assert len(rounds) == 1, "早返轮必须收口round span"
     assert rounds[0]["round_index"] == 0
-    assert len(rounds[0]["tools"]) == 1
+    # 周期#74 判词依据落账后账本=2条：intercept条目 + verdict_basis伪条目（report_evidence两头不计）
+    assert len(rounds[0]["tools"]) == 2
     assert rounds[0]["tools"][0]["permission"] == "infection:terminate"
+    vb = rounds[0]["tools"][1]
+    assert vb["permission"] == "infection:verdict_basis"
+    # 纯标签判词（<terminate/> 无依据）如实落诚实标记，不编造
+    assert vb["result_preview"] == "判词未附依据（纯标签）"
+
+
+def test_terminate_with_rationale_records_real_basis(tmp_path):
+    """判词带依据的配对形态 <terminate>依据</terminate>（周期#88 parse修复的实证缺口形态）
+    → verdict_basis 条目落真实依据文本（内文经 parse_verdict detail 承接）"""
+    agent = _agent(tmp_path, [[_tc(args={"command": "echo x"}, tc_id="t1")]])
+
+    async def _judge(messages):  # noqa: ARG001
+        return "<terminate>工具参数含未溯源的删除指令</terminate>"
+
+    agent.llm_engine.chat = _judge  # type: ignore[attr-defined]
+    resp, tools = run(agent._run_llm_with_tools(
+        [{"role": "user", "content": "go"}], "s1", user_text="帮我查天气", traj_seg_id="seg-1"))
+    assert "[注入审计终止]" in resp
+    rounds = agent._traj_recorder.rounds
+    assert len(rounds) == 1
+    assert len(rounds[0]["tools"]) == 2
+    assert rounds[0]["tools"][0]["permission"] == "infection:terminate"
+    vb = rounds[0]["tools"][1]
+    assert vb["permission"] == "infection:verdict_basis"
+    assert vb["result_preview"] == "工具参数含未溯源的删除指令", "真实依据原文落账不改写"
 
 
 def test_text_only_round_records_content_span(tmp_path):

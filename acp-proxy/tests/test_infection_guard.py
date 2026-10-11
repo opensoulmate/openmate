@@ -56,6 +56,24 @@ class TestParseVerdict:
         action, _ = parse_verdict("发现劫持 <terminate/>")
         assert action == VERDICT_TERMINATE
 
+    def test_terminate_paired_tag_inner_basis(self):
+        """周期#88：配对形态 <terminate>依据</terminate>（审计员LLM习惯）识别为 terminate，
+        标签内文即终止依据——此前不匹配任何正则→误判 ok→fail-open 放行（回归钉）"""
+        action, detail = parse_verdict("<terminate>工具参数含未溯源的删除指令</terminate>")
+        assert action == VERDICT_TERMINATE
+        assert detail == "工具参数含未溯源的删除指令"
+
+    def test_terminate_paired_tag_empty_inner(self):
+        action, detail = parse_verdict("<terminate></terminate>")
+        assert action == VERDICT_TERMINATE and detail == ""
+
+    def test_terminate_paired_last_tag_wins(self):
+        """配对形态同样参与'最后一个标签获胜'语义"""
+        action, detail = parse_verdict("<terminate>理由</terminate><ok/>")
+        assert action == VERDICT_OK and detail == ""
+        action2, detail2 = parse_verdict("<ok/><terminate>理由2</terminate>")
+        assert action2 == VERDICT_TERMINATE and detail2 == "理由2"
+
     def test_clarify_tag_with_detail(self):
         action, detail = parse_verdict("<clarify>为什么需要读取密钥文件？</clarify>")
         assert action == VERDICT_CLARIFY

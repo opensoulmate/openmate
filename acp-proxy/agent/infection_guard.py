@@ -51,11 +51,16 @@ VERDICT_TERMINATE = "terminate"
 
 # agent-zero parse_result 逐字语义：三态标签，**最后一个标签获胜**
 _RE_OK = re.compile(r"<ok\s*/>")
-_RE_TERMINATE = re.compile(r"<terminate\s*/>")
+# 周期#88：terminate 兼容两种判词形态——自闭合 `<terminate/>`（JUDGE_PROMPT 契约）
+# 与配对 `<terminate>依据</terminate>`（审计员 LLM 习惯，依据写在标签内）。此前配对形态
+# 不匹配任何正则→parse_verdict 判 ok→fail-open 放行（实证漏检缺口），语义等价合并：
+# 配对形态内文即终止依据（与 clarify 标签内文同语义）。
+_RE_TERMINATE = re.compile(r"<terminate\s*/>|<terminate>(.*?)</terminate>", re.DOTALL)
 _RE_CLARIFY = re.compile(r"<clarify>(.*?)</clarify>", re.DOTALL)
-# 12.6① 判词依据提取用：三态 verdict 标签整体（clarify 含标签内文）
+# 12.6① 判词依据提取用：三态 verdict 标签整体（clarify/配对 terminate 含标签内文）
 _RE_VERDICT_TAG = re.compile(
-    r"<ok\s*/>|<terminate\s*/>|<clarify>.*?</clarify>", re.DOTALL)
+    r"<ok\s*/>|<terminate\s*/>|<terminate>.*?</terminate>|<clarify>.*?</clarify>",
+    re.DOTALL)
 _RATIONALE_MAX = 400
 
 MAX_CLARIFICATIONS = 2  # agent-zero max_clarifications 默认3，本系统取2（超限即终止）
@@ -130,7 +135,8 @@ def parse_verdict(text: str) -> tuple[str, str]:
             pos, action, detail = m.start(), VERDICT_OK, ""
     for m in _RE_TERMINATE.finditer(text):
         if m.start() > pos:
-            pos, action, detail = m.start(), VERDICT_TERMINATE, ""
+            # 配对形态 <terminate>依据</terminate> 内文即终止依据（自闭合形态 group(1)=None）
+            pos, action, detail = m.start(), VERDICT_TERMINATE, (m.group(1) or "").strip()
     for m in _RE_CLARIFY.finditer(text):
         if m.start() > pos:
             pos, action, detail = m.start(), VERDICT_CLARIFY, m.group(1).strip()
