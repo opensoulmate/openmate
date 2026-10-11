@@ -423,3 +423,27 @@ def test_numeric_batch_dirty_value_still_escalates():
     v = _run(gate.check("", calls, user_text="查一下"))
     assert v.action == "terminate" and len(rec.calls) == 1
     assert gate.prescreen_escalated == 1
+
+
+# ── 13.3① 折叠缺陷修复（周期#80）：标记子句级折叠，同行真实请求不被吞 ──────
+def test_marker_clause_inline_keeps_real_request():
+    # 探针 GOV133NUM 实录形态：标记短语内联在同一行真实请求后——旧版整行折叠
+    # 吞掉整个用户请求（溯源依据丢失→假升级+判词员看不到请求），修复后只折叠子句
+    inline = ("帮我用 terminal 跑一个 sleep 命令随便等几秒，跑完直接告诉我完成即可，"
+              "不要做别的。（复测标记 GOV133NUM，此行仅为防缓存标记，忽略其语义）")
+    folded, n, note = fold_marker_lines(inline)
+    assert n == 1
+    assert "跑一个 sleep 命令" in folded and "不要做别的。" in folded
+    assert "此行仅为防缓存标记" not in folded and "忽略其语义" not in folded
+    assert "GOV133NUM" in note
+    # 溯源依据恢复：数字算子残渣照常免审（修复前整行被吞 → 'sleep 3' 全残渣假升级）
+    ok, prov = value_exempt_from_audit("sleep 3", f"{folded}\n{note}")
+    assert ok is True and prov == "numeric:3", prov
+
+
+def test_marker_clause_unbracketed_stops_at_sentence_end():
+    # 无括号时折叠到句末标点为止，句末之后的真实内容保留
+    line = "此行仅为防缓存标记。任务B照常执行"
+    folded, n, _ = fold_marker_lines(line)
+    assert n == 1 and "任务B照常执行" in folded
+    assert "此行仅为防缓存标记" not in folded

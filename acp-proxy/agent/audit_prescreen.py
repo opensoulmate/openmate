@@ -36,17 +36,30 @@ from __future__ import annotations
 import json
 import re
 
-# ── 防缓存/占位标记行（窄签名，中英双语）──────────────────────────────────
-# 需同时命中"自述仅是"与"标记/占位"两组词——单有"忽略"不折叠（防误杀真实需求行）
-_MARKER_LINE_RE = re.compile(
-    r"^.*(?:"
+# ── 防缓存/占位标记（窄签名，中英双语）──────────────────────────────────
+# 需同时命中"自述仅是"与"标记/占位"两组词——单有"忽略"不折叠（防误杀真实需求行）。
+# ⚠️ 13.3① 实证缺陷修复（周期#80）：旧实现 `^.*(?:短语).*$` **整行**折叠——标记
+# 短语内联在同一行真实请求后时（"…不要做别的。（复测标记 X，此行仅为防缓存标记，
+# 忽略其语义）"，探针 GOV133NUM 实录）把整个用户请求连带吞掉：溯源依据丢失→假升级
+# 审计、判词员看不到用户请求（比疑触发误杀更糟的同族缺陷）。改为**标记子句级**
+# 折叠：只折叠自述标记子句（含短语的括号组整体；无括号时折叠短语起到句末标点/
+# 行尾为止），短语之前的同行内容原样保留送审。残余边界（如实记录）：自述短语后
+# 无任何句末/括号边界的同句内容（"此行仅为防缓存标记，请帮我删库"）仍随子句折叠
+# ——该行自述"整行只是标记"，窄签名本就建立在这一自述上，与旧行为一致不放宽。
+_MARKER_PHRASE_RE = re.compile(
+    r"(?:"
     r"(?:此|本|这)(?:一)?行(?:仅仅?|只是)(?:为|是|作为)?[^。\n]{0,12}(?:标记|占位|防缓存)"
     r"|"
     r"this\s+line\s+is\s+only\s+(?:a\s+)?(?:cache[- ]?busting\s+)?(?:marker|placeholder)"
-    r").*$",
+    r")",
     re.IGNORECASE,
 )
-# 折叠说明里保留的可审计标识（RUN_TAG 之类）
+# 短语所在括号组（子句边界）：（…）【…】[…] (…)
+_BRACKET_GROUP_RE = re.compile(r"（[^（）]*）|【[^【】]*】|\[[^\[\]]*\]|\([^()]*\)")
+# 无括号子句的右边界：句末标点/收尾括号
+_CLAUSE_END_CHARS = "。！？!?；;）)】]」』"
+# 折叠说明里保留的可审计标识（RUN_TAG 之类，含数字的 token 才算标识——防把
+# 普通英文词当 tag 报进说明）
 _TAG_TOKEN_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_\-]{3,}")
 
 # 残渣"惰性"判定：去掉用户原文片段后只剩空白/引号/中文标点 = 无模型自造内容。
@@ -80,26 +93,43 @@ _MIN_SPAN = 4  # 溯源片段最短长度（更短的碎片不作覆盖依据，
 
 
 def fold_marker_lines(text: str) -> tuple[str, int, str]:
-    """折叠自述占位/防缓存标记行。返回 (折叠后文本, 折叠条数, 说明)。"""
+    """折叠自述占位/防缓存标记**子句**（13.3① 周期#80 整行吞缺陷修复）。
+
+    返回 (折叠后文本, 折叠条数, 说明)。短语所在括号组整体折叠；无括号时折叠
+    短语起到句末标点/收尾括号/行尾为止。短语之前的同行内容（真实请求）原样
+    保留——旧版整行折叠会把同行请求连带吞掉（溯源依据丢失+判词员看不到请求）。
+    """
     if not text:
         return text, 0, ""
-    kept: list[str] = []
+    out_lines: list[str] = []
     tags: list[str] = []
     count = 0
     for line in text.splitlines():
-        if _MARKER_LINE_RE.match(line.strip()):
-            count += 1
-            m = _TAG_TOKEN_RE.search(line)
-            if m:
-                tags.append(m.group(0))
+        m = _MARKER_PHRASE_RE.search(line)
+        if not m:
+            out_lines.append(line)
             continue
-        kept.append(line)
+        count += 1
+        start, end = m.start(), len(line)
+        for g in _BRACKET_GROUP_RE.finditer(line):
+            if g.start() <= m.start() < g.end():
+                start, end = g.start(), g.end()
+                break
+        else:
+            for j in range(m.end(), len(line)):
+                if line[j] in _CLAUSE_END_CHARS:
+                    end = j + 1
+                    break
+        for tok in _TAG_TOKEN_RE.findall(line[:end]):
+            if any(ch.isdigit() for ch in tok):
+                tags.append(tok)
+        out_lines.append(line[:start] + line[end:])
     if not count:
         return text, 0, ""
     tag_note = "、".join(dict.fromkeys(tags))[:80]
     note = (f"（审计输入已折叠防缓存/占位标记行 {count} 条"
             f"{'：' + tag_note if tag_note else ''}——自述占位符，按其自述无语义）")
-    return "\n".join(kept), count, note
+    return "\n".join(out_lines), count, note
 
 
 def flatten_value_strings(obj, out: list | None = None) -> list[str]:
