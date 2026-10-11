@@ -31,6 +31,7 @@ from agent.code_mode import (
     CodeModeCancelled,
     CodeModeExecutor,
     CodeModeResult,
+    _reclaim_hung_thread,
 )
 from agent.sandbox_policy import SandboxPolicy
 from agent.soulmate_agent import SoulMateAgent
@@ -190,8 +191,9 @@ class TestExecutorFailureVisibility:
         assert len(calls) == 3
         assert len(res.call_log) == 3
 
-    def test_batch_timeout_returns_partial_and_sets_cancel(self):
+    def test_batch_timeout_returns_partial_and_sets_cancel(self, monkeypatch):
         """挂死脚本不能楔住会话（goose pctx教训）：批级超时→部分结果返回"""
+        monkeypatch.setattr("agent.code_mode.RECLAIM_GRACE_S", 0.1)  # 测试期快速回收
         calls = []
         ex = CodeModeExecutor(batch_timeout=1.0)
         script = (
@@ -563,3 +565,53 @@ class TestWiringEndToEnd:
         cm_text = [m for m in agent.llm_engine.seen_messages[1]
                    if m.get("role") == "tool"][0]["content"]
         assert "batch_execute 需要 script 参数" in cm_text
+
+
+class TestHungThreadReclaim:
+    """周期#83：批超时被放弃的 worker 线程到点回收（GIL 楔死另一半）。
+
+    实证背景：`while True: pass` 残留线程持 GIL 自旋，同进程其他线程
+    单次 syscall 的 GIL 再获取都要等切换间隔——0.14s 的目录 walk 实测变
+    60s+，整套回归被楔成"挂死"。
+    """
+
+    def test_hung_spinner_reclaimed_after_grace(self, monkeypatch):
+        monkeypatch.setattr("agent.code_mode.RECLAIM_GRACE_S", 0.2)
+        ex = CodeModeExecutor(batch_timeout=0.5)
+        script = "while True:\n    pass\n"
+        res = run(ex.execute(script, [], lambda n, a: asyncio.sleep(0)))
+        assert res.timed_out is True  # 超时语义不变
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            alive = [t for t in threading.enumerate()
+                     if t.name == "code-mode-exec" and t.is_alive()]
+            if not alive:
+                break
+            time.sleep(0.1)
+        alive = [t for t in threading.enumerate()
+                 if t.name == "code-mode-exec" and t.is_alive()]
+        assert alive == []  # 宽限期后残留自旋线程被回收
+
+    def test_reclaim_noop_on_not_started_thread(self):
+        # 线程从未启动（ident=None）：回收是安全 no-op，不抛异常
+        th = threading.Thread(target=lambda: None, name="code-mode-exec")
+        _reclaim_hung_thread(th, grace=0.05)
+        time.sleep(0.2)  # Timer 到点执行 _fire，走 ident is None 分支
+
+    def test_reclaim_survives_oneshot_exit(self):
+        # 线程已自行退出：_fire 检查 is_alive 短路，不注入不抛异常
+        th = threading.Thread(target=lambda: None, name="code-mode-exec")
+        th.start()
+        th.join(timeout=2.0)
+        assert not th.is_alive()
+        _reclaim_hung_thread(th, grace=0.05)
+        time.sleep(0.2)
+
+    def test_wiring_timeout_path_schedules_reclaim(self):
+        src = (Path(__file__).parent.parent / "agent" / "code_mode.py").read_text(
+            encoding="utf-8")
+        # TimeoutError 分支必须紧随 cancel 置位后调度回收
+        i = src.index("except asyncio.TimeoutError:")
+        seg = src[i:i + 400]
+        assert "state[\"cancel\"].set()" in seg
+        assert "_reclaim_hung_thread(worker, grace=RECLAIM_GRACE_S)" in seg

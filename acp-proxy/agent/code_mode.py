@@ -18,6 +18,9 @@ goose code_execution+kilocode code-mode（两方定案）"。
   for every session: bound the wait"）：
   * 批级超时（默认90s）：超时→cancel标记置位，worker里后续stub调用被拒绝不再产生
     副作用（AbortOnDrop语义），已完成的调用日志/部分结果照常返回
+  * 挂死脚本残留线程回收（宽限期默认2s）：超时被放弃的worker线程若仍在自旋
+    （如 while True: pass 持GIL楔死同进程其余线程），到点注入退出异常强制收口
+    （fire-and-forget，脚本吞异常时如实告警不谎称回收成功）
   * 单次调用超时（默认30s）：stub返回超时标记，脚本可继续（单次挂死不楔住整批）
   * 批内调用数上限（默认40）：失控循环到顶即停，错误显式返回
   * 脚本异常→部分call_log+stdout+traceback全部显式返回（mem0 §1.1"失败必须可见，
@@ -28,10 +31,12 @@ goose code_execution+kilocode code-mode（两方定案）"。
 """
 
 import asyncio
+import ctypes
 import io
 import json
 import logging
 import math
+import os
 import re
 import threading
 import time
@@ -51,6 +56,43 @@ class CodeModeCallLimit(Exception):
 
 class CodeModeCancelled(Exception):
     """批任务已被取消（批级超时后worker内后续stub调用直接拒绝）。"""
+
+
+# 挂死脚本残留线程回收宽限期（秒），SOULMATE_CODE_MODE_RECLAIM_S 可配。
+# 周期#83 实证：批超时放弃 worker 后，`while True: pass` 类自旋脚本线程持 GIL
+# 不放，把同进程其他线程拖慢单倍~百倍（实测 0.14s 的目录 walk 变 60s+，
+# 回合工具执行全链随之爬行）——"不楔住会话"只做了一半：有界等待做到了，
+# 残留线程回收没做。到点注入异步异常强制收口（_run 的 except BaseException
+# 接住→线程干净退出），fire-and-forget 不阻塞调用方。
+RECLAIM_GRACE_S = float(os.environ.get("SOULMATE_CODE_MODE_RECLAIM_S", "2.0"))
+
+
+def _reclaim_hung_thread(
+    thread: threading.Thread, grace: float = RECLAIM_GRACE_S,
+) -> None:
+    """回收批超时后被放弃的 worker 线程（Timer 线程内 fire-and-forget）。
+
+    PyThreadState_SetAsyncExc 在字节码边界注入 SystemExit——_run 的
+    except BaseException 收口后线程退出。脚本自行吞异常继续跑时回收失败，
+    如实告警不谎称成功（daemon 线程，进程退出自然回收）。
+    """
+    def _fire() -> None:
+        if not thread.is_alive() or thread.ident is None:
+            return  # 已自行退出/未曾启动：无需回收
+        try:
+            res = ctypes.pythonapi.PyThreadState_SetAsyncExc(
+                ctypes.c_ulong(thread.ident), ctypes.py_object(SystemExit))
+        except Exception as e:  # ctypes 注入不可用等：如实告警
+            logger.warning(f"[code-mode] 挂死脚本回收不可用: {e}")
+            return
+        if res == 0:
+            return  # 注入时线程刚退出
+        logger.warning(
+            f"[code-mode] 挂死脚本残留自旋已回收（注入退出异常） thread={thread.name}")
+
+    t = threading.Timer(grace, _fire)
+    t.daemon = True
+    t.start()
 
 
 # 受限builtins（不含__import__——见模块docstring）
@@ -213,12 +255,14 @@ class CodeModeExecutor:
             except RuntimeError:
                 pass  # 事件循环已关闭：结果丢弃，daemon线程直接退出
 
-        threading.Thread(target=_run, daemon=True, name="code-mode-exec").start()
+        worker = threading.Thread(target=_run, daemon=True, name="code-mode-exec")
+        worker.start()
         try:
             await asyncio.wait_for(asyncio.shield(exec_fut), timeout=self.batch_timeout)
             ok = True
         except asyncio.TimeoutError:
             state["cancel"].set()  # AbortOnDrop：worker里后续stub不再dispatch
+            _reclaim_hung_thread(worker, grace=RECLAIM_GRACE_S)  # 残留自旋线程到点回收（GIL楔死另一半）
             timed_out = True
             error = (f"[CODE_MODE_TIMEOUT] 批执行超过{self.batch_timeout}s已取消；"
                      "已完成的工具调用见日志，后续调用已阻断")

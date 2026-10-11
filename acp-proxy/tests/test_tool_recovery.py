@@ -278,3 +278,24 @@ class TestWiring:
     def test_agent_init_has_recovery(self):
         from agent.soulmate_agent import SoulMateAgent
         assert hasattr(SoulMateAgent, "_tool_recovery_execute")
+
+
+class TestPytestIsolation:
+    """周期#83：pytest 副作用禁写真实审计库（conftest.py autouse 兜底回归钉）。"""
+
+    def test_default_manager_escapes_real_db_under_pytest(self):
+        # conftest 注入 TOOL_FAILURE_DB_PATH → 默认构造不得解析到真实运行库
+        mgr = ToolRecoveryManager()
+        real = os.path.join(
+            os.path.expanduser("~/.hermes/soulmate/memory"), "tool_failures.db")
+        assert os.path.abspath(mgr._db_path) != os.path.abspath(real)
+
+    def test_record_never_touches_real_db_under_pytest(self):
+        real = os.path.join(
+            os.path.expanduser("~/.hermes/soulmate/memory"), "tool_failures.db")
+        before = os.path.getsize(real) if os.path.exists(real) else None
+        mgr = ToolRecoveryManager()
+        mgr.record("iso-check", "read_file", "transient", "错误: x",
+                   action="fallback", attempt=1, outcome="failed")
+        after = os.path.getsize(real) if os.path.exists(real) else None
+        assert before == after  # 真实库字节数纹丝不动
