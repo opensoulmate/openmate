@@ -413,3 +413,65 @@ def amend_availability(response: str, assessment: AvailabilityAssessment) -> str
     if not assessment.false_claims:
         return response
     return availability_banner(assessment) + "\n\n" + (response or "")
+
+
+# ── ⚡8.5c-②b 拒做补做（周期#42 诚实边界"拒做行为本身未强制重试"销账）────────
+# 更正声明只治"说"不治"做"：模型谎称点名工具"没注入/不在清单"而拒做，实测间歇
+# 复发（验收调研类 2026-10-12 1/2 复现）。此处定义**有界补做 1 轮**的目标判定
+# （宁可不做不误做：proof=registry 即"工具在册但本回合零成功执行"——assess_availability
+# 语义；用户明文点名才补，模型自选工具的取舍自由不越俎）与安全措辞（新文案不携带
+# 任何可被 find_availability_claims 匹配的声称形态——防对更正文本二次误报/防判据
+# 主答区被误判，措辞安全由测试钉死）。
+
+def remediation_targets(
+    assessment: AvailabilityAssessment,
+    user_text: str = "",
+) -> list[str]:
+    """拒做补做目标：proof=registry 的具名被证伪声称 + 用户明文点名该工具。
+
+    proof=registry 的语义（assess_availability 单一真源）= 工具在工具面真源在册、
+    但本回合**没有成功执行**——恰是"说没有而没做"的拒做形态；proof=executed
+    （做完了还说没有）不需要补做，走既有更正声明即可。返回按声称顺序去重。
+    """
+    out: list[str] = []
+    for c in assessment.false_claims:
+        if c.proof != "registry" or not c.tool_name:
+            continue
+        if c.tool_name not in (user_text or ""):
+            continue
+        if c.tool_name not in out:
+            out.append(c.tool_name)
+    return out
+
+
+def build_execution_remediation_prompt(tool_name: str) -> str:
+    """补做指令（注入为 user 消息）：点名工具真实在册，请直接调用完成任务。
+
+    措辞安全：不含"X 工具不可用/没有 X 工具/未注入工具"等声称形态（find_availability_claims
+    零命中，测试钉死）——防模型引用本指令文本触发二次误报更正。
+    """
+    return (
+        f"系统更正指令：你上一条回复对 `{tool_name}` 的可用性判断有误。"
+        f"`{tool_name}` 已在本回合工具清单中真实提供，请直接调用 `{tool_name}` "
+        f"完成用户的请求并给出结果；不要以工具缺失为由拒绝执行，也不要用其他工具替代。"
+    )
+
+
+def remediation_succeeded(tool_name: str, tool_calls_log: list | None) -> bool:
+    """补做是否真的执行了目标工具（执行账本 executed 侧单一真源）。"""
+    executed, _blocked = parse_ledger(tool_calls_log)
+    return any(e.name == tool_name for e in executed)
+
+
+def build_remediation_response(original: str, tool_name: str, fix_resp: str) -> str:
+    """补做成功的最终回复 = 补做答案 + 更正声明（首轮原文留档 journal/流式帧，
+    不在回复里逐字复述误报——防可用性抽取对引用文本二次误报）。
+
+    末行"可用性更正声明"同时是验收判据的主答区切割点（acceptance_benchmark
+    verify_research 按该短语切主答区），补做答案在主答区首位。
+    """
+    return (
+        (fix_resp or "").strip()
+        + f"\n\n可用性更正声明（首轮）：首轮回复对 `{tool_name}` 的可用性判断有误，"
+        + "该工具真实存在于本回合工具清单且已实际调用完成任务（首轮原文留档审计日志）。"
+    )

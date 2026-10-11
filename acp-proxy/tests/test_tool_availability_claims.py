@@ -189,12 +189,18 @@ def test_wiring_availability_check_uses_tool_face_truth_source():
 
 def test_wiring_availability_before_self_verify_and_after_evidence():
     src = _agent_source()
-    avail = src.find("report_evidence.assess_availability(")
+    # 周期#101 断言跟上（8.5c-②b 拒做补做）：assess_availability 现有两个调用点——
+    # ①补做目标判定（证据治理之前）②8.5c-② 更正核验（证据治理之后）。锚点改以
+    # 更正收口 amend_availability 判原意图（更正在证据后、自检前），并补钉新架构。
+    amend = src.find("report_evidence.amend_availability(full_response, _avail)")
     verify = src.find("self._self_verifier.verify(user_text, full_response, tool_calls_log)")
     evidence = src.find("report_evidence.assess(user_text, full_response, tool_calls_log)")
-    assert avail > 0, "可用性核验收口缺失"
-    assert evidence > 0 and avail > evidence, "可用性核验须在证据治理之后"
-    assert verify > avail, "可用性核验须先于自检（自检看更正后文本）"
+    avail_first = src.find("report_evidence.assess_availability(")
+    assert amend > 0, "可用性更正收口缺失"
+    assert evidence > 0 and amend > evidence, "可用性更正须在证据治理之后"
+    assert verify > amend, "可用性更正须先于自检（自检看更正后文本）"
+    assert avail_first > 0 and avail_first < evidence, \
+        "拒做补做目标判定须在证据治理之前（8.5c-②b）"
 
 
 # ── ⑥ 周期#66 事故形态：容器在前的注册声称（"工具列表中没有 X"）────────

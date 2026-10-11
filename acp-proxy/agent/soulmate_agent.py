@@ -6258,6 +6258,52 @@ You can send files to the user natively: to deliver a file, write a brief confir
         except Exception as e:
             logger.debug(f"[p2-post] 后置处理失败(非致命): {e}")
 
+        # ── ⚡8.5c-②b 拒做补做（周期#42 诚实边界"拒做行为本身未强制重试"销账）────
+        # 模型谎称点名工具"没注入/不在清单"而拒做（实测间歇复发，验收调研类 1/2 复现）：
+        # 8.5c-② 更正声明只治"说"不治"做"。对"工具在册+用户明文点名+零成功执行"
+        # 的误报做**有界补做 1 轮**（对齐 2.1 补做纪律）：真调用了 → 最终回复=补做
+        # 答案+更正声明（首轮原文留档 journal/流式帧）；仍拒做 → 不改写，落回既有
+        # 8.2/8.5c-② 治理路径（原文保留可审计），绝不循环。
+        # 放在 8.2 之前：补做成功后 8.2/8.5c-②/2.1 对最终合并文本统一收口。
+        try:
+            _avail_pre = report_evidence.assess_availability(
+                full_response,
+                getattr(self, "_active_tool_names", None),
+                tool_calls_log,
+            )
+            _remediate = report_evidence.remediation_targets(_avail_pre, user_text)
+        except Exception as e:
+            logger.debug(f"[refusal-remedy] 目标判定失败(非致命): {e}")
+            _remediate = []
+        if _remediate:
+            _tool = _remediate[0]  # 有界1轮：只补做首个目标
+            logger.warning(
+                f"[refusal-remedy] session={session_id} 拒做补做(上限1轮): {_tool}")
+            try:
+                fix_messages = messages + [
+                    {"role": "assistant", "content": full_response[:2000]},
+                    {"role": "user", "content":
+                        report_evidence.build_execution_remediation_prompt(_tool)},
+                ]
+                fix_resp, fix_tools = await self._run_llm_with_tools(
+                    fix_messages, session_id,
+                    matched_skills=matched_skills, user_text=user_text,
+                )
+                if fix_tools:
+                    tool_calls_log.extend(fix_tools)
+                if fix_resp and report_evidence.remediation_succeeded(_tool, tool_calls_log):
+                    full_response = report_evidence.build_remediation_response(
+                        full_response, _tool, fix_resp)
+                    logger.info(
+                        f"[refusal-remedy] session={session_id} 补做成功: {_tool}")
+                else:
+                    logger.warning(
+                        f"[refusal-remedy] session={session_id} 补做后 {_tool} "
+                        f"仍未执行，走既有更正声明路径")
+            except Exception as e:
+                logger.warning(
+                    f"[refusal-remedy] session={session_id} 补做失败(非致命): {e}")
+
         # ── ⚡8.2 短路合成报告治理：报告必须以工具执行证据为前提 ──────
         # 完成声称但本回合零成功工具执行（或工具全被拦截）→ 治理声明+报告标题降级，
         # 禁报"完成"；被拦截的工具报"被拦截+原因"。落库回复=治理后文本。
