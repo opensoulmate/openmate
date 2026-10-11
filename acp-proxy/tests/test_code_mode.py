@@ -576,6 +576,7 @@ class TestHungThreadReclaim:
     """
 
     def test_hung_spinner_reclaimed_after_grace(self, monkeypatch):
+        monkeypatch.setenv("SOULMATE_CODE_MODE_ISOLATION", "thread")  # 14.1后默认process，此例钉线程路径
         monkeypatch.setattr("agent.code_mode.RECLAIM_GRACE_S", 0.2)
         ex = CodeModeExecutor(batch_timeout=0.5)
         script = "while True:\n    pass\n"

@@ -28,6 +28,16 @@ goose code_execution+kilocode code-mode（两方定案）"。
 - 受限builtins：__import__不注入——批内脚本要跑任意代码应调用terminal/execute_code
   工具（这些工具本身仍过权限gate），而不是绕过权限层直接import subprocess。
   json/re/math三个纯计算模块可用。
+
+进程级隔离（路线图14.1，周期#84）：脚本执行默认搬独立子进程
+（agent/code_mode_worker.py，browser_worker 同款 JSONL/子进程模式）。周期#83
+实证吞异常死循环（while True: try/except pass）连线程回收（PyThreadState_
+SetAsyncExc）都收不掉——残留线程持 GIL 自旋把同进程所有线程拖慢单倍~百倍。
+进程级隔离后 GIL 面彻底消失：批级超时=kill 进程组（连带清子进程），挂死只损失
+本批；单次调用超时/调用上限/部分结果语义等价迁移（`result` 赋值与 print 即时
+流式快照送出，被杀时部分产物不丢；内层工具仍由父进程 dispatch=不绕权限引擎）。
+SOULMATE_CODE_MODE_ISOLATION=thread 回退旧线程模式（代码路径保留，测试/应急用），
+默认 process。
 """
 
 import asyncio
@@ -38,12 +48,15 @@ import logging
 import math
 import os
 import re
+import signal
+import sys
 import threading
 import time
 import traceback
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from contextlib import redirect_stdout
 from dataclasses import dataclass, field
+from pathlib import Path
 
 logger = logging.getLogger("acp.code_mode")
 
@@ -65,6 +78,15 @@ class CodeModeCancelled(Exception):
 # 残留线程回收没做。到点注入异步异常强制收口（_run 的 except BaseException
 # 接住→线程干净退出），fire-and-forget 不阻塞调用方。
 RECLAIM_GRACE_S = float(os.environ.get("SOULMATE_CODE_MODE_RECLAIM_S", "2.0"))
+
+# 脚本执行隔离面（路线图14.1）：process=独立子进程（默认，GIL面彻底消失）/
+# thread=旧线程模式（保留代码路径，测试/应急用）。逐次读 env 便于测试与运维切换。
+ISOLATION_ENV = "SOULMATE_CODE_MODE_ISOLATION"
+
+
+def _isolation() -> str:
+    v = str(os.environ.get(ISOLATION_ENV, "process") or "process").strip().lower()
+    return "thread" if v in ("thread", "inproc", "in-process") else "process"
 
 
 def _reclaim_hung_thread(
@@ -215,7 +237,17 @@ class CodeModeExecutor:
 
     # ── 执行入口 ──────────────────────────────────────────────────
     async def execute(self, script: str, available_tools, dispatch) -> CodeModeResult:
-        """执行批处理脚本。dispatch: async (name: str, args: dict) -> str。"""
+        """执行批处理脚本。dispatch: async (name: str, args: dict) -> str。
+
+        隔离面路由（路线图14.1）：默认 process（子进程，GIL面消失）；
+        SOULMATE_CODE_MODE_ISOLATION=thread 走旧线程模式。
+        """
+        if _isolation() == "thread":
+            return await self._execute_in_thread(script, available_tools, dispatch)
+        return await self._execute_in_process(script, available_tools, dispatch)
+
+    async def _execute_in_thread(self, script: str, available_tools, dispatch) -> CodeModeResult:
+        """旧线程模式（SOULMATE_CODE_MODE_ISOLATION=thread）：保留语义与回收机制。"""
         loop = asyncio.get_running_loop()
         state = {
             "call_log": [],
@@ -288,6 +320,184 @@ class CodeModeExecutor:
         )
         logger.info(
             f"[code-mode] ok={res.ok} calls={res.calls_dispatched} "
+            f"logged={len(res.call_log)} {res.duration_ms}ms"
+            f"{' timed_out' if res.timed_out else ''}")
+        return res
+
+    # ── 子进程隔离执行（路线图14.1，默认路径）────────────────────
+    async def _execute_in_process(self, script: str, available_tools, dispatch) -> CodeModeResult:
+        """脚本在独立子进程执行（agent/code_mode_worker.py JSONL 协议）。
+
+        语义等价迁移对照线程模式：
+        - 内层工具：子进程 stub 发 tool_call → 本进程 dispatch（含 permission gate）
+          → 回传 tool_result；单次调用超时在本进程判定（ok/error 标记随结果回传）。
+        - 批级超时：kill 进程组（start_new_session+killpg），AbortOnDrop 语义——
+          后续 stub 不再执行；call_log/输出/result 经子进程流式快照保留（部分结果不丢）。
+        - 调用上限/参数校验/异常可见：子进程同款语义（见 code_mode_worker.py）。
+        """
+        t0 = time.monotonic()
+        worker_path = Path(__file__).resolve().parent / "code_mode_worker.py"
+
+        async def _write(obj: dict) -> bool:
+            try:
+                proc.stdin.write(
+                    (json.dumps(obj, ensure_ascii=False, default=str) + "\n").encode("utf-8"))
+                await proc.stdin.drain()
+                return True
+            except Exception:
+                return False
+
+        async def _kill_proc() -> None:
+            # killpg 连带清掉脚本可能留下的子进程（进程组=start_new_session 独立）
+            if proc.returncode is not None:
+                return
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, OSError):
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=5)
+            except asyncio.TimeoutError:
+                pass
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable, str(worker_path),
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=str(Path(__file__).resolve().parent.parent),
+                start_new_session=True,
+            )
+        except Exception as e:
+            return CodeModeResult(
+                ok=False, error=f"[CODE_MODE] 子进程启动失败: {e}",
+                duration_ms=int((time.monotonic() - t0) * 1000))
+        assert proc.stdin is not None and proc.stdout is not None \
+            and proc.stderr is not None  # PIPE 模式恒非空（类型收窄）
+
+        call_log: dict = {}          # seq → entry（开始/结束两次快照 upsert）
+        stdout_parts: list = []
+        state_results: list = []     # `result` 变量流式快照（最新为准）
+        final_fut: asyncio.Future = asyncio.get_running_loop().create_future()
+
+        async def _pump() -> None:
+            try:
+                while True:
+                    line = await proc.stdout.readline()
+                    if not line:
+                        break
+                    try:
+                        msg = json.loads(line)
+                    except Exception:
+                        continue
+                    typ = msg.get("type")
+                    if typ == "tool_call":
+                        seq = msg.get("seq")
+                        name = str(msg.get("name", ""))
+                        args = msg.get("args") or {}
+                        ok, err = True, ""
+                        try:
+                            r = await asyncio.wait_for(
+                                dispatch(name, args), timeout=self.call_timeout)
+                        except asyncio.TimeoutError:
+                            ok, err = False, "call_timeout"
+                            r = (f"[CODE_MODE] 工具调用超时({self.call_timeout}s): {name}")
+                        except Exception as e:  # dispatch异常（含gate故障降级）
+                            ok, err = False, str(e)[:200]
+                            r = f"[CODE_MODE] 工具调用异常: {name}: {e}"
+                        await _write({
+                            "type": "tool_result", "seq": seq, "ok": ok,
+                            "error": err, "result": str(r) if r is not None else ""})
+                    elif typ == "call_log":
+                        entry = msg.get("entry") or {}
+                        if entry.get("seq") is not None:
+                            call_log[entry["seq"]] = entry
+                    elif typ == "stdout":
+                        stdout_parts.append(str(msg.get("text", "")))
+                    elif typ == "state":
+                        state_results.append(msg.get("result"))
+                    elif typ == "final":
+                        if not final_fut.done():
+                            final_fut.set_result(msg)
+            except Exception as e:
+                if not final_fut.done():
+                    final_fut.set_exception(e)
+
+        pump_task = asyncio.ensure_future(_pump())
+        await _write({
+            "action": "exec", "script": script,
+            "tool_names": [str(t) for t in (available_tools or [])],
+            "max_calls": self.max_calls, "call_timeout": self.call_timeout,
+        })
+
+        ok, error, timed_out = False, "", False
+        try:
+            final_msg = await asyncio.wait_for(asyncio.shield(final_fut), timeout=self.batch_timeout)
+            ok = bool(final_msg.get("ok"))
+            error = str(final_msg.get("error") or "")
+            for entry in (final_msg.get("call_log") or []):
+                if entry.get("seq") is not None:
+                    call_log[entry["seq"]] = entry
+        except asyncio.TimeoutError:
+            timed_out = True
+            await _write({"type": "cancel"})  # 尽力而为（自旋时收不到也无妨）
+            try:  # 宽限一小拍：在途调用收尾即返回（随后必 kill，不留自旋）
+                final_msg = await asyncio.wait_for(asyncio.shield(final_fut), timeout=0.5)
+                ok = bool(final_msg.get("ok"))
+                error = str(final_msg.get("error") or "")
+            except Exception:
+                pass
+            if not final_fut.done():
+                ok = False
+                error = (f"[CODE_MODE_TIMEOUT] 批执行超过{self.batch_timeout}s已取消；"
+                         "已完成的工具调用见日志，后续调用已阻断")
+        except asyncio.CancelledError:
+            await _kill_proc()
+            pump_task.cancel()
+            raise
+        except Exception as e:
+            ok = False
+            error = f"[CODE_MODE] 子进程通信异常: {e}"
+
+        await _kill_proc()
+        pump_task.cancel()
+        stderr_tail = ""
+        try:
+            stderr_tail = (await proc.stderr.read()).decode("utf-8", "replace").strip()
+        except Exception:
+            pass
+        if not ok and not timed_out and not final_fut.done() and not error:
+            # 子进程崩溃/被杀且无显式错误：如实报退出码+stderr尾，禁静默
+            error = (f"[CODE_MODE] 子进程异常退出 code={proc.returncode}"
+                     + (f": {stderr_tail[-400:]}" if stderr_tail else ""))
+        if not final_fut.done() and error and not timed_out and stderr_tail and "脚本异常" in error:
+            error = f"{error}\n[stderr] {stderr_tail[-400:]}"
+
+        # 输出语义与线程模式一致：result 变量优先，否则 stdout
+        out_val = state_results[-1] if state_results else None
+        output = str(out_val) if out_val is not None else "".join(stdout_parts).strip()
+        calls_dispatched = max(
+            [int(e.get("seq") or 0) for e in call_log.values()] or [0])
+        if final_fut.done() and not timed_out:
+            try:
+                calls_dispatched = int(final_fut.result().get("calls_dispatched") or 0)
+            except Exception:
+                pass
+        res = CodeModeResult(
+            ok=ok,
+            output=output[:8000],
+            call_log=[call_log[k] for k in sorted(call_log)],
+            error=error,
+            timed_out=timed_out,
+            duration_ms=int((time.monotonic() - t0) * 1000),
+            calls_dispatched=calls_dispatched,
+        )
+        logger.info(
+            f"[code-mode/process] ok={res.ok} calls={res.calls_dispatched} "
             f"logged={len(res.call_log)} {res.duration_ms}ms"
             f"{' timed_out' if res.timed_out else ''}")
         return res
