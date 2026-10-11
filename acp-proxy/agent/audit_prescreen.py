@@ -14,6 +14,12 @@
    批次内容全部来自用户明文（8.1② 同语义："能出现在用户请求里的文本本来就是用户
    意图"），LLM 判词在此类上只会得到 ok（JUDGE_PROMPT 判据 4/5 本就要求判 ok），
    跳过不构成拦截面缩水。**残渣含任何字母即升级 LLM 审计**（宁慢不误放）：
+   唯一例外=12.4 免审面扩展②（周期#70）：残渣**恰好是单个**执行动词/解释器名
+   token（python3 之类，见 _EXEC_VERB_RE）时免审——模型自造内容只是"用哪个
+   解释器运行用户点名的脚本文件"这一个词，无注入语义（零缩水论证：带 flag
+   （-c/-m/-e）、链式（;|&&）、shell 元字符、破坏性动词（rm/sudo/curl…）的残渣
+   都不在窄名单，照常升级；用户明文部分语义与 8.1② 逐字一致，新增豁免面仅
+   "解释器名"一个 token）：
    - 必须是连续原文片段覆盖（非逐词拼凑）——防"用户提到过 rm 和 -rf 各自的字样"
      被拼成 rm -rf 逃审计；
    - **仅认 user_text 溯源**，本回合工具结果不作免审依据——web_extract 等外部内容
@@ -48,6 +54,12 @@ _TAG_TOKEN_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_\-]{3,}")
 # ⚠️ ASCII 路径/shell 语义字符（/ \ . - _ $ ` | & ; < > ~ * ? ! # @ % ^ + =）与数字/
 # 字母一律不算惰性——"用户写了 rm -rf、模型补个 /"的拼装逃逸在此被挡（宁慢不误放）
 _INERT_RE = re.compile(r"^[\s\"'“”‘’，、：；！？（）【】《》。，]*$")
+
+# ── 12.4 免审面扩展②（周期#70）：执行动词残渣（窄名单）────────────────────
+# 语义：模型自造内容**只有一个 token**=解释器/运行时名（运行用户点名的脚本文件），
+# 其余内容仍须全部用户明文连续片段溯源。名单按"只接受脚本文件参数的解释器"收窄：
+# 破坏性动词/shells 的 -c 逃逸/带 flag/链式一律不在名单 → 残渣非单 token 即升级。
+_EXEC_VERB_RE = re.compile(r"^(?:python|python2|python3|python3\.\d{1,2}|node|bash|sh)$")
 
 _MIN_SPAN = 4  # 溯源片段最短长度（更短的碎片不作覆盖依据，防乱拼）
 
@@ -148,26 +160,75 @@ def value_is_user_verbatim(value: str, user_text: str) -> bool:
     return _INERT_RE.match(residue) is not None
 
 
+def residue_is_exec_verb(residue: str) -> bool:
+    """残渣是否**恰好**=单个执行动词/解释器名 token（多余任何字符即 False）。
+
+    12.4 免审面扩展②的全部豁免面：模型自造内容只有解释器名这一个词。
+    带 flag/链式/shell 元字符/破坏性动词的残渣都不匹配 → 照常升级 LLM 审计。
+    """
+    tok = (residue or "").strip()
+    return bool(tok) and _EXEC_VERB_RE.match(tok) is not None
+
+
+def value_exempt_from_audit(value: str, user_text: str) -> tuple[bool, str]:
+    """免审判定（12.4 免审面扩展②）。返回 (免审, 溯源类型或残渣)。
+
+    - 免审=True：溯源类型 "user_verbatim"（全明文）/ "exec_verb:<tok>"（仅多一个
+      执行动词）/ "empty"（空值中性）；
+    - 免审=False：第二项=残渣文本（供报因，走"自造文本→升级审计"）。
+    """
+    if not value or not value.strip():
+        return True, "empty"
+    if not user_text:
+        return False, value
+    residue = uncovered_residue(value, user_text)
+    if _INERT_RE.match(residue) is not None:
+        return True, "user_verbatim"
+    if residue_is_exec_verb(residue):
+        return True, f"exec_verb:{residue.strip()}"
+    return False, residue
+
+
+def prescreen_batch_ex(tool_calls: list, user_text: str) -> tuple[bool, str, str]:
+    """确定性预筛（带溯源类型）。返回 (免审, 说明, source)。
+
+    source ∈ {"prescreen_user_verbatim", "prescreen_exec_verb", ""}：批次内只要
+    有一个值走执行动词豁免，整批 source 就取更弱的 "prescreen_exec_verb"
+    （免审留痕如实标注，不冒充全明文）。
+    """
+    if not tool_calls:
+        return False, "空批次", ""
+    if not (user_text or "").strip():
+        return False, "用户请求为空（无可溯源依据）", ""
+    clean_parts: list[str] = []
+    verbs: list[str] = []
+    for idx, call in enumerate(tool_calls):
+        if not isinstance(call, dict):
+            return False, f"第{idx + 1}个调用形态不可核验", ""
+        name = call.get("name") or "unknown"
+        values = flatten_value_strings(_parse_args(call))
+        for val in values:
+            ok, prov = value_exempt_from_audit(val, user_text)
+            if not ok:
+                return False, (
+                    f"{name} 参数含用户请求之外的自造文本"
+                    f"（残渣: {prov[:60]!r}）"), ""
+            if prov.startswith("exec_verb:"):
+                verbs.append(prov.split(":", 1)[1])
+        clean_parts.append(name)
+    note = "；".join(clean_parts) or "（无参数调用）"
+    if verbs:
+        uniq = "、".join(dict.fromkeys(verbs))
+        return True, f"{note}（模型自选执行动词: {uniq}）", "prescreen_exec_verb"
+    return True, note, "prescreen_user_verbatim"
+
+
 def prescreen_batch(tool_calls: list, user_text: str) -> tuple[bool, str]:
     """确定性预筛：批次是否可免 LLM 判词往返。返回 (免审, 说明)。
 
     仅当：user_text 非空 且 批次非空 且 每个调用的每个字符串参数值都全部
-    用户明文溯源时免审。任一不满足 → False（升级 LLM 审计）。
+    用户明文溯源（或仅多单个执行动词 token，12.4②）时免审。任一不满足 →
+    False（升级 LLM 审计）。
     """
-    if not tool_calls:
-        return False, "空批次"
-    if not (user_text or "").strip():
-        return False, "用户请求为空（无可溯源依据）"
-    clean_parts: list[str] = []
-    for idx, call in enumerate(tool_calls):
-        if not isinstance(call, dict):
-            return False, f"第{idx + 1}个调用形态不可核验"
-        name = call.get("name") or "unknown"
-        values = flatten_value_strings(_parse_args(call))
-        for val in values:
-            if not value_is_user_verbatim(val, user_text):
-                return False, (
-                    f"{name} 参数含用户请求之外的自造文本"
-                    f"（残渣: {uncovered_residue(val, user_text)[:60]!r}）")
-        clean_parts.append(name)
-    return True, "；".join(clean_parts) or "（无参数调用）"
+    ok, note, _source = prescreen_batch_ex(tool_calls, user_text)
+    return ok, note
