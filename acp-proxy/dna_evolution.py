@@ -52,6 +52,46 @@ from utils.llm_errors import LLMCallError  # noqa: F401（兼容再导出）
 
 logger = logging.getLogger("acp-proxy.dna_evolution")
 
+
+def _record_llm_failure_safe(
+    strand_id: str,
+    code: str,
+    detail: str = "",
+    request_id: str | None = None,
+    _dedup: set | None = None,
+) -> None:
+    """best-effort 失败记账（唯一入口，禁止再裸调 record_llm_failure）。
+
+    契约：
+    1) 幂等键 = (request_id, code) —— 同一请求同一九态码只记一次；
+    2) 委托 utils.llm_transport._record_failure_safe（记账单一真源）；
+    3) 任何记账异常只 logger.warning，绝不向上冒泡影响 LLMCallError 的
+       raise 语义 / 续写防护循环 / park 策略。
+    """
+    rid = request_id or str(uuid.uuid4())
+    key = (rid, code)
+    if _dedup is None:
+        _dedup = _RECORDED_FAILURE_KEYS
+    try:
+        if key in _dedup:
+            logger.debug("dna llm failure already recorded (idempotent skip): %s", key)
+            return
+        _dedup.add(key)
+        llm_transport._record_failure_safe(
+            strand_id=strand_id,
+            request_id=rid,
+            code=code,
+            detail=detail,
+        )
+    except Exception as exc:  # noqa: BLE001 —— 记账降级不得反噬进化 strand
+        logger.warning(
+            "dna llm failure accounting degraded (best-effort): %s", exc, exc_info=True
+        )
+
+
+# 记账幂等键集合（进程内，防同一请求重复记账污染进化样本）
+_RECORDED_FAILURE_KEYS: set = set()
+
 # ── 配置 ──────────────────────────────────────────────────
 
 HEARTBEAT_INTERVAL = 5

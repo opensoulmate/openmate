@@ -32,6 +32,8 @@ complete_with_protection调用（含续写轮）内停在应答的link上。链=
 
 import asyncio
 import logging
+import uuid
+from collections import OrderedDict
 
 import httpx
 
@@ -66,6 +68,45 @@ def _fail_detail(strand_id: str, info) -> str:
     return f"[{strand_id}] {text}" if strand_id else text
 
 
+# 幂等键→None，容量上限 4096，超出 FIFO 淘汰，防长跑内存膨胀。
+# 键= f"{request_id}:{code}"（请求ID+九态码），同一请求同一九态码只入账一次，
+# 阻断重复入账/半写后重入；半写（入账前抛异常）不写键，允许下次重试。
+_RECORDED_KEYS = OrderedDict()
+_RECORDED_KEYS_MAX = 4096
+
+
+def _record_failure_safe(strand_id: str, request_id: str, code: str, detail: str) -> bool:
+    """传输故障记账 best-effort 化 + 幂等键去重（阻断记账异常反噬 LLM 主链路）。
+
+    - 幂等键 = f"{request_id}:{code}"（请求ID+九态码）；键已存在直接 return False，
+      防止重复入账 / 半写后重入；
+    - record_llm_failure(...) 放在 try: ... except Exception: 内，except 分支仅
+      logger.warning('llm failure accounting degraded (best-effort): %s', exc,
+      exc_info=True)，绝不 raise、绝不吞掉主流程异常；
+    - 仅当入账成功才把幂等键写入 _RECORDED_KEYS（半写不入 set，允许下次重试）；
+      返回 True=已入账 / False=幂等跳过或记账降级。
+
+    与 transport 业务路径解耦：本函数自身不改变 post_chat_completion /
+    complete_with_protection 的返回值、异常类型、重试与 park 策略。
+    """
+    key = f"{request_id}:{code}"
+    if key in _RECORDED_KEYS:
+        return False
+    try:
+        from agent.llm_engine import record_llm_failure
+        record_llm_failure(strand_id, request_id, code, 1, code, detail)
+    except Exception as exc:
+        logger.warning(
+            'llm failure accounting degraded (best-effort): %s', exc, exc_info=True
+        )
+        return False
+    # 入账成功才写键；容量超限 FIFO 淘汰最旧一条。
+    if len(_RECORDED_KEYS) >= _RECORDED_KEYS_MAX:
+        _RECORDED_KEYS.popitem(last=False)
+    _RECORDED_KEYS[key] = None
+    return True
+
+
 def _record_failure(path: str, source, action: str, attempt: int,
                     outcome: str, detail: str = "") -> None:
     """传输故障分类记账（11.3 补链）：进化引擎/llm_gateway 的 LLM 调用失败可审计。
@@ -76,10 +117,16 @@ def _record_failure(path: str, source, action: str, attempt: int,
     旁路纪律（同 10.1）：只记账，绝不冒泡、绝不阻塞 LLM 链路。
     """
     try:
-        from agent.llm_engine import record_llm_failure
-        record_llm_failure(path, source, action, attempt, outcome, detail)
-    except Exception:
-        pass
+        _record_failure_safe(
+            strand_id=str(source or ""),
+            request_id=str(path or "") or str(uuid.uuid4()),
+            code=str(outcome or ""),
+            detail=detail,
+        )
+    except Exception as exc:
+        logger.warning(
+            'llm failure accounting degraded (best-effort): %s', exc, exc_info=True
+        )
 
 
 class _LinkFailure(Exception):

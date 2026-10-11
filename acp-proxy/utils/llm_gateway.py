@@ -47,6 +47,13 @@ from utils import llm_transport
 from utils import network_state  # noqa: F401（保留=测试monkeypatch注入面）
 from utils.llm_errors import LLMCallError
 
+# 【记账单一真源纪律（2026-09-30收口）】失败记账唯一入口=utils.llm_transport._record_failure_safe，
+# 复用同一幂等set（跨模块去重入账）。gateway禁令：不得内联 record_llm_failure / tool_failures 写入点，
+# 违反=再次制造漂移面（与llm_safety三处镜像漂移同款事故）。契约（异常处理段核查基准）：
+# 记账须在 LLMCallError 构造之后、raise 之前，整体 try/except 包裹；
+# 记账副作用（网络/持久化失败）不得掩盖/替换/吞掉 LLMCallError（含 partial_content 语义）。
+# best-effort：记账本身抛异常→ _record_failure_safe 内部静默吞掉，不影响 LLMCallError 传播。
+
 logger = logging.getLogger(__name__)
 
 # ── 常量 ──────────────────────────────────────────────

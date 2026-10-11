@@ -75,15 +75,60 @@ def _query(db_path: str, sql: str, args: tuple = ()) -> list[tuple]:
         return []
 
 
+# ── 统一快照读取器（周期#59）────────────────────────────────────────
+def _looks_timeout(text: str) -> bool:
+    """超时特征判定（超时码/超时措辞），供快照状态标定。"""
+    t = text or ""
+    return bool(re.search(r"(?i)(\btimeout\b|超时|timed?\s*out|WS_TIMEOUT|超时码)", t))
+
+
+def _read_result_snapshot(request_id: str) -> dict:
+    """单一快照读取器：一次一致性读，多处比对。
+
+    消除超时回读的竞态窗口——二次回读禁止使用不同读取路径/不同缓存，
+    统一从 agent_messages 真源做一次快照读取；返回值携带 request_id/状态码/
+    时间戳供日志与判定使用，不引入任何全局可变状态。
+
+    状态码语义：ok=有正常产出；timeout=快照内含超时态（超时≠成功）；
+    empty=尚无落库产出。
+    """
+    snap_ts = time.time()
+    rows = _query(AGENT_MESSAGES_DB,
+                  "SELECT content, role, created_at FROM agent_messages "
+                  "WHERE session_id = ? ORDER BY id ASC",
+                  (request_id,))
+    contents = [r[0] or "" for r in rows if (r[1] or "assistant") == "assistant"]
+    if not contents:
+        status = "empty"
+    elif any(_looks_timeout(c) for c in contents):
+        status = "timeout"
+    else:
+        status = "ok"
+    return {
+        "request_id": request_id,
+        "status": status,
+        "timestamp": snap_ts,
+        "reply": "".join(contents),
+        "rows": rows,
+    }
+
+
 # ── 10.4 WS 超时的服务端后到产出二次回读（周期#58）──────────────────
 
 
 def _read_back_reply(session_id: str, db_path: str = "") -> str:
-    """服务端真源回复回读：该会话 assistant 落库行按序拼接（含增量落库接管行）。
+    """服务端真源回复回读：统一走同一快照读取器，一次读取多次比对。
 
     WS 超时时回答帧已丢失，但服务端回合照跑并落库（观察窗纪律：页面/连接只是
     观察窗）——agent_messages 里该 session 的 assistant 行就是服务端产出真源。
+    ⚠️ 超时≠成功：快照状态为 timeout 时必须判 FAIL/INCOMPLETE（返回空回复），
+    禁止被二次回读的瞬时成功态翻案；快照本身只读一次，消除竞态窗口。
     """
+    snap = _read_result_snapshot(session_id)  # 唯一读取路径：一次快照，多处比对
+    if snap["status"] == "timeout":
+        # 超时≠成功断言：快照态为 timeout，判 FAIL/INCOMPLETE，不翻案。
+        return ""
+    return snap["reply"] or ""
     rows = _query(db_path or AGENT_MESSAGES_DB,
                   "SELECT content FROM agent_messages WHERE session_id = ? "
                   "AND role = 'assistant' ORDER BY id",
