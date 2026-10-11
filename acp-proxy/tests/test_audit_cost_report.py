@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from agent.infection_guard import InfectionGate  # noqa: E402
+from agent.infection_guard import InfectionGate, _audit_signature  # noqa: E402
 from audit_cost_report import (  # noqa: E402
     AUDIT_RE,
     parse_audit_lines,
@@ -89,6 +89,7 @@ def test_journal_line_shape_ok(caplog):
                 if "LLM审计完成" in r.getMessage())
     assert "verdict=ok" in line
     assert "耗时=" in line and "ms tools=write_file" in line
+    assert " sig=" in line and " full=" in line and " chars=" in line  # 13.3②③ 埋点
     assert "（累计 1 次 均值 " in line
     assert AUDIT_RE.search(line), "探针正则必须能解析生产者行"
 
@@ -199,6 +200,10 @@ def test_summarize_empty_is_none():
     assert s["count"] == 0
     assert s["ms"]["mean"] is None and s["ms"]["total"] is None
     assert s["by_verdict"] == {} and s["by_tool"] == {}
+    # 13.3②③ 空数据同样 None 禁假 0%
+    assert s["reuse"]["sig"]["hit_rate"] is None
+    assert s["reuse"]["full"]["hit_rate"] is None
+    assert s["chars_ms"]["pearson"] is None
 
 
 # ── 6. 接线护栏 ────────────────────────────────────────────────────
@@ -222,3 +227,86 @@ def test_exempt_batch_costs_zero_roundtrip():
     assert v.source == "prescreen_user_verbatim"
     assert gate.stats()["llm_audits"] == 0
     assert gate.stats()["llm_audit_last_ms"] is None
+
+
+# ── 7. 13.3②③ 签名复现率/chars 相关性埋点契约 ─────────────────────────────
+def _sig_line(sig, full, chars, ms=100):
+    return (f"[infection-guard] LLM审计完成 verdict=ok 耗时={ms}ms tools=write_file"
+            f" sig={sig} full={full} chars={chars}"
+            f"（累计 1 次 均值 {ms}ms 最大 {ms}ms）")
+
+
+def test_signature_fields_parsed_from_producer_line(caplog):
+    gate = InfectionGate(llm_call=_SlowOkLLM(0.02))
+    with caplog.at_level(logging.INFO, logger="infection_guard"):
+        _run(gate.check(output_text="写入 x.py", tool_calls=_calls(),
+                        user_text=_sample_user_text()))
+    line = next(r.getMessage() for r in caplog.records
+                if "LLM审计完成" in r.getMessage())
+    samples = parse_audit_lines([line])
+    assert samples[0]["sig"] not in (None, "", "-")
+    assert samples[0]["full"] not in (None, "", "-")
+    assert samples[0]["sig"] != samples[0]["full"]  # claims 口径与 full 口径不同源
+    assert samples[0]["chars"] > 0
+
+
+def test_parse_legacy_line_without_signature_fields():
+    # 部署前旧格式行照常解析（sig=None 不计复现率）——真实 journal 窗口含旧样本
+    body = ("[infection-guard] LLM审计完成 verdict=clarify 耗时=1234ms "
+            "tools=terminal,write_file（累计 1 次 均值 1234ms 最大 1234ms）")
+    samples = parse_audit_lines([body])
+    assert len(samples) == 1
+    assert samples[0]["sig"] is None and samples[0]["full"] is None
+    assert samples[0]["chars"] is None
+    s = summarize(samples)
+    assert s["reuse"]["without_sig"] == 1
+    assert s["reuse"]["sig"]["hit_rate"] is None  # 零带签名样本禁假 0%
+
+
+def test_signature_stable_and_provenance_splits_full():
+    # claims 三元组口径：同 claims 同签名（provenance 不进 key）；full 随 provenance 分叉
+    s1, f1 = _audit_signature("用户", "输出", [{"name": "terminal"}], ["r1"])
+    s2, f2 = _audit_signature("用户", "输出", [{"name": "terminal"}], ["r2"])
+    s3, f3 = _audit_signature("用户", "输出", [{"name": "terminal"}], ["r1"])
+    assert s1 == s2 == s3
+    assert f1 == f3 and f1 != f2
+    s4, _ = _audit_signature("别的请求", "输出", [{"name": "terminal"}], ["r1"])
+    assert s4 != s1
+    s5, _ = _audit_signature("用户", "输出", [{"name": "terminal", "arguments": {"a": 1}}], ["r1"])
+    assert s5 != s1  # tool_calls 进 key
+
+
+def test_summarize_sig_reuse_math():
+    # sig 复现 1/3（理论可省比 0.333）；full 全不同 → 0（provenance 取舍的代价对照）
+    samples = parse_audit_lines([
+        _sig_line("aaaa1111", "ffff0001", 1000),
+        _sig_line("aaaa1111", "ffff0002", 1100),
+        _sig_line("bbbb2222", "ffff0003", 1200),
+    ])
+    ru = summarize(samples)["reuse"]
+    assert ru["sig"]["samples"] == 3 and ru["sig"]["distinct"] == 2
+    assert ru["sig"]["repeat_hits"] == 1
+    assert ru["sig"]["hit_rate"] == 0.333
+    assert ru["full"]["repeat_hits"] == 0 and ru["full"]["hit_rate"] == 0.0
+    assert ru["without_sig"] == 0
+
+
+def test_summarize_chars_ms_pearson():
+    # chars 与耗时线性相关 → pearson 1.0；n<3 报 None 禁假 0
+    samples = parse_audit_lines([
+        _sig_line("aaaa1111", "ffff0001", 1000, ms=100),
+        _sig_line("bbbb2222", "ffff0002", 2000, ms=200),
+        _sig_line("cccc3333", "ffff0003", 3000, ms=300),
+    ])
+    s = summarize(samples)
+    assert s["chars_ms"]["n"] == 3
+    assert s["chars_ms"]["pearson"] == 1.0
+    s2 = summarize(parse_audit_lines([_sig_line("aaaa1111", "ffff0001", 1000)]))
+    assert s2["chars_ms"]["pearson"] is None
+    # chars=0 占位（未埋点）不进相关性
+    s3 = summarize(parse_audit_lines([
+        _sig_line("aaaa1111", "ffff0001", 0, ms=100),
+        _sig_line("bbbb2222", "ffff0002", 0, ms=200),
+        _sig_line("cccc3333", "ffff0003", 0, ms=300),
+    ]))
+    assert s3["chars_ms"]["n"] == 0 and s3["chars_ms"]["pearson"] is None

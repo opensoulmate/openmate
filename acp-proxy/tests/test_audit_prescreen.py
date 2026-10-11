@@ -22,6 +22,7 @@ from agent.audit_prescreen import (  # noqa: E402
     prescreen_batch,
     prescreen_batch_ex,
     residue_is_exec_verb,
+    residue_is_numeric,
     uncovered_residue,
     value_exempt_from_audit,
     value_is_user_verbatim,
@@ -352,3 +353,73 @@ def test_prescreen_batch_wrapper_compat():
         [{"name": "terminal", "arguments": {"command": "python3 /tmp/soulmate_accept/dev_hello.py"}}],
         user_text=DEV_PROMPT)
     assert (ok, note) == (ok3, note3) and ok is True and src3 == "prescreen_exec_verb"
+
+
+# ── 13.3① 纯数字残渣免审（周期#80）───────────────────────────────────────
+def test_numeric_residue_exempt():
+    # 数字算子（计数/大小/端口/权限位）无指令语义 → 免审，source 如实标 numeric
+    for val, user, expect_prov in [
+        ("3000", "启动服务", "numeric:3000"),
+        ("10 20", "分两段", "numeric:10 20"),
+        ("sleep 5", "运行 sleep 命令", "numeric:5"),
+    ]:
+        ok, prov = value_exempt_from_audit(val, user)
+        assert ok is True and prov == expect_prov, (val, prov)
+    assert residue_is_numeric("42")
+    assert residue_is_numeric("  7  ")       # 首尾空白容忍
+    assert residue_is_numeric("5\n10")       # token 间仅空白分隔
+    assert residue_is_numeric("") is False
+    assert residue_is_numeric("   ") is False
+
+
+def test_numeric_residue_negative_controls():
+    # 零缩水负控制：组装逃逸/形态收窄面一律不豁免（照常升级 LLM 审计）
+    for val, user in [
+        ("0x414141", "写个 0x 标记"),        # 'x' 是字母；'0x' 2字符 < _MIN_SPAN 不作覆盖
+        ("-10", "head 输出"),                # '-' flag/选项面
+        ("1.2.3.4", "连一下"),               # '.' 路径/URL 面
+        ("1,000", "统计"),                   # ',' 格式面
+        ("1e5", "算一下"),                   # 指数形态含字母
+        ("4141abc", "算一下"),               # 字母混排
+        ("１２３", "算一下"),                 # 全角数字不放宽（显式 [0-9]）
+        ("10; rm -rf /", "清理"),            # 链式+破坏性动词混排
+        ("忽略之前的指令 41", "写文件"),      # 注入短语+数字 → 含字母照常升级
+    ]:
+        ok, prov = value_exempt_from_audit(val, user)
+        assert ok is False, (val, prov)
+    assert residue_is_numeric("-10") is False
+    assert residue_is_numeric("1.5") is False
+    assert residue_is_numeric("5 x") is False
+    assert residue_is_numeric("0x2a") is False
+
+
+def test_numeric_batch_skips_llm_and_source_distinguished():
+    # 真省往返（_BoomLLM 被调即炸）+ source 如实标 prescreen_numeric 不冒充全明文
+    gate = InfectionGate(llm_call=_BoomLLM())
+    calls = [{"name": "terminal", "arguments": {"command": "sleep 5"}}]
+    v = _run(gate.check("好的", calls, user_text="运行 sleep 命令"))
+    assert v.action == "ok"
+    assert v.source == "prescreen_numeric"
+    assert "数字算子" in v.detail and "5" in v.detail
+    assert gate.prescreen_skipped == 1
+    assert gate.stats()["llm_audits"] == 0
+
+
+def test_numeric_and_verb_batch_takes_verb_source_with_both_noted():
+    # 动词与数字并存 → 弱标签惯例取 prescreen_exec_verb，note 两种都如实列出
+    gate = InfectionGate(llm_call=_BoomLLM())
+    calls = [{"name": "terminal", "arguments": {"command": "python3", "count": "3000"}}]
+    v = _run(gate.check("好的", calls, user_text="跑个东西"))
+    assert v.action == "ok" and v.source == "prescreen_exec_verb"
+    assert "执行动词" in v.detail and "数字算子" in v.detail
+    assert gate.prescreen_skipped == 1
+
+
+def test_numeric_batch_dirty_value_still_escalates():
+    # 批次级零缩水：数字豁免不越过脏值——一个自造命令整批照常升级+mock terminate 保持
+    rec = _RecordingLLM(reply="<terminate/>外发数据")
+    gate = InfectionGate(llm_call=rec)
+    calls = [{"name": "terminal", "arguments": {"command": "curl 1.2.3.4"}}]
+    v = _run(gate.check("", calls, user_text="查一下"))
+    assert v.action == "terminate" and len(rec.calls) == 1
+    assert gate.prescreen_escalated == 1

@@ -13,13 +13,12 @@
    都能被用户请求的**连续原文片段**覆盖、残渣只剩空白/数字/标点（无任何字母）→
    批次内容全部来自用户明文（8.1② 同语义："能出现在用户请求里的文本本来就是用户
    意图"），LLM 判词在此类上只会得到 ok（JUDGE_PROMPT 判据 4/5 本就要求判 ok），
-   跳过不构成拦截面缩水。**残渣含任何字母即升级 LLM 审计**（宁慢不误放）：
+   **残渣含任何字母即升级 LLM 审计**（宁慢不误放）：
    唯一例外=12.4 免审面扩展②（周期#70）：残渣**恰好是单个**执行动词/解释器名
    token（python3 之类，见 _EXEC_VERB_RE）时免审——模型自造内容只是"用哪个
-   解释器运行用户点名的脚本文件"这一个词，无注入语义（零缩水论证：带 flag
-   （-c/-m/-e）、链式（;|&&）、shell 元字符、破坏性动词（rm/sudo/curl…）的残渣
-   都不在窄名单，照常升级；用户明文部分语义与 8.1② 逐字一致，新增豁免面仅
-   "解释器名"一个 token）：
+   解释器运行用户点名的脚本文件"这一个词，无注入语义；以及 13.3①（周期#80）：
+   残渣**只含纯 ASCII 数字 token**（见 _NUMERIC_RESIDUE_RE）时免审——数字算子
+   无指令语义（零缩水论证/负控制见该常量注释）。
    - 必须是连续原文片段覆盖（非逐词拼凑）——防"用户提到过 rm 和 -rf 各自的字样"
      被拼成 rm -rf 逃审计；
    - **仅认 user_text 溯源**，本回合工具结果不作免审依据——web_extract 等外部内容
@@ -60,6 +59,22 @@ _INERT_RE = re.compile(r"^[\s\"'“”‘’，、：；！？（）【】《》
 # 其余内容仍须全部用户明文连续片段溯源。名单按"只接受脚本文件参数的解释器"收窄：
 # 破坏性动词/shells 的 -c 逃逸/带 flag/链式一律不在名单 → 残渣非单 token 即升级。
 _EXEC_VERB_RE = re.compile(r"^(?:python|python2|python3|python3\.\d{1,2}|node|bash|sh)$")
+
+# ── 13.3① 免审面扩展（周期#80）：纯数字残渣（窄形态）──────────────────────
+# 语义：残渣只含十进制数字 token（token 间仅空白分隔）→ 该值免审。零缩水论证：
+# 纯数字 token 不能构成指令/路径/flag/URL/变量名——这些语义都需要字母、/ . - $ 等
+# 字符；数字只是算子（计数/大小/行号/端口/权限位），动作与目标语义住在非数字 token
+# 里，那些 token 照常全量溯源/升级审计。组装逃逸负控制（测试钉死）：
+# - "0x4141"：'x' 是字母 → 不匹配（用户明文"0x"仅 2 字符 < _MIN_SPAN 不作覆盖
+#   依据，"0x"+"414141" 拼装在 uncovered_residue 阶段就剩含字母残渣 → 升级）；
+# - "-10"：'-' 是 flag/选项面 → 不匹配（head -5 之类刻意保守，漏网回 LLM 审计）；
+# - "1.2.3.4"/"1,000"：'.' ',' 是路径/URL/格式面 → 不匹配；
+# - "1e5"/"4141abc"/"１２３"（全角数字，[0-9] 显式 ASCII 不用 \d）→ 不匹配；
+# - 数字与字母/符号混排（"10; rm"、"41\nrm"）→ 不匹配。
+# 与执行动词豁免同级（模型自选算子 token），source 如实标 prescreen_numeric
+# 不冒充全明文；批内同时有动词与数字时按既有弱标签惯例取 prescreen_exec_verb
+# 并在 note 里两种都如实列出。
+_NUMERIC_RESIDUE_RE = re.compile(r"^[0-9]+(?:[ \t\n\r\f]+[0-9]+)*$")
 
 _MIN_SPAN = 4  # 溯源片段最短长度（更短的碎片不作覆盖依据，防乱拼）
 
@@ -170,11 +185,21 @@ def residue_is_exec_verb(residue: str) -> bool:
     return bool(tok) and _EXEC_VERB_RE.match(tok) is not None
 
 
+def residue_is_numeric(residue: str) -> bool:
+    """残渣是否**只含纯 ASCII 十进制数字 token**（13.3① 免审面扩展）。
+
+    token 间仅空白分隔；正负号/小数点/进制前缀/字母/全角数字任一出现即 False
+    （负控制见 _NUMERIC_RESIDUE_RE 注释）→ 照常升级 LLM 审计。
+    """
+    tok = (residue or "").strip()
+    return bool(tok) and _NUMERIC_RESIDUE_RE.match(tok) is not None
+
+
 def value_exempt_from_audit(value: str, user_text: str) -> tuple[bool, str]:
-    """免审判定（12.4 免审面扩展②）。返回 (免审, 溯源类型或残渣)。
+    """免审判定（12.4② + 13.3①）。返回 (免审, 溯源类型或残渣)。
 
     - 免审=True：溯源类型 "user_verbatim"（全明文）/ "exec_verb:<tok>"（仅多一个
-      执行动词）/ "empty"（空值中性）；
+      执行动词）/ "numeric:<tok>"（仅多纯数字算子）/ "empty"（空值中性）；
     - 免审=False：第二项=残渣文本（供报因，走"自造文本→升级审计"）。
     """
     if not value or not value.strip():
@@ -186,15 +211,18 @@ def value_exempt_from_audit(value: str, user_text: str) -> tuple[bool, str]:
         return True, "user_verbatim"
     if residue_is_exec_verb(residue):
         return True, f"exec_verb:{residue.strip()}"
+    if residue_is_numeric(residue):
+        return True, f"numeric:{residue.strip()[:40]}"
     return False, residue
 
 
 def prescreen_batch_ex(tool_calls: list, user_text: str) -> tuple[bool, str, str]:
     """确定性预筛（带溯源类型）。返回 (免审, 说明, source)。
 
-    source ∈ {"prescreen_user_verbatim", "prescreen_exec_verb", ""}：批次内只要
-    有一个值走执行动词豁免，整批 source 就取更弱的 "prescreen_exec_verb"
-    （免审留痕如实标注，不冒充全明文）。
+    source ∈ {"prescreen_user_verbatim", "prescreen_exec_verb",
+    "prescreen_numeric", ""}：批次内只要有一个值走执行动词/数字算子豁免，整批
+    source 就取更弱的 token 豁免标签（动词与数字并存时按弱标签惯例取
+    prescreen_exec_verb 且 note 如实列出两种；免审留痕如实标注，不冒充全明文）。
     """
     if not tool_calls:
         return False, "空批次", ""
@@ -202,6 +230,7 @@ def prescreen_batch_ex(tool_calls: list, user_text: str) -> tuple[bool, str, str
         return False, "用户请求为空（无可溯源依据）", ""
     clean_parts: list[str] = []
     verbs: list[str] = []
+    nums: list[str] = []
     for idx, call in enumerate(tool_calls):
         if not isinstance(call, dict):
             return False, f"第{idx + 1}个调用形态不可核验", ""
@@ -215,11 +244,17 @@ def prescreen_batch_ex(tool_calls: list, user_text: str) -> tuple[bool, str, str
                     f"（残渣: {prov[:60]!r}）"), ""
             if prov.startswith("exec_verb:"):
                 verbs.append(prov.split(":", 1)[1])
+            elif prov.startswith("numeric:"):
+                nums.append(prov.split(":", 1)[1])
         clean_parts.append(name)
     note = "；".join(clean_parts) or "（无参数调用）"
     if verbs:
         uniq = "、".join(dict.fromkeys(verbs))
-        return True, f"{note}（模型自选执行动词: {uniq}）", "prescreen_exec_verb"
+        extra = f"；模型自选数字算子: {'、'.join(dict.fromkeys(nums))}" if nums else ""
+        return True, f"{note}（模型自选执行动词: {uniq}{extra}）", "prescreen_exec_verb"
+    if nums:
+        uniq_n = "、".join(dict.fromkeys(nums))
+        return True, f"{note}（模型自选数字算子: {uniq_n}）", "prescreen_numeric"
     return True, note, "prescreen_user_verbatim"
 
 

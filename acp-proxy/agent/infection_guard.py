@@ -33,6 +33,7 @@ _clarify_loop 的 CoT 双向对话）——本系统改为合成工具结果让�
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -351,6 +352,24 @@ JUDGE_PROMPT = """你是提示词注入（prompt-injection）安全审计员。�
 _TAGGED_FAILURE_PREFIX = "[LLM错误"
 
 
+def _audit_signature(user_text: str, output_text: str,
+                     tool_calls: list[dict] | None,
+                     prior_tool_results: list[str] | None = None) -> tuple[str, str]:
+    """13.3② 判词复用候选签名（测量口径，不作安全判定依据）。返回 (sig, full_sig)。
+
+    sig = (用户请求, 助手输出, 待执行调用) 三元组指纹——"provenance 不进 key"
+    取舍口径下②的命中判定看这个；full_sig = 再并入 prior_tool_results（零取舍
+    对照口径，预期命中率≈0，两者差值=provenance 取舍的代价量化）。sha256 前 8 位
+    仅用于 journal 留痕归并统计（单窗口样本量下碰撞可忽略，真源判定不依赖它）。
+    """
+    def _h(*parts) -> str:
+        blob = json.dumps(parts, ensure_ascii=False, sort_keys=True, default=str)
+        return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:8]
+
+    claims = (user_text or "", output_text or "", tool_calls or [])
+    return _h(*claims), _h(*claims, prior_tool_results or [])
+
+
 class InfectionGate:
     """工具执行前的注入审计门（一个真实turn一个实例）。
 
@@ -411,12 +430,17 @@ class InfectionGate:
         }
 
     def _record_audit_ms(self, elapsed_ms: float, verdict: str,
-                         tool_calls: list[dict] | None = None) -> None:
+                         tool_calls: list[dict] | None = None,
+                         sig: str = "", full_sig: str = "", chars: int = 0) -> None:
         """13.3 判词往返耗时落观测（journal 行=跨进程真源，audit_cost_report.py 消费）。
 
         每次 _llm_audit 尝试（含 timeout/error/unavailable 失败路径）恰好记一次——
         开销分布必须含失败往返（超时 30s 是最贵的开销形态）。旁路纪律：观测失败
         绝不冒泡影响审计判定。
+        13.3②③ 埋点：sig=判词复用候选签名（claims 三元组，provenance 不进 key
+        的取舍口径）、full_sig=并入 prior_tool_results 的零取舍对照口径、
+        chars=审计输入实际字符数（③ 输入瘦身相关性数据）——均为测量口径，
+        不作安全判定依据。
         """
         try:
             self.audit_durations_ms.append(float(elapsed_ms))
@@ -429,6 +453,7 @@ class InfectionGate:
             logger.info(
                 f"[infection-guard] LLM审计完成 verdict={verdict} "
                 f"耗时={int(elapsed_ms)}ms tools={names}"
+                f" sig={sig or '-'} full={full_sig or '-'} chars={int(chars)}"
                 f"（累计 {self.llm_audits} 次 均值 {int(s['llm_audit_mean_ms'] or 0)}ms "
                 f"最大 {int(s['llm_audit_max_ms'] or 0)}ms）")
         except Exception:  # 观测绝不影响审计判定
@@ -484,26 +509,33 @@ class InfectionGate:
             f"{_tr_block}"
         )
         messages = [{"role": "user", "content": f"{JUDGE_PROMPT}\n\n{user_msg}"}]
-        # 13.3 判词往返计时（基线数据源）：每个 return 点恰好一次 _record_audit_ms
+        # 13.3 判词往返计时（基线数据源）：每个 return 点恰好一次 _record_audit_ms；
+        # 13.3②③ 签名+chars 埋点（测量口径）
+        _sig, _full_sig = _audit_signature(user_text, output_text, tool_calls,
+                                           prior_tool_results)
+        _chars = len(user_msg)
         _audit_t0 = time.monotonic()
         try:
             resp = await asyncio.wait_for(llm_call(messages), timeout=self.audit_timeout)
         except asyncio.TimeoutError:
             self.llm_fail_streak += 1
             logger.warning(f"[infection-guard] LLM审计超时({self.audit_timeout}s)，fail-safe放行")
-            self._record_audit_ms((time.monotonic() - _audit_t0) * 1000, "timeout", tool_calls)
+            self._record_audit_ms((time.monotonic() - _audit_t0) * 1000, "timeout", tool_calls,
+                                  sig=_sig, full_sig=_full_sig, chars=_chars)
             return Verdict(source="llm_error_fail_safe", evidence="timeout")
         except Exception as _ig_err:
             self.llm_fail_streak += 1
             logger.warning(f"[infection-guard] LLM审计异常(fail-safe放行): {_ig_err}")
-            self._record_audit_ms((time.monotonic() - _audit_t0) * 1000, "error", tool_calls)
+            self._record_audit_ms((time.monotonic() - _audit_t0) * 1000, "error", tool_calls,
+                                  sig=_sig, full_sig=_full_sig, chars=_chars)
             return Verdict(source="llm_error_fail_safe", evidence=str(_ig_err)[:200])
         resp = (resp or "").strip()
         if not resp or resp.startswith(_TAGGED_FAILURE_PREFIX):
             # LLMEngine.chat 吞异常返回"[LLM错误: …]"（如 provider 402 余额不足）
             self.llm_fail_streak += 1
             logger.warning(f"[infection-guard] LLM审计不可用(fail-safe放行): {resp[:120]}")
-            self._record_audit_ms((time.monotonic() - _audit_t0) * 1000, "unavailable", tool_calls)
+            self._record_audit_ms((time.monotonic() - _audit_t0) * 1000, "unavailable", tool_calls,
+                                  sig=_sig, full_sig=_full_sig, chars=_chars)
             return Verdict(source="llm_error_fail_safe", evidence=resp[:120])
         self.llm_fail_streak = 0
         action, detail = parse_verdict(resp)
@@ -519,7 +551,8 @@ class InfectionGate:
             evidence = (rationale or detail)[:200]
         else:
             evidence = ""
-        self._record_audit_ms((time.monotonic() - _audit_t0) * 1000, action, tool_calls)
+        self._record_audit_ms((time.monotonic() - _audit_t0) * 1000, action, tool_calls,
+                              sig=_sig, full_sig=_full_sig, chars=_chars)
         return Verdict(action=action, detail=detail, evidence=evidence, source="llm")
 
     async def check(self, output_text: str, tool_calls: list[dict] | None = None,

@@ -12,7 +12,10 @@
 
 输出=耗时分布（count/mean/p50/p95/max/min/total）+按 verdict 分布+按工具名归因
 （一批多工具共享一次往返，按批内每个工具名各记一次归因——"每工具审计耗时"口径）。
-无数据时报 None（禁把"没跑过"当 0ms）。
+13.3②③ 增：同签名复现率（sig=claims 三元组口径=判词复用"provenance 不进 key"
+取舍下的理论命中率；full=并入 prior_tool_results 的零取舍对照）+审计输入 chars
+与耗时 Pearson 相关性（③ 输入瘦身动刀前的相关性数据）。无数据时报 None
+（禁把"没跑过"当 0ms）。
 """
 from __future__ import annotations
 
@@ -22,9 +25,12 @@ import re
 import subprocess
 import sys
 
-# 生产者逐字契约（infection_guard._record_audit_ms）——生产者改措辞探针即红
+# 生产者逐字契约（infection_guard._record_audit_ms）——生产者改措辞探针即红。
+# sig/full/chars 为 13.3②③ 埋点；旧格式行（无埋点）按 sig=None 照常解析（真实
+# journal 窗口含部署前样本），复现率统计只计带签名样本。
 AUDIT_RE = re.compile(
     r"\[infection-guard\] LLM审计完成 verdict=(\S+) 耗时=(\d+)ms tools=(\S*?)"
+    r"(?: sig=(\S+) full=(\S+) chars=(\d+))?"
     r"（累计 \d+ 次 均值 \d+ms 最大 \d+ms）")
 UNITS = ("acp-proxy-a", "acp-proxy-b", "acp-proxy")
 
@@ -46,8 +52,13 @@ def parse_audit_lines(lines) -> list[dict]:
             continue
         seen.add(inner)
         verdict, ms_raw, tools_raw = m.group(1), m.group(2), m.group(3)
+        sig, full, chars_raw = m.group(4), m.group(5), m.group(6)
         tools = [t for t in tools_raw.split(",") if t and t != "-"]
-        samples.append({"verdict": verdict, "ms": int(ms_raw), "tools": tools})
+        samples.append({
+            "verdict": verdict, "ms": int(ms_raw), "tools": tools,
+            "sig": sig, "full": full,
+            "chars": int(chars_raw) if chars_raw is not None else None,
+        })
     return samples
 
 
@@ -58,13 +69,52 @@ def _pct(sorted_vals: list[float], p: float) -> float:
     return sorted_vals[idx]
 
 
+def _reuse_stats(keys: list[str]) -> dict:
+    """同签名复现统计（13.3②）：repeat_hits=理论可省的判词往返次数。
+
+    hit_rate = repeat_hits / samples——"判词复用若按该签名做 key"的理论命中率
+    （测量口径，非实际节省；无样本报 None 禁假 0%）。
+    """
+    seen: set[str] = set()
+    repeat = 0
+    for k in keys:
+        if k in seen:
+            repeat += 1
+        seen.add(k)
+    return {
+        "samples": len(keys), "distinct": len(seen), "repeat_hits": repeat,
+        "hit_rate": (round(repeat / len(keys), 3) if keys else None),
+    }
+
+
+def _pearson(xs: list[float], ys: list[float]) -> float | None:
+    """Pearson 相关（13.3③ chars↔耗时）；n<3 或零方差报 None 禁假 0。"""
+    n = len(xs)
+    if n < 3:
+        return None
+    mx, my = sum(xs) / n, sum(ys) / n
+    num = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+    dx = sum((x - mx) ** 2 for x in xs)
+    dy = sum((y - my) ** 2 for y in ys)
+    if dx <= 0 or dy <= 0:
+        return None
+    return round(num / ((dx * dy) ** 0.5), 3)
+
+
 def summarize(samples: list[dict]) -> dict:
-    """耗时分布汇总（纯函数）：整体+按 verdict+按工具名归因。无数据耗时报 None。"""
+    """耗时分布汇总（纯函数）：整体+按 verdict+按工具名归因+②复现率+③相关性。
+
+    无数据耗时报 None。
+    """
+    empty_reuse = _reuse_stats([])
     if not samples:
         return {
             "count": 0,
             "ms": {k: None for k in ("mean", "p50", "p95", "max", "min", "total")},
             "by_verdict": {}, "by_tool": {},
+            "reuse": {"sig": empty_reuse, "full": empty_reuse,
+                      "without_sig": 0},
+            "chars_ms": {"n": 0, "pearson": None},
         }
     durs = sorted(float(s["ms"]) for s in samples)
     by_verdict: dict[str, dict] = {}
@@ -80,6 +130,11 @@ def summarize(samples: list[dict]) -> dict:
     for d in (by_verdict, by_tool):
         for v in d.values():
             v["mean_ms"] = round(v["total_ms"] / v["count"], 1)
+    # 13.3② 复现率（只计带签名样本；'-'=旧埋点占位不当签名）
+    sigs = [s["sig"] for s in samples if s.get("sig") not in (None, "", "-")]
+    fulls = [s["full"] for s in samples if s.get("full") not in (None, "", "-")]
+    with_chars = [(float(s["chars"]), float(s["ms"])) for s in samples
+                  if s.get("chars")]  # chars=0=未埋点占位，不进相关性
     return {
         "count": len(samples),
         "ms": {
@@ -92,6 +147,16 @@ def summarize(samples: list[dict]) -> dict:
         },
         "by_verdict": by_verdict,
         "by_tool": by_tool,
+        "reuse": {
+            "sig": _reuse_stats(sigs),
+            "full": _reuse_stats(fulls),
+            "without_sig": len(samples) - len(sigs),
+        },
+        "chars_ms": {
+            "n": len(with_chars),
+            "pearson": _pearson([c for c, _ in with_chars],
+                                [m for _, m in with_chars]),
+        },
     }
 
 
@@ -139,6 +204,18 @@ def main(argv=None) -> int:
         for name, d in sorted(summary["by_tool"].items(),
                               key=lambda kv: -kv[1]["total_ms"]):
             print(f"  {name}: {d['count']} 次  合计 {d['total_ms']}ms  均值 {d['mean_ms']}ms")
+    ru = summary["reuse"]
+    print("-- 13.3② 同签名复现率（判词复用理论命中口径，测量非实际节省） --")
+    for label, d in (("sig（provenance 不进 key 取舍口径）", ru["sig"]),
+                     ("full（含 provenance 零取舍对照）", ru["full"])):
+        rate = f"{d['hit_rate']:.1%}" if d["hit_rate"] is not None else "n/a"
+        print(f"  {label}: 带签名样本 {d['samples']}  去重 {d['distinct']}  "
+              f"复现命中 {d['repeat_hits']}  理论可省比 {rate}")
+    if ru["without_sig"]:
+        print(f"  （另有 {ru['without_sig']} 条样本无签名埋点/旧格式，不计复现率）")
+    cm = summary["chars_ms"]
+    pear = "n/a（n<3 或零方差）" if cm["pearson"] is None else str(cm["pearson"])
+    print(f"-- 13.3③ 审计输入 chars↔耗时相关: n={cm['n']}  pearson={pear} --")
     return 0
 
 
