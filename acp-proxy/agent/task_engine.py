@@ -359,24 +359,11 @@ class TaskPlanner:
                 self.store.save_plan(existing)
                 logger.info(f"[plan] Cleared old plan: {existing.id}, action={action}")
 
-        messages = [
-            {"role": "system", "content": PLANNING_PROMPT},
-            {"role": "user", "content": f"目标：{goal}"},
-        ]
-
-        try:
-            raw = await self._llm_call(messages)
-            # 提取 JSON
-            raw = raw.strip()
-            if raw.startswith("```"):
-                raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-            data = json.loads(raw)
-        except Exception as e:
-            logger.warning(f"[plan] LLM planning failed: {e}, treating as simple task")
-            data = {"needs_planning": False, "reason": "规划失败，作为简单任务处理", "subtasks": []}
-
         # 2.3 复杂任务分解器：多文件改动目标 → 确定性拆步（不赌LLM规划质量，
         # 多文件改动是最容易"步骤越权/漏文件"的形态）。拆解失败静默回退LLM计划。
+        # 15.3 aux延迟治理：本块前移到LLM规划**之前**——decomposer 结果本就覆盖
+        # LLM 计划（旧顺序 LLM 规划完即被丢弃），前移后多文件目标完全跳过 LLM
+        # 规划往返（实测均值11.2s/峰值35.1s 串行挡在首字回复前），语义面不变。
         try:
             from agent.task_decomposer import TaskDecomposer
             _decomposer = TaskDecomposer()
@@ -400,11 +387,27 @@ class TaskPlanner:
                 self.store.save_plan(mf_plan)
                 logger.info(
                     f"[plan] multi-file decomposition: {len(mf_subtasks)} steps "
-                    f"for goal: {goal[:50]}"
+                    f"for goal: {goal[:50]} (LLM planning skipped, 15.3 pre-gate)"
                 )
                 return mf_plan
         except Exception as e:
             logger.warning(f"[plan] task_decomposer failed, fallback to LLM plan: {e}")
+
+        messages = [
+            {"role": "system", "content": PLANNING_PROMPT},
+            {"role": "user", "content": f"目标：{goal}"},
+        ]
+
+        try:
+            raw = await self._llm_call(messages)
+            # 提取 JSON
+            raw = raw.strip()
+            if raw.startswith("```"):
+                raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+            data = json.loads(raw)
+        except Exception as e:
+            logger.warning(f"[plan] LLM planning failed: {e}, treating as simple task")
+            data = {"needs_planning": False, "reason": "规划失败，作为简单任务处理", "subtasks": []}
 
         if not data.get("needs_planning") or not data.get("subtasks"):
             # 简单任务，不需要规划

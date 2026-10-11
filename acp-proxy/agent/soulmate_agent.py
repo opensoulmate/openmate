@@ -192,6 +192,28 @@ _AUX_TRAJ_CTX: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
     "soulmate_aux_traj_ctx", default=None
 )
 
+# 15.3 aux延迟治理：串行挡在首字回复前的关键路径 aux（plan 任务规划/task_judge
+# 任务裁决）短预算到点回退，其余 label（title=fire-and-forget/reflect/replan/
+# infection_audit）非首字关键路径不设限。预算运行时读取（测试可monkeypatch）。
+_AUX_CRITICAL_LABELS = frozenset({"plan", "task_judge"})
+_AUX_CRITICAL_BUDGET_DEFAULT_S = 12.0
+
+# _aux_llm_label 特征词嗅探的取样上限（显式命名常量，非数据截断：嗅探输入是
+# 提示词形态特征词，不承载用户数据；完整 messages 原样送 LLM 不截断——
+# 与 [:3000] 静默截断守护（test_no_silent_truncation）对齐，两车道语义各归各）。
+_AUX_LABEL_SAMPLE_CHARS = 3000
+
+
+def _aux_critical_budget_s(label: str) -> float:
+    """关键路径 label 返回短预算秒数（<=0=关闭），非关键路径返回 0（不设限）。"""
+    if label not in _AUX_CRITICAL_LABELS:
+        return 0.0
+    try:
+        raw = os.environ.get("SOULMATE_AUX_CRITICAL_BUDGET_S", "").strip()
+        return float(raw) if raw else _AUX_CRITICAL_BUDGET_DEFAULT_S
+    except ValueError:
+        return _AUX_CRITICAL_BUDGET_DEFAULT_S
+
 
 class SoulMateAgent:
     """SoulMate Agent — 实现官方 acp.Agent 协议
@@ -1060,7 +1082,7 @@ class SoulMateAgent:
         """
         blob = "\n".join(
             str(m.get("content", "")) for m in messages if isinstance(m, dict)
-        )[:3000]
+        )[:_AUX_LABEL_SAMPLE_CHARS]
         if "任务判断器" in blob:
             return "task_judge"
         if "重规划" in blob or "如何处理这个失败" in blob:
@@ -1076,17 +1098,33 @@ class SoulMateAgent:
     ) -> str:
         """辅助LLM往返统一落账口（14.4 落账补洞）：计时+trajectory事件回填。
 
-        返回值/异常行为与直接 self.llm_engine.chat 逐字等价（落账是旁路，绝不
-        改变语义面）；session_id 显式传入优先（如标题生成自带session），否则取
+        返回值/异常行为与直接 self.llm_engine.chat 等价（落账是旁路，绝不改变
+        语义面）；session_id 显式传入优先（如标题生成自带session），否则取
         _AUX_TRAJ_CTX（_prompt_inner 回合内设置）；都没有（回合外直调/测试）只
         跳过落账不伪造session。记账失败绝不阻塞。
+
+        15.3 aux延迟治理（唯一语义面例外，显式声明）：串行挡在首字回复前的
+        关键路径 aux（plan 任务规划/task_judge 任务裁决，实测均值11.2s/峰值
+        35.1s）带短预算 SOULMATE_AUX_CRITICAL_BUDGET_S（默认12s，<=0 关闭），
+        到点抛 TimeoutError 走调用点既有确定性回退（plan→"简单任务"、
+        task_judge→"new"），账本如实落 status="timeout"。非关键路径 label
+        （title=fire-and-forget 不阻塞/reflect/replan/infection_audit）不设限。
         """
         t0 = time.monotonic()
         status = "ok"
+        budget = _aux_critical_budget_s(label)
         try:
-            text = await self.llm_engine.chat(messages)
+            if budget > 0:
+                text = await asyncio.wait_for(
+                    self.llm_engine.chat(messages), timeout=budget
+                )
+            else:
+                text = await self.llm_engine.chat(messages)
             status = llm_outcome_status(text or "")
             return text
+        except (asyncio.TimeoutError, TimeoutError):
+            status = "timeout"
+            raise
         except Exception:
             status = "error"
             raise
