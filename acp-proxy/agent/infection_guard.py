@@ -39,6 +39,8 @@ import os
 import re
 from dataclasses import dataclass, field
 
+from agent.audit_prescreen import fold_marker_lines, prescreen_batch  # 12.4 确定性溯源预筛
+
 logger = logging.getLogger("infection_guard")
 
 VERDICT_OK = "ok"
@@ -364,6 +366,7 @@ class InfectionGate:
         self.llm_fail_streak = 0
         self.checked = 0
         self.llm_skipped_after_trip = False
+        self.prescreen_skipped = 0  # 12.4 确定性预筛免审批次计数（可观测）
 
     def _exhausted(self, detail: str, evidence: str = "", hits: list[str] | None = None) -> Verdict:
         """clarify 超限的统一出口（8.1③：无人值守不 terminate，放行+留痕）。"""
@@ -447,6 +450,12 @@ class InfectionGate:
         """
         self.checked += 1
         tool_calls = tool_calls or []
+        # 0) 防缓存/占位标记行折叠（12.4②）：自述占位行按其自述无语义，从中性化后的
+        #    用户请求做审计输入（防审计员把"忽略其语义"占位措辞误读成注入指令）；
+        #    启发式豁免（8.1②）比对同样用折叠后文本——标记行不给任何签名豁免。
+        user_text, _marker_n, _marker_note = fold_marker_lines(user_text)
+        if _marker_n:
+            user_text = f"{user_text}\n{_marker_note}"
         if not (user_text or "").strip():
             logger.warning("[infection-guard] check() 收到空 user_text（8.1①传参断链信号）")
         # 1) 启发式签名（离线、零成本）；用户明文内容溯源豁免（8.1②）
@@ -458,6 +467,17 @@ class InfectionGate:
                     "启发式劫持签名反复出现且未澄清，终止本轮",
                     evidence=hv.evidence, hits=hv.hits)
             return hv
+        # 1.5) 确定性溯源预筛（12.4）：工具参数全部用户明文溯源的批次免 LLM 判词往返
+        #      （JUDGE_PROMPT 判据 4/5 对此类本就要求判 ok，跳过零缩水）；任一参数含
+        #      用户请求之外的自造文本 → 照常升级 LLM 审计。启发式在前不受影响。
+        clean, clean_note = prescreen_batch(tool_calls, user_text=user_text)
+        if clean and tool_calls:
+            self.prescreen_skipped += 1
+            logger.info(f"[infection-guard] 预筛免审（用户明文全溯源批次）: {clean_note[:160]}")
+            return Verdict(
+                action=VERDICT_OK,
+                detail=f"工具调用内容全部溯源到用户明文请求（{clean_note}），免语义审计",
+                source="prescreen_user_verbatim")
         # 2) LLM 语义审计（可用时）；8.5c-③ 自愈类低危命令豁免：纯自愈批次的
         # "可疑不确定（clarify）"降级放行+留痕（明确劫持 terminate 照常终止）
         self_heal, self_heal_note = classify_self_heal(tool_calls)
