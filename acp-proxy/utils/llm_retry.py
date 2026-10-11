@@ -47,11 +47,14 @@ MAX_ATTEMPTS = 5  # 10.1偏差：kilocode默认3→5（持续降级耐性，仍�
 # 上限后照常重试（有界耐性）；SOULMATE_LLM_RETRY_MAX_WAIT_S可配（测试注入故障用）。
 RETRY_MAX_WAIT_MS = 60_000
 
-# 九态分类码全集（12.6：预分类 code 串透传判据，改分类面先改这里）
+# 分类码全集（12.6：预分类 code 串透传判据，改分类面先改这里）：
+# 九态传输/状态码 + empty_output（周期#88 补：HTTP 200 空输出是独立失败形态，
+# 此前 llm_transport 以 "empty_output" 串记账但不在码集→classify 落 unknown
+# 分类缺口，探针实证 id=142 新行仍缺分类）
 _LLM_KIND_CODES = frozenset({
     "rate_limit", "timeout_status", "server_error", "client_error",
     "protocol_error", "read_timeout", "connect_error", "network_error",
-    "transient_message", "unknown",
+    "transient_message", "empty_output", "unknown",
 })
 
 # kilocode TRANSIENT_MESSAGES：纯文案匹配兜底（跨平台错误串，httpx类型判定之外的补充）
@@ -251,6 +254,7 @@ def classify_failure(source) -> str:
       请求族异常——实证 4 行 llm:dna "Error -3 while decompressing" 曾落 unknown
       分类缺口，请求族传输损坏归 network_error）
     - TRANSIENT_MESSAGES文案命中 → transient_message（跨平台兜底）
+    - "empty_output"预分类串码 → empty_output（HTTP 200空输出独立失败形态，周期#88补）
     - 其余 → unknown
     """
     if isinstance(source, bool):  # bool是int子类，先排除

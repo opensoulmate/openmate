@@ -251,7 +251,7 @@ class TestFallbackChainAccounting:
 
 class TestEmptyOutputAccounting:
     def test_empty_output_recorded(self, fault_server, fail_db):
-        """HTTP 200 空内容→失败必须可见：记账行含'空内容'"""
+        """HTTP 200 空内容→失败必须可见：记账行含'空内容'，kind=empty_output（周期#88 分类补齐）"""
         srv = fault_server([("ok", "")])
         with pytest.raises(LLMCallError) as ei:
             _call(srv.base_url)
@@ -261,6 +261,7 @@ class TestEmptyOutputAccounting:
             r[0] == "llm:dna" and r[2] == "llm_give_up" and "空内容" in (r[5] or "")
             for r in rows
         ), rows
+        assert any(r[1] == "empty_output" for r in rows), f"kind 未分类为 empty_output: {rows}"
 
 
 # ════════════════ 5. 旁路纪律 ════════════════

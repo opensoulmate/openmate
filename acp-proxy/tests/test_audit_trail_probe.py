@@ -220,6 +220,12 @@ class TestDnaWrapperAligned:
         assert classify_failure("protocol_error") == "protocol_error"
         assert classify_failure("not_a_code") == "unknown"
 
+    def test_classify_empty_output_gap_closed(self):
+        """周期#88：empty_output 预分类串码透传（此前不在码集→落 unknown 分类缺口，
+        探针实证 id=142 新行缺分类）"""
+        assert classify_failure("empty_output") == "empty_output"
+        assert classify_failure("empty_output") != "unknown"
+
     def test_classify_decoding_error_gap_closed(self):
         import httpx
         err = httpx.DecodingError("Error -3 while decompressing data")

@@ -4,7 +4,8 @@
 对 tool_failures.db（失败/恢复/LLM传输记账单一落点）做确定性抽查核对（不写库）：
 
 1. **失败分类行完整性**：kind/action/outcome/attempt 值域核对——
-   工具行 kind∈FailureKind 五态、llm: 行 kind∈九态(+unknown 显式列出=分类缺口)、
+   工具行 kind∈FailureKind 五态、llm: 行 kind∈分类码全集（九态+empty_output，周期#88补；
+   unknown 显式列出=分类缺口）、
    action∈{none,retry,fallback,give_up,llm_retry,llm_give_up}（值域外=记账参数
    错位形态，周期#69 WIP 实证 'retry_scheduled'/'failed' 落进 action 列）。
 2. **无孤儿行**：收尾行（outcome=exhausted）必须在同一 session_id+tool_name 组内
@@ -52,7 +53,7 @@ TOOL_KINDS = {"ok", "blocked", "transient", "recoverable", "permanent"}
 LLM_KINDS = {
     "rate_limit", "timeout_status", "server_error", "client_error",
     "protocol_error", "read_timeout", "connect_error", "network_error",
-    "transient_message", "unknown",
+    "transient_message", "empty_output", "unknown",
 }
 ACTIONS = {"none", "retry", "fallback", "give_up", "llm_retry", "llm_give_up"}
 # llm 记账契约配对（action ↔ outcome，10.1/11.3 语义）
