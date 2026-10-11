@@ -224,6 +224,16 @@ class DocGenTools:
         if not name.lower().endswith(f".{fmt}"):
             name = f"{name}.{fmt}"
         if "/" in name or "\\" in name or not _SAFE_NAME_RE.match(name):
+            # 11.5 越界回显限制说明：请求路径不在允许输出目录内时显式说明限制与
+            # 解法（产物落允许目录+可按用户明文指定路径复制），不再只有"filename 非法"
+            # 一句——静默改目录/裸拒绝会让用户不知道产物去哪了（周期#59 实证弯路根因）
+            if "/" in name or "\\" in name:
+                raise ValueError(
+                    f"⚠️ 输出目录受限：文档生成只能写入 {self.out_dir}，"
+                    f"请求路径 {name!r} 越界不在允许输出目录内。"
+                    f"请改用 filename=<文件名>（不含路径分隔符）生成到允许目录；"
+                    f"若用户明文指定了其他目标路径，生成后可用 terminal 复制到该路径"
+                    f"（用户指定路径属用户意图），并在回复中说明产物实际路径")
             raise ValueError(
                 f"filename 非法: {name!r}（只允许文件名本身，不含路径分隔符）")
         out_path = (self.out_dir / name).resolve()

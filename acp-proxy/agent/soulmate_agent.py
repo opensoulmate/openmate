@@ -3804,6 +3804,13 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             for tc in tool_calls
                         ],
                         user_text=user_text,
+                        # 11.5 来源证明：本回合已执行工具结果快照（审计判"来源不明"
+                        # 前先看同回合产出；也供确定性溯源降级核验）
+                        prior_tool_results=[
+                            str(m.get("content", ""))[:500]
+                            for m in messages
+                            if isinstance(m, dict) and m.get("role") == "tool"
+                        ][-12:],
                     )
                     if infection_verdict.action != "ok":
                         ig_action = infection_verdict.action
@@ -3864,9 +3871,11 @@ You can send files to the user natively: to deliver a file, write a brief confir
                         messages.extend(tool_results)
                         break
                     elif infection_verdict.source in ("clarify_exhausted_pass",
-                                                      "self_heal_pass_with_trace"):
-                        # 8.1③/8.5c-③ 放行+留痕（clarify超限无人值守放行 / 自愈类低危
-                        # 命令豁免降级放行）：工具照常执行，但放行原因进轨迹账本+日志
+                                                      "self_heal_pass_with_trace",
+                                                      "provenance_pass_with_trace"):
+                        # 8.1③/8.5c-③/11.5 放行+留痕（clarify超限无人值守放行 / 自愈类
+                        # 低危命令豁免降级放行 / 路径来源真源自证降级放行）：工具照常执行，
+                        # 但放行原因进轨迹账本+日志
                         logger.warning(
                             f"[infection-guard] session={session_id} 放行+留痕 "
                             f"source={infection_verdict.source} "

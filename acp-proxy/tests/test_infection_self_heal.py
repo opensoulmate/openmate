@@ -170,4 +170,6 @@ class TestWiring:
         import agent.soulmate_agent as sma
         src = Path(sma.__file__).read_text(encoding="utf-8")
         assert "self_heal_pass_with_trace" in src
-        assert '"self_heal_pass_with_trace")' in src or "'self_heal_pass_with_trace')" in src
+        # 留痕分支元组成员断言（11.5 起该元组扩为三元，尾随字符可能是 , 或 )）
+        assert ('"self_heal_pass_with_trace",' in src
+                or '"self_heal_pass_with_trace")' in src)
