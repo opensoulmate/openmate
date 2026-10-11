@@ -238,6 +238,7 @@ class UnifiedMessageRouter:
         self._get_wechat_bridge = get_wechat_bridge
         self._turn_fn = turn_fn or make_openmate_turn_fn()
         self._openmate_send = openmate_send
+        self._audit = None  # 出站痕迹（lazy get_outbound_audit）
         self._store = store or RouterStore()
         self._openmate_db_path = (
             openmate_db_path or os.environ.get("SOULMATE_MSG_OPENMATE_DB")
@@ -258,6 +259,25 @@ class UnifiedMessageRouter:
         self.stats.last_error = str(msg)[:300]
         self.stats.last_error_at = int(time.time() * 1000)
         logger.warning("[msg_router] %s", msg)
+
+    def _record_out(self, channel: str, target: str, kind: str, status: str,
+                    *, blocks: int = 1, dedup_key: str | None = None,
+                    text_preview: str = "") -> None:
+        """出站痕迹落审计行（路线图12.1；旁路纪律失败只计数不冒泡）。
+
+        wechat 通道由 WeChatBridge 传输边界留痕（单一真源不双份记账），
+        本处只留 openmate 通道出站痕迹。
+        """
+        try:
+            audit = self._audit
+            if audit is None:
+                from agent.outbound_audit import get_outbound_audit
+                audit = get_outbound_audit()
+                self._audit = audit
+            audit.record(channel, target, kind, status, blocks=blocks,
+                         dedup_key=dedup_key, text_preview=text_preview)
+        except Exception:
+            pass
 
     # ── 入站 ───────────────────────────────────────────────────
 
@@ -465,15 +485,20 @@ class UnifiedMessageRouter:
                 detail=f"已发{'+'.join(parts)}给微信peer「{tgt}」")
 
         # ── openmate 出站：落库 + relay 补推（正连前端实时可见） ──
+        out_kind = "media" if (atts and not body.strip()) else "text"
         try:
             sender = self._openmate_send or self._default_openmate_send
             row_id = sender(tgt, body, atts)
         except Exception as e:
             self.stats.outbound_failed += 1
             self._note_error(f"openmate出站落库异常({tgt}): {e}")
+            self._record_out(ch, tgt, out_kind, "failed",
+                             text_preview=body)
             return RouteResult(
                 "error", ch, target=tgt, detail=f"落库失败: {e}")
         self.stats.outbound_ok += 1
+        self._record_out(ch, tgt, out_kind, "sent", blocks=1,
+                         dedup_key=f"om-{row_id}", text_preview=body)
         return RouteResult(
             "delivered", ch, target=tgt, session_id=tgt, reply_sent=True,
             detail=f"已落库消息行#{row_id}（turn_origin={MSG_TURN_ORIGIN}，正连前端实时可见）")

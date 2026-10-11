@@ -349,6 +349,7 @@ class WeChatBridge:
         turn_fn: Callable[[WeChatMessage], Coroutine[Any, Any, str]] | None = None,
         *,
         store: BridgeStore | None = None,
+        audit: object | None = None,
         poll_interval_s: float | None = None,
         min_send_interval_s: float | None = None,
         max_block_chars: int | None = None,
@@ -356,6 +357,7 @@ class WeChatBridge:
     ):
         self._transport = transport
         self._store = store or BridgeStore()
+        self._audit = audit  # 出站痕迹（None=懒加载 get_outbound_audit）
         self._turn_fn = turn_fn or make_default_turn_fn(self._store)
         self._poll_interval_s = float(
             poll_interval_s
@@ -425,12 +427,31 @@ class WeChatBridge:
                 self.stats.replies_sent += 1
             else:
                 self.stats.send_failed += 1
+        self._record_out("reply", str(msg.from_user or ""),
+                         "sent" if sent else "failed", blocks=sent,
+                         dedup_key=str(msg.msg_id or ""),
+                         text_preview=str(text or ""))
         return sent
 
     def _note_error(self, msg: str) -> None:
         self.stats.last_error = str(msg)[:300]
         self.stats.last_error_at = int(time.time() * 1000)
         logger.warning("[wechat] %s", msg)
+
+    def _record_out(self, kind: str, target: str, status: str, *,
+                    blocks: int = 1, dedup_key: str | None = None,
+                    text_preview: str = "") -> None:
+        """出站痕迹落审计行（路线图12.1；旁路纪律失败只计数不冒泡）。"""
+        try:
+            audit = self._audit
+            if audit is None:
+                from agent.outbound_audit import get_outbound_audit
+                audit = get_outbound_audit()
+                self._audit = audit
+            audit.record("wechat", target, kind, status, blocks=blocks,
+                         dedup_key=dedup_key, text_preview=text_preview)
+        except Exception:
+            pass
 
     # ── 处理回路 ───────────────────────────────────────────────
 
@@ -487,6 +508,8 @@ class WeChatBridge:
                 self.stats.replies_sent += 1
             else:
                 self.stats.send_failed += 1
+        self._record_out("text", str(peer), "sent" if sent else "failed",
+                         blocks=sent, text_preview=str(text or ""))
         return sent
 
     async def send_media_proactive(self, peer: str, media: list) -> int:
@@ -521,6 +544,11 @@ class WeChatBridge:
                 self.stats.media_sent += 1
             else:
                 self.stats.send_failed += 1
+        self._record_out("media", str(peer), "sent" if sent else "failed",
+                         blocks=sent,
+                         text_preview=",".join(
+                             str(a.get("name", "") if isinstance(a, dict)
+                                 else getattr(a, "name", "")) for a in atts))
         return sent
 
     async def run_once(self) -> int:

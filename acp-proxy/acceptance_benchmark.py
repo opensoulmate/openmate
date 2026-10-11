@@ -36,6 +36,10 @@ RESULTS_PATH = "/tmp/soulmate_accept_results.json"
 MEM_PATH = os.path.expanduser("~/.hermes/soulmate/memory/MEMORY.md")
 CRON_DB = os.path.expanduser("~/.hermes/soulmate/memory/cron_tasks.db")
 SUB_DB = os.path.expanduser("~/.hermes/soulmate/memory/subagent_runs.db")
+# 路线图12.1：多渠道出站独立可查痕迹（agent/outbound_audit.py 单一写入源）
+OUTBOUND_DB = (os.environ.get("SOULMATE_OUTBOUND_AUDIT_DB")
+               or os.path.expanduser("~/.hermes/soulmate/memory/outbound_audit.db"))
+MULTICHANNEL_MARKER = "验收多渠道探针"
 # 周期#54：上游降级期实证回合 >300s 仍会服务端跑完（定时类 WS 300s 超时但
 # accept_probe 行后到落库），默认 300s 保留，降级期可 ACCEPT_PROMPT_TIMEOUT_S 拉长。
 PROMPT_TIMEOUT_S = int(os.environ.get("ACCEPT_PROMPT_TIMEOUT_S", "300"))
@@ -291,8 +295,21 @@ def verify_cron(reply: str) -> tuple[bool, str]:
 
 
 def verify_multichannel(reply: str) -> tuple[bool, str]:
-    ok = ("accept_peer" in reply or "微信" in reply) and len(reply) > 20
-    return ok, f"回复提及目标/微信={'是' if ('accept_peer' in reply or '微信' in reply) else '否'}"
+    """路线图12.1：服务端出站痕迹回读（不再依赖回复辅证）。
+
+    判据=出站审计行（agent/outbound_audit.py）存在 channel=wechat、
+    target=accept_peer、status=sent 且文本含探针文案的痕迹行。
+    """
+    rows = _query(
+        OUTBOUND_DB,
+        "SELECT ts_ms, kind, status, text_preview FROM outbound_log "
+        "WHERE channel = 'wechat' AND target = ? AND status = 'sent' "
+        "ORDER BY ts_ms DESC, id DESC LIMIT 20",
+        ("accept_peer",))
+    hit = [r for r in rows if MULTICHANNEL_MARKER in (r[3] or "")]
+    return bool(hit), (
+        f"出站痕迹行（wechat→accept_peer 含探针文案）={len(hit)}"
+        f"（审计库总相关行={len(rows)}）")
 
 
 def verify_memory(reply: str) -> tuple[bool, str]:
@@ -307,7 +324,7 @@ def verify_collab(reply: str) -> tuple[bool, str]:
     return both and db_ok, f"回复含双worker产出={'是' if both else '否'}、subagent_runs近8行={len(rows)}"
 
 
-SERVER_SIDE = {"开发", "调试", "发布", "办公", "定时", "记忆", "协作"}
+SERVER_SIDE = {"开发", "调试", "发布", "办公", "定时", "记忆", "协作", "多渠道"}
 
 TASKS = [
     {
@@ -432,6 +449,16 @@ def cleanup() -> None:
         conn.execute(
             "DELETE FROM agent_messages WHERE content LIKE ?",
             ("%SOULMATE_PUBLISH_PROBE%",))
+        conn.commit()
+        conn.close()
+    except sqlite3.Error:
+        pass
+    # 路线图12.1：多渠道出站痕迹探针行同样预清（陈旧行假阳性防线）
+    try:
+        conn = sqlite3.connect(OUTBOUND_DB, timeout=10)
+        conn.execute(
+            "DELETE FROM outbound_log WHERE target = ? OR text_preview LIKE ?",
+            ("accept_peer", f"%{MULTICHANNEL_MARKER}%"))
         conn.commit()
         conn.close()
     except sqlite3.Error:
