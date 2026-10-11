@@ -53,7 +53,10 @@ class _RecordingLLM:
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    # 周期#74 测试基建修复：get_event_loop().run_until_complete 在批内排序下
+    # （前序测试 asyncio.run/loop.close 之后无当前循环）抛 RuntimeError 批内红灯，
+    # 对齐周期#55/#73 修法用 asyncio.run（每次全新事件循环，排序无关）
+    return asyncio.run(coro)
 
 
 # ── 1. 免审判据（用户明文全溯源）─────────────────────────────────────────

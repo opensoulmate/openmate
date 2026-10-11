@@ -19,6 +19,13 @@
 6. **11.5 溯源降级真实判词触发观察**：opensoul.db trajectory_events 里
    provenance_pass_with_trace / self_heal_pass_with_trace 留痕计数
    （0 = 尚未自然触发，如实报"未触发"，不假造观察结论）。
+   ⚠️列名容缺：扫描列取 PRAGMA 实存列（content/arguments_json/metadata_json），
+   轨迹账本 metadata 落 metadata_json 列——早期版本只扫 content/arguments_json
+   （后者根本不存在）对 [infection-guard] 伪条目是盲的（周期#74 修正）。
+7. **判词依据落账抽查**（12.6①）：infection 非 ok 判词的 [infection-guard]
+   verdict_basis 落账行核对——真实依据行 / "判词未附依据（纯标签）"诚实标记行
+   分别计数；有拦截行（permission infection:terminate|clarify）却无任何
+   verdict_basis 落账行的会话=修复前历史缺口，如实计数不改写历史。
 
 用法：
     python audit_trail_probe.py                       # 默认真实库
@@ -59,6 +66,12 @@ RECOVERY_ACTIONS = {"retry", "fallback"}
 
 # ts 单位判据：毫秒 UTC（2026 年约 1.79e12）远大于秒值；1e10 为分界保守值
 TS_MS_MIN = 10 ** 10
+
+# 判词依据空值判据（12.6①）：verdict_basis 键后跟空字符串。容忍三种落库形态——
+# Python repr `'verdict_basis': ''` / JSON `"verdict_basis": ""` / JSON 内再转义
+# `\"verdict_basis\": \"\"`（周期#72 实证 arguments 落库为 repr 非 JSON）；每个引号
+# 是「可选反斜杠+引号」单元（转义形态引号前各有反斜杠）
+_EMPTY_BASIS_RE = re.compile(r"""verdict_basis\\?['"]:\s*(?:\\?['"]){2}""")
 
 
 def load_rows(conn) -> list[dict]:
@@ -185,6 +198,26 @@ def check_ts_units(rows: list[dict]) -> dict:
             "ok": sec_rows == 0, "note": "存量秒单位行不改写历史，新行毫秒UTC"}
 
 
+def _traj_text_columns(conn) -> list[str]:
+    """轨迹账本可扫文本列（列名容缺）：真实列是 metadata_json（工具账本 metadata
+    落点），历史上探针误扫不存在的 arguments_json 对 [infection-guard] 伪条目全盲。"""
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(trajectory_events)")}
+    except sqlite3.OperationalError:
+        return []
+    return [c for c in ("content", "arguments_json", "metadata_json") if c in cols]
+
+
+def _count_traj_rows(conn, cols: list[str], needle: str) -> int:
+    if not cols:
+        return 0
+    where = " OR ".join(f"{c} LIKE ?" for c in cols)
+    cur = conn.execute(
+        f"SELECT COUNT(*) FROM trajectory_events WHERE {where}",
+        [f"%{needle}%"] * len(cols))
+    return cur.fetchone()[0]
+
+
 def check_provenance_trace(events_db: Path) -> dict:
     """11.5 溯源降级真实判词触发观察：留痕行自然触发计数（0=未触发如实报）。"""
     out = {"provenance_rows": 0, "self_heal_rows": 0, "available": False,
@@ -195,37 +228,69 @@ def check_provenance_trace(events_db: Path) -> dict:
     try:
         conn = sqlite3.connect(str(events_db))
         try:
-            cur = conn.execute(
-                "SELECT COUNT(*) FROM trajectory_events"
-                " WHERE content LIKE '%pass_with_trace%'"
-                " OR arguments_json LIKE '%pass_with_trace%'"
-            )
-            total = cur.fetchone()[0]
-        except sqlite3.OperationalError:
-            # 列名容缺：content/arguments_json 至少一个在
-            total = 0
-            for col in ("content", "arguments_json"):
-                try:
-                    cur = conn.execute(
-                        f"SELECT COUNT(*) FROM trajectory_events"
-                        f" WHERE {col} LIKE '%pass_with_trace%'")
-                    total += cur.fetchone()[0]
-                except sqlite3.OperationalError:
-                    continue
-        try:
-            cur = conn.execute(
-                "SELECT COUNT(*) FROM trajectory_events"
-                " WHERE content LIKE '%provenance_pass_with_trace%'"
-                " OR arguments_json LIKE '%provenance_pass_with_trace%'")
-            prov = cur.fetchone()[0]
-        except sqlite3.OperationalError:
-            prov = 0
-        conn.close()
+            cols = _traj_text_columns(conn)
+            total = _count_traj_rows(conn, cols, "pass_with_trace")
+            prov = _count_traj_rows(conn, cols, "provenance_pass_with_trace")
+        finally:
+            conn.close()
         out["available"] = True
         out["provenance_rows"] = prov
         out["self_heal_rows"] = max(0, total - prov)
-        out["note"] = ("自然触发观察中（探针可复跑）" if total
+        out["note"] = (f"自然触发观察中（探针可复跑，扫描列={'+'.join(cols) or '无'}）"
+                       if total
                        else "尚未自然触发（0 行=如实报，非缺陷）")
+    except Exception as e:  # 探针自身故障显式报
+        out["note"] = f"轨迹库读取失败: {e}"
+    return out
+
+
+def check_verdict_basis(events_db: Path) -> dict:
+    """12.6① 判词依据落账抽查：非 ok 判词的 verdict_basis 落账行核对（只读）。"""
+    out = {"basis_rows": 0, "with_basis_rows": 0, "no_basis_marker_rows": 0,
+           "intercept_rows": 0, "intercept_sessions_without_basis": 0,
+           "empty_basis_rows": 0, "available": False, "note": ""}
+    if not Path(events_db).exists():
+        out["note"] = f"轨迹库不存在: {events_db}"
+        return out
+    try:
+        conn = sqlite3.connect(str(events_db))
+        try:
+            cols = _traj_text_columns(conn)
+            basis = _count_traj_rows(conn, cols, "verdict_basis")
+            marker = _count_traj_rows(conn, cols, "判词未附依据")
+            intercept = (_count_traj_rows(conn, cols, "infection:terminate")
+                         + _count_traj_rows(conn, cols, "infection:clarify"))
+            # 有拦截行却无任何判词落账行的会话（修复前历史账，如实计数）
+            gap = 0
+            if basis == 0:
+                gap = intercept  # 无落账行时按拦截行计（行口径如实报）
+            # 空依据行：verdict_basis 键在但值为空（正常路径必落真实依据或诚实
+            # 标记，0=健康）。arguments 落库形态有三种（Python repr / JSON /
+            # JSON 里再转义），LIKE 配不过来——取行后 Python 正则判空。
+            empty = 0
+            for c in cols:
+                try:
+                    cur = conn.execute(
+                        f"SELECT {c} FROM trajectory_events"
+                        f" WHERE {c} LIKE '%verdict_basis%'")
+                    for (cell,) in cur.fetchall():
+                        if _EMPTY_BASIS_RE.search(cell or ""):
+                            empty += 1
+                except sqlite3.OperationalError:
+                    continue
+        finally:
+            conn.close()
+        out["available"] = True
+        out["basis_rows"] = basis
+        out["no_basis_marker_rows"] = marker
+        out["empty_basis_rows"] = min(empty, basis)
+        out["with_basis_rows"] = max(0, basis - marker - out["empty_basis_rows"])
+        out["intercept_rows"] = intercept
+        out["intercept_sessions_without_basis"] = gap
+        out["note"] = (
+            "判词依据落账观察中（探针可复跑）"
+            if basis else
+            "尚无 verdict_basis 落账行（修复前历史拦截行不改写，如实报）")
     except Exception as e:  # 探针自身故障显式报
         out["note"] = f"轨迹库读取失败: {e}"
     return out
@@ -249,6 +314,7 @@ def run_probe(db_path: Path, events_db: Path) -> dict:
             "note": "周期#61遗留③：真实降级审计行存在=闭环",
         },
         "provenance_observation": check_provenance_trace(events_db),
+        "verdict_basis": check_verdict_basis(events_db),
     }
     report["dna_closure"]["closed"] = report["dna_closure"]["real_dna_rows"] > 0
     return report
@@ -286,6 +352,14 @@ def format_report(rep: dict) -> str:
     p = rep["provenance_observation"]
     lines.append(f"ℹ️ 11.5 溯源降级留痕观察：provenance {p['provenance_rows']} / "
                  f"self_heal {p['self_heal_rows']} — {p['note']}")
+    b = rep.get("verdict_basis", {})
+    mark = "✅" if not b.get("empty_basis_rows") else "❌"
+    lines.append(f"{mark} 判词依据落账（12.6①）：落账行 {b.get('basis_rows', 0)}"
+                 f"（真实依据 {b.get('with_basis_rows', 0)} / 诚实标记 "
+                 f"{b.get('no_basis_marker_rows', 0)}），空依据行 "
+                 f"{b.get('empty_basis_rows', 0)}，拦截行 {b.get('intercept_rows', 0)}"
+                 f"（无落账历史缺口 {b.get('intercept_sessions_without_basis', 0)}）"
+                 f" — {b.get('note', '')}")
     return "\n".join(lines)
 
 

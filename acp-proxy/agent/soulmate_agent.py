@@ -3814,9 +3814,15 @@ You can send files to the user natively: to deliver a file, write a brief confir
                     )
                     if infection_verdict.action != "ok":
                         ig_action = infection_verdict.action
+                        # 12.6① 判词依据落账：非 ok 判词的依据显式落轨迹账本——
+                        # 此前 verdict=terminate detail=空 时 message 只剩通用兜底
+                        # 文案（"判了什么全靠猜"）；纯标签判词无依据时如实落
+                        # "判词未附依据"，不编造理由。
+                        _ig_basis = (infection_verdict.detail or infection_verdict.evidence
+                                     or "判词未附依据（纯标签）")
                         logger.warning(
                             f"[infection-guard] session={session_id} verdict={ig_action} "
-                            f"source={infection_verdict.source} detail={infection_verdict.detail[:200]}")
+                            f"source={infection_verdict.source} detail={_ig_basis[:200]}")
                         # 可观测：拦截事件进all_tool_calls轨迹账本（"为什么没执行"可查）
                         for tc in tool_calls:
                             all_tool_calls.append({
@@ -3825,6 +3831,17 @@ You can send files to the user natively: to deliver a file, write a brief confir
                                 "result_preview": infection_verdict.message[:200],
                                 "permission": f"infection:{ig_action}",
                             })
+                        # 判词依据伪条目（[infection-guard] 类，report_evidence.
+                        # parse_ledger 两头不计=纯可观测不影响执行证据判定）；
+                        # permission 用独立值不与 infection:{action} 混计数
+                        all_tool_calls.append({
+                            "name": "[infection-guard]",
+                            "arguments": {"action": ig_action,
+                                          "source": infection_verdict.source,
+                                          "verdict_basis": _ig_basis[:400]},
+                            "result_preview": _ig_basis[:300],
+                            "permission": "infection:verdict_basis",
+                        })
                         if ig_action == "terminate":
                             # TERMINATE（含clarify超限升级）：工具一个都不执行，终止本轮
                             _ig_tail = redactor.flush()
