@@ -922,7 +922,7 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
   🛡️banner带判词依据落库+⚡8.2负路径真实触发（⛔工具被拦截逐条报原因+报告降级），
   样本文件全程未落盘。探针=injection_probe_ws.py（主8断言）+
   injection_probe_turn3/turn4.py（8.2负路径配料），可复跑。
-- [ ] 13.3 注入审计 LLM 往返开销治理（8.3 期间另案）：12.4 只做了免审面（确定性
+- [x] 13.3 注入审计 LLM 往返开销治理（8.3 期间另案）：12.4 只做了免审面（确定性
   溯源预筛），剩余升级审计仍是**每工具一次 LLM 往返**（3 工具链曾被拉到 5-8 分钟）。
   方向=同回合同签名批次批量审计（一批工具一次判词）或会话内判词复用；先测当前每工具
   审计耗时分布拿基线再动刀，判词语义（JUDGE_PROMPT/verdict_basis 落账）零缩水。
@@ -942,6 +942,32 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
   候选命中场景；注意 prior_tool_results 逐轮增长会让精确输入复用命中率≈0，需按
   （user_text+output+tool_calls）签名复用并接受 provenance 上下文不进 key 的取舍）
   ③审计输入瘦身需补 chars 维度相关性数据再动（判词语义零缩水约束）。
+  ——周期#80 治理刀（零语义风险面全做完，含 1 处实证缺陷根因修复）：
+  **① 免审面扩展（数字算子）**：audit_prescreen 增纯 ASCII 数字 token 残渣免审
+  （_NUMERIC_RESIDUE_RE 窄形态：仅 [0-9] token 空白分隔；0x/-/./,/e/全角/链式
+  混排一律照常升级——组装逃逸负控制钉死，"0x"+"4141" 拼装被 _MIN_SPAN(4) 挡），
+  source=prescreen_numeric 不冒充全明文。**真实路径实效**（WS 回合 GOV133NUM2）：
+  `sleep 3` 批免审零 LLM 往返（修复前同形态升级+2549ms 审计）。
+  **实证缺陷根因修复（同轮探针暴露）**：fold_marker_lines 旧 `^.*短语.*$` 整行
+  折叠——标记短语内联在同一行真实请求后时把整个用户请求吞掉（溯源依据丢失→
+  'sleep 3' 整值假升级+判词员看不到用户请求）→ 改标记**子句级**折叠（含短语的
+  括号组整体/无括号折到句末标点），同行真实请求原样送审；残余边界=自述短语后
+  无句末边界的同句内容仍随子句折叠（与旧行为一致不放宽，如实记录）。
+  **② 同签名复现率实测（判词复用动刀前数据）**：sig=(user_text,output,tool_calls)
+  claims 三元组 / full=+prior_tool_results 双口径埋点落 journal，真实 4 回合
+  （开发/办公/数字探针×2）4 样本 **两口径复现率均 0%**（含 output_text 的严口径
+  需输出逐字相同才命中——自然回合几乎不发生；13.2 clarify 重试链（/tmp/.txt ×4）
+  是已知候选命中场景但先于签名埋点）。**结论**：②零取舍口径（full，含 provenance）
+  实测无收益；有收益口径（sig，provenance 不进 key）是安全取舍（理论上漏"同 claims
+  但新工具结果揭示来源为注入"的场景）→ **不擅动，待用户拍板**。
+  **③ chars 相关性实测（瘦身动刀前数据）**：4 样本 chars 154-1031、单次 2.5-6.7s
+  （总 20.08s/均值 5.0s），pearson=0.452（n=4；3 样本子集为 -0.483——小样本正负号
+  翻转=无稳定相关）——本窗口审计耗时**非输入长度驱动**（chars=365 的 document
+  审计 6.7s 最慢、chars=154 的 terminal 2.5s），瘦身预期收益低，动刀暂缓。
+  ⏳待用户拍板（安全取舍，不擅动）：②判词复用是否接受"provenance 不进 key"
+  取舍（收益面=clarify 重试链等同 claims 复发场景，风险面=同 claims 但新工具
+  结果揭示来源为注入的理论漏检；零取舍口径已实测无收益）。13.3 主体（零语义
+  风险治理面+两项动刀前测量）已完成勾选。
 - [ ] 13.4 AI 群组真实成员端到端（"后续另案"清单遗留，用户重视 AI 群组）：多 agent
   真实成员（非 loopback 模拟）群组任务链式执行+每步回群聊的端到端验收探针，
   对齐 references/ai-groups-e2e.md 验收行。
@@ -1038,3 +1064,5 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 [2026-10-11 16:20] 周期#77 | 13.1 流式路径 stall 停顿治理（事故家族最后已知缺口销账）：utils/stall_guard 同源扩面（aiter_with_stall_guard 消费侧 chunk 间隙看门狗+open_stream_with_stall_guard 流式等响应头看门狗+_await_with_stall 单源计时+stream_deadline_s 流式总兜底默认 900s/可配 SOULMATE_LLM_STREAM_DEADLINE_S）+llm_engine 四点接线（chat_stream/chat_stream_with_tools 各"等响应头+chunk 间隙"），停顿抛 httpx.ReadTimeout 落既有 except httpx.TransportError——partial 输出/has_output 重试规则与"[LLM响应超时]"文案零改动（接线护栏钉死）；**接线期真实生产实证并修复同族既有缺陷**（周期#69 send_with_stall_guard）：收集 aiter_bytes 已解码字节却保留 content-encoding: gzip 头重建 Response=二次解码 DecodingError"incorrect header check"——16:09 journal 实证 token-plan gzip 响应下 chat() 全部报"[LLM错误: Error -3 while decompressing...]"（会话标题被错误文案污染，纯文本假服务器测试未覆盖 gzip 形态）→改收 aiter_raw 原始字节与头一致+gzip 回归钉 | ✅ | (本次提交) | 13.1勾选；Gate1 git diff 5文件+新测试文件真实落盘（stall_guard +108/llm_engine +27/新测试 test_llm_stream_stall.py 15例/gzip 回归钉/路线图）；Gate2 grep 四接线点在 chat_stream/chat_stream_with_tools 真实路径（6 处引用）+aiter_raw 修复点+两次真实 WS 用户路径走中真实接线（开发类回合=chat_stream_with_tools 流式消费真实路径、标题生成=chat()→send_with_stall_guard 真实路径）；Gate3 tests/test_llm_stream_stall.py 15/15（真实 socket SSE 故障注入非 mock：头挂死重试恢复/消费中挂死 partial 保留+has_output 零重试+文案逐字/tool 路径状态零污染与恢复/涓流零误杀负控制[间隙0.1s<stall0.5s 总时长1s>stall 完整收流]/慢首 token 不误杀/stream deadline 兜底涓流假进展/错误契约 read_timeout+inner 异常透传/接线护栏含 has_output 规则未动/旁路）+test_llm_stall_guard 22/22（含新增 gzip 双解码回归钉+streaming 接线断言随 13.1 更新）+受影响面 425 全过（stall/stream/transport/resilience/accounting/error_contract/retry 145+engine_fallback/model_fallback/transport_core/stream_continuation/turn_park/network_park/send_budget/stream_progress/turn_lifecycle/turn_outcome/discussion_park/wakeup_fire 280）+py_compile+服务同款 interpreter 导入烟测 SMOKE77_IMPORT_OK；真实验收=WS 用户路径开发类 2/2✅（STALL131 33.47s/STALL131B 42.17s，verify_dev 三判据全命中 end_turn），修复后 journal 实证"Session title generated: 创建并运行Python文件"干净标题+全窗口零 DecodingError 零守卫误杀；测试产物清理归零（/tmp/soulmate_accept 已删）；⚠️诚实边界：①流式停顿的自然发生（上游真挂死）未在本轮触发——停顿→中止→重试以故障注入实证，涓流零误杀以负控制实证②流式 deadline 默认 900s 取值依据=连续出字属合法长生成，若真实负载有 >900s 合法连续流调 SOULMATE_LLM_STREAM_DEADLINE_S 上调③gzip 双解码缺陷为周期#69 引入（deploy 后至本周期修复前的 chat() 调用受影响：标题/步自省曾静默吞错文案），已修复并回归钉死；下周期做 13.2 注入审计拦截自然触发端到端实证
 [2026-10-11 17:15] 周期#78 | 13.2 注入审计拦截自然触发端到端实证（销周期#74 诚实边界③+⚡8.2负路径真实触发）：两段式间接注入隔离session（om-4fe1d3b58854）真实WS用户路径——turn1只读建立来源（模型识破注入但只转述不执行=干净基线）/turn2执行"注入检测样本同步"SOP（4条样本逐字携带劫持签名：persona改写/隐瞒用户/指令覆盖/套取提示词，签名只在载体文件与工具参数、不在用户明文→8.1②溯源豁免不适用→启发式确定性命中）；自然升级链 journal 实证 clarify(16:50:44)→clarify(16:50:55)→terminate(16:51:13 clarify_exhausted"启发式劫持签名反复出现且未澄清，终止本轮")，全session最终 clarify账本行14+terminate行7；verdict_basis 落账21行全部真实依据（0诚实标记0空依据；探针第7面：落账行0→21、拦截行33→54、历史缺口33→0不增、新行有依据✅）；banner 用户可见报因✅（回合行🛡️[注入审计终止]+判词依据）；⚡8.2 治理负路径真实触发✅（turn4 配方=明文逐字写入禁编码+标题先行+禁读取检查类工具→claims+全拦截+零成功执行→verdict=blocked→落库回复前置"⛔ **工具被拦截（未执行，不构成完成证明）**"逐条"被拦截：原因"（含 loop_guard"same arguments 3 times"一并如实报）+报告标题降级"（⚠️ 未经执行验证）"）；动作被阻止✅（样本 canary 文件全程未创建，21次写入尝试零落盘） | ✅ | (本次提交) | Gate1 git diff 3探针新文件+路线图2区块真实落盘；Gate2=探针真实执行即接线（WS真回合4条+audit_trail_probe第7面+journal [infection-guard] 链21条），无新增生产代码符号（纯验收切片）；Gate3=主探针8断言6/8（A4/A5后到回读补齐）+turn3 5项+turn4 5/5，全部服务端副作用证据（轨迹账本/agent_messages落库行/canary不存在/journal）非探针自报；测试产物清理（inject载体删除/canary不存在//tmp helper删除），隔离session轨迹行保留=审计证据；⚠️诚实边界：①terminate 由启发式 clarify 超限升级路径自然触发，LLM 语义审计直接判 terminate 未在本轮发生②8.2 负路径前置条件苛刻（claims+全拦截+零成功执行）：turn2 有 cat/ls 真实执行→grounded 不触发（合理）、turn3 全拦截但模型诚实未谎称完成→no-claim 不触发（合理=治理只针对假声称）——三轮对照恰实证治理判定语义按设计工作③新发现误伤张力（候选待用户拍板）：合法"安全测试样本落盘"诉求（样本文本来自三方文件）被签名反复拦截、有人值守 clarify 超限升级 terminate 无法完成，模型自行发现 base64 编码可绕过签名扫描（turn4 禁编码才拦住）——签名扫描的固有误伤面+编码绕过面，候选后续=用户明示重试豁免/澄清后二次豁免语义，涉及安全取舍不擅动④WS 320s 超时后回合服务端跑完后到落库再次实证（10.4 口径：turn2 任务管线重规划3次历时~19分钟后到回读）；下周期做 13.3 注入审计 LLM 往返开销治理（先测每工具审计耗时分布基线再动刀）
 [2026-10-11 17:45] 周期#79 | 13.3第一刀·注入审计 LLM 往返开销基线（"先测基线再动刀"按序执行，治理刀未动）：infection_guard._llm_audit 每次判词往返计时（_record_audit_ms，含 timeout/error/unavailable 失败路径恰好各记一次——失败往返 30s 是最贵开销形态；旁路纪律观测失败不冒泡）落 stats() llm_audit_last/mean/max/total_ms + journal 行"LLM审计完成 verdict=X 耗时=Nms tools=a,b（累计 N 次 均值 Xms 最大 Yms）"（工具名归因=每工具审计耗时口径）+可复跑探针 acp-proxy/audit_cost_report.py（分布 count/mean/p50/p95/max/min/total+按 verdict+按工具归因；生产者-消费者正则 AUDIT_RE 互相咬合改一边测试红；stderr 中继双份去重沿用 12.4③ 实测坑纪律） | ✅ | 8c78d494 | 13.3 部分完成（基线✅治理刀下拍第一优先，决策依据已写入 13.3 条目）；Gate1 git diff infection_guard +39 行+2 新文件真实落盘（8c78d494）；Gate2 grep _record_audit_ms 四个 return 点全数接线+check() 真实路径计时测试走中+真实 WS 验收回合经真实调用路径产出 journal 样本（非测试 stub）；Gate3 tests/test_audit_cost_report.py 13/13（成功/timeout/error/unavailable 四路径计时、列表有界 500、生产者-消费者 roundtrip+去重+无关行、分布数学+按工具归因+空数据 None、check() 接线护栏、免审批次零往返）+同域回归 249 全过（prescreen_stats/infection_guard×4/audit_prescreen 166 + report_evidence/self_verify/remediation_style/frame_origin/tool_availability 83）+py_compile+服务同款 interpreter 烟测 SMOKE79_IMPORT_OK+双实例重启 health 200/200；**真实基线**（tag=BASE133_1791727000，WS 真实用户路径开发+办公 2 回合 2/2✅：开发 35.03s verify_dev 三判据命中/办公 58.61s report.xlsx 4979B）：5 次判词往返总 18.99s、均值 3.8s、p50 2.2s、p95=最大 7.2s、最小 1.5s、全 verdict=ok 零失败零超时；工具归因 execute_code 3 次均值 3.5s、document 2 次均值 4.2s；窗口 7 工具批次 2 免审 5 升级（prescreen 命中率 28.6%，exec_verb 1+user_verbatim 1）；测试产物清理归零（/tmp/soulmate_accept 已删、结果 JSON 2/2 回读一致）；⚠️诚实边界：①5 样本同机低负载，p95 参考意义有限（长尾需长窗口探针持续观察）②单次均值 3.8s 显著低于 12.3 事故期 16s——事故期含上游波动/冷启动，基线取值以本窗口为准③"每工具一次往返"实测口径=每轮一次判词（批内多工具已合并），链级多次来自模型一轮一工具；下周期做 13.3 治理刀（首选免审面扩展零语义风险，判词复用前先测同签名复现率）
+
+[2026-10-11 18:25] 周期#80 | 13.3治理刀·零语义风险面全做完+动刀前测量（含1处实证缺陷根因修复）：①免审面扩展（13.3①）：audit_prescreen 纯ASCII数字token残渣免审（_NUMERIC_RESIDUE_RE 窄形态[0-9]+空白分隔，0x/-/./,/e/全角/链式混排负控制钉死，source=prescreen_numeric 不冒充全明文）；②**同轮探针暴露并修复同族既有缺陷**：fold_marker_lines 旧`^.*短语.*$`整行折叠把与标记短语同行的真实用户请求连带吞掉（GOV133NUM 实录：溯源依据丢失→'sleep 3'整值假升级+判词员看不到用户请求）→改标记子句级折叠（含短语括号组整体/无括号折到句末标点），同行真实请求原样送审（残余边界如实记录：自述短语后无句末边界的同句内容仍随子句折叠）；③判词签名双口径埋点（sig=claims三元组=provenance不进key取舍口径/full=+prior_tool_results零取舍对照）+chars维度落journal，audit_cost_report 增同签名复现率+chars↔耗时Pearson | ✅ | a936acc8+d7cbeba3 | 13.3勾选（⏳②provenance取舍待用户拍板，零取舍口径已实测无收益不擅动）；Gate1 git diff 4文件+2测试文件326+69行真实落盘（两commit）；Gate2 grep _audit_signature/_record_audit_ms 四return点全数接线+residue_is_numeric 进 value_exempt_from_audit 判定链+fold_marker_lines 在 infection_guard.check 真实路径（572行）——真实WS回合经真实调用路径产出journal样本实证；Gate3 tests 49/49（数字免审5例含组装逃逸负控制/签名契约/复现率数学/Pearson/折叠内联回归钉）+同域回归286/286（audit×3/infection×4/prescreen_stats/report_evidence/self_verify/remediation_style/frame_origin/tool_availability）+py_compile+服务同款interpreter烟测SMOKE80_IMPORT_OK/SMOKE80_FOLD_OK+双实例重启health 200/200；**真实实效**（WS真实用户路径3回合）：验收2/2✅（开发45.02s verify_dev三判据命中/办公51.87s report.xlsx 4963B）+数字探针GOV133NUM2真实免审（journal实录'预筛免审（prescreen_numeric）: terminal（模型自选数字算子: 3）'零LLM往返，修复前同形态升级+2549ms审计）；**测量结论**：②同签名复现率4样本sig/full两口径均0%（严口径含output_text需逐字相同，13.2 clarify重试链为候选场景）③chars 154-1031与耗时无稳定相关（pearson小样本正负号翻转）——审计耗时非输入长度驱动，瘦身暂缓；测试产物清理归零（/tmp/soulmate_accept已删/MEMORY标记0/探针脚本删除，隔离session轨迹行保留=审计证据）；⚠️诚实边界：①数字免审实效为1真实样本（同机低负载）②复现率/相关性样本量小（4），结论按'测量未支持'表述非'证明为零'③残渣类别天花板分析（journal实录）：升级残渣主体=模型自造代码体（execute_code/terminal）+短CJK词+路径片段，溯源型免审面理论天花板已近——继续扩大免审面对这些类别必然语义缩水，13.3开销治理后续收益在②（待拍板）④/probe80旧版经/acp/send误路由hermes（非soulmate通道），改WS agent_id=soulmate后取样正确——探针通道纪律沿用群组红线；下周期做13.4 AI群组真实成员端到端
