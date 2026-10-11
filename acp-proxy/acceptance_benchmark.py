@@ -8,6 +8,9 @@
 验证纪律（P0"写了≠接线了"）：
 - 服务端副作用优先（文件内容/SQLite 行），回复文本只作辅证；
 - 回复文本无法独立验证的类别显式标注 verify_mode=reply_assisted（诚实边界）；
+- 路线图12.2：运维/调研判据=工具账本真源（复用 trajectory_events 既有落账，
+  零新增落库负担）——运维=体检结果落账、调研=检索调用账本+来源行；账本判据
+  不可用时诚实降级回复辅证（verify_mode 不假称 server_side）；
 - 每类任务独立 session（同一 stdio 子进程，上下文互不污染）；
 - 测试产物显式清理（MEMORY.md 标记行、accept_probe 定时任务行、/tmp 工作目录）。
 
@@ -79,6 +82,66 @@ def _query(db_path: str, sql: str, args: tuple = ()) -> list[tuple]:
         return []
 
 
+# ── 路线图12.2：工具账本真源回读（运维/调研 verify 升级 server_side）────────
+# 真源=opensoul.db trajectory_events（trajectory_recorder 在真实回合写入的
+# tool_call 轨迹账本）——复用既有落账，零新增落库负担（roadmap 12.2 约束）。
+# verify() 单参签名不变，会话上下文经 _VERIFY_CTX 注入（session/new 后设置，
+# 会话是新建的→账本行只可能来自本 run，天然免疫陈旧行假阳性）。
+TOOL_LEDGER_DB = AGENT_MESSAGES_DB
+_VERIFY_CTX: dict = {"session_id": "", "mode_note": ""}
+# 轨迹落账是 fire-safe 异步（回合收口后可能尚在途）：缺行时有界轮询防竞态假阴性。
+_LEDGER_WAIT_S = float(os.environ.get("ACCEPT_LEDGER_WAIT_S", "4"))
+_LEDGER_POLL_S = 1.0
+
+
+def _tool_ledger(tool_name: str) -> tuple[list, str]:
+    """会话级工具账本回读。返回 (executed_hits, state)。
+
+    - executed_hits：该工具的真实执行条目（report_evidence.parse_ledger 单一
+      真源判执行/拦截 + 行 status=ok），条目含 result_preview（体检结果落账/
+      检索来源行就在里面）。
+    - state：ok=有执行行；missing=账本有行但无该工具执行（工具真没调/被拦）；
+      unavailable=该会话账本整体无任何行或无会话上下文（记账链路未写入→
+      判据诚实降级回复辅证，不假失败也绝不假称 server_side）。
+    """
+    from agent.report_evidence import parse_ledger
+
+    sid = str(_VERIFY_CTX.get("session_id") or "")
+    poll = max(0.0, _LEDGER_WAIT_S) if sid else 0.0  # 无会话上下文=离线调用，不空等
+    deadline = time.monotonic() + poll
+    while True:
+        entries: list[dict] = []
+        any_rows = 0
+        if sid:
+            any_rows = (_query(TOOL_LEDGER_DB,
+                               "SELECT COUNT(*) FROM trajectory_events WHERE session_id = ?",
+                               (sid,)) or [(0,)])[0][0]
+            for content, meta_json, status in _query(
+                TOOL_LEDGER_DB,
+                "SELECT content, metadata_json, status FROM trajectory_events "
+                "WHERE session_id = ? AND event_type = 'tool_call' ORDER BY id",
+                (sid,)):
+                if (status or "") != "ok":
+                    continue  # 失败/拦截行不计执行证据
+                try:
+                    meta = json.loads(meta_json or "{}")
+                except ValueError:
+                    meta = {}
+                entries.append({
+                    "name": str(meta.get("name") or content or ""),
+                    "arguments": str(meta.get("arguments", "")),
+                    "result_preview": str(meta.get("result_preview", "")),
+                    "permission": str(meta.get("permission", "")),
+                })
+        executed, _blocked = parse_ledger(entries)
+        hits = [e for e in executed if e.name == tool_name]
+        if hits or time.monotonic() >= deadline:
+            if hits:
+                return hits, "ok"
+            return [], ("unavailable" if (not sid or any_rows == 0) else "missing")
+        time.sleep(_LEDGER_POLL_S)
+
+
 # ── 统一快照读取器（周期#59）────────────────────────────────────────
 def _looks_timeout(text: str) -> bool:
     """超时特征判定（超时码/超时措辞），供快照状态标定。"""
@@ -86,7 +149,7 @@ def _looks_timeout(text: str) -> bool:
     return bool(re.search(r"(?i)(\btimeout\b|超时|timed?\s*out|WS_TIMEOUT|超时码)", t))
 
 
-def _read_result_snapshot(request_id: str) -> dict:
+def _read_result_snapshot(request_id: str, db_path: str = "") -> dict:
     """单一快照读取器：一次一致性读，多处比对。
 
     消除超时回读的竞态窗口——二次回读禁止使用不同读取路径/不同缓存，
@@ -97,8 +160,8 @@ def _read_result_snapshot(request_id: str) -> dict:
     empty=尚无落库产出。
     """
     snap_ts = time.time()
-    rows = _query(AGENT_MESSAGES_DB,
-                  "SELECT content, role, created_at FROM agent_messages "
+    rows = _query(db_path or AGENT_MESSAGES_DB,
+                  "SELECT content, role FROM agent_messages "
                   "WHERE session_id = ? ORDER BY id ASC",
                   (request_id,))
     contents = [r[0] or "" for r in rows if (r[1] or "assistant") == "assistant"]
@@ -112,7 +175,7 @@ def _read_result_snapshot(request_id: str) -> dict:
         "request_id": request_id,
         "status": status,
         "timestamp": snap_ts,
-        "reply": "".join(contents),
+        "reply": "\n\n".join(contents),  # 行间双换行（_read_back_reply 既有契约）
         "rows": rows,
     }
 
@@ -128,16 +191,11 @@ def _read_back_reply(session_id: str, db_path: str = "") -> str:
     ⚠️ 超时≠成功：快照状态为 timeout 时必须判 FAIL/INCOMPLETE（返回空回复），
     禁止被二次回读的瞬时成功态翻案；快照本身只读一次，消除竞态窗口。
     """
-    snap = _read_result_snapshot(session_id)  # 唯一读取路径：一次快照，多处比对
+    snap = _read_result_snapshot(session_id, db_path=db_path)  # 唯一读取路径：一次快照，多处比对
     if snap["status"] == "timeout":
         # 超时≠成功断言：快照态为 timeout，判 FAIL/INCOMPLETE，不翻案。
         return ""
     return snap["reply"] or ""
-    rows = _query(db_path or AGENT_MESSAGES_DB,
-                  "SELECT content FROM agent_messages WHERE session_id = ? "
-                  "AND role = 'assistant' ORDER BY id",
-                  (session_id,))
-    return "\n\n".join((r[0] or "") for r in rows)
 
 
 async def _drain_ws(ws, collect_sid: str, out: list, timeout: float) -> int:
@@ -224,8 +282,29 @@ def verify_debug(reply: str) -> tuple[bool, str]:
 
 
 def verify_ops(reply: str) -> tuple[bool, str]:
-    ok = "8090" in reply and ("%" in reply or "磁盘" in reply or "disk" in reply.lower())
-    return ok, f"回复含8090={'是' if '8090' in reply else '否'}、磁盘信息={'是' if ('%' in reply or '磁盘' in reply) else '否'}"
+    """路线图12.2：服务端判据=体检结果落账（工具账本真源）。
+
+    运维类确定性判据：system_checkup 账本行 result_preview 内含 8090 端口与
+    磁盘结论（体检结果落账/审计行）；回复文本只作辅证。账本判据不可用时诚实
+    降级回复辅证（mode_note=ledger_unavailable，verify_mode 不假称 server_side）。
+    """
+    _VERIFY_CTX["mode_note"] = ""
+    hits, state = _tool_ledger("system_checkup")
+    ledger_ok = any(
+        "8090" in h.result_preview
+        and ("%" in h.result_preview or "磁盘" in h.result_preview
+             or "disk" in h.result_preview.lower())
+        for h in hits
+    )
+    reply_ok = "8090" in reply and ("%" in reply or "磁盘" in reply or "disk" in reply.lower())
+    reply_part = (f"回复含8090={'是' if '8090' in reply else '否'}、"
+                  f"磁盘信息={'是' if ('%' in reply or '磁盘' in reply) else '否'}")
+    if state == "unavailable":
+        _VERIFY_CTX["mode_note"] = "ledger_unavailable"
+        return reply_ok, f"⚠️轨迹账本无本会话行（记账链路未写入），判据降级回复辅证；{reply_part}"
+    return ledger_ok and reply_ok, (
+        f"体检结果落账={'命中' if ledger_ok else '未命中'}"
+        f"（账本 system_checkup 执行行={len(hits)}，真源=trajectory_events）；{reply_part}")
 
 
 # 自报搜索不可用=真实声称，判据=主语邻接（确定性规则，周期#41两轮实证收敛）：
@@ -261,11 +340,23 @@ def verify_research(reply: str) -> tuple[bool, str]:
         break
     # ③必须给出被搜事实（问题=Python 3.13 发布时间，答案含 3.13 + 2024 年份）
     has_fact = "3.13" in text and "2024" in text
-    ok = has_fact and len(text) > 30 and not claim
-    return ok, (f"回复含'3.13'={'是' if '3.13' in text else '否'}、"
-                f"含'2024'={'是' if '2024' in text else '否'}、"
-                f"主答区自报搜索不可用={'是' if claim else '否'}、"
-                f"长度{len(text)}字")
+    reply_ok = has_fact and len(text) > 30 and not claim
+    reply_part = (f"回复含'3.13'={'是' if '3.13' in text else '否'}、"
+                  f"含'2024'={'是' if '2024' in text else '否'}、"
+                  f"主答区自报搜索不可用={'是' if claim else '否'}、"
+                  f"长度{len(text)}字")
+    # ④路线图12.2：服务端判据=检索调用账本+来源行（工具账本真源）——web_search
+    #   执行行 result_preview 内含真实来源 URL（检索结果来源行），零新增落库负担。
+    _VERIFY_CTX["mode_note"] = ""
+    hits, state = _tool_ledger("web_search")
+    ledger_ok = any(re.search(r"https?://", h.result_preview or "") for h in hits)
+    if state == "unavailable":
+        _VERIFY_CTX["mode_note"] = "ledger_unavailable"
+        return (reply_ok,
+                f"⚠️轨迹账本无本会话行（记账链路未写入），判据降级回复辅证；{reply_part}")
+    return reply_ok and ledger_ok, (
+        f"检索调用账本+来源行={'命中' if ledger_ok else '未命中'}"
+        f"（web_search 执行行={len(hits)}，真源=trajectory_events）；{reply_part}")
 
 
 def verify_publish(reply: str) -> tuple[bool, str]:
@@ -324,7 +415,8 @@ def verify_collab(reply: str) -> tuple[bool, str]:
     return both and db_ok, f"回复含双worker产出={'是' if both else '否'}、subagent_runs近8行={len(rows)}"
 
 
-SERVER_SIDE = {"开发", "调试", "发布", "办公", "定时", "记忆", "协作", "多渠道"}
+# 12.2：运维/调研判据升级服务端（工具账本真源）→ 全部 10 类 server_side
+SERVER_SIDE = {"开发", "调试", "运维", "调研", "发布", "办公", "定时", "记忆", "协作", "多渠道"}
 
 TASKS = [
     {
@@ -542,6 +634,8 @@ async def main() -> None:
                 sid = res.get("session_id") or res.get("sessionId") or ""
                 if not sid:
                     raise RuntimeError(f"session/new 无session_id: {r}")
+                # 12.2：工具账本判据的会话上下文（新建会话→账本行只可能来自本 run）
+                _VERIFY_CTX["session_id"] = sid
                 try:
                     r, reply, sys_frames = await _rpc(
                         ws, "session/prompt",
@@ -570,6 +664,8 @@ async def main() -> None:
                         task["verify"], lambda: _read_back_reply(sid),
                         ws=ws, collect_sid=sid)
                     mode = "server_side" if task["category"] in SERVER_SIDE else "reply_assisted"
+                    if _VERIFY_CTX.get("mode_note"):
+                        mode = "reply_assisted"  # 12.2：账本判据降级时诚实标注
                     entry.update(
                         ok=bool(ok),
                         verify_mode=f"{mode}_late" if ok else "ws_timeout_unrecovered",
@@ -596,6 +692,8 @@ async def main() -> None:
                 ok, detail = False, f"验证器异常: {type(e).__name__}: {e}"
             entry["ok"] = bool(ok) and entry.get("http_ok", False)
             entry["verify_mode"] = "server_side" if task["category"] in SERVER_SIDE else "reply_assisted"
+            if _VERIFY_CTX.get("mode_note"):
+                entry["verify_mode"] = "reply_assisted"  # 12.2：账本判据降级时诚实标注
             entry["detail"] = detail
             results.append(entry)
             print(f"    -> {'✅' if entry['ok'] else '❌'} {detail} "

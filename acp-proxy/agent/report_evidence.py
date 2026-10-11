@@ -251,11 +251,19 @@ _REG_NAME_FIRST = re.compile(
     rf"[`'\"]?(?P<name>{_NAME_TOKEN})[`'\"]?\s*"
     rf"(?:这个)?(?:工具|命令|功能)?\s*"
     rf"(?:运行时)?(?:未注入|未加载|未注册|没被注入|未被注入|没提供|未提供|"
-    rf"不存在|(?:不|没)(?:有|在)(?:当前)?(?:工具)?(?:列表|清单|之中|里面|里))"
+    rf"不存在|(?:不|没)(?:有|在)(?:当前)?(?:会话的?)?(?:工具)?(?:列表|清单|之中|里面|里))"
 )
 _REG_NAME_LAST = re.compile(
     rf"(?:没有|缺少|缺|不存在|未提供|没有提供|没有注册|未注册)(?:名为|叫做|叫)?\s*"
     rf"[`'\"]?(?P<name>{_NAME_TOKEN})[`'\"]?\s*(?:这个)?(?:工具|命令|功能)"
+)
+# 容器在前形态（周期#66 实测事故句"当前会话的工具列表中没有 web_search"）——
+# 工具列表/清单/可用工具做主语，名字在"没有/缺少"之后；_RESULTISH 排除
+# "工具列表中没有 X 的结果"类结果缺失句防误纠
+_REG_LIST_CONTAINER = re.compile(
+    rf"(?:可用工具|工具列表|工具清单)(?:中|里|内|里面|都)?"
+    rf"(?:没有|缺少|缺|不含|不包含|未包含|未提供)"
+    rf"\s*[`'\"]?(?P<name>{_NAME_TOKEN})[`'\"]?{_RESULTISH}"
 )
 # 无"工具"后缀的裸形态（run-A "没有 web_search"）：要求主语语境+排除结果类宾语
 _REG_BARE = re.compile(
@@ -316,7 +324,8 @@ def find_availability_claims(response: str) -> list[AvailabilityClaim]:
 
     for pat, kind in ((_REG_NAME_FIRST, "registration"),
                       (_REG_NAME_LAST, "registration"),
-                      (_REG_BARE, "registration")):
+                      (_REG_BARE, "registration"),
+                      (_REG_LIST_CONTAINER, "registration")):
         for m in pat.finditer(text):
             _add(kind, m.group("name"), m.span())
 

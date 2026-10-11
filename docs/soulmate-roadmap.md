@@ -712,9 +712,23 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
   不双份记账）+acceptance_benchmark 多渠道 verify 改服务端痕迹回读（channel=wechat+
   target=accept_peer+status=sent+text_preview 含探针文案，空回复也能判）、多渠道进
   SERVER_SIDE、cleanup 预清痕迹探针行（复测铁律②）
-- [ ] 12.2 运维/调研 verify 升级 server_side（11.1 两类 reply_assisted 弱项）：为两类
+- [x] 12.2 运维/调研 verify 升级 server_side（11.1 两类 reply_assisted 弱项）：为两类
   找确定性服务端判据（运维=体检结果落账/审计行，调研=检索调用账本+引用来源行），
   提升"完全替代"判定可信度；不为凑判据造新落库负担，优先复用工具账本/journal 真源。
+  ——周期#66实装：真源=opensoul.db trajectory_events（trajectory_recorder 真实回合
+  已写入的 tool_call 轨迹账本，复用既有落账零新增落库）——运维=system_checkup 账本行
+  result_preview 含 8090+磁盘结论（体检结果落账）、调研=web_search 账本行
+  result_preview 含来源 URL（检索调用账本+来源行）；acceptance_benchmark 增
+  _tool_ledger 会话级账本回读（report_evidence.parse_ledger 单一真源判执行/拦截、
+  session/new 注入会话上下文=新建会话天然免疫陈旧行假阳性、落账异步缺行有界轮询4s、
+  三态 ok/missing/unavailable）+verify_ops/verify_research 双判据（账本+回复辅证）
+  +账本不可用诚实降级 reply_assisted（禁假称 server_side）；至此 10/10 类全部
+  server_side。连带修2真缺口：①周期#59 _read_result_snapshot 改造漏传 db_path+
+  硬依赖 created_at 列致 _read_back_reply 既有测试红（temp 库查空），快照读取器
+  补 db_path 参数+去 created_at 依赖+回复行间"\n\n"契约还原②8.5c-② 可用性治理
+  抽取盲区（事故句"当前会话的工具列表中没有 web_search"容器在前形态漏抽注册类，
+  只抽到须执行证明的 availability 类→模型拒不调用即无法证伪→更正声明未触发）：
+  report_evidence 增 _REG_LIST_CONTAINER+放宽名字在后形态"会话的"间隔词
 - [ ] 12.3 开发类回合 301.74s 超时复核归因（周期#64 新发现，用户重视速度）：journal
   复盘该轮耗时构成（LLM 首包/注入审计往返/工具执行/回复回收四段计时），区分上游延迟
   波动 vs 本地可控耗时；若本地可控（如每工具注入审计 LLM 往返）→ 与 12.4 合并治理；
@@ -800,3 +814,4 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 [2026-10-11 10:35] 周期#64 | 验收对标抽样实测（路线图清零后）+规划阶段12：5类抽样（tag=FULL12_1791684846，WS真实用户路径，ACCEPT_CATEGORIES=开发,办公,定时,协作,记忆）**5/5通过**——开发301.74s dev_hello.py+marker命中（**WS 300s超时→10.4后到回读0.0s/1次恢复**，verify_mode=server_side_late）、办公65.26s report.xlsx 4963B有效xlsx（11.5治理回归目标全窗口零注入审计终止）、定时74.53s accept_probe行=1、记忆106.81s MEMORY.md标记、协作27.4s双worker产出；4类server_side+1类server_side_late（本抽样无reply_assisted弱项）；结果+新发现写入路线图"2026-10-11抽样对标实测"节，规划阶段12六切片（12.1多渠道出站独立可查痕迹+verify升级/12.2运维调研verify升级/12.3开发类301.74s超时复核归因/12.4注入审计LLM往返开销治理=8.3另案/12.5 harness收尾清理+late_readback扩测/12.6轨迹审计闭环抽查） | ✅ | (本次提交) | Gate1 git diff 路线图3区块真实落盘（实测表+阶段12+周期日志）；Gate2=N/A（纯验收/规划周期无新代码符号）；Gate3=acceptance_benchmark真实运行5/5+结果JSON /tmp/soulmate_accept_results.json回读（passed 5/5、late_readback ws_timeouts=1 recovered=1）与台面一致+测试产物清理归零（accept_probe行0/MEMORY.md标记0/tmp工作目录删除）；新证据：①10.4后到回读路径首次非构造场景真实触发（11.1遗留④部分销账，仍单样本）②开发类48.2s→301.74s显著变慢但产出1分钟内就绪=超时在回复回收侧，疑上游波动/冷启动首回合，归因入12.3（单样本禁定论）③harness收尾清理边界实证：cleanup()不删/tmp工作目录（仅开跑前rmtree，docstring承诺未兑现），本轮残留3件已手动清理入12.5；⚠️诚实边界：每类单次样本同机低负载；下周期做12.1多渠道出站独立可查痕迹+verify升级server_side
 
 [2026-10-11 10:50] 周期#65 | 12.1 多渠道出站独立可查痕迹+verify升级server_side（阶段12第一刀）：新增agent/outbound_audit.py（OutboundAudit：outbound_log表单一写入源=ts/channel/target/kind/status/blocks/sender/dedup_key/text_preview九字段，record旁路纪律写失败只计数返回''绝不阻塞发送、recent四维过滤回读、clear拒绝全表清空防误删审计）+wechat_bridge三条出站路径留痕（_send_blocks回复路径dedup_key=入站msg_id、send_proactive主动文本、send_media_proactive媒体，失败态照留status=failed/blocks=0，_record_out lazy注入可测）+message_router openmate出站留痕（成功dedup_key=om-rowid/失败照留；wechat经桥留痕一次=单一真源不双份记账，实测恰1行）+acceptance_benchmark三件（多渠道verify从回复辅证改服务端痕迹回读=channel=wechat+target=accept_peer+status=sent+text_preview含探针文案，空回复也判过、多渠道进SERVER_SIDE、cleanup预清痕迹探针行） | ✅ | (本次提交) | 12.1勾选；Gate1 git diff 5文件528行真实落盘；Gate2 grep接线点（_record_out×3发送路径+message_router接线+verify服务端读路径）+真机全链路实证（真实router→桥→审计库→verify_multichannel空回复=True「出站痕迹行=1」→清理归零）；Gate3 tests/test_outbound_audit.py 14/14（行形状/过滤回读/clear守卫/跨实例持久/写失败旁路/微信三路径留痕含失败态/openmate成败双留/统一出站不双份记账/接线护栏harness服务端判据）+同域回归77全过（wechat_bridge/message_router/wechat_router/media_channel）+双实例重启health OK（8092/8095）；⚠️诚实边界：iLink真实传输仍loopback（4.1b待用户拍板不动）；痕迹只覆盖出站（入站去重已有BridgeStore/RouterStore）；本切片未跑真LLM回合多渠道类验收（harness判据改造+全链路smoke已证，全量复测归12.5扩测轮）；下周期做12.2 运维/调研verify升级server_side
+[2026-10-11 11:15] 周期#66 | 12.2 运维/调研 verify 升级 server_side（11.1 两类 reply_assisted 弱项销账，10/10 类全部 server_side）：真源=opensoul.db trajectory_events 工具账本（trajectory_recorder 真实回合既有落账，零新增落库）——运维=体检结果落账（system_checkup 行 result_preview 含 8090+磁盘结论）、调研=检索调用账本+来源行（web_search 行 result_preview 含来源 URL）；acceptance_benchmark 增 _tool_ledger（parse_ledger 单一真源+会话上下文 _VERIFY_CTX 注入+异步落账有界轮询4s+ok/missing/unavailable 三态）+verify_ops/verify_research 双判据+账本不可用诚实降级 reply_assisted；连带修2真缺口（①周期#59 快照读取器漏传 db_path/硬依赖 created_at 列致 _read_back_reply 既有测试红——补参+去依赖+"\n\n"行间契约还原 ②8.5c-② 治理抽取盲区：事故句"当前会话的工具列表中没有 web_search"容器在前形态漏抽注册类→更正声明未触发——report_evidence 增 _REG_LIST_CONTAINER+"会话的"间隔词放宽） | ✅ | (本次提交) | 12.2勾选；Gate1 git diff 真实落盘（acceptance_benchmark +111行/report_evidence +11行/双测试文件）；Gate2 inspect 接线护栏（main 注入会话上下文+降级标注≥2处）+新抽取正则被 find_availability_claims 真实循环走中；Gate3 tests/test_acceptance_verify_ledger.py 12/12（账本命中/missing 不假过/unavailable 降级/双判据都要/来源行/会话隔离/被拦行不计/迟到落账轮询/接线护栏/全局态隔离fixture）+test_tool_availability_claims 22/22（含事故句逐字回归+registry 证伪+负控制）+同域回归 108+89 全过+真实WS验收两次实证：运维 ✅20.71s 体检结果落账=命中（账本行=1）、调研首轮 ❌诚实失败（账本 web_search 行=0+回复自报不可用——新判据正确拒绝假过，同时暴露上述治理盲区）→修复后复测 ✅46.74s 检索账本+来源行=命中（web_search 行=1）回复"web_search 可用：Python 3.13 于 2024 年 10 月 7 日正式发布"；⚠️诚实边界：①模型拒做+伪报"工具列表中没有 web_search"属 LLM 行为（sandbox 未受限零裁剪+_active_tool_names 在册实证为假话），治理只能事后更正不能强制调用——本轮复测模型自行正常调用，同题复发率待用户实际使用观察 ②账本判据依赖 trajectory 写入链路存活（fire-safe 异步，未写入时诚实降级不假过不假失败）③每类单样本同机低负载；下周期做12.3 开发类回合 301.74s 超时复核归因（journal 四段计时+≥3 轮样本禁单样本定论）

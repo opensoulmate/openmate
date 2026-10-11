@@ -195,3 +195,44 @@ def test_wiring_availability_before_self_verify_and_after_evidence():
     assert avail > 0, "可用性核验收口缺失"
     assert evidence > 0 and avail > evidence, "可用性核验须在证据治理之后"
     assert verify > avail, "可用性核验须先于自检（自检看更正后文本）"
+
+
+# ── ⑥ 周期#66 事故形态：容器在前的注册声称（"工具列表中没有 X"）────────
+# 真实事故句（12.2 验收调研类，模型拒做搜索的借口）：web_search 在工具面真源
+# 在册（sandbox 未受限零裁剪实证），但回复称"当前会话的工具列表中没有 web_search"。
+# 修复前只抽出 availability 类（须执行证明才可更正→模型拒不调用即无法证伪），
+# 注册类（registry 证明即可更正）漏抽 → 更正声明未触发。
+
+_INCIDENT = (
+    "**web_search 工具不可用** —— 当前会话的工具列表中没有 web_search"
+    "（搜索后端未接入），按你的要求不降级替换为其他工具，因此无法执行此搜索。"
+)
+
+
+def test_extract_list_container_registration_form():
+    claims = find_availability_claims(_INCIDENT)
+    kinds = {(c.kind, c.tool_name) for c in claims}
+    assert ("registration", "web_search") in kinds, claims
+    assert ("availability", "web_search") in kinds, claims  # 两类并存各自核验
+
+
+def test_incident_claim_falsified_by_registry_alone():
+    # 模型拒不调用（无执行证明）→ 注册类仍可被工具面真源证伪，更正声明触发
+    a = assess_availability(_INCIDENT, {"web_search", "terminal"}, [])
+    assert a.has_false_claim
+    assert any(c.proof == "registry" and c.tool_name == "web_search"
+               for c in a.false_claims)
+    banner = availability_banner(a)
+    assert "真实存在于本回合工具清单" in banner
+
+
+def test_name_last_gap_in_list_form():
+    # "X 不在当前会话的工具列表中"（中间隔"会话的"）同为注册类
+    claims = find_availability_claims("web_search 不在当前会话的工具列表中，无法搜索。")
+    assert ("registration", "web_search") in {(c.kind, c.tool_name) for c in claims}
+
+
+def test_list_container_result_object_not_a_claim():
+    # 负控制："工具列表中没有 X 的结果"是结果缺失句，不算可用性声称（防误纠）
+    assert find_availability_claims("工具列表中没有 web_search 的结果可供引用") == []
+    assert find_availability_claims("工具列表中没有 web_search 的输出内容") == []
