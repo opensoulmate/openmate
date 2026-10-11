@@ -1750,6 +1750,7 @@ new_string是替换后的文本。
                     max_tokens=4096,
                     rounds=3,  # 既有语义：max_continuation=3→总3轮（首发+2续写）
                     strand_id=self.strand_id,
+                    path="dna",  # 11.3：进化引擎LLM故障分类记账（tool_failures.db）
                 )
             self._llm_failure_streak = 0  # 成功一次即清零连续失败计数
             self._breaker_close("llm_success")  # LLM恢复可用=风暴结束，自动复位熔断

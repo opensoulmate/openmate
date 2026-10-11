@@ -219,6 +219,7 @@ async def _call_with_protection(
                 rounds=max_continuation + 1,  # 既有语义：max_continuation=续写次数
                 strand_id=strand_id,
                 output_cap=MAX_TOOL_OUTPUT_CHARS,
+                path="gateway",  # 11.3：业务/调用面LLM故障分类记账（tool_failures.db）
             )
     except LLMCallError:
         raise

@@ -55,6 +55,33 @@ logger = logging.getLogger(__name__)
 __all__ = ["post_chat_completion", "complete_with_protection"]
 
 
+# ── 传输故障可观测（路线图11.3）：分类入 tool_failures.db ──────────────────
+def _fail_detail(strand_id: str, info) -> str:
+    """失败描述（带 strand 归因；key 不进描述）。"""
+    text = (
+        f"{info.__class__.__name__}: {info}"
+        if isinstance(info, BaseException)
+        else str(info)
+    )
+    return f"[{strand_id}] {text}" if strand_id else text
+
+
+def _record_failure(path: str, source, action: str, attempt: int,
+                    outcome: str, detail: str = "") -> None:
+    """传输故障分类记账（11.3 补链）：进化引擎/llm_gateway 的 LLM 调用失败可审计。
+
+    复用 agent.llm_engine.record_llm_failure 单一真源（kind=utils.llm_retry
+    .classify_failure 九态分类，落 tool_failures.db）；lazy import 使 utils 层
+    不持有对 agent 层的模块级依赖（记账器居 agent 层是 10.1 既有形态，不搬）。
+    旁路纪律（同 10.1）：只记账，绝不冒泡、绝不阻塞 LLM 链路。
+    """
+    try:
+        from agent.llm_engine import record_llm_failure
+        record_llm_failure(path, source, action, attempt, outcome, detail)
+    except Exception:
+        pass
+
+
 class _LinkFailure(Exception):
     """内部信号：当前link（primary或备胎）本轮失败。
 
@@ -81,6 +108,7 @@ async def _post_single_link(
     attempts: int,
     strand_id: str,
     switch_now: bool = False,
+    path: str = "transport",
 ) -> dict:
     """单link传输环（post_chat_completion的内层）。
 
@@ -108,6 +136,10 @@ async def _post_single_link(
             # 全局断连→park等恢复自动续跑；非离线/恢复后走下方重试记账
             await network_state.maybe_park(e)
             if _http_retry < attempts - 1 and is_transient_error(e):
+                _record_failure(
+                    path, e, "llm_retry", _http_retry + 1, "retry_scheduled",
+                    _fail_detail(strand_id, e),
+                )
                 _wait = backoff_ms(_http_retry + 1) / 1000.0
                 logger.warning(
                     f"[{strand_id}] 传输错误{e.__class__.__name__}，"
@@ -115,6 +147,10 @@ async def _post_single_link(
                 )
                 await asyncio.sleep(_wait)
                 continue
+            _record_failure(
+                path, e, "llm_give_up", _http_retry + 1, "failed",
+                _fail_detail(strand_id, e),
+            )
             raise _LinkFailure(e, f"{e.__class__.__name__}: {e}") from e
         if resp.status_code == 200:
             return resp.json()
@@ -133,6 +169,10 @@ async def _post_single_link(
         _wait = backoff_ms(
             _http_retry + 1, getattr(resp, "headers", None)
         ) / 1000.0
+        _record_failure(
+            path, resp.status_code, "llm_retry", _http_retry + 1, "retry_scheduled",
+            _fail_detail(strand_id, f"LLM HTTP {resp.status_code}"),
+        )
         logger.warning(
             f"[{strand_id}] LLM HTTP {resp.status_code}, "
             f"retry {_http_retry+1}/{attempts} in {_wait:.1f}s"
@@ -142,6 +182,11 @@ async def _post_single_link(
     status = resp.status_code if resp else "no-response"
     body = resp.text[:200] if resp else ""
     logger.error(f"[{strand_id}] LLM call failed: {status} {body}")
+    _record_failure(
+        path, resp.status_code if resp else "no-response", "llm_give_up",
+        attempts, "failed",
+        _fail_detail(strand_id, f"LLM HTTP {status}: {body}"),
+    )
     raise _LinkFailure(
         LLMCallError(f"LLM HTTP {status}: {body}"), f"LLM HTTP {status}: {body}"
     )
@@ -158,6 +203,7 @@ async def post_chat_completion(
     max_tokens: int,
     strand_id: str = "",
     chain: FallbackChain | None = None,
+    path: str = "transport",
 ) -> dict:
     """单发chat/completions（带重试/park/错误契约/降级链）——传输层单一真源。
 
@@ -202,6 +248,7 @@ async def post_chat_completion(
                 switch_now=(
                     is_start_link and chain is not None and chain.available()
                 ),
+                path=path,
             )
         except _LinkFailure as f:
             spent.append(f"{link_label}: {f.summary}")
@@ -235,6 +282,7 @@ async def complete_with_protection(
     strand_id: str = "",
     output_cap: int | None = None,
     chain: FallbackChain | None = None,
+    path: str = "transport",
 ) -> str:
     """带防护的完整LLM调用（续写/omission/空输出契约/输出上限/降级链）。
 
@@ -265,6 +313,7 @@ async def complete_with_protection(
                     max_tokens=max_tokens,
                     strand_id=strand_id,
                     chain=chain,
+                    path=path,
                 )
             except LLMCallError as e:
                 # 半截输出不丢（partial_content），但失败仍判失败（统一契约）
@@ -304,12 +353,22 @@ async def complete_with_protection(
         raise
     except Exception as e:
         logger.error(f"[{strand_id}] LLM call exception: {e}")
+        if not isinstance(e, httpx.TransportError):
+            # 传输错误已在 _post_single_link 放弃点记账（防双行重复）；
+            # 此处记防护层自身异常（JSON解析/防护循环等）
+            _record_failure(
+                path, e, "llm_give_up", 1, "failed", _fail_detail(strand_id, e)
+            )
         err = LLMCallError(f"LLM调用异常: {e}")
         err.partial_content = full_content
         raise err from e
 
     if not full_content.strip():
         # 200但空输出：对反思/规划/审查一律无意义，同判失败（不许伪装"无改进"）
+        _record_failure(
+            path, "empty_output", "llm_give_up", rounds, "failed",
+            _fail_detail(strand_id, "LLM返回空内容（HTTP 200但无输出）"),
+        )
         raise LLMCallError("LLM返回空内容（HTTP 200但无输出）")
 
     # 输出字符数限制（调用方指定上限时）
