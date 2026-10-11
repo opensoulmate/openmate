@@ -9,8 +9,11 @@ report_evidence.parse_ledger（只认真实执行，被拦截不算失败证据�
 
 边界（诚实）：
 - 只进化 saved:<slug> 可写库技能——标准层只读技能单写入者纪律，不动
-- 内容变更仅"坑"追加（确定性成文）；步骤/触发词的语义改写需 LLM 或
-  用户拍板，不做
+- 坑沉淀=确定性成文；步骤措辞改写/触发词增补走 agent/skill_rewrite.py
+  LLM 辅助通道（13.5）：零丢失保真门（数量一致+语义载体原样+触发词只增）
+  +写回后回读复验，任一不过整体拒绝原文不动；**语义取舍**（删/并/拆步骤、
+  删/改触发词）一律拒绝报"需用户拍板"；LLM 不可用/超时显式跳过禁编造；
+  频控=同技能 rewrite_min_interval_s（默认24h）+每回合≤max_rewrite_per_turn
 - 每回合每技能最多 max_new_per_turn 条新坑、总坑数封顶 max_pitfalls，
   超限显式报因不硬塞；正文解析不出（非 SkillSaver 渲染格式）→ 不改写
 """
@@ -116,12 +119,20 @@ class SkillEvolver:
         db_path: Optional[str] = None,
         max_new_per_turn: int = 2,
         max_pitfalls: int = 12,
+        rewrite_min_interval_s: Optional[float] = None,
+        max_rewrite_per_turn: int = 1,
     ):
         self._saver = saver  # lazy：None 时用 get_skill_saver()
         self._skill_manager = skill_manager  # 可选：写回后强刷 saved 层缓存
         self._db_path = db_path or os.environ.get("SOULMATE_SKILL_EVOLUTION_DB") or DEFAULT_DB_PATH
         self.max_new_per_turn = int(max_new_per_turn)
         self.max_pitfalls = int(max_pitfalls)
+        # 语义改写频控（13.5）：同技能最小间隔 + 每回合上限（LLM 成本有界）
+        self.rewrite_min_interval_s = float(
+            rewrite_min_interval_s if rewrite_min_interval_s is not None
+            else os.environ.get("SOULMATE_SKILL_REWRITE_INTERVAL_S", 86400.0)
+        )
+        self.max_rewrite_per_turn = int(max_rewrite_per_turn)
 
     # ── 持久化 ─────────────────────────────────────────────
 
@@ -356,6 +367,103 @@ class SkillEvolver:
             revision_before=rev_before,
             revision_after=rev_after,
         )
+
+
+    # ── 13.5 语义改写阶段（LLM 辅助 + 确定性保真门）────────
+
+    def _last_rewrite_ts(self, slug: str) -> Optional[float]:
+        """该技能最近一次成功语义改写的时刻（epoch 秒；查询失败返回 None 不拦路）"""
+        try:
+            with self._conn() as conn:
+                row = conn.execute(
+                    "SELECT ts FROM evolutions WHERE slug=? AND action='rewritten'"
+                    " ORDER BY id DESC LIMIT 1",
+                    (slug,),
+                ).fetchone()
+        except Exception as e:
+            logger.debug(f"[skill-evolution] rewrite ts query failed: {e}")
+            return None
+        if not row:
+            return None
+        try:
+            return datetime.fromisoformat(str(row[0])).timestamp()
+        except (TypeError, ValueError):
+            return None
+
+    async def evolve_semantics(
+        self,
+        skills,
+        user_text: str = "",
+        tool_calls_log=None,
+        llm=None,
+        session_id: str = "",
+    ) -> list:
+        """回合收尾语义改写（13.5）：步骤措辞改写 + 触发词增补（零丢失保真门）。
+
+        - 语义取舍（删/并/拆步骤、删/改触发词）由保真门拒绝，报"需用户拍板"
+        - 频控：同技能 rewrite_min_interval_s 内不重复改写 + 每回合
+          ≤ max_rewrite_per_turn 次真实 LLM 尝试（门禁跳过不占名额）
+        - 旁路纪律：任何失败只记日志，绝不阻塞回合收尾主链路
+        返回 RewriteOutcome 列表（含 skipped，全态可观测）；审计只落
+        rewritten/rejected 真实行（门禁跳过只进返回值与日志，不刷屏审计表）。
+        """
+        out: list = []
+        if os.environ.get("SOULMATE_SKILL_REWRITE", "1") == "0":
+            logger.debug("[skill-rewrite] disabled by env")
+            return out
+        if llm is None:
+            return out
+        from agent.skill_rewrite import RewriteOutcome, SkillRewriter
+
+        rewriter = SkillRewriter(saver=self._saver)
+        failures = []
+        try:
+            failures = [
+                f"{f['tool']}: {f['line']}"
+                for f in self._failure_evidence(tool_calls_log)
+            ]
+        except Exception:
+            failures = []
+        budget = self.max_rewrite_per_turn
+        now_ts = datetime.now(timezone.utc).timestamp()
+        for skill in [s for s in (skills or []) if isinstance(s, dict)]:
+            slug = self._slug_of(skill)
+            skill_id = str(skill.get("id") or "")
+            if not slug:
+                continue  # 只读标准层：单写入者纪律，绝不改写
+            if budget <= 0:
+                out.append(RewriteOutcome(
+                    skill_id, slug, "skipped",
+                    f"本回合语义改写名额已用（≤{self.max_rewrite_per_turn}/回合）",
+                ))
+                continue
+            last = self._last_rewrite_ts(slug)
+            if last is not None and (now_ts - last) < self.rewrite_min_interval_s:
+                out.append(RewriteOutcome(
+                    skill_id, slug, "skipped",
+                    f"频控：{self.rewrite_min_interval_s:.0f}s 内已改写过",
+                ))
+                continue
+            budget -= 1
+            result = await rewriter.rewrite(
+                skill, user_text=user_text, failures=failures, llm=llm
+            )
+            if result.action in ("rewritten", "rejected"):
+                self._record(session_id, EvolutionResult(
+                    result.skill_id, result.slug, result.action, result.reason,
+                    added=result.added_triggers,
+                    revision_before=result.revision_before,
+                    revision_after=result.revision_after,
+                ))
+            if result.action == "rewritten":
+                try:
+                    mgr = self._skill_manager
+                    if mgr is not None and hasattr(mgr, "scan_saved_skills"):
+                        mgr.scan_saved_skills(force_refresh=True)
+                except Exception as e:
+                    logger.debug(f"[skill-rewrite] cache refresh skipped: {e}")
+            out.append(result)
+        return out
 
 
 _evolver_singleton: Optional[SkillEvolver] = None

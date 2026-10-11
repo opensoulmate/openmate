@@ -6256,6 +6256,29 @@ You can send files to the user natively: to deliver a file, write a brief confir
         except Exception as e:
             logger.debug(f"Skill evolution skipped: {e}")
 
+        # ── 路线图 13.5 技能进化语义改写（LLM 辅助+零丢失保真门）──
+        # 步骤措辞改写/触发词增补；语义取舍由保真门拒绝"需用户拍板"；
+        # 旁路纪律：任何失败只记日志，绝不阻塞回合收尾主链路。
+        try:
+            _sem_evolver = getattr(self, "_skill_evolver_inst", None)
+            _sem_llm_engine = getattr(self, "llm_engine", None)
+            if _sem_evolver is not None and _sem_llm_engine is not None:
+                _sem_results = await _sem_evolver.evolve_semantics(
+                    skills=matched_skills,
+                    user_text=user_text,
+                    tool_calls_log=tool_calls_log,
+                    llm=lambda p: _sem_llm_engine.chat([{"role": "user", "content": p}]),
+                    session_id=session_id,
+                )
+                _sem_rw = [r for r in _sem_results if r.action == "rewritten"]
+                if _sem_rw:
+                    logger.info(
+                        f"[skill-rewrite] rewritten: "
+                        f"{[(r.slug, r.revision_before, r.revision_after) for r in _sem_rw]}"
+                    )
+        except Exception as e:
+            logger.debug(f"Skill semantic rewrite skipped: {e}")
+
         # ── 自动学习 ──────────────────────────────────────
         try:
             await self._skill_manager.try_learn_skill(
