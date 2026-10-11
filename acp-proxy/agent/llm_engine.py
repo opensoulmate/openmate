@@ -97,6 +97,81 @@ class LLMNonRetryableError(RuntimeError):
     """HTTP状态明确不可重试（401/403/404等凭证/请求级错误）：
     fail-fast直接可见失败，不进入重试环烧掉3次调用（mem0：失败必须可见）"""
 
+
+# ── 音频输入多模态直路由（17.1，用户原要求"语音直接路由多模态大模型，不走
+# whisper→文本两步"）：把音频附件挂进用户消息转 OpenAI 兼容 input_audio 内容块
+# 直发模型。MiMo token plan 官方支持实测（2026-10-12）：data URL 形态
+# （data:{MIME};base64,）入参，audio_tokens=秒×6.25 计量；格式 MP3/WAV/FLAC/
+# M4A/OGG。答案字段有实测坑：reasoning 模型在音频输入回合偶发把答案只写进
+# reasoning_content、content 留空——消费侧必须回退收下（见各流式收尾处）。
+_AUDIO_FORMAT_BY_MIME = {
+    "audio/wav": "wav",
+    "audio/x-wav": "wav",
+    "audio/wave": "wav",
+    "audio/mpeg": "mp3",
+    "audio/mp3": "mp3",
+    "audio/flac": "flac",
+    "audio/x-flac": "flac",
+    "audio/mp4": "m4a",
+    "audio/m4a": "m4a",
+    "audio/ogg": "ogg",
+    "audio/opus": "ogg",
+}
+
+
+def attach_audio_parts(
+    messages: list[dict],
+    audio_parts: list[dict] | None,
+    fallback_last: bool = False,
+) -> list[dict]:
+    """把音频附件挂到目标用户消息上（返回新列表，原列表不动）。
+
+    audio_parts: [{"path": 持久化路径（锚点）, "mime": "audio/wav", "data": 裸base64}, ...]
+    目标消息 = content 含任一锚点路径的用户消息（用户文本里的
+    "[附件已保存到: path]"注记即锚点）；找不到锚点且 fallback_last=True 时挂最后
+    一条用户消息（辅助提示词形态：prompt 自带用户原话），否则原样返回——找不到
+    目标绝不乱挂（多会话/子代理并发下音频绝不窜到别的消息上）。content 已是
+    list 的消息不重复包装。未映射格式/空数据的条目跳过并留警告（显式报因禁静默）。
+    """
+    if not audio_parts:
+        return messages
+    blocks = []
+    for ap in audio_parts:
+        data = ap.get("data") or ""
+        mime = (ap.get("mime") or "").split(";")[0].strip().lower() or "audio/wav"
+        if not data:
+            logger.warning("[audio] 音频附件无数据，跳过直发: %s", ap.get("path", ""))
+            continue
+        fmt = _AUDIO_FORMAT_BY_MIME.get(mime)
+        if fmt is None:
+            logger.warning("[audio] 未映射音频格式 %s（支持 MP3/WAV/FLAC/M4A/OGG），跳过直发", mime)
+            continue
+        data_url = data if data.startswith("data:") else f"data:{mime};base64,{data}"
+        blocks.append({"type": "input_audio", "input_audio": {"data": data_url, "format": fmt}})
+    if not blocks:
+        return messages
+    anchors = [ap.get("path", "") for ap in audio_parts if ap.get("path")]
+    target_idx = None
+    for i, m in enumerate(messages):
+        if m.get("role") != "user" or not isinstance(m.get("content"), str):
+            continue
+        if any(a and a in m["content"] for a in anchors):
+            target_idx = i
+            break
+    if target_idx is None and fallback_last:
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i].get("role") == "user":
+                target_idx = i
+                break
+    if target_idx is None:
+        logger.warning("[audio] 未找到含音频锚点的用户消息，音频未随请求直发（%d 块）", len(blocks))
+        return messages
+    out = list(messages)
+    orig = out[target_idx]
+    text = orig.get("content") if isinstance(orig.get("content"), str) else ""
+    out[target_idx] = {**orig, "content": [{"type": "text", "text": text}, *blocks]}
+    return out
+
 # 默认系统提示词 — 包含SOUL强制注释规则和迭代复盘规则
 DEFAULT_SYSTEM_PROMPT = """你是OpenMate内置Vibe Coding Agent，一个专业的AI编程助手。
 
@@ -215,6 +290,13 @@ class LLMEngine:
         for msg in reversed(messages):
             if msg.get("role") == "user":
                 prompt = msg.get("content", "")
+                # 17.1音频直发：用户消息content可能是OpenAI内容块list（text+input_audio）
+                # 复杂度评分只吃文本面（音频块不参与打分）
+                if isinstance(prompt, list):
+                    prompt = " ".join(
+                        str(p.get("text", "")) for p in prompt
+                        if isinstance(p, dict) and p.get("type") == "text"
+                    )
                 break
 
         try:
@@ -320,6 +402,7 @@ class LLMEngine:
         # P2流式续写状态：本段文本累积（段语义，只放本段防重复入history）
         # + 观察到的finish_reason（check_finish_reason单一真源归一）
         _segment_parts: list[str] = []
+        _reasoning_parts: list[str] = []  # 17.1：thinking增量暂存（content空时回退收下）
         _last_finish: str | None = None
         try:
             async with client:
@@ -434,6 +517,10 @@ class LLMEngine:
                                     continue
                                 delta = choices[0].get("delta", {})
                                 if delta.get("reasoning_content"):
+                                    # 17.1：MiMo音频输入实测偶发答案只写reasoning_content
+                                    # （content为空）——先积累，流收尾时content为空才回退
+                                    # 收下（content正常时不掺thinking，语义面不变）
+                                    _reasoning_parts.append(delta["reasoning_content"])
                                     continue
                                 content = delta.get("content")
                                 if content:
@@ -460,6 +547,18 @@ class LLMEngine:
                     # P2纯文本截断续写：finish_reason=length→按段续写无缝拼流，
                     # 次数用尽/空段→显式截断标记（不静默半截收尾），已取消不处理
                     self.last_usage = latest_usage
+                    # 17.1 reasoning回退（chat_stream）：content全程为空但thinking有
+                    # 内容（MiMo音频输入实测形态：答案只写reasoning_content）——丢弃
+                    # =用户看空回复，回退收下thinking文本为回复（content正常时不掺）
+                    if (not _segment_parts and _reasoning_parts
+                            and not (cancel_event and cancel_event.is_set())):
+                        logger.info(
+                            "[LLM] content为空，回退reasoning_content为回复（%d字）",
+                            len("".join(_reasoning_parts)),
+                        )
+                        _fb_text = "".join(_reasoning_parts)
+                        _segment_parts.append(_fb_text)
+                        yield _fb_text
                     _segment_text = "".join(_segment_parts)
                     if _last_finish == "length" and not (cancel_event and cancel_event.is_set()):
                         if (_segment_text.strip() and _continuation_depth < MAX_CONTINUATION
@@ -632,6 +731,7 @@ class LLMEngine:
         accumulated_tool_calls: dict[int, dict] = {}  # index → {id, type, function: {name, arguments}}
         # P2流式续写状态：本段文本累积（段语义）+ 观察到的finish_reason
         _segment_parts: list[str] = []
+        _reasoning_parts: list[str] = []  # 17.1：thinking增量暂存（content空时回退收下）
         _last_finish: str | None = None
 
         for _retry in range(MAX_ATTEMPTS):
@@ -771,6 +871,9 @@ class LLMEngine:
                                     choice = choices[0]
                                     delta = choice.get("delta", {})
                                     if delta.get("reasoning_content"):
+                                        # 17.1：MiMo音频输入实测偶发答案只写reasoning_content
+                                        # （content为空）——先积累，流收尾时content为空才回退
+                                        _reasoning_parts.append(delta["reasoning_content"])
                                         continue
                                     content = delta.get("content")
                                     if content:
@@ -847,6 +950,20 @@ class LLMEngine:
                         # 续写不发射中间段usage（防消费方对同一逻辑回合双重backfill），
                         # 最终段usage随递归自然发射
                         self.last_usage = latest_usage
+                        # 17.1 reasoning回退（chat_stream_with_tools）：content为空且
+                        # 无tool_calls但thinking有内容（MiMo音频输入实测形态）——回退
+                        # 收下thinking文本为回复；有tool_calls时不回退（thinking≠工具
+                        # 轮的可见输出，掺入会污染纯工具轮）
+                        if (_final_tc_payload is None and not accumulated_tool_calls
+                                and not _segment_parts and _reasoning_parts
+                                and not (cancel_event and cancel_event.is_set())):
+                            logger.info(
+                                "[LLM] content为空，回退reasoning_content为回复（%d字）",
+                                len("".join(_reasoning_parts)),
+                            )
+                            _fb_text = "".join(_reasoning_parts)
+                            _segment_parts.append(_fb_text)
+                            yield _fb_text
                         if (_final_tc_payload is None and not accumulated_tool_calls
                                 and _last_finish == "length"
                                 and not (cancel_event and cancel_event.is_set())):
@@ -1102,7 +1219,13 @@ class LLMEngine:
                     if isinstance(_nusage, dict) and _nusage:
                         self.last_usage = _nusage
                     choice = data.get("choices", [{}])[0]
-                    segment = (choice.get("message", {}) or {}).get("content") or ""
+                    _nmsg = choice.get("message", {}) or {}
+                    segment = _nmsg.get("content") or ""
+                    if not segment and _nmsg.get("reasoning_content"):
+                        # 17.1 reasoning回退（chat）：MiMo音频输入实测偶发答案只写
+                        # reasoning_content（content为空）——丢弃=空回复，回退收下
+                        logger.info("[LLM] content为空，回退reasoning_content为回复（chat）")
+                        segment = _nmsg.get("reasoning_content") or ""
                     full_content += segment
 
                     # 防护1：omission占位符→整体重新生成（Gemini CLI方案）

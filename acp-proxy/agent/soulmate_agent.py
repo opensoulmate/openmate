@@ -40,7 +40,7 @@ from acp.schema import (
     TextContentBlock,
 )
 
-from agent.llm_engine import LLMEngine
+from agent.llm_engine import LLMEngine, attach_audio_parts
 from skill_manager import SkillManager, is_injectable_trigger
 from evolution import EvolutionEngine
 from dna_evolution import DNAEvolutionEngine
@@ -190,6 +190,15 @@ _PROGRESS_SAVE_INTERVAL_S = 2.0
 # 后补对它可见（纯ContextVar值后set对已创建task的上下文副本不可见）。
 _AUX_TRAJ_CTX: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
     "soulmate_aux_traj_ctx", default=None
+)
+
+# 17.1 音频输入多模态直路由：本轮音频附件（可变list上下文，同_AUX_TRAJ_CTX语义
+# ——标题任务create_task早于附件落盘，持有同一list引用后补append对它可见）。
+# 每个prompt回合在_prompt_inner开头set新list（子代理worker走完整prompt回合自动
+# 覆盖继承值=会话间音频绝不窜台）；消费方=_run_llm_with_tools主链路+_aux_llm_chat
+# （plan/judge/reflect/title随回合语境自动带上音频，infection_audit显式排除）。
+_TURN_AUDIO: contextvars.ContextVar[list | None] = contextvars.ContextVar(
+    "soulmate_turn_audio", default=None
 )
 
 # 15.3 aux延迟治理：串行挡在首字回复前的关键路径 aux（plan 任务规划/task_judge
@@ -1113,6 +1122,14 @@ class SoulMateAgent:
         t0 = time.monotonic()
         status = "ok"
         budget = _aux_critical_budget_s(label)
+        # 17.1 音频随回合语境直发：plan/task_judge/reflect/title等辅助提示词带上本轮
+        # 音频（fallback_last：辅助prompt无"[附件已保存到]"锚点，挂最后一条用户消息）。
+        # infection_audit显式排除——审计员判的是工具调用注入面，掺音频徒增噪声与
+        # 每轮音频token开销
+        if label != "infection_audit":
+            _audio = [a for a in (_TURN_AUDIO.get() or []) if a.get("data")]
+            if _audio:
+                messages = attach_audio_parts(messages, _audio, fallback_last=True)
         try:
             if budget > 0:
                 text = await asyncio.wait_for(
@@ -3789,8 +3806,12 @@ You can send files to the user natively: to deliver a file, write a brief confir
                 self._token_attr_ledger.record(_usage, session_id=session_id, model=_model)
             except Exception as _ta_exc:
                 logger.debug(f"[token-attribution] record failed (non-fatal): {_ta_exc}")
+            # 17.1 音频多模态直发：每轮LLM请求把本轮音频挂回用户消息（锚点定位，
+            # 原messages不动）——请求无状态，工具多轮间音频必须随每轮请求携带
+            _audio = [a for a in (_TURN_AUDIO.get() or []) if a.get("data")]
+            _wire_messages = attach_audio_parts(messages, _audio) if _audio else messages
             async for chunk in self.llm_engine.chat_stream_with_tools(
-                messages=messages,
+                messages=_wire_messages,
                 tools=all_tools if all_tools else None,
                 system_prompt=system_prompt,
             ):
@@ -5324,21 +5345,24 @@ You can send files to the user natively: to deliver a file, write a brief confir
         # EmbeddedResourceContentBlock等），不是dict——两种形态都要支持，否则图片被静默丢弃
         user_text = ""
         file_parts = []
+        audio_parts = []  # 17.1 音频直发载荷（path锚点在附件落盘时回填；同list引用进_TURN_AUDIO）
+        _TURN_AUDIO.set(audio_parts)
         for block in prompt:
             bname = type(block).__name__
             if isinstance(block, dict):
                 if block.get("type") == "text":
                     user_text += block.get("text", "")
-                elif block.get("type") in ("file", "image") and block.get("data"):
+                elif block.get("type") in ("file", "image", "audio") and block.get("data"):
                     file_parts.append(dict(block))
             elif bname == "TextContentBlock" or (hasattr(block, "text") and getattr(block, "type", "") == "text"):
                 user_text += block.text
             elif getattr(block, "type", "") in ("image", "audio") or bname in ("ImageContentBlock", "AudioContentBlock"):
-                # SDK ImageContentBlock对象: .data + .mime_type(snake_case) + .type="image"
+                # SDK ImageContentBlock/AudioContentBlock对象: .data + .mime_type(snake_case)
                 data = getattr(block, "data", None)
                 if data:
-                    mime = getattr(block, "mime_type", None) or getattr(block, "mimeType", None) or "image/png"
-                    file_parts.append({"type": "image", "data": data, "mimeType": mime})
+                    _is_audio = getattr(block, "type", "") == "audio" or bname == "AudioContentBlock"
+                    mime = getattr(block, "mime_type", None) or getattr(block, "mimeType", None) or ("audio/wav" if _is_audio else "image/png")
+                    file_parts.append({"type": "audio" if _is_audio else "image", "data": data, "mimeType": mime})
             elif hasattr(block, "resource"):
                 # EmbeddedResourceContentBlock(type:"resource"): .resource = BlobResourceContents(.blob/.mime_type/.uri)
                 res = getattr(block, "resource", None)
@@ -5400,14 +5424,24 @@ You can send files to the user natively: to deliver a file, write a brief confir
 
         # ── 异步生成会话标题（第一条消息时立即触发，不等回复）──
         if user_text and not session.get("title") and len(session.get("messages", [])) <= 1:
-            session["title"] = user_text[:30]  # 先用截断文本做临时标题
+            # 17.1纯语音消息临时标题：附件注记不是人类可读标题（异步LLM标题随后覆盖，
+            # 标题任务经_TURN_AUDIO拿到音频可按语音内容起名）。audio_parts此时尚未
+            # 落盘回填，判据取提取期已知的mime面
+            _has_audio_att = any(
+                str(f.get("mimeType", "")).lower().startswith("audio/") for f in file_parts
+            )
+            if _has_audio_att and user_text.strip().startswith("["):
+                _tmp_title = "🎤 语音消息"
+            else:
+                _tmp_title = user_text[:30]  # 先用截断文本做临时标题
+            session["title"] = _tmp_title
             # 立即同步到OpenSoul（sidebar数据源）
             try:
                 import httpx
                 async with httpx.AsyncClient() as client:
                     await client.patch(
                         f"http://127.0.0.1:8090/api/sessions/{session_id}",
-                        json={"title": user_text[:30]},
+                        json={"title": _tmp_title},
                         timeout=3,
                     )
             except Exception:
@@ -5448,6 +5482,20 @@ You can send files to the user natively: to deliver a file, write a brief confir
                         "mime_type": mime,
                         "path": persist_path,
                     })
+                    if mime.split(";")[0].strip().lower().startswith("audio/"):
+                        # 17.1 音频多模态直发载荷：path=锚点（attach_audio_parts按用户
+                        # 文本里的"[附件已保存到: path]"注记定位目标消息），data=裸base64。
+                        # 提示语实证补丁（真实MiMo探针：光有注记时模型会去bash读文件而不
+                        # 用"听"到的内容）——音频已随消息直发，明确引导基于听到内容作答
+                        user_text += (
+                            f"\n[语音附件已随消息直发：你已直接听到 {persist_path} 的音频内容，"
+                            "请基于听到的内容作答，无需读取该文件]"
+                        )
+                        audio_parts.append({
+                            "path": persist_path,
+                            "mime": mime,
+                            "data": b64_data,
+                        })
                     logger.info(f"[prompt] File saved: {persist_path} ({len(file_bytes)} bytes)")
                 except Exception as e:
                     logger.error(f"[prompt] File save error: {e}")
