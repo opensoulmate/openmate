@@ -601,9 +601,15 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
   服务端真源一致（dev_hello.py 真实落盘含 SOULMATE_DEV_OK 独立复核）
 
 ### 阶段11 · 下一批切片（周期#58 规划——阶段1-10切片清零后的续刀，按优先级）
-- [ ] 11.1 全量10类验收对标实测（harness 带 10.4 超时降级适配后重跑；上游降级期
-  口径不再漏记后到完成）：tag 唯一防缓存，结果写进本路线图；失败类别逐根因修复
-  优先于新切片
+- [x] 11.1 全量10类验收对标实测（周期#59）：harness 带 10.4 超时降级适配后全量单轮
+  重跑（tag=FULL11_1791677778），**10/10 当场全过**（上游 MiMo token-plan 已恢复
+  /api/llm/test pong 后开跑）：开发48.2s/调试38.0s/运维14.4s/调研32.1s（答案
+  Python 3.13 发布日 2024-10-07）/发布21.6s（投递行=1 真实落库）/办公96.1s
+  （report.xlsx 4962B 有效）/定时87.1s（accept_probe 行=1）/多渠道46.0s/记忆78.0s
+  （MEMORY.md 标记）/协作37.6s（subagent_runs 双worker）；server_side 7类+
+  reply_assisted 3类（运维/调研/多渠道）；本轮 WS 超时 0 个（late_readback 未触发，
+  降级期口径留待下次降级复核）；采集侧系统帧过滤实证生效（heartbeat×3+self_check×7
+  被过滤）；测试产物清理归零（accept_probe 行 0、MEMORY.md 标记 0、/tmp 探针产物删除）
 - [ ] 11.2 _run_soulmate_turn 挂死可见性（周期#57 诚实边界①销账）：10.3 三件套
   （进度心跳/执行时长可查询/可显式取消）扩到群组任务的 soulmate ACP 回合通道
   （此前只覆盖 CLI 通道 run_agent_proxy）；同样不加到点 SIGKILL
@@ -613,6 +619,11 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 - [ ] 11.4 soulmate-daemon 常驻托管覆盖面真实验收（周期#48 遗留）：实证"后建
   任务/目标也被轮询拾取"（daemon 启动后新建 schedule_task/监控目标在周期内真被
   执行/检查，而非只有启动时存量在跑）
+- [ ] 11.5（周期#59 新发现，候选）注入审计误杀良性文档任务：办公类验收回合中
+  InfectionGate "[注入审计终止]"打断一轮工具执行（文档生成工具输出目录受限 vs
+  任务要求 /tmp/soulmate_accept/report.xlsx 绝对路径被判疑似劫持），产物最终生成
+  成功（4962B 有效 xlsx）但回合多走弯路；治理方向=审计判据区分"路径越界"与
+  "注入劫持"（越界应回显限制说明，不升级终止）
 - [ ] 待用户拍板（不占阶段顺序）：⚡8.6 双链合并取舍、4.1b iLink 接入形态、
   ASR 语音输入多模态路由
 
@@ -674,3 +685,4 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 [2026-10-11 06:58] 周期#56 | 10.2 检测=注册=列表真源收口（周期#53遗留③销账）：实现已落 opensoul（姊妹流水线 B3 线先行提交：a01b79cf「detect/uninstall/list/send 统一 which_agent」+77346163「B3探测即注册」，services/agent_registry.py probe_agent=L1真ACP握手（acp-proxy /agents/probe）+L2真开会话（ws session/new 拿sessionId）两级全过才 registered=1、list_registered 只回 registered=1），本周期真机验收闭环销账——①盲区A/B实证：服务真实 PATH（/home/climbing/opensoul/.venv/bin:/usr/bin:/usr/local/bin:/bin，无 ~/.local/bin 与 ~/.npm-global/bin）下裸 shutil.which 对 mimo/opencode/claude/openclaw **全 None**（"available 全None"根因逐字复现）、which_agent 全部命中真实绝对路径；live /api/agents/detect available=True 带真实 path（mimo=~/.local/bin/mimo 等 9 项）=修复已生效（agents.py 05:05落盘 < 05:07:58服务启动，运行进程即新代码，未重启）②真实探测链 e2e **5/5 PASS**（/tmp/probe_chain_e2e.py，AGENT_REGISTRY_DB 临时库隔离不污染真实注册表，网络全真）：mimo L1"ACP handshake OK"+L2 真开会话 sessionId=ses_ed7fd4…→registered=1 进 list_registered；fake-agent-zzz 被拒"不在 acp-proxy 注册表…拒绝探测（禁冒名兜底）"→registered=0 不进列表③live /api/agents/registry total=2（hermes/soulmate 均 registered=1+session_ready=1）vs detect 61 个安装项——未注册不进列表 live 实证④opensoul tests：test_agent_detect_which+test_agents_probe_registry 19/19、test_agents 9/9 全过 | ✅ | (opensoul a01b79cf/77346163；本文档提交) | 10.2勾选；Gate1 git diff 本条目+勾选真实落盘、代码面改动归属 opensoul 两提交（非本周期产出，如实注明）；Gate2 grep which_agent 在 detect/uninstall/list/send 真实路径（a01b79cf）+probe_agent→list_registered 真实链路被 e2e 走中；Gate3 真实探测链 5/5+live API 双证据+opensoul 既有测试 28 例全过；⚠️诚实边界：detect 的 available=安装语义（装没装），真实 ACP 能力语义在 registered/session_ready（探测即注册），验收"available 与真实 ACP 能力一致"按两段语义合验；正例只探 mimo 一例（其余 agent 注册留给管理页用户点"检测"，cron 不批量改用户可见列表）；临时 e2e 库已清理、真实注册表零改动；下周期做10.3 run_agent_proxy 挂死可见性（进度心跳+执行时长可查询+可显式取消，不加到点 SIGKILL）
 [2026-10-11 07:45] 周期#57 | 10.3 run_agent_proxy 挂死可见性（周期#53 诚实边界②销账）：ws_chat.py run_agent_proxy 治理三件套——①进度心跳（_heartbeat 后台任务默认30s SOULMATE_PROXY_HEARTBEAT_S，on_event("heartbeat","⏳执行进行中：已用Ns｜已收N行｜最近:xxx") 推群组 _emit_exec_event 事件流可见，旁路纪律失败不冒泡不阻塞）②执行时长可查询（_PROXY_RUNS 登记表+proxy_run_snapshot JSON安全快照实时 elapsed_s/last_event/lines/pid + find_proxy_run 按 task_ref 查找+list_proxy_runs 列举+登记表64条有界）③可显式取消（cancel_proxy_run：SIGTERM 独立进程组[start_new_session=True，killpg 收编整棵进程树]→有界等待3s→force=True 才 SIGKILL，**执行主路径无任何到点自动杀**）+ai_groups 接线（_execute_task_impl 传 task_ref=group/task、显式取消不自动重试不评分任务以取消收口、GET /api/ai-groups/{g}/tasks/{t}/exec-status 查询端点+POST .../exec-cancel 显式取消端点，无可取消对象显式404不造假） | ✅ | (opensoul ws_chat.py/ai_groups.py/tests×2；本文档提交) | 10.3勾选；Gate1 git diff 四文件真实落盘（ws_chat.py +189行+ai_groups.py 接线/端点+tests/test_agent_proxy_run_control.py 新增8例+brain_wiring桩签名兼容**kwargs）；Gate2 grep task_ref 透传调用点+端点调用 find/cancel_proxy_run+心跳 on_event 进 _emit_exec_event 群组事件流，live curl 实证两路由已注册（exec-status 回 run:null 不造假/无可取消对象 404 显式报因）；Gate3 tests/test_agent_proxy_run_control.py 8/8（真实子进程非mock：心跳≥2条+运行中快照查询/显式取消 SIGTERM 如实报 cancelled 禁冒充完成/2.5s 长回合不被误杀/SIGTERM 忽略者 force=True 才 SIGKILL 两级取消/task_ref 查找三态/ai_groups 端点真取消真实子进程+cancel-requested 事件落库/_execute_task_impl 取消不重试不评分+task_ref 透传/源码契约无 wait_for 到点杀）+同域回归50全过+批量 -k 回归63全过+真机烟测 SMOKE_103_PASS（服务同款 interpreter：3.2s 慞回合运行中快照 elapsed=3.2s lines=7 last='tick 6'、task_ref 命中、SIGTERM 取消 returncode=-15、3条心跳事件、结束后 status=cancelled）+opensoul 服务重启 health OK | ⚠️诚实边界：①心跳/取消覆盖 CLI 通道（run_agent_proxy），soulmate ACP 回合（_run_soulmate_turn）挂死可见性另案②含真实 agent 的完整群组任务取消 e2e 未跑（需真实慢 agent 回合 5-12 分钟级，端点层已实测真取消真实子进程）③心跳为固定间隔非输出驱动（输出密集时进度细节看快照 lines/last_event）；下周期做10.4 验收 harness 降级适配（WS 超时任务的服务端后到产出二次回读，验收=模拟慢回合 harness 结果与服务端真源一致）
 [2026-10-11 07:55] 周期#58 | 10.4 验收 harness 降级适配（阶段10全部完成，路线图切片清零）：acceptance_benchmark.py 三件——①late_readback 预算内轮询服务端真源（_read_back_reply=agent_messages 该 session assistant 落库行真源回读+类别验证器复用），后到产出出现即判过附"后到回读Ns/M次"，预算耗尽（ACCEPT_LATE_READBACK_S默认300s/POLL_S默认5s）如实False禁把超时当成功②_drain_ws 超时期间持续排水后到帧（防读缓冲顶满反压agent stdout把回合拖死；按sessionId过滤；断连只停排水不冒泡）③main()超时路径与普通WS失败分离（prompt_timed_out标记），verify_mode=server_side_late/reply_assisted_late/ws_timeout_unrecovered三态+summary.late_readback统计 | ✅ | (本次提交) | 10.4勾选（阶段10收官）；tests/test_acceptance_late_readback.py 11/11（预算内后到判过≥3轮询/预算耗尽诚实失败/立即过单次收工不等poll/验证器异常不炸环/DB回复+排水帧合成判据/assistant行真源回读排除user与他会话行/排水sid过滤与计数/断连不冒泡/接线护栏inspect main真实调用+超时路径分离）；真实验收=模拟慢回合（tag=LR58，ACCEPT_PROMPT_TIMEOUT_S=5人为压短WS口径）：WS 5s超时→服务端回合照跑→后到回读20.0s/5次恢复，1/1✅ verify_mode=server_side_late，harness ok与服务端真源一致（dev_hello.py真实落盘含SOULMATE_DEV_OK独立复核）；⚠️诚实边界：单任务样本（开发类），定时类（周期#54实证原型）未在本轮复测——路径同一；全量回归tests/在后台执行，结果以补记为准；至此路线图阶段1-10切片全部清零，余项仅剩待用户拍板（⚡8.6双链合并取舍、4.1b iLink接入形态、ASR语音输入多模态路由）；下拍建议=跑全量10类验收对标（harness已带超时降级适配，上游降级期口径不再漏记后到完成）并规划新一批切片（候选：常驻托管覆盖面复核/语音输入ASR/用户实测反馈优先）
+[2026-10-11 08:30] 周期#59 | 11.1 全量10类验收对标实测（阶段11第一刀）：上游MiMo token-plan 恢复后全量单轮真实重跑（tag=FULL11_1791677778，WS /ws/acp 真实用户路径，每类独立session）**10/10 当场全过**——开发48.2s dev_hello.py真实落盘+marker命中/调试38.0s buggy.py修复return a+b+FIXED标记/运维14.4s 8090+磁盘信息/调研32.1s web_search真实执行答案Python 3.13发布日2024-10-07+主答区零自报不可用/发布21.6s opensoul.db投递行=1/办公96.1s report.xlsx 4962B有效xlsx/定时87.1s cron_tasks.db accept_probe行=1/多渠道46.0s/记忆78.0s MEMORY.md标记真实写入/协作37.6s subagent_runs双worker产出；verify_mode=server_side 7类+reply_assisted 3类（运维/调研/多渠道）；本轮WS超时0个（late_readback未触发——10.4降级口径留待下次上游降级期复核）；采集侧系统帧过滤实证生效（heartbeat×3+self_check×7被过滤）；测试产物清理归零（accept_probe行0/MEMORY.md标记0/tmp探针产物删除） | ✅ | (本次提交) | 11.1勾选；Gate1=git diff路线图11.1勾选+11.5新增+本条目真实落盘；Gate2=N/A（纯验收/文档周期，无新代码符号）；Gate3=acceptance_benchmark真实运行10/10通过（server_side者均有文件/SQLite行/MEMORY.md数据工件回读）+结果JSON /tmp/soulmate_accept_results.json回读复核与台面一致；⚠️诚实边界：①每类单次样本（同机低负载）②运维/调研/多渠道3类verify为reply_assisted（回复文本辅证）③late_readback在本轮未被触发（无WS超时），降级期二次回读路径的实证仍在周期#58单任务样本④新发现入11.5候选：办公回合InfectionGate"[注入审计终止]"误杀一轮良性工具执行（文档工具输出目录受限vs /tmp绝对路径被判劫持），产物仍生成但回合多走弯路；下周期做11.2 _run_soulmate_turn挂死可见性（10.3三件套扩到群组soulmate ACP回合通道）
