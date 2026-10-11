@@ -69,6 +69,11 @@ _SELF_NEGATING_RE = re.compile(
     r"|此行(仅[为是]|只是)[^，。；;]{0,8}(标记|占位)"
     r"|[Ii]gnore (this|the) (line|row)"
 )
+# 系统附件锚点注记（"[附件已保存到: …]"/"[文件/图片已保存到: …]"/"[语音附件已随消息直发：…]"）：
+# 消息管道注入的元信息，不是用户需求——周期#102 部署后真实 WS audio e2e 实证：锚点行被
+# 拆成需求项必然 unmet → 每条带附件消息必触发补做 + "覆盖 0/N" 噪音横幅（语音消息
+# 实测三项全"未覆盖"其中两项是锚点）。纯语音消息剥掉锚点后无正文=闲聊不自验，天然干净。
+_ANCHOR_NOTE_RE = re.compile(r"\[[^\[\]]*(?:已保存到|已随消息直发)[^\[\]]*\]")
 
 # 中文停用字（不进匹配词元）
 _STOP_CHARS = set(
@@ -133,6 +138,8 @@ def extract_requirements(text: str) -> list[str]:
     ④兜底：长任务整体作为单条需求。
     """
     text = (text or "").strip()
+    # 剥掉系统附件锚点注记（"[附件已保存到: …]"类）——管道元信息不是用户需求
+    text = _ANCHOR_NOTE_RE.sub("", text).strip()
     if not text:
         return []
 

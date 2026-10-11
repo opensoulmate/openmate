@@ -56,6 +56,51 @@ def test_extract_long_single_task_fallback():
     assert reqs == [text], reqs
 
 
+# ── 1b. 系统附件锚点注记不进需求（周期#102 audio e2e 实证回归） ──────────
+
+def test_extract_strips_file_anchor_note():
+    """"[附件已保存到: …]"是管道元信息，不得拆成需求项（否则必然 unmet→必触发补做）。"""
+    text = "帮我分析这份招标文件的评分标准并给出品牌推荐建议\n[附件已保存到: /home/climbing/opensoul/data/attachments/om-x/file.pdf]"
+    reqs = extract_requirements(text)
+    assert all("已保存到" not in r for r in reqs), reqs
+    assert reqs == ["帮我分析这份招标文件的评分标准并给出品牌推荐建议"], reqs
+
+
+def test_extract_pure_voice_message_no_requirements():
+    """纯语音消息=正文只有锚点注记，剥掉后无正文→闲聊不自验，零噪音。"""
+    text = (
+        "\n[附件已保存到: /home/climbing/opensoul/data/attachments/om-828b6d70542f/file.mpeg]"
+        "\n[语音附件已随消息直发：你已直接听到 /home/climbing/opensoul/data/attachments/"
+        "om-828b6d70542f/file.mpeg 的音频内容，请基于听到的内容作答，无需读取该文件]"
+    )
+    assert extract_requirements(text) == []
+
+
+def test_extract_anchor_not_item_in_list():
+    """编号列表里混入锚点行，锚点不得成为第 N 项。"""
+    text = "1. 生成月度报表 2. 发送邮件给团队\n[附件已保存到: /tmp/a.xlsx]"
+    reqs = extract_requirements(text)
+    assert len(reqs) == 2, reqs
+    assert all("已保存到" not in r for r in reqs), reqs
+
+
+def test_extract_image_and_file_anchor_variants():
+    """ws_chat/proxy 侧的"[文件/图片已保存到: …]"同族注记同样剥离。"""
+    text = "帮我看看这张截图里有什么UI问题并给出修复建议\n[图片已保存到: /tmp/img.png]"
+    assert extract_requirements(text) == ["帮我看看这张截图里有什么UI问题并给出修复建议"]
+    text2 = "转换这个文件的格式；顺便按日期重命名\n[文件已保存到: /tmp/f.doc]"
+    reqs2 = extract_requirements(text2)
+    assert all("已保存到" not in r for r in reqs2), reqs2
+    assert len(reqs2) == 2, reqs2
+
+
+def test_extract_user_bracket_text_untouched():
+    """普通方括号文本（非锚点）不受影响——只剥"已保存到/已随消息直发"族。"""
+    text = "请按照[设计规范]更新这份开发文档的接口章节"
+    reqs = extract_requirements(text)
+    assert reqs == [text], reqs
+
+
 # ── 2. 自验三态 ──────────────────────────────────────────────────
 
 def _verifier():
