@@ -39,7 +39,11 @@ from utils.llm_retry import (
 # 链耗尽报错列出所有试过的模型。opt-in：LLM_FALLBACK_CHAIN未配置=空链=行为与
 # 接线前逐字一致
 from utils.model_fallback import FallbackChain, FallbackLink, load_fallback_chain
-from utils.stall_guard import send_with_stall_guard
+from utils.stall_guard import (
+    aiter_with_stall_guard,
+    open_stream_with_stall_guard,
+    send_with_stall_guard,
+)
 
 # ── 传输故障可观测（路线图10.1）：分类入tool_failures.db ──────────────────
 _llm_fail_log = None
@@ -313,7 +317,11 @@ class LLMEngine:
                     yield "\n[LLM错误: 本回合HTTP发送预算已用尽（续写×重试联合封顶）]"
                     return
                 req = client.build_request("POST", "/chat/completions", json=payload)
-                response = await client.send(req, stream=True)
+                # 流式"等响应头"停顿看门狗（13.1，utils.stall_guard 同源语义）：
+                # 与 chat() 同族盲区——头前挂死 httpx read 超时不开火时无界等待
+                response = await open_stream_with_stall_guard(
+                    client.send(req, stream=True)
+                )
                 try:
                     if response.status_code != 200:
                         body = await response.aread()
@@ -382,7 +390,10 @@ class LLMEngine:
                     latest_usage = None
                     stream_finished = False
                     _got_done = False
-                    async for chunk in response.aiter_bytes():
+                    # 流式消费侧 chunk 间隙停顿看门狗（13.1）：停顿抛 httpx.ReadTimeout
+                    # 落进下方既有 except httpx.TransportError——partial 输出/has_output
+                    # 重试规则与失败文案零改动（"[LLM响应超时]"契约逐字不动）
+                    async for chunk in aiter_with_stall_guard(response.aiter_bytes()):
                         if cancel_event and cancel_event.is_set():
                             logger.info("LLM stream cancelled by event")
                             return
@@ -623,7 +634,10 @@ class LLMEngine:
                         yield "\n[LLM错误: 本回合HTTP发送预算已用尽（续写×重试联合封顶）]"
                         return
                     req = client.build_request("POST", "/chat/completions", json=payload)
-                    response = await client.send(req, stream=True)
+                    # 流式"等响应头"停顿看门狗（13.1，utils.stall_guard 同源语义）
+                    response = await open_stream_with_stall_guard(
+                        client.send(req, stream=True)
+                    )
                     try:
                         if response.status_code != 200:
                             body = await response.aread()
@@ -699,7 +713,10 @@ class LLMEngine:
                         _final_tc_payload = None
                         latest_usage = None
                         _got_done = False
-                        async for chunk in response.aiter_bytes():
+                        # 流式消费侧 chunk 间隙停顿看门狗（13.1）：停顿抛
+                        # httpx.ReadTimeout 落进既有 except httpx.TransportError——
+                        # has_output（文本/tool_calls 已累积）重试规则零改动
+                        async for chunk in aiter_with_stall_guard(response.aiter_bytes()):
                             if cancel_event and cancel_event.is_set():
                                 logger.info("LLM stream cancelled by event")
                                 return

@@ -18,17 +18,26 @@ attempt_deadline_s() 另设单次请求总时长兜底（细碎涓流、间隙�
 总不收口的形态）。两者都以"收到字节=进展"为准，**绝不对正常慢响应误杀**：
 间隙 < stall 的完整慢响应照常完成（回归测试钉死）。
 
+流式路径（13.1，周期#77 同源扩面）：chat_stream / chat_stream_with_tools 的
+消费端挂起与非流式同族盲区（12.3 事故族最后已知缺口）——open_stream_with_stall_guard
+守"等响应头"，aiter_with_stall_guard 守"每个 chunk 间隙"，同一套 stall/deadline
+计时语义（_await_with_stall 单源）；停顿抛 httpx.ReadTimeout 落进流式路径既有的
+except httpx.TransportError（partial 输出/has_output 重试规则零改动原样生效，
+错误文案逐字不动）。
+
 语义边界（诚实记录）：
 - 非流式 chat/completions 的 TTFB=整个生成时长（服务端生成完才发头）。默认
   stall=60s 对 chat() 实测单次调用时长（0.03~16s，周期#67 五样本+判词 16s）
   留 3.75 倍余量；若真实负载出现生成 >60s 的合法调用，调 SOULMATE_LLM_STALL_TIMEOUT_S
   即可（≤120s 与 httpx read 超时对齐，>120s 的调用今天本来就会 ReadTimeout）。
-- 流式路径（chat_stream / chat_stream_with_tools）不在本切片（消费端挂起语义
-  与 partial 输出/has_output 重试规则耦合，另案）。
+- 流式路径的 TTFB=首 token 时长（短），生成期"收到字节=进展"：间隙 < stall 的
+  慢涓流生成照常收完整流（负控制必测）；流式总时长兜底默认 900s（stream_deadline_s，
+  比非流式 240s 宽松——连续出字的长生成属合法），涓流假进展仍是有界失败。
 
 环境变量（均可运行时读取，测试注入用）：
 - SOULMATE_LLM_STALL_TIMEOUT_S  停顿阈值秒（默认 60；任何字节间隙超过即中止本次尝试）
 - SOULMATE_LLM_ATTEMPT_DEADLINE_S  单请求总时长上限秒（默认 240，对齐 8.3 回合软预算）
+- SOULMATE_LLM_STREAM_DEADLINE_S  流式单次生成总时长上限秒（默认 900）
 - SOULMATE_LLM_STALL_GUARD=off  整体旁路（退回 client.request 原行为，排障用）
 """
 import asyncio
@@ -39,8 +48,11 @@ import httpx
 __all__ = [
     "stall_timeout_s",
     "attempt_deadline_s",
+    "stream_deadline_s",
     "stall_guard_enabled",
     "send_with_stall_guard",
+    "open_stream_with_stall_guard",
+    "aiter_with_stall_guard",
 ]
 
 # 默认值取值依据：
@@ -48,8 +60,11 @@ __all__ = [
 #   且 >120s（httpx read 超时）的调用今天必然失败，故 stall≤120 不引入新误杀面。
 # - DEADLINE 240s：对齐 turn_watchdog 软预算（8.3），单次非流式请求总时长
 #   超过回合软预算本身已属病态（含涓流假进展兜底）。
+# - STREAM_DEADLINE 900s：流式生成"连续出字=合法进展"，长文档生成可达数分钟，
+#   默认比非流式宽松 3.75 倍；涓流假进展（间隙<stall 但从不收口）由它兜底有界。
 DEFAULT_STALL_TIMEOUT_S = 60.0
 DEFAULT_ATTEMPT_DEADLINE_S = 240.0
+DEFAULT_STREAM_DEADLINE_S = 900.0
 
 
 def _env_float(name: str, default: float) -> float:
@@ -70,6 +85,15 @@ def stall_timeout_s() -> float:
 def attempt_deadline_s() -> float:
     """单次请求总时长上限秒。SOULMATE_LLM_ATTEMPT_DEADLINE_S 覆盖。"""
     return _env_float("SOULMATE_LLM_ATTEMPT_DEADLINE_S", DEFAULT_ATTEMPT_DEADLINE_S)
+
+
+def stream_deadline_s() -> float:
+    """流式单次生成总时长上限秒。SOULMATE_LLM_STREAM_DEADLINE_S 覆盖。
+
+    流式生成"连续出字=合法进展"，长文档生成可达数分钟，默认 900s 比非流式
+    240s 宽松；涓流假进展（间隙<stall 但从不收口）由它兜底有界失败。
+    """
+    return _env_float("SOULMATE_LLM_STREAM_DEADLINE_S", DEFAULT_STREAM_DEADLINE_S)
 
 
 def stall_guard_enabled() -> bool:
@@ -165,7 +189,12 @@ async def send_with_stall_guard(
                 await resp.aread()
             return resp
         chunks: list[bytes] = []
-        aiter = resp.aiter_bytes()
+        # aiter_raw 收**原始（未解码）字节**——必须与重建 Response 保留的
+        # content-encoding 头一致：aiter_bytes 产出的是已解码字节，配 gzip 头重建
+        # 会被二次解码 → DecodingError "incorrect header check"（真实生产实证
+        # 2026-10-11 16:09 journal：token-plan gzip 响应下 chat() 全部报
+        # "[LLM错误: Error -3 while decompressing...]"，纯文本假服务器测试未覆盖）
+        aiter = resp.aiter_raw()
         while True:
             chunk = await _await_with_stall(
                 _anext_or_none(aiter), stall, _remaining,
@@ -186,3 +215,76 @@ async def send_with_stall_guard(
                 await resp.aclose()
             except Exception:  # noqa: BLE001 — 收尾尽力而为，不冒泡
                 pass
+
+
+async def open_stream_with_stall_guard(
+    send_awaitable,
+    *,
+    stall_s: float | None = None,
+    deadline_s: float | None = None,
+):
+    """流式请求"等响应头"的停顿计时（send_with_stall_guard 头部等待同源语义）。
+
+    流式路径 client.send(req, stream=True) 在响应头到达时即返回，但与非流式同族
+    盲区：websockets serve 循环里 httpx read 超时不开火时，头前挂死同样无界。
+    间隙 > stall_s → 抛 httpx.ReadTimeout（既有 except httpx.TransportError 原样
+    接住，重试/失败契约零变化）；deadline_s 为本次流式生成总预算起点（调用方传
+    同一 remaining 语义即可，此处独立起表=头+体各得一份预算，上界仍是有界）。
+    """
+    if not stall_guard_enabled():
+        return await send_awaitable
+    stall = stall_s if stall_s is not None else stall_timeout_s()
+    deadline = deadline_s if deadline_s is not None else stream_deadline_s()
+    loop = asyncio.get_running_loop()
+    t_end = loop.time() + deadline
+
+    def _remaining() -> float:
+        return t_end - loop.time()
+
+    deadline_msg = f"LLM请求总时长超上限 {deadline:.0f}s（无流停顿检测总预算兜底）"
+    stall_head_msg = f"LLM传输停顿：{stall:.0f}s 未收到响应头（无流停顿检测）"
+    return await _await_with_stall(
+        send_awaitable, stall, _remaining, deadline_msg, stall_head_msg,
+    )
+
+
+async def aiter_with_stall_guard(
+    aiter,
+    *,
+    stall_s: float | None = None,
+    deadline_s: float | None = None,
+):
+    """流式消费侧 chunk 间隙停顿看门狗（13.1）：逐 chunk 套 _await_with_stall 单源计时。
+
+    - 每个 chunk 前的间隙 > stall_s → 抛 httpx.ReadTimeout（"响应体无新数据"）；
+    - 总时长 > deadline_s（涓流假进展：间隙都小但从不收口）→ 抛 httpx.ReadTimeout
+      （"总时长超上限"）；
+    - 间隙 < stall_s 的慢涓流生成照常逐 chunk 产出（零误杀负控制）；
+    - 内层迭代器自身抛出的异常（RemoteProtocolError 等）原样透传不吞；
+    - SOULMATE_LLM_STALL_GUARD=off 时旁路为原样迭代。
+
+    抛出的 ReadTimeout 属 TransportError 家族：流式路径既有 except httpx.TransportError
+    原样接住——partial 输出/has_output 重试规则零改动（plan_error_retry 语义不变），
+    失败文案走既有 "[LLM响应超时]" 契约逐字不动。
+    """
+    if not stall_guard_enabled():
+        async for item in aiter:
+            yield item
+        return
+    stall = stall_s if stall_s is not None else stall_timeout_s()
+    deadline = deadline_s if deadline_s is not None else stream_deadline_s()
+    loop = asyncio.get_running_loop()
+    t_end = loop.time() + deadline
+
+    def _remaining() -> float:
+        return t_end - loop.time()
+
+    deadline_msg = f"LLM请求总时长超上限 {deadline:.0f}s（无流停顿检测总预算兜底）"
+    stall_body_msg = f"LLM传输停顿：{stall:.0f}s 响应体无新数据（无流停顿检测）"
+    while True:
+        item = await _await_with_stall(
+            _anext_or_none(aiter), stall, _remaining, deadline_msg, stall_body_msg,
+        )
+        if item is None:
+            return
+        yield item

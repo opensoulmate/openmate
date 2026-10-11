@@ -389,8 +389,10 @@ class TestWiringPins:
 
     def test_park_call_shape_matches_llm_engine(self):
         """park调用形态与llm_engine同款（except httpx.TransportError分支内）"""
+        # 锚定真实 handler 语句（"except httpx.TransportError as e:"）——裸类名会被
+        # 注释文字误命中（13.1 流式注释曾抢锚致假红）
         for rel in ("utils/llm_transport.py", "agent/llm_engine.py"):
             src = self._src(rel)
-            assert "except httpx.TransportError" in src
-            idx = src.find("except httpx.TransportError")
+            assert "except httpx.TransportError as e:" in src
+            idx = src.find("except httpx.TransportError as e:")
             assert "maybe_park(" in src[idx:idx + 400], f"{rel} park必须在TransportError分支内"

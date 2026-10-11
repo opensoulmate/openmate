@@ -18,6 +18,7 @@
 8. SOULMATE_LLM_STALL_GUARD=off 旁路回原行为
 """
 import asyncio
+import gzip
 import http.server
 import inspect
 import json
@@ -70,6 +71,15 @@ def _make_handler(state):
                     self.send_header("Content-Length", str(len(OK_BODY)))
                     self.end_headers()
                     self.wfile.write(OK_BODY)
+                elif kind == "gzip_ok":
+                    # 真实生产形态：MiFE/token-plan 回 content-encoding: gzip
+                    gz = gzip.compress(OK_BODY)
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Encoding", "gzip")
+                    self.send_header("Content-Length", str(len(gz)))
+                    self.end_headers()
+                    self.wfile.write(gz)
                 elif kind == "slow_ok":
                     # 延迟后回完整响应（合法慢 TTFB，不该误杀）
                     time.sleep(spec.get("secs", 0.3))
@@ -344,6 +354,29 @@ class TestResponseContract:
         assert resp.content == OK_BODY
         assert "application/json" in resp.headers.get("content-type", "")
 
+    def test_gzip_body_not_double_decoded(self, fast_env):
+        """content-encoding: gzip 响应重建后正常解码（真实生产缺陷回归钉）：
+
+        2026-10-11 16:09 journal 实证：send_with_stall_guard 收集 aiter_bytes 已解码
+        字节却保留 gzip 头重建 Response → 二次解码 DecodingError "incorrect header
+        check"，真实 chat() 全部报 "[LLM错误: Error -3 while decompressing...]"。
+        修复=收集 aiter_raw 原始字节与头一致。纯文本假服务器此前未覆盖此形态。
+        """
+        srv = _Server([{"kind": "gzip_ok"}])
+        try:
+            async def go():
+                async with httpx.AsyncClient(timeout=httpx.Timeout(120)) as client:
+                    return await send_with_stall_guard(
+                        client, "POST", f"http://127.0.0.1:{srv.port}/v1/chat/completions",
+                        json={"x": 1},
+                    )
+            resp = _run(go())
+        finally:
+            srv.close()
+        assert resp.json() == OK_JSON  # 二次解码会在构造时直接抛 DecodingError
+        assert resp.text == OK_BODY.decode()
+        assert resp.content == OK_BODY
+
     def test_error_status_body_preserved(self, fast_env):
         """非 200 响应的 resp.text 保留（状态重试/失败契约要读 body 前 200 字）"""
         srv = _Server([{"kind": "error500"}])
@@ -372,14 +405,14 @@ class TestWiring:
         src = inspect.getsource(llm_transport._post_single_link)
         assert "send_with_stall_guard" in src
 
-    def test_streaming_paths_untouched(self):
-        """流式路径本切片不动（诚实边界钉死，另案时改此断言）"""
-        from utils.stall_guard import send_with_stall_guard as g
+    def test_streaming_paths_wired(self):
+        """13.1（周期#77 另案）：流式路径已接同源守卫——此断言随另案更新（原钉"不动"）"""
         s1 = inspect.getsource(LLMEngine.chat_stream)
         s2 = inspect.getsource(LLMEngine.chat_stream_with_tools)
-        assert "send_with_stall_guard" not in s1
-        assert "send_with_stall_guard" not in s2
-        assert g is send_with_stall_guard
+        assert "aiter_with_stall_guard" in s1
+        assert "aiter_with_stall_guard" in s2
+        assert "open_stream_with_stall_guard" in s1
+        assert "open_stream_with_stall_guard" in s2
 
 
 # ══════════════ 8. 配置与旁路 ══════════════
