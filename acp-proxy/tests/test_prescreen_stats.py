@@ -58,7 +58,10 @@ class _OkLLM:
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    # 周期#12.6：get_event_loop().run_until_complete 在批内排序下（前序测试
+    # 已关/置空事件循环）抛 "no current event loop"（6红实证，纯HEAD复现），
+    # 改 asyncio.run 每调用独立新循环——对齐周期#55 同款基建修法
+    return asyncio.run(coro)
 
 
 def _clean_calls():

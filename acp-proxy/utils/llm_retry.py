@@ -47,6 +47,13 @@ MAX_ATTEMPTS = 5  # 10.1偏差：kilocode默认3→5（持续降级耐性，仍�
 # 上限后照常重试（有界耐性）；SOULMATE_LLM_RETRY_MAX_WAIT_S可配（测试注入故障用）。
 RETRY_MAX_WAIT_MS = 60_000
 
+# 九态分类码全集（12.6：预分类 code 串透传判据，改分类面先改这里）
+_LLM_KIND_CODES = frozenset({
+    "rate_limit", "timeout_status", "server_error", "client_error",
+    "protocol_error", "read_timeout", "connect_error", "network_error",
+    "transient_message", "unknown",
+})
+
 # kilocode TRANSIENT_MESSAGES：纯文案匹配兜底（跨平台错误串，httpx类型判定之外的补充）
 TRANSIENT_MESSAGES = (
     "load failed",
@@ -226,7 +233,8 @@ def plan_error_retry(
 def classify_failure(source) -> str:
     """传输/状态故障确定性分类（不走LLM），产出tool_failures.db的kind列。
 
-    source：HTTP状态码(int)或捕获的异常对象。
+    source：HTTP状态码(int)、捕获的异常对象、或已分类九态码串（透传保真——
+    12.6：预分类 code 经此落库不再落 unknown）。
     分类面（周期#54上游降级三态实证对齐）：
     - 429 → rate_limit（限流）；408 → timeout_status
     - 5xx → server_error（服务端瞬时故障，含503 ServiceUnavailableError实证形态）
@@ -235,11 +243,16 @@ def classify_failure(source) -> str:
       实证形态——周期#54直探针 RemoteProtocolError: peer closed connection…）
     - httpx.ReadTimeout → read_timeout；httpx.ConnectError → connect_error
     - 其余httpx.TransportError → network_error
+    - 其余httpx.RequestError → network_error（12.6 补：DecodingError 等
+      请求族异常——实证 4 行 llm:dna "Error -3 while decompressing" 曾落 unknown
+      分类缺口，请求族传输损坏归 network_error）
     - TRANSIENT_MESSAGES文案命中 → transient_message（跨平台兜底）
     - 其余 → unknown
     """
     if isinstance(source, bool):  # bool是int子类，先排除
         return "unknown"
+    if isinstance(source, str) and source in _LLM_KIND_CODES:
+        return source  # 已分类九态码串透传（record 调用方预分类场景）
     if isinstance(source, int):
         s = int(source)
         if s == 429:
@@ -257,6 +270,10 @@ def classify_failure(source) -> str:
         if isinstance(source, httpx.RemoteProtocolError):
             return "protocol_error"
         if isinstance(source, httpx.TransportError):
+            return "network_error"
+        if isinstance(source, httpx.RequestError):
+            # 12.6 补：DecodingError 等请求族异常（非 TransportError 兄弟类）——
+            # 实证 4 行 llm:dna "Error -3 while decompressing" 落 unknown 分类缺口
             return "network_error"
         msg = str(source).lower()
         if any(m in msg for m in TRANSIENT_MESSAGES):

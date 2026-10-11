@@ -824,6 +824,26 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
   ts 存秒非毫秒（违全局时间规范，抽查探针顺带核）④dna_evolution
   ._record_llm_failure_safe 死包装（零调用点，签名与恢复后 _record_failure_safe
   不兼容=接线即 TypeError 地雷，清理或对齐）。
+  ——周期#73实装（探针+③④+分类缺口，余①②+11.5观察）：新增 acp-proxy/
+  audit_trail_probe.py 可复跑抽查探针（只读六面：分类行完整性=kind/action/
+  outcome/attempt 值域核+kind=unknown 缺口如实列、无孤儿行=收尾行须有先行恢复
+  尝试行（连接口径实证：尝试行以 step 工具名落行、收尾行以原工具名落行，note
+  "换路径: read_file → read_file_segment" 是连接键）+llm action↔outcome 契约配对、
+  llm 归因串线=tool_name 必须 llm:<已知path>+llm:dna 行必带 [strand_a|strand_b]、
+  llm:dna 闭环（周期#61遗留③）、ts 毫秒/秒混存普查、11.5 溯源留痕自然触发观察）；
+  真实库抽查实证 4 类发现：2 归因串线行（WIP 错位历史产物 llm:[Errno -2]…/
+  llm:empty_output，历史不改写）、llm:dna DecodingError 4 行落 unknown=分类缺口、
+  孤儿 0（口径修正后真无孤儿）、llm:dna 真实降级行 4→6 条=闭环成立。修 3 根因：
+  ③record() ts 改毫秒 UTC（存量 133 行秒单位不改写历史，探针普查如实报）④dna 死
+  包装对齐（_record_llm_failure_safe 委托 kwargs 与 _record_failure_safe(path,
+  source,action,attempt,outcome,detail) 签名不匹配 TypeError 被吞=记账静默丢失
+  地雷→对齐委托 path="dna"+strand 归因进 detail+request_id 幂等保留）+classify_
+  failure 补九态码串透传（预分类 code 不再落 unknown）与 httpx.RequestError 兜底
+  →network_error（DecodingError 非 TransportError 兄弟类，4 行 unknown 缺口根因）；
+  顺带修存量测试基建红灯（test_prescreen_stats _run 用 get_event_loop 批内排序
+  污染 6 红，纯 HEAD worktree 先证非本切片引入→改 asyncio.run 对齐周期#55 修法）。
+  余项下拍第一优先：①infection-guard 判词依据不落账 ②verify_dev 判据弱项；
+  11.5 观察=探针持续复跑（当前 0 行=未自然触发如实报）。
 - [ ] 待用户拍板（不占阶段顺序）：⚡8.6 双链合并取舍、4.1b iLink 接入形态、
   ASR 语音输入多模态路由
 
@@ -906,3 +926,4 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 [2026-10-11 13:58] 周期#71 | 12.5 harness收尾清理+late_readback三类别扩测（10.4单样本边界+11.1遗留④销账）：acceptance_benchmark.py 增量两件——①cleanup() 末尾 rmtree(WORKDIR)（run 末产物显式清理，兑现 docstring"测试产物显式清理"承诺=周期#64 实证残留 3 件形态根治；setup() 预清路径幂等；cleanup 的 agent_messages 探针行清理改走 AGENT_MESSAGES_DB 模块常量单一真源=测试可隔离不摸真实库）②真实扩测 tag=LR125_1791716400（ACCEPT_PROMPT_TIMEOUT_S=20 人为压短 WS 口径构造多类别后到产出场景，ACCEPT_CATEGORIES=开发,办公,记忆）：**3/3 全部 WS 超时→后到回读 3/3 恢复**（ws_timeouts=3 recovered=3，verify_mode=server_side_late×3）——开发 20.98s（后到回读 0.0s/1次，超时时刻产出已就绪 dev_hello.py+marker）、办公 40.02s（20.0s/5次，report.xlsx 4979B 有效 xlsx 落 /tmp/soulmate_accept）、记忆 25.01s（5.0s/2次，MEMORY.md 含 ACCEPT_MEM_MARK_9）；run 末 /tmp/soulmate_accept 实证已删除（ls 报 No such file）、测试产物清理归零（MEMORY 标记 0/accept_probe 行 0） | ✅ | a1a0a903 | 12.5勾选；Gate1 git diff 5插入2删除+新测试文件真实落盘；Gate2 grep cleanup() 在 main 真实路径（L705）+rmtree 落 cleanup 末尾（本次真实 run 走中=run 末目录消失即实证）；Gate3 tests/test_acceptance_cleanup.py 5/5（rmtree 核心契约/缺失幂等/setup 重建 buggy.py/模块常量隔离真库探针行清理/接线护栏）+既有 harness 双测试 23/23（late_readback 11+verify_ledger 12）零回归+py_compile+结果 JSON /tmp/soulmate_accept_results.json 回读与台面一致；⚠️诚实边界：①late_readback 三类别均构造场景（人为压短 WS 口径），自然超时场景的三类别恢复仍待上游降级期自然发生复核②开发类 0.0s/1次=产出先于超时就绪（非轮询恢复形态，恢复多样性由办公/记忆 20.0s/5次、5.0s/2次补证）③每类单样本同机低负载；下周期做 12.6 轨迹/审计闭环抽查（tool_failures.db 抽查探针+llm:dna 归因不串线+12.4③ 免审命中率实测）
 
 [2026-10-11 14:21] 周期#72 | 12.4③ 免审命中率stats实测观察（12.4全部完成）：InfectionGate 增 prescreen_escalated/llm_audits 计数+stats() 快照（命中率无数据报 None 禁假 100%），journal 双留痕行"预筛免审（source）/预筛升级审计"带累计命中率（stats() 真实接线进日志路径非死代码），soulmate_agent 免审批次账本留痕（[infection-guard] 伪条目 permission=infection:prescreen_exempt，report_evidence.parse_ledger 两头不计零缩水钉死）+可复跑探针 acp-proxy/prescreen_hitrate_report.py（journal+trajectory_events 双通道交叉核对不一致如实报差异；实证两坑：账本列名 metadata_json 非 metadata、arguments 落库为 Python repr 非 JSON→双形态解析）。**真实实测** 3 类真实 WS 验收 3/3✅（开发 20.01s/调研 33.43s/办公 55.27s，本切片门改动零破坏）：接线后干净窗口 6 工具批次命中率 50%（免审 3=user_verbatim 2+exec_verb 1；升级 3=办公类模型自造 xlsx 内容照常走 LLM 审计），journal 与账本双通道计数一致 3=3；实测暴露并修复 1 真缺陷=子进程 stderr 被 ws_acp 中继双份记账 journal 致样本翻倍，探针按内层日志行去重（测试钉死） | ✅ | 001918de | 12.4③勾选（12.4 ✅ 全完）；Gate1 git diff 46插入（infection_guard+soulmate_agent）+2 新文件真实落盘；Gate2 grep stats() 调用点=journal 日志行真实路径+账本留痕实证 3 行真库回读（om-9c042303d473 等）+探针消费 journal 行契约测试互相咬合；Gate3 tests/test_prescreen_stats.py 12/12+同域回归 147/147（audit_prescreen/infection_guard/provenance/self_heal/report_evidence）+3 次真实验收 3/3+探针真实输出（双通道+去重后口径）；⚠️诚实边界：①窗口内命中率 50% 为 3 次真实运行小样本，长窗口自然分布待后续周期探针持续观察（探针可复跑）②接线前批次（13:56 前）只有 journal 行无账本行，宽窗口双通道计数差异=接线时间边界所致（探针如实报警不取其一）③免审仅省注入审计 LLM 往返，权限门/启发式签名零变化；下周期做 12.6 轨迹/审计闭环抽查（阶段12最后一片）
+[2026-10-11 15:12] 周期#73 | 12.6第一刀·轨迹/审计闭环抽查探针+③④根因修复：新增 acp-proxy/audit_trail_probe.py（只读六面可复跑：分类行完整性值域核/孤儿行含 step工具名-收尾工具名 note 连接口径/llm 归因串线（llm:<已知path>+llm:dna 带 strand 归因）/llm:dna 闭环/ts 毫秒普查/11.5 溯源留痕自然触发观察）+修3根因（③record() ts 秒→毫秒UTC存量不改写④dna_evolution._record_llm_failure_safe 死包装对齐委托（TypeError 被吞记账静默丢失地雷→正确签名+strand 归因+request_id 幂等保留）+classify_failure 九态码串透传与 httpx.RequestError→network_error 兜底=DecodingError 4行unknown缺口根因）+顺带修存量测试基建红灯（test_prescreen_stats _run get_event_loop 批内污染6红，纯HEAD worktree 先证非本切片引入→asyncio.run） | ✅ | (本次提交) | 12.6 部分完成（探针+③④✅，余①infection-guard判词依据不落账②verify_dev判据弱项=下拍第一优先；11.5 观察当前0行未自然触发如实报）；Gate1 git diff 5文件57行+2新文件真实落盘；Gate2 接线实证=探针经 ToolRecoveryManager.record 真实写入路径产出毫秒行回读+classify 透传/RequestError 经 record_llm_failure 真实调用链（测试走真实 writer 非 stub）；Gate3 tests/test_audit_trail_probe.py 25/25+批内回归 127/127（原6红转绿）+受影响面 251/251（llm transport/retry/accounting/stall/dna storm×3/tool_recovery）+py_compile+服务同款 interpreter 烟测 SMOKE126_PASS+真实库抽查实证（2 归因串线 WIP 历史行/孤儿0/llm:dna 4→6条闭环）+双实例重启 health 200/200；⚠️诚实边界：①串线 2 行为 WIP 错位历史产物不改写历史（探针持续如实报）②11.5 溯源降级留痕 0 行=未自然触发非缺陷，待自然发生复核③存量 133 行秒单位与新毫秒行混存由探针普查标注，不做迁移④期间真实库新增 llm:dna 行仍落 unknown=服务重启前旧码所记，重启后新行应为 network_error 待下次探针复跑核对；⚠️并发警示：tool_recovery/dna_evolution/llm_retry/test_prescreen_stats/roadmap 编辑中均收到 sibling 修改告警，git diff 核实工作树仅本周期改动（57行）无他会话混入；下周期做 12.6① infection-guard 判词依据不落账（terminate detail=空→判词落账）

@@ -302,7 +302,7 @@ class ToolRecoveryManager:
                     " action, attempt, outcome, error_first_line, note, args_json)"
                     " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
-                        time.time(), session_id or "", tool_name, str(kind),
+                        int(time.time() * 1000), session_id or "", tool_name, str(kind),
                         action, int(attempt), outcome,
                         _first_line(error)[:300], note[:300], args_json,
                     ),

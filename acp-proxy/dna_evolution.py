@@ -63,8 +63,14 @@ def _record_llm_failure_safe(
     """best-effort 失败记账（唯一入口，禁止再裸调 record_llm_failure）。
 
     契约：
-    1) 幂等键 = (request_id, code) —— 同一请求同一九态码只记一次；
-    2) 委托 utils.llm_transport._record_failure_safe（记账单一真源）；
+    1) 幂等键 = (request_id, code) —— 同一请求同一九态码只记一次（请求级幂等
+       归持有真实请求身份的本入口，传输层不做无身份去重——周期#69 撤除 WIP
+       去重集的分工约定）；
+    2) 委托 utils.llm_transport._record_failure_safe（记账单一真源）——
+       周期#12.6 对齐：此前调用 kwargs（strand_id/request_id/code）与
+       _record_failure_safe(path, source, action, attempt, outcome, detail)
+       签名不匹配，接线即 TypeError 被 except 吞掉=记账静默丢失地雷；
+       code 为已分类九态码，经 classify_failure 码串透传保真（不再落 unknown）；
     3) 任何记账异常只 logger.warning，绝不向上冒泡影响 LLMCallError 的
        raise 语义 / 续写防护循环 / park 策略。
     """
@@ -78,10 +84,12 @@ def _record_llm_failure_safe(
             return
         _dedup.add(key)
         llm_transport._record_failure_safe(
-            strand_id=strand_id,
-            request_id=rid,
-            code=code,
-            detail=detail,
+            path="dna",
+            source=code,
+            action="llm_give_up",
+            attempt=1,
+            outcome="failed",
+            detail=(f"[{strand_id}] {detail}" if strand_id else detail),
         )
     except Exception as exc:  # noqa: BLE001 —— 记账降级不得反噬进化 strand
         logger.warning(
