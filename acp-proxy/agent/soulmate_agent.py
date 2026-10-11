@@ -6,6 +6,7 @@
 
 import asyncio
 import base64
+import contextvars
 import httpx
 import re
 import logging
@@ -181,6 +182,14 @@ logger = logging.getLogger("acp-agent.soulmate")
 # 切页/断连/取消都能从库重建已生成部分。测试可monkeypatch本模块全局。
 _PROGRESS_SAVE_CHARS = 800
 _PROGRESS_SAVE_INTERVAL_S = 2.0
+
+# 14.4 落账补洞：辅助LLM往返（planner任务拆解/任务裁决/注入审计判词/标题生成/
+# 技能语义改写）的trajectory落账上下文。持有**可变dict**而非纯值：fire-and-forget
+# 任务（标题生成在回合根span建立前create_task）拿到的是同一dict引用，root_id
+# 后补对它可见（纯ContextVar值后set对已创建task的上下文副本不可见）。
+_AUX_TRAJ_CTX: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
+    "soulmate_aux_traj_ctx", default=None
+)
 
 
 class SoulMateAgent:
@@ -1037,7 +1046,63 @@ class SoulMateAgent:
 
     async def _llm_plan_call(self, messages: list[dict]) -> str:
         """轻量 LLM 调用，只返回文本（不带工具），用于规划和自省"""
-        return await self.llm_engine.chat(messages)
+        return await self._aux_llm_chat(self._aux_llm_label(messages), messages)
+
+    @staticmethod
+    def _aux_llm_label(messages: list[dict]) -> str:
+        """从消息面确定性推断辅助LLM调用用途（14.4 落账标签，不赌LLM自报）。
+
+        TaskPlanner/SelfReflector 的 llm_call_fn 契约是 fn(messages)（测试替身
+        同签名，不能加label参数），故按 system/user 提示词的稳定特征词归类：
+        任务判断器→task_judge、重规划→replan、自省校验→reflect、规划→plan、
+        其余→plan_call（如实兜底，不冒称）。
+        """
+        blob = "\n".join(
+            str(m.get("content", "")) for m in messages if isinstance(m, dict)
+        )[:3000]
+        if "任务判断器" in blob:
+            return "task_judge"
+        if "重规划" in blob or "如何处理这个失败" in blob:
+            return "replan"
+        if "自省引擎" in blob or "校验这个子任务" in blob:
+            return "reflect"
+        if "任务规划器" in blob or "needs_planning" in blob:
+            return "plan"
+        return "plan_call"
+
+    async def _aux_llm_chat(
+        self, label: str, messages: list[dict], session_id: str = ""
+    ) -> str:
+        """辅助LLM往返统一落账口（14.4 落账补洞）：计时+trajectory事件回填。
+
+        返回值/异常行为与直接 self.llm_engine.chat 逐字等价（落账是旁路，绝不
+        改变语义面）；session_id 显式传入优先（如标题生成自带session），否则取
+        _AUX_TRAJ_CTX（_prompt_inner 回合内设置）；都没有（回合外直调/测试）只
+        跳过落账不伪造session。记账失败绝不阻塞。
+        """
+        t0 = time.monotonic()
+        status = "ok"
+        try:
+            text = await self.llm_engine.chat(messages)
+            status = llm_outcome_status(text or "")
+            return text
+        except Exception:
+            status = "error"
+            raise
+        finally:
+            try:
+                ctx = _AUX_TRAJ_CTX.get()
+                sid = session_id or (ctx or {}).get("session_id") or ""
+                if sid:
+                    await self._traj_recorder.record_aux_llm_call(
+                        session_id=sid,
+                        label=label,
+                        duration_ms=(time.monotonic() - t0) * 1000.0,
+                        status=status,
+                        parent_id=(ctx or {}).get("root_id") or "",
+                    )
+            except Exception:
+                pass  # 落账失败绝不阻塞（CowAgent 记账哲学）
 
     async def _judge_task_continuation_llm(self, current_task, user_text: str) -> str:
         """规则层无法确定时的LLM任务边界裁决 — 返回 "continue" | "new"。
@@ -1060,7 +1125,7 @@ class SoulMateAgent:
             )},
             {"role": "user", "content": f"当前任务: {current_task.goal}\n用户消息: {user_text}"},
         ]
-        raw = await self.llm_engine.chat(judge_messages)
+        raw = await self._aux_llm_chat("task_judge", judge_messages)
         raw = raw.strip()
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
@@ -1157,7 +1222,7 @@ class SoulMateAgent:
         走llm_engine.chat非流式单发；provider故障（如402余额不足）由
         LLMEngine.chat吞异常返回"[LLM错误: …]"，InfectionGate按失败fail-safe放行。
         """
-        return await self.llm_engine.chat(messages)
+        return await self._aux_llm_chat("infection_audit", messages)
 
     # ── Code Mode内层工具执行（goose code_execution+kilocode code-mode两方定案）──
     # builtin子集实现与_run_llm_with_tools内联分支同款语义（遗留：后续可重构共享）；
@@ -5176,6 +5241,11 @@ You can send files to the user natively: to deliver a file, write a brief confir
         **kwargs,
     ) -> PromptResponse:
         """prompt的实际处理逻辑（在writer fence保护下执行）"""
+        # 14.4 落账补洞：本回合辅助LLM往返（planner/任务裁决/注入审计/标题生成/
+        # 技能语义改写）的落账上下文。可变dict：root_id 在回合根span建立后补写，
+        # 先于它 create_task 的 fire-and-forget 标题任务共享同一引用可见。
+        _aux_ctx = {"session_id": session_id, "root_id": ""}
+        _AUX_TRAJ_CTX.set(_aux_ctx)
         session = self.sessions.get(session_id)
         if not session:
             session = self._reload_session_from_db(session_id)
@@ -5343,6 +5413,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
         # :8090 /api/trajectory（09-17轮建的观察面首个真实写入方）。失败返回
         # ''后所有record/end按空id跳过——观察面故障绝不破坏会话流。
         traj_root_id = await self._traj_recorder.start_turn(session_id, user_text)
+        _aux_ctx["root_id"] = traj_root_id or ""
 
         # ── kilocode #7 TurnOpen：turn生命周期开始（订阅器驱动观测+记忆采集）──
         self._turn_close_reason.pop(session_id, None)
@@ -6267,7 +6338,9 @@ You can send files to the user natively: to deliver a file, write a brief confir
                     skills=matched_skills,
                     user_text=user_text,
                     tool_calls_log=tool_calls_log,
-                    llm=lambda p: _sem_llm_engine.chat([{"role": "user", "content": p}]),
+                    llm=lambda p: self._aux_llm_chat(
+                        "skill_sem_rewrite", [{"role": "user", "content": p}]
+                    ),
                     session_id=session_id,
                 )
                 _sem_rw = [r for r in _sem_results if r.action == "rewritten"]
@@ -6602,10 +6675,14 @@ You can send files to the user natively: to deliver a file, write a brief confir
     async def _generate_session_title(self, session_id: str, user_text: str):
         """异步调LLM生成会话标题，并同步到OpenSoul"""
         try:
-            title = await self.llm_engine.chat([
-                {"role": "system", "content": "你是标题生成器。只输出一个简短标题（不超过15个汉字），不要任何其他内容、不要markdown、不要代码、不要解释。"},
-                {"role": "user", "content": user_text[:200]},
-            ])
+            title = await self._aux_llm_chat(
+                "title",
+                [
+                    {"role": "system", "content": "你是标题生成器。只输出一个简短标题（不超过15个汉字），不要任何其他内容、不要markdown、不要代码、不要解释。"},
+                    {"role": "user", "content": user_text[:200]},
+                ],
+                session_id=session_id,
+            )
             # 清洗LLM输出：去掉markdown、代码块、换行等垃圾
             title = (title or "").strip()
             if "```" in title:

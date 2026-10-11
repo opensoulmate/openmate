@@ -282,7 +282,11 @@ class TestWiring:
 
     def test_llm_call_helper_wired(self):
         src = inspect.getsource(SoulMateAgent._infection_llm_call)
-        assert "self.llm_engine.chat(" in src
+        # 14.4 落账补洞：判词经 _aux_llm_chat（内部=llm_engine.chat 单一传输真源
+        # +trajectory落账旁路），传输契约不变、语义面零变化
+        assert 'self._aux_llm_chat("infection_audit"' in src
+        aux_src = inspect.getsource(SoulMateAgent._aux_llm_chat)
+        assert "self.llm_engine.chat(" in aux_src, "传输仍走 llm_engine.chat 单一真源"
         sma_src = inspect.getsource(SoulMateAgent._run_llm_with_tools)
         assert "self._infection_llm_call" in sma_src
 

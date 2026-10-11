@@ -318,6 +318,46 @@ class TrajectoryRecorder:
         )
         return span_id
 
+    @_fail_safe("")
+    async def record_aux_llm_call(
+        self,
+        session_id: str,
+        label: str,
+        duration_ms: float = 0.0,
+        status: str = "ok",
+        parent_id: str = "",
+        token_usage: int = 0,
+        agent_id: str = "soulmate",
+    ) -> str:
+        """辅助LLM往返落账（14.4 落账补洞）——planner任务拆解/任务裁决/注入审计
+        判词/标题生成/技能语义改写等主聊天循环之外的LLM往返。
+
+        此前这些往返零落账，turn_timing_report 四段归因的"⑤未归属空洞"只能靠
+        journal 事后解释（14.2 实证首段 6-32s 空洞=未落账 LLM 往返）。本方法按
+        report 既有口径落同一张表（llm_call 无 end_at=轮内往返，
+        start=created_at-duration_ms），自动计入时间覆盖——"空洞≈0"由此成为
+        归因仪表完备的验收行。content 统一"[aux] {label}"前缀（report 据此与主
+        轮区分）；parent 未知（fire-and-forget 标题任务先于回合根建 span）时挂
+        根层 parent_event_id=None，不伪造父子。never-raise（记账失败永不阻塞）。
+        """
+        if not session_id:
+            return ""
+        await self.ensure_session(session_id, agent_id=agent_id)
+        data = await self._post(
+            f"/api/trajectory/sessions/{session_id}/events",
+            {
+                "event_type": "llm_call",
+                "agent_id": agent_id,
+                "content": f"[aux] {str(label)[:80]}",
+                "metadata": {"kind": "aux_llm", "label": str(label)[:80]},
+                "parent_event_id": parent_id or None,
+                "token_usage": int(token_usage or 0),
+                "duration_ms": float(duration_ms or 0.0),
+                "status": status,
+            },
+        )
+        return (data or {}).get("id", "")
+
     # ── round级span（P1 span粒度round级嵌套：root→llm段→round→tool_call四级）──
 
     def _tool_child_events(self, tools: list[dict], parent_span_id: str, agent_id: str = "soulmate") -> list[dict]:

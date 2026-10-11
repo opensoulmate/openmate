@@ -9,6 +9,8 @@
 
 四段归因（用户/路线图 12.3 口径）：
   ① LLM 往返（含首包）= 轮内 llm_call 时长合计 + 每轮明细
+  ②b 辅助LLM往返（14.4 落账补洞）= "[aux]" 前缀行（planner任务拆解/任务裁决/
+    注入审计判词/标题生成/技能语义改写），与主轮同口径计入时间覆盖
   ② 注入审计往返 = journal 同窗口"注入审计/clarify/terminate"判词行扫描（有则计数+归入空洞解释）
   ③ 工具执行 = tool_call 行（时长未落账→用相邻轮间隙做上界代理，如实标注）
   ④ 回复回收 = 回合结束 - 最后一个事件结束
@@ -91,6 +93,7 @@ def report(session_id: str, conn: sqlite3.Connection) -> dict:
 
     steps = []          # 步骤跨度（带 end_at 的 llm_call）
     rounds = []         # 轮内 LLM 往返（无 end_at 的 llm_call）
+    aux_rounds = []     # 辅助LLM往返（"[aux]"前缀：planner/裁决/注入审计/标题等，14.4）
     tools = []          # 工具执行点
     for c0, c1, etype, content, dur in rows:
         if etype == "user_input":
@@ -100,21 +103,28 @@ def report(session_id: str, conn: sqlite3.Connection) -> dict:
             steps.append({"start": _ts(c0), "end": _ts(c1), "dur_s": round(dur / 1000, 2),
                           "label": (content or "")[:40]})
         elif etype == "llm_call":
-            rounds.append({"start": start, "end": _ts(c0), "dur_s": round(dur / 1000, 2),
-                           "preview": (content or "")[:30]})
+            entry = {"start": start, "end": _ts(c0), "dur_s": round(dur / 1000, 2),
+                     "preview": (content or "")[:30]}
+            if (content or "").startswith("[aux]"):
+                aux_rounds.append(entry)
+            else:
+                rounds.append(entry)
         elif etype == "tool_call":
             tools.append({"ts": _ts(c0), "name": (content or "")[:20],
                           "dur_s": round(dur / 1000, 2)})
 
     llm_total = round(sum(r["dur_s"] for r in rounds), 2)
+    aux_total = round(sum(r["dur_s"] for r in aux_rounds), 2)
     tool_instrumented = round(sum(t["dur_s"] for t in tools), 2)
 
-    # 空洞 = 回合窗口内未被 [轮跨度 ∪ 步骤跨度] 覆盖的区间
+    # 空洞 = 回合窗口内未被 [轮跨度 ∪ 辅助轮跨度 ∪ 步骤跨度] 覆盖的区间
     covered = sorted(
-        [r["start"] for r in rounds] + [s["start"] for s in steps],
+        [r["start"] for r in rounds] + [r["start"] for r in aux_rounds] + [s["start"] for s in steps],
     )
     spans = sorted(
-        [(r["start"], r["end"]) for r in rounds] + [(s["start"], s["end"]) for s in steps],
+        [(r["start"], r["end"]) for r in rounds]
+        + [(r["start"], r["end"]) for r in aux_rounds]
+        + [(s["start"], s["end"]) for s in steps],
     )
     gaps = []
     cur = t_start
@@ -127,7 +137,10 @@ def report(session_id: str, conn: sqlite3.Connection) -> dict:
         gaps.append({"from": _fmt(cur), "to": _fmt(t_end),
                      "dur_s": round((t_end - cur).total_seconds(), 2)})
 
-    last_event_end = max([r["end"] for r in rounds] + [s["end"] for s in steps] + [t_start])
+    last_event_end = max(
+        [r["end"] for r in rounds] + [r["end"] for r in aux_rounds]
+        + [s["end"] for s in steps] + [t_start]
+    )
     reply_recovery = round((t_end - last_event_end).total_seconds(), 2)
 
     journal = _journal_errors(t_start, t_end)
@@ -140,6 +153,9 @@ def report(session_id: str, conn: sqlite3.Connection) -> dict:
         "llm_total_s": llm_total,
         "llm_rounds": [{"t": _fmt(r["start"]), "dur_s": r["dur_s"], "preview": r["preview"]}
                        for r in rounds],
+        "aux_total_s": aux_total,
+        "aux_rounds": [{"t": _fmt(r["start"]), "dur_s": r["dur_s"], "preview": r["preview"]}
+                       for r in aux_rounds],
         "steps": [{"t": _fmt(s["start"]), "dur_s": s["dur_s"], "label": s["label"]} for s in steps],
         "tools": [{"t": _fmt(t["ts"]), "name": t["name"], "dur_s": t["dur_s"]} for t in tools],
         "tool_instrumented_s": tool_instrumented,
@@ -176,6 +192,10 @@ def main() -> None:
         print(f"  ② LLM 往返合计: {rep['llm_total_s']}s（{len(rep['llm_rounds'])} 轮）")
         for r in rep["llm_rounds"]:
             print(f"     - {r['t']}  {r['dur_s']:>7}s  {r['preview']!r}")
+        if rep.get("aux_rounds"):
+            print(f"  ②b 辅助LLM往返（14.4落账）: {rep['aux_total_s']}s（{len(rep['aux_rounds'])} 次）")
+            for r in rep["aux_rounds"]:
+                print(f"     - {r['t']}  {r['dur_s']:>7}s  {r['preview']!r}")
         print(f"  ③ 工具执行: {len(rep['tools'])} 次，落账 {rep['tool_instrumented_s']}s"
               + (f"（{rep['tool_timing_gap']}）" if rep["tool_timing_gap"] else ""))
         for t in rep["tools"]:
