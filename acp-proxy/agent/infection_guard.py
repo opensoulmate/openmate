@@ -37,6 +37,7 @@ import json
 import logging
 import os
 import re
+import time
 from dataclasses import dataclass, field
 
 from agent.audit_prescreen import fold_marker_lines, prescreen_batch_ex  # 12.4 确定性溯源预筛
@@ -384,14 +385,18 @@ class InfectionGate:
         self.prescreen_skipped = 0  # 12.4 确定性预筛免审批次计数（可观测）
         self.prescreen_escalated = 0  # 12.4③ 到达预筛但含自造文本→升级审计批次（命中率分母）
         self.llm_audits = 0  # 12.4③ 实际发生的 LLM 判词往返次数
+        # 13.3 每次 LLM 判词往返耗时（毫秒，含失败/超时路径——开销治理基线数据源）
+        self.audit_durations_ms: list[float] = []
 
     def stats(self) -> dict:
         """12.4③ 免审命中率可观测快照（进程内计数）。
 
         跨进程/跨重启真源 = journal '[infection-guard] 预筛免审/预筛升级审计' 行
         （prescreen_hitrate_report.py 扫描统计），本方法供回合内/测试即时观察。
+        13.3 增判词往返耗时分布（llm_audit_*_ms）——开销治理基线。
         """
         batches = self.prescreen_skipped + self.prescreen_escalated
+        durs = self.audit_durations_ms
         return {
             "checked": self.checked,
             "tool_batches": batches,
@@ -399,7 +404,35 @@ class InfectionGate:
             "prescreen_escalated": self.prescreen_escalated,
             "llm_audits": self.llm_audits,
             "exempt_hit_rate": (self.prescreen_skipped / batches) if batches else None,
+            "llm_audit_last_ms": (round(durs[-1], 1) if durs else None),
+            "llm_audit_mean_ms": (round(sum(durs) / len(durs), 1) if durs else None),
+            "llm_audit_max_ms": (round(max(durs), 1) if durs else None),
+            "llm_audit_total_ms": round(sum(durs), 1) if durs else 0.0,
         }
+
+    def _record_audit_ms(self, elapsed_ms: float, verdict: str,
+                         tool_calls: list[dict] | None = None) -> None:
+        """13.3 判词往返耗时落观测（journal 行=跨进程真源，audit_cost_report.py 消费）。
+
+        每次 _llm_audit 尝试（含 timeout/error/unavailable 失败路径）恰好记一次——
+        开销分布必须含失败往返（超时 30s 是最贵的开销形态）。旁路纪律：观测失败
+        绝不冒泡影响审计判定。
+        """
+        try:
+            self.audit_durations_ms.append(float(elapsed_ms))
+            if len(self.audit_durations_ms) > 500:  # 有界：防长命进程内存无界增长
+                del self.audit_durations_ms[:-500]
+            names = ",".join(
+                str((tc or {}).get("name", "")) for tc in (tool_calls or [])
+            ) or "-"
+            s = self.stats()
+            logger.info(
+                f"[infection-guard] LLM审计完成 verdict={verdict} "
+                f"耗时={int(elapsed_ms)}ms tools={names}"
+                f"（累计 {self.llm_audits} 次 均值 {int(s['llm_audit_mean_ms'] or 0)}ms "
+                f"最大 {int(s['llm_audit_max_ms'] or 0)}ms）")
+        except Exception:  # 观测绝不影响审计判定
+            pass
 
     def _exhausted(self, detail: str, evidence: str = "", hits: list[str] | None = None) -> Verdict:
         """clarify 超限的统一出口（8.1③：无人值守不 terminate，放行+留痕）。"""
@@ -451,21 +484,26 @@ class InfectionGate:
             f"{_tr_block}"
         )
         messages = [{"role": "user", "content": f"{JUDGE_PROMPT}\n\n{user_msg}"}]
+        # 13.3 判词往返计时（基线数据源）：每个 return 点恰好一次 _record_audit_ms
+        _audit_t0 = time.monotonic()
         try:
             resp = await asyncio.wait_for(llm_call(messages), timeout=self.audit_timeout)
         except asyncio.TimeoutError:
             self.llm_fail_streak += 1
             logger.warning(f"[infection-guard] LLM审计超时({self.audit_timeout}s)，fail-safe放行")
+            self._record_audit_ms((time.monotonic() - _audit_t0) * 1000, "timeout", tool_calls)
             return Verdict(source="llm_error_fail_safe", evidence="timeout")
         except Exception as _ig_err:
             self.llm_fail_streak += 1
             logger.warning(f"[infection-guard] LLM审计异常(fail-safe放行): {_ig_err}")
+            self._record_audit_ms((time.monotonic() - _audit_t0) * 1000, "error", tool_calls)
             return Verdict(source="llm_error_fail_safe", evidence=str(_ig_err)[:200])
         resp = (resp or "").strip()
         if not resp or resp.startswith(_TAGGED_FAILURE_PREFIX):
             # LLMEngine.chat 吞异常返回"[LLM错误: …]"（如 provider 402 余额不足）
             self.llm_fail_streak += 1
             logger.warning(f"[infection-guard] LLM审计不可用(fail-safe放行): {resp[:120]}")
+            self._record_audit_ms((time.monotonic() - _audit_t0) * 1000, "unavailable", tool_calls)
             return Verdict(source="llm_error_fail_safe", evidence=resp[:120])
         self.llm_fail_streak = 0
         action, detail = parse_verdict(resp)
@@ -481,6 +519,7 @@ class InfectionGate:
             evidence = (rationale or detail)[:200]
         else:
             evidence = ""
+        self._record_audit_ms((time.monotonic() - _audit_t0) * 1000, action, tool_calls)
         return Verdict(action=action, detail=detail, evidence=evidence, source="llm")
 
     async def check(self, output_text: str, tool_calls: list[dict] | None = None,
