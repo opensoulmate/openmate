@@ -21,10 +21,11 @@ wakeup_executor 的无客户端SoulMateAgent回合 + LLM级失败/零输出判�
 4. 时间语义：存储用毫秒UTC（全局时间规范），cron表达式按**本地时间**匹配
    （用户说"每天8点"指本地8点）。
 
-进程归属：调度循环跑在活着的 SoulMateAgent 进程（stdio子进程，start.py 启动时
-有未完成任务则自举；schedule_task 时也会拉起）。诚实声明：没有agent进程存活时
-任务不执行（到点错过不补跑，next_run推进到下个周期）——常驻托管（独立daemon/
-systemd）留作后续切片。
+进程归属：调度循环由独立常驻宿主托管（soulmate_daemon.py + systemd --user
+soulmate-daemon.service，无条件跑 run_forever——无 agent 进程也照常执行）；
+agent stdio 进程内嵌循环与之多宿主共存安全（CAS 不双跑）。错过语义：到点被
+拾取时补跑 1 次、不积压重放（"错过不补跑"），期间溜掉的执行点显式落 runs 表
+status='missed' 留痕（15.1：错过必须可见）。
 """
 
 from __future__ import annotations
@@ -49,6 +50,8 @@ _DB_TIMEOUT_S = 30.0
 _MAX_CLAIM_BATCH = 20
 _RECENT_CAP = 20
 _DETAIL_CAP = 500
+# 错过留痕（15.1）：单次领取最多枚举多少个溜掉的执行点（长停机防枚举爆炸，超出截断自报）
+_MISSED_CAP = 100
 
 # 连续失败N次后在日志detail中显式提醒（不自动禁用——周期任务语义是持续跑）
 _FAIL_STREAK_HINT = 3
@@ -192,6 +195,38 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _fmt_ms(ms: int) -> str:
+    """毫秒UTC → 本地 'MM-DD HH:MM'（日志/留痕展示用）。"""
+    return datetime.fromtimestamp(int(ms) / 1000).strftime("%m-%d %H:%M")
+
+
+def _missed_slots(kind: str, expr: str, due_ms: int, now_ms: int) -> tuple[list[int], bool]:
+    """due 之后到 now 之间溜掉的执行点（>due 且 <=now）。
+
+    本次领取补跑的是 due 那一个执行点（既有"错过不补跑"语义=不积压重放），
+    期间周期表本该命中却没被执行的时刻就是 missed，由调用方落 runs 留痕。
+    封顶 _MISSED_CAP 防长停机枚举爆炸（超出返回截断标记，如实自报）。
+    """
+    slots: list[int] = []
+    if kind == "interval":
+        step_ms = _interval_seconds(expr) * 1000
+        s = int(due_ms) + step_ms
+        while s <= now_ms and len(slots) < _MISSED_CAP:
+            slots.append(s)
+            s += step_ms
+        return slots, s <= now_ms
+    cr = CronExpr(expr[5:] if str(expr).startswith("cron:") else str(expr))
+    dt = cr.next_after(datetime.fromtimestamp(int(due_ms) / 1000))
+    while True:
+        s = int(dt.timestamp() * 1000)
+        if s > now_ms:
+            return slots, False
+        if len(slots) >= _MISSED_CAP:
+            return slots, True
+        slots.append(s)
+        dt = cr.next_after(dt)
+
+
 def build_cron_prompt(task: dict) -> str:
     """定时任务回合prompt——显式声明系统自动回合（非用户消息），与唤醒回合同款纪律。"""
     return (
@@ -253,7 +288,7 @@ class SoulMateScheduler:
         self._recent: list[str] = []
         self._stats: dict = {
             "polls": 0, "due_seen": 0, "claimed": 0, "claim_lost": 0,
-            "fire_ok": 0, "fire_failed": 0,
+            "fire_ok": 0, "fire_failed": 0, "missed": 0,
         }
         parent = os.path.dirname(self._db_path)
         if parent:
@@ -385,7 +420,8 @@ class SoulMateScheduler:
         """到点任务 CAS 领取：`UPDATE ... WHERE id AND next_run_at_ms` rowcount==1
 
         即唯一赢家（多进程调度共存不双跑）。领取即把 next_run 推进到下个周期
-        （错过不补跑：长停机后按周期表取下一次，不积压重放）。
+        （错过不补跑：长停机后按周期表取下一次，不积压重放）；期间溜掉的
+        执行点由赢家显式落 runs 表 status='missed' 留痕（15.1）。
         """
         now = int(now_ms if now_ms is not None else self._now_fn())
         claimed: list[dict] = []
@@ -419,11 +455,14 @@ class SoulMateScheduler:
                     (next_run, now, t["id"], t["next_run_at_ms"]))
                 db.commit()
                 if cur.rowcount == 1:
+                    due_ms = int(t["next_run_at_ms"])  # 本次补跑的执行点（覆盖前取原值）
                     t["next_run_at_ms"] = next_run
                     t["last_run_at_ms"] = now
                     t["run_count"] = int(t["run_count"]) + 1
                     claimed.append(t)
                     self._stats["claimed"] += 1
+                    # 15.1 错过留痕：补跑1次之外溜掉的执行点显式落 runs（仅 CAS 赢家记，防双写）
+                    self._log_missed(db, t, due_ms, now)
                 else:
                     self._stats["claim_lost"] += 1
         finally:
@@ -462,6 +501,34 @@ class SoulMateScheduler:
             logger.warning("[cron] 执行日志落库失败（不阻塞）: %s", e)
         finally:
             db.close()
+
+    def _log_missed(self, db, t: dict, due_ms: int, now_ms: int) -> None:
+        """15.1 错过留痕：本次领取=补跑 due 这一个执行点（既有"错过不补跑"语义=
+        不积压重放），期间溜掉的执行点显式落 runs 表 status='missed'——错过必须
+        可见，不能只体现在"少跑了"。missed 不算失败（不动 fail_streak）；
+        留痕失败绝不阻塞领取/执行链路。复用调用方已开的连接（禁嵌套连接）。
+        """
+        try:
+            slots, truncated = _missed_slots(
+                str(t["schedule_kind"]), str(t["schedule_expr"]), due_ms, now_ms)
+            if not slots:
+                return
+            first, last = slots[0], slots[-1]
+            detail = (
+                f"错过{len(slots)}个执行点（{_fmt_ms(first)}~{_fmt_ms(last)}）："
+                "宿主未在点执行，按'错过不补跑'语义跳过不积压"
+                + (f"（≥{_MISSED_CAP}已截断，仅列前{_MISSED_CAP}个）" if truncated else "")
+            )
+            db.execute(
+                "INSERT INTO runs(task_id, started_at_ms, finished_at_ms, status,"
+                " detail) VALUES(?,?,?,?,?)",
+                (int(t["id"]), first, int(now_ms), "missed", detail[:_DETAIL_CAP]))
+            db.commit()
+            self._stats["missed"] += len(slots)
+            self._note(f"⏭️ 错过留痕 #{t['id']} {t['name']}: {len(slots)}个执行点未执行"
+                       f"（{_fmt_ms(first)}~{_fmt_ms(last)}），不积压补跑")
+        except Exception as e:  # 留痕失败不得阻塞任务链路
+            logger.warning("[cron] 错过留痕落库失败（不阻塞）: %s", e)
 
     async def run_due(self, now_ms: int | None = None) -> int:
         """执行一轮到点任务：领取→执行→落日志。返回本轮执行条数。"""

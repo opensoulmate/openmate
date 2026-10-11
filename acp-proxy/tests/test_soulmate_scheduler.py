@@ -334,3 +334,95 @@ def test_wiring_start_stdio_boots_scheduler():
     src = Path(__file__).resolve().parents[1].joinpath(
         "agent/start.py").read_text(encoding="utf-8")
     assert "soulmate_scheduler" in src and "ensure_started" in src
+
+
+# ── 11. 错过留痕（15.1：missed 落 runs 日志可见，"不补跑"语义保持） ──
+
+def _runs(s):
+    db = s._connect()
+    try:
+        return [dict(r) for r in db.execute("SELECT * FROM runs ORDER BY id").fetchall()]
+    finally:
+        db.close()
+
+
+def test_missed_occurrences_logged_interval(tmp_path):
+    fired = []
+    s = _sched(tmp_path,
+               fire_fn=lambda t: fired.append(t["id"]) or {"stop_reason": "end_turn"})
+    s.add_task("t", "interval:60", "x")   # due = now+60s
+    s._clock["now"] += 600_000            # 10个周期后才被宿主拾取
+    assert _run(s.run_due()) == 1         # 仍只补跑1次（不积压语义保持，既有断言不破）
+    rows = _runs(s)
+    missed = [r for r in rows if r["status"] == "missed"]
+    assert len(missed) == 1
+    # due+60k<=now → k=1..9 共9个执行点溜掉（due 那个=本次补跑）
+    assert "错过9个执行点" in missed[0]["detail"]
+    assert "不积压" in missed[0]["detail"]
+    assert len([r for r in rows if r["status"] == "ok"]) == 1
+    # missed 不算失败
+    assert s.list_tasks(with_runs=False)[0]["fail_streak"] == 0
+    assert s.snapshot()["stats"]["missed"] == 9
+    assert any("错过留痕" in line for line in s.snapshot()["recent"])
+
+
+def test_missed_occurrences_logged_cron(tmp_path):
+    s = _sched(tmp_path, now_ms=int(datetime(2026, 10, 10, 8, 7).timestamp() * 1000))
+    s.add_task("t", "cron:0 * * * *", "x")  # due = 09:00
+    s._clock["now"] = int(datetime(2026, 10, 10, 12, 30).timestamp() * 1000)
+    assert _run(s.run_due()) == 1           # 09:00 补跑1次
+    missed = [r for r in _runs(s) if r["status"] == "missed"]
+    assert len(missed) == 1
+    # 10:00/11:00/12:00 三个执行点溜掉
+    assert "错过3个执行点" in missed[0]["detail"]
+
+
+def test_no_missed_row_when_slight_lateness(tmp_path):
+    s = _sched(tmp_path, fire_fn=lambda t: {"stop_reason": "end_turn"})
+    s.add_task("t", "interval:60", "x")   # due = now+60s
+    s._clock["now"] += 90_000             # 迟到30s（<1周期）
+    assert _run(s.run_due()) == 1
+    rows = _runs(s)
+    assert [r["status"] for r in rows] == ["ok"]  # 正常迟到无missed噪音
+
+
+def test_missed_cap_truncates_long_downtime(tmp_path):
+    s = _sched(tmp_path, fire_fn=lambda t: {"stop_reason": "end_turn"})
+    s.add_task("t", "interval:60", "x")
+    s._clock["now"] += 10 * 86_400_000    # 停机10天
+    assert _run(s.run_due()) == 1
+    missed = [r for r in _runs(s) if r["status"] == "missed"]
+    assert len(missed) == 1
+    assert "错过100个执行点" in missed[0]["detail"]  # 封顶如实
+    assert "截断" in missed[0]["detail"]             # 截断自报
+    assert s.snapshot()["stats"]["missed"] == 100
+
+
+def test_missed_row_does_not_bump_fail_streak(tmp_path):
+    def boom(t):
+        raise RuntimeError("boom")
+    s = _sched(tmp_path, fire_fn=boom)
+    s.add_task("t", "interval:60", "x")
+    s._clock["now"] += 600_000
+    assert _run(s.run_due()) == 1
+    rows = _runs(s)
+    assert {r["status"] for r in rows} == {"failed", "missed"}
+    assert s.list_tasks(with_runs=False)[0]["fail_streak"] == 1  # 只有failed计失败
+
+
+def test_missed_logged_once_not_repeated(tmp_path):
+    s = _sched(tmp_path, fire_fn=lambda t: {"stop_reason": "end_turn"})
+    s.add_task("t", "interval:60", "x")
+    s._clock["now"] += 600_000
+    assert _run(s.run_due()) == 1
+    assert _run(s.run_due()) == 0         # 无到点，不再领取
+    assert len([r for r in _runs(s) if r["status"] == "missed"]) == 1
+
+
+def test_wiring_missed_mark_and_logger():
+    src = Path(__file__).resolve().parents[1].joinpath(
+        "agent/soulmate_agent.py").read_text(encoding="utf-8")
+    assert '"missed": "⏭️"' in src  # schedule_list 展示 missed 不冒充❌失败
+    sched = Path(__file__).resolve().parents[1].joinpath(
+        "agent/soulmate_scheduler.py").read_text(encoding="utf-8")
+    assert "self._log_missed(db, t, due_ms, now)" in sched  # claim赢家路径真实调用

@@ -1665,7 +1665,7 @@ class SoulMateAgent:
                         f"｜已执行{t['run_count']}次｜下次:{_fmt(t['next_run_at_ms'])}"
                         f"｜连续失败{t.get('fail_streak', 0)}次")
                     for r in (t.get("recent_runs") or [])[:3]:
-                        mark = "✅" if r["status"] == "ok" else "❌"
+                        mark = {"ok": "✅", "missed": "⏭️"}.get(str(r["status"]), "❌")
                         lines.append(
                             f"    {mark} {_fmt(r['started_at_ms'])} → {str(r['detail'])[:120]}")
                 return "\n".join(lines)

@@ -266,11 +266,12 @@ class TestSchedulerWiring:
         assert len(rows) == 2
         assert "｜❌ 失败" in rows[1]["content"]
         assert "异常: RuntimeError: provider 500" in rows[1]["content"]
-        # runs 日志同时落 failed（汇报不替代执行日志）
+        # runs 日志同时落 failed（汇报不替代执行日志）；DUE_MS 越过1个周期 →
+        # 15.1 错过留痕：首个领取随行落 1 条 missed（due+60s=now 那个执行点溜掉）
         db = sqlite3.connect(s._db_path)
         statuses = [r[0] for r in db.execute("SELECT status FROM runs ORDER BY id")]
         db.close()
-        assert statuses == ["failed", "failed"]
+        assert statuses == ["missed", "failed", "failed"]
 
     def test_reporter_error_does_not_block_scheduler(self):
         report_db = "/nonexistent-dir/xx/db.sqlite"

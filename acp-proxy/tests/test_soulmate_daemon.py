@@ -149,7 +149,10 @@ def test_daemon_hosts_real_scheduler_claim_and_fire(tmp_path):
     finally:
         db.close()
     assert rows, "fire 后 runs 表必须有执行行"
-    assert rows[0][0] == "ok", f"fire 成功应记 ok，实际 {rows[0][0]}"
+    statuses = [r[0] for r in rows]
+    assert "ok" in statuses, f"fire 成功应记 ok，实际 {statuses}"
+    # next_run 拨到 epoch(0)=远古 → 15.1 错过留痕：missed 行随 ok 行一起可见
+    assert "missed" in statuses, f"半个世纪迟到必须留痕 missed，实际 {statuses}"
 
 
 def test_daemon_real_monitor_runs_in_host(tmp_path):
