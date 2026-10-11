@@ -345,6 +345,28 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
   /tmp 工作目录仅在**开跑前** rmtree（docstring 承诺"测试产物显式清理"未完全兑现），
   本轮残留 3 件已手动清理 → 12.5。
 
+### 2026-10-11 抽样对标实测（周期#76，阶段12 完成后）——可复跑
+`ACCEPT_CATEGORIES="开发,办公,定时,协作,记忆" ACCEPT_RUN_TAG=<tag> python acceptance_benchmark.py`
+
+| # | 类别 | 结果 | 耗时 | 证据（服务端副作用优先） |
+|---|------|------|------|--------------------------|
+| 1 | 开发 | ✅ | 23.63s | dev_hello.py 存在+marker 命中+**运行账本命中**（terminal 执行行=1 含程序输出非源码回显）+回复报告输出=是 |
+| 2 | 办公 | ✅ | 44.93s | report.xlsx 4964B 有效 xlsx（全窗口零注入审计终止） |
+| 3 | 定时 | ✅ | 30.80s | cron_tasks.db accept_probe 行=1 |
+| 4 | 记忆 | ✅ | 24.98s | MEMORY.md 含 ACCEPT_MEM_MARK_9 |
+| 5 | 协作 | ✅ | 18.75s | 双 worker 产出+subagent_runs 近 8 行 |
+
+**判定：抽样 5/5 通过，5 类全部 server_side（本抽样无 reply_assisted/late 弱项）。**
+新证据/新发现：
+- **12.6② verify_dev 三判据首次真实 run 走中**：开发类证据从"文件 marker"升级为
+  "文件+运行账本+回复报告"三判据（运行账本=命中，真源=trajectory_events），S1 假过
+  形态在真实验收路径封死。
+- **开发类 23.63s 回归常态**（#64 曾 301.74s、#75 24.44s）——#64 的 301s 确认为
+  上游波动/冷启动个案（12.3 归因结论复核成立），stall_guard 上线后无复发。
+- 本轮零注入审计误杀、零 WS 超时（late_readback 未触发，路径实证仍在 #58/#71/#64）；
+  采集侧系统帧过滤照常（self_check×3）。
+- 测试产物清理归零实证：MEMORY 标记 0、accept_probe 行 0、/tmp/soulmate_accept 已删。
+
 ## 阶段8 · 验收缺口修复（下一批切片，按优先级）
 - [x] ⚡8.1 InfectionGate 误杀修复（P0 用户可见缺陷，先于一切）：①审计门必须拿到本回合
   用户原始 prompt（修上下文传参断链，验收断言=journal 不再出现"用户请求缺失/为空"）
@@ -872,6 +894,30 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 - [ ] 待用户拍板（不占阶段顺序）：⚡8.6 双链合并取舍、4.1b iLink 接入形态、
   ASR 语音输入多模态路由
 
+### 阶段13 · 下一批切片（周期#76 规划——阶段12 清零+抽样实测 5/5 后的续刀，按优先级）
+- [ ] 13.1 流式路径 stall 停顿治理（周期#69 诚实边界②"另案"，事故家族最后已知缺口）：
+  chat_stream*/chat_stream_with_tools 消费端挂起与非流式同族盲区（12.3 事故轮即
+  llm:chat 非流式已由 stall_guard 封死，流式侧未接）。方向=消费侧按 chunk 间隙计时的
+  看门狗（复用 send_with_stall_guard 单源语义），契约约束：partial 输出/has_output
+  重试规则耦合不动、既有错误文案逐字不动、涓流零误杀负控制必测。
+- [ ] 13.2 注入审计拦截自然触发端到端实证（周期#74 诚实边界③销账）：构造注入攻击
+  prompt 真实 LLM 回合（隔离 session 防污染）→ 实证 terminate+判词依据 verdict_basis
+  落账（探针第7面新拦截行有依据）+banner 用户可见报因+工具被拦报告治理负路径（⚡8.2
+  诚实边界）真实场景触发。验收=audit_trail_probe 第7面历史缺口不增、新行有依据。
+- [ ] 13.3 注入审计 LLM 往返开销治理（8.3 期间另案）：12.4 只做了免审面（确定性
+  溯源预筛），剩余升级审计仍是**每工具一次 LLM 往返**（3 工具链曾被拉到 5-8 分钟）。
+  方向=同回合同签名批次批量审计（一批工具一次判词）或会话内判词复用；先测当前每工具
+  审计耗时分布拿基线再动刀，判词语义（JUDGE_PROMPT/verdict_basis 落账）零缩水。
+- [ ] 13.4 AI 群组真实成员端到端（"后续另案"清单遗留，用户重视 AI 群组）：多 agent
+  真实成员（非 loopback 模拟）群组任务链式执行+每步回群聊的端到端验收探针，
+  对齐 references/ai-groups-e2e.md 验收行。
+- [ ] 13.5 技能进化语义改写（6.3 诚实边界）：步骤/触发词 LLM 辅助改写+内容保真校验
+  （改写后步骤/触发词/描述零丢失断言已有基建），防 LLM 改坏技能——若涉及语义取舍
+  需用户拍板则只做确定性部分。
+- [ ] 例行观察（不占阶段顺序）：长窗口免审命中率（prescreen_hitrate_report.py）+
+  审计闭环（audit_trail_probe.py）探针每若干周期复跑留痕；11.5 溯源降级留痕
+  （provenance/self_heal/verdict_basis）自然触发后复核。
+
 ## 周期日志
 [2026-10-09 19:00] 周期#0 | 路线图建立+cron流水线上线 | ✅ | (本文档创建) | 首个自动周期15分钟后启动
 [2026-10-10 01:20] 周期#1 | 阶段0盘点：核实21工具/3记忆引擎/三层技能机制+缺口图；清理soulmate_agent.py损坏WIP（截断import`AgentCheckpointMan`+`return clsager`致ImportError，且属用户已否决的防双开守卫类，diff留证docs/devlog/2026-10-10-broken-idempotent-guard-wip.patch后还原HEAD，import实测恢复） | ⚠️ | 1ea328ce | 附带实测tests/test_skill_standard_layer.py 34 passed；下周期做1.1 MEMORY.md型持久记忆
@@ -954,3 +1000,4 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 [2026-10-11 15:12] 周期#73 | 12.6第一刀·轨迹/审计闭环抽查探针+③④根因修复：新增 acp-proxy/audit_trail_probe.py（只读六面可复跑：分类行完整性值域核/孤儿行含 step工具名-收尾工具名 note 连接口径/llm 归因串线（llm:<已知path>+llm:dna 带 strand 归因）/llm:dna 闭环/ts 毫秒普查/11.5 溯源留痕自然触发观察）+修3根因（③record() ts 秒→毫秒UTC存量不改写④dna_evolution._record_llm_failure_safe 死包装对齐委托（TypeError 被吞记账静默丢失地雷→正确签名+strand 归因+request_id 幂等保留）+classify_failure 九态码串透传与 httpx.RequestError→network_error 兜底=DecodingError 4行unknown缺口根因）+顺带修存量测试基建红灯（test_prescreen_stats _run get_event_loop 批内污染6红，纯HEAD worktree 先证非本切片引入→asyncio.run） | ✅ | (本次提交) | 12.6 部分完成（探针+③④✅，余①infection-guard判词依据不落账②verify_dev判据弱项=下拍第一优先；11.5 观察当前0行未自然触发如实报）；Gate1 git diff 5文件57行+2新文件真实落盘；Gate2 接线实证=探针经 ToolRecoveryManager.record 真实写入路径产出毫秒行回读+classify 透传/RequestError 经 record_llm_failure 真实调用链（测试走真实 writer 非 stub）；Gate3 tests/test_audit_trail_probe.py 25/25+批内回归 127/127（原6红转绿）+受影响面 251/251（llm transport/retry/accounting/stall/dna storm×3/tool_recovery）+py_compile+服务同款 interpreter 烟测 SMOKE126_PASS+真实库抽查实证（2 归因串线 WIP 历史行/孤儿0/llm:dna 4→6条闭环）+双实例重启 health 200/200；⚠️诚实边界：①串线 2 行为 WIP 错位历史产物不改写历史（探针持续如实报）②11.5 溯源降级留痕 0 行=未自然触发非缺陷，待自然发生复核③存量 133 行秒单位与新毫秒行混存由探针普查标注，不做迁移④期间真实库新增 llm:dna 行仍落 unknown=服务重启前旧码所记，重启后新行应为 network_error 待下次探针复跑核对；⚠️并发警示：tool_recovery/dna_evolution/llm_retry/test_prescreen_stats/roadmap 编辑中均收到 sibling 修改告警，git diff 核实工作树仅本周期改动（57行）无他会话混入；下周期做 12.6① infection-guard 判词依据不落账（terminate detail=空→判词落账）
 [2026-10-11 15:20] 周期#74 | 12.6① 判词依据落账（verdict=terminate detail=空→判词落账）：根因=<terminate/> 自闭合标签 tag 内无处写原因，parse_verdict detail 恒空+evidence 只存 resp 截断（纯标签判词时=裸标签噪声），落账侧 message 回退通用兜底文案——真实库实证 33 条拦截行 result_preview 全是"检测到疑似提示词注入劫持"通用文案=判了什么全靠猜。修三件：①infection_guard.extract_rationale（剥三态 verdict 标签取自由文本判定依据）+_llm_audit detail 补齐（clarify 标签内文优先）+evidence 只留依据文本禁裸标签冒充②soulmate_agent 非 ok 分支判词依据伪条目落轨迹账本（verdict_basis≤400+permission=infection:verdict_basis 独立值+parse_ledger 两头不计；纯标签如实落"判词未附依据（纯标签）"不编造）+journal 落依据③JUDGE_PROMPT 要求判 terminate/clarify 必须附判定依据。连带修探针盲区（第6面误扫不存在的 arguments_json 列对 [infection-guard] 伪条目全盲→PRAGMA 实存列容缺）+新增第7面 check_verdict_basis（真实依据/诚实标记/空依据三形态正则/拦截行历史缺口） | ✅ | (本次提交) | 12.6①勾选；Gate1 git diff 5文件150行+新测试文件真实落盘+key扫描0命中；Gate2 grep接线点全数命中（extract_rationale L479 在 _llm_audit 真实路径、verdict_basis 落账 L3841 在 _run_llm_with_tools 非ok分支、check_verdict_basis L317 进 run_probe）+真实库探针跑通第7面（拦截行33/落账行0/历史缺口33如实报）+服务同款 interpreter 导入烟测 SMOKE74_IMPORT_OK；Gate3 tests/test_infection_verdict_basis.py 28/28（extract_rationale 7例/detail补齐5例/JUDGE_PROMPT钉死2例/真实 _run_llm_with_tools 路径E2E 4例含副作用证据/parse_ledger两头不计/接线护栏3例/探针面6例含空依据双形态）+同域回归312全过（infection×4/prescreen×2/audit_trail_probe/report_evidence/loop_guard_wiring/steering/tool_output/self_verify/trajectory_recorder）+py_compile；实测暴露并修2处：纯标签判词 evidence 裸标签冒充依据（改只留依据文本）、探针空依据判空 LIKE 配不过三种落库形态（改 Python 正则容反斜杠单元，5形态手工实证 3真/2负）；顺带修存量测试基建红灯（test_audit_prescreen _run get_event_loop 批内排序污染 17红，纯 HEAD worktree /tmp/wt74-check 先证非本切片引入→asyncio.run 对齐周期#55/#73 修法）；⚠️诚实边界：①真实库 33 条历史拦截行=修复前旧账不改写（探针如实报历史缺口），新拦截行落 verdict_basis 待自然触发后复跑探针核对②判词依据质量取决于审计员是否照 JUDGE_PROMPT 写依据——不写时如实落诚实标记，不编造③本切片未跑真 LLM 回合触发拦截的自然场景（E2E 走真实 _run_llm_with_tools+真实 InfectionGate+账本形状，判词为注入 fake）；下周期做 12.6② verify_dev 判据弱项（只查文件 marker 不查"用 terminal 运行它"）
 [2026-10-11 15:33] 周期#75 | 12.6② verify_dev 运行账本判据（12.6 余项清零，阶段12 收官）：根因=开发类只查文件 marker 不查"用 terminal 运行它"，S1 被审计误杀的 terminal 步骤（未执行）仍判 pass=假过（真实库 15 条 dev_hello 轨迹行实证运行证据本来就在账本里：name=terminal+args 引用 dev_hello+result_preview=程序输出）。修=verify_dev 三判据（文件 marker+运行账本+回复报告输出）：运行证据=_tool_ledger(("terminal","execute_code")) 执行行（parse_ledger 单一真源，被拦行不计）args/name/result 含 dev_hello 且 result_preview 含程序输出 SOULMATE_DEV_OK 且非源码回显（print( 正则——cat/echo 源码不算运行）；_tool_ledger 扩多名字一次回读+名字容忍"terminal: <cmd>"冒号前缀形态；账本不可用诚实降级文件+回复（mode_note=ledger_unavailable 不假称 server_side） | ✅ | 42f28c95 | Gate1 git diff 3 文件 302 行真实落盘；Gate2 grep verify_dev 三判据接线点在 acceptance_benchmark main 真实验证路径（_tool_ledger 多名字回读+运行判据消费账本行）；Gate3 tests/test_acceptance_verify_dev.py 12/12（含 S1 回归假过封死：terminal 步骤被误杀未执行时不再判 pass）+真实 WS 验收开发类 1/1 ✅ 24.44s（运行账本命中=terminal 执行行 1）；11.5 观察=探针复跑（provenance 0/self_heal 0 未自然触发、verdict_basis 落账行 0=修复后尚无新拦截，历史 33 条不改写如实报）；⚠️本条目为周期#76 补记（#75 提交 42f28c95 漏写周期日志行）；至此阶段1-12 切片全部清零（余项仅待用户拍板：⚡8.6 双链合并、4.1b iLink 形态、ASR 语音输入）
+[2026-10-11 15:52] 周期#76 | 路线图清零后验收对标抽样实测+规划阶段13+补记#75日志行：①补记周期#75 周期日志行（42f28c95 提交漏写，9271bf74 补账）②5类抽样实测（tag=SAMPLE76_1791704767，WS 真实用户路径，ACCEPT_CATEGORIES=开发,办公,定时,协作,记忆）**5/5 通过全部 server_side**——开发 23.63s（**12.6② verify_dev 三判据首次真实 run 走中：文件+运行账本+回复报告，运行账本命中=terminal 执行行1 含程序输出非源码回显**）/办公 44.93s report.xlsx 4964B/定时 30.80s accept_probe 行=1/记忆 24.98s MEMORY.md 标记/协作 18.75s 双 worker；开发类回归常态 23.63s=#64 的 301.74s 确认上游波动个案（12.3 归因复核成立）；零注入审计误杀零 WS 超时；测试产物清理归零（MEMORY 标记 0/accept_probe 行 0//tmp/soulmate_accept 已删）③规划阶段13 五切片+例行观察（13.1 流式 stall 治理最高优先/13.2 拦截自然触发端到端/13.3 审计往返开销/13.4 AI 群组真实成员 e2e/13.5 技能语义改写） | ✅ | (本次提交) | Gate1 git diff 路线图 3 区块真实落盘（#75 补记行+抽样实测节+阶段13+本条目）；Gate2=N/A（纯验收/规划周期无新代码符号）；Gate3=acceptance_benchmark 真实运行 5/5+结果 JSON /tmp/soulmate_accept_results.json 回读与台面一致+清理归零三项实证；⚠️诚实边界：每类单次样本同机低负载；late_readback 本轮未触发（无 WS 超时）；下周期做 13.1 流式路径 stall 停顿治理
