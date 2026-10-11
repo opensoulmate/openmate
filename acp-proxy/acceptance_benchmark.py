@@ -536,8 +536,7 @@ def cleanup() -> None:
     # 标记和 cron 行，agent_messages 探针行跨 run 累积→陈旧行假阳性（实证放过了
     # 一个真实未发送的 run）
     try:
-        conn = sqlite3.connect(
-            os.path.expanduser("~/opensoul/data/opensoul.db"), timeout=10)
+        conn = sqlite3.connect(AGENT_MESSAGES_DB, timeout=10)
         conn.execute(
             "DELETE FROM agent_messages WHERE content LIKE ?",
             ("%SOULMATE_PUBLISH_PROBE%",))
@@ -555,6 +554,10 @@ def cleanup() -> None:
         conn.close()
     except sqlite3.Error:
         pass
+    # 路线图12.5（周期#71）：run 末显式清理工作目录，兑现 docstring"测试产物
+    # 显式清理"承诺（周期#64 实证：此前只有开跑前 rmtree，run 后 /tmp 残留
+    # 产物）。setup() 开头也走本函数——那里 rmtree 无害（随后立即重建）。
+    shutil.rmtree(WORKDIR, ignore_errors=True)
 
 
 # ── WS 驱动（soulmate 真实用户路径）──────────────────────────────
