@@ -7,7 +7,7 @@ import { MultiFileDiff, type FileChange } from "@/components/multi-file-diff";
 import { TaskChoiceMenu, type ChoiceOption, type ChoiceQuestion } from "@/components/task-choice-menu";
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useAppStore } from '@/stores/app-store';
-import { Send, Bot, User, Loader2, Paperclip, X, Wifi, WifiOff, FileText, Image as ImageIcon, Info, ChevronDown, ChevronLeft, ChevronRight, Plus, Bookmark, RotateCcw, Zap, Brain, PanelLeft, Copy, ThumbsUp, ThumbsDown, Share2, RefreshCw, MoreHorizontal, Volume2, MessageSquare, FolderOpen, Video, Music, Link2, CalendarDays, LocateFixed } from "lucide-react";
+import { Send, Bot, User, Loader2, Paperclip, X, Wifi, WifiOff, FileText, Image as ImageIcon, Info, ChevronDown, ChevronLeft, ChevronRight, Plus, Bookmark, RotateCcw, Zap, Brain, PanelLeft, Copy, ThumbsUp, ThumbsDown, Share2, RefreshCw, MoreHorizontal, Volume2, MessageSquare, FolderOpen, Video, Music, Link2, CalendarDays, LocateFixed, Mic, Square } from "lucide-react";
 import { SkirtTabs } from "@opensoulmate/openface";
 import { ContextRing } from "@/components/context-ring";
 import { getApiBaseUrl, getToken, getUserId } from '@/lib/api-client';
@@ -21,6 +21,7 @@ import { SmartPrompt } from '@/components/smart-prompt';
 import { AcpApprovalModal, type AcpApprovalRequest } from '@/components/acp-approval-modal';
 import { NetworkWaitBanner } from '@/components/network-wait-banner';
 import { buildUserMessage } from './user-message';
+import { pickRecorderMimeType, blobToAudioAttachment } from '@/lib/audio-record';
 
 const getApiUrl = () => getApiBaseUrl();
 const getWsUrl = () => getApiUrl().replace('http', 'ws');
@@ -347,6 +348,10 @@ function useAcpWebSocket(params: {
       for (const att of attachments) {
         if (att.type === 'image' && att.data) {
           promptParts.push({ type: 'image', data: att.data, mimeType: att.mime_type || 'image/png' });
+        }
+        if (att.type === 'audio' && att.data) {
+          // ACP AudioContentBlock — 语音输入（17.2）：ws_acp 纯透传，后端 attach_audio_parts 直发 MiMo input_audio
+          promptParts.push({ type: 'audio', data: att.data, mimeType: att.mime_type || 'audio/wav' });
         }
         if (att.type === 'file' && att.data) {
           // ACP v1.0标准 EmbeddedResourceContentBlock — type:'file'不是合法schema，SDK解析会报ValidationError
@@ -1325,6 +1330,9 @@ export function ChatClient() {
         if (p.type === 'image' && p.data) {
           files.push({ name: p.name || 'image.png', mimeType: p.mime_type || 'image/png', data: p.data, messageId: msg.id, role: msg.role, timestamp: msg.timestamp });
         }
+        if (p.type === 'audio' && p.data) {
+          files.push({ name: p.name || 'voice', mimeType: p.mime_type || 'audio/wav', data: p.data, messageId: msg.id, role: msg.role, timestamp: msg.timestamp });
+        }
       }
       // Also scan text parts for MEDIA: tags
       for (const p of msg.parts) {
@@ -1731,7 +1739,7 @@ export function ChatClient() {
             const attachmentParts = ((m.attachments as Array<Record<string, unknown>>) || [])
               .filter((a): a is Record<string, unknown> & { data: string } => typeof a.data === 'string' && a.data.length > 0)
               .map(a => ({
-                type: (a.mime_type as string)?.startsWith('image/') ? 'image' : 'file',
+                type: (a.mime_type as string)?.startsWith('image/') ? 'image' : (a.mime_type as string)?.startsWith('audio/') ? 'audio' : 'file',
                 data: a.data as string,
                 name: a.name as string,
                 mime_type: a.mime_type as string,
@@ -1865,7 +1873,8 @@ export function ChatClient() {
       reader.onload = () => {
         const base64 = (reader.result as string).split(',')[1];
         const isImage = file.type.startsWith('image/');
-        setAttachments(prev => [...prev, { type: isImage ? 'image' : 'file', data: base64, name: file.name, mime_type: file.type }]);
+        const isAudio = file.type.startsWith('audio/');
+        setAttachments(prev => [...prev, { type: isImage ? 'image' : isAudio ? 'audio' : 'file', data: base64, name: file.name, mime_type: file.type }]);
         setReadingCount(c => Math.max(0, c - 1));
       };
       reader.onerror = () => {
@@ -1893,6 +1902,72 @@ export function ChatClient() {
       }
     }
   };
+
+  // ── 语音输入（17.2）：MediaRecorder 录音 → 统一转 WAV → 音频附件（sendAcpPrompt 以 audio ACP 块直发）──
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [audioError, setAudioError] = useState<string | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const recordChunksRef = useRef<Blob[]>([]);
+  const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopRecording = useCallback(() => {
+    if (recordTimerRef.current) { clearInterval(recordTimerRef.current); recordTimerRef.current = null; }
+    setIsRecording(false);
+    setRecordingSeconds(0);
+    const rec = recorderRef.current;
+    recorderRef.current = null;
+    if (rec && rec.state !== 'inactive') rec.stop();
+  }, []);
+
+  const startRecording = useCallback(async () => {
+    setAudioError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mime = pickRecorderMimeType();
+      const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+      recordChunksRef.current = [];
+      rec.ondataavailable = (e) => { if (e.data && e.data.size > 0) recordChunksRef.current.push(e.data); };
+      rec.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        const blob = new Blob(recordChunksRef.current, { type: rec.mimeType || 'audio/webm' });
+        recordChunksRef.current = [];
+        if (!blob.size) { setAudioError('录音为空，请重试'); return; }
+        try {
+          const att = await blobToAudioAttachment(blob);
+          if (!att.converted) setAudioError(`音频未能统一转码，已按原格式 ${att.mime_type} 附着（如后端不支持会显式报因）`);
+          setAttachments(prev => [...prev, att]);
+        } catch (e) {
+          setAudioError(`音频处理失败：${(e as Error)?.message || e}`);
+        }
+      };
+      rec.onerror = () => { setAudioError('录音出错，请重试'); };
+      rec.start();
+      recorderRef.current = rec;
+      setIsRecording(true);
+      setRecordingSeconds(0);
+      recordTimerRef.current = setInterval(() => setRecordingSeconds(s => s + 1), 1000);
+    } catch (e) {
+      const name = (e as Error)?.name || '';
+      setAudioError(
+        name === 'NotAllowedError' ? '麦克风权限被拒绝，无法录音'
+        : name === 'NotFoundError' ? '未检测到麦克风设备'
+        : `无法开始录音：${(e as Error)?.message || e}`
+      );
+    }
+  }, []);
+
+  const toggleRecording = useCallback(() => {
+    if (isRecording) stopRecording();
+    else void startRecording();
+  }, [isRecording, startRecording, stopRecording]);
+
+  // 组件卸载收尾录音（释放麦克风，不静默留后台录音）
+  useEffect(() => () => {
+    if (recordTimerRef.current) clearInterval(recordTimerRef.current);
+    const rec = recorderRef.current;
+    if (rec && rec.state !== 'inactive') rec.stop();
+  }, []);
 
   // 公共 WS 等待函数：连接建立后自动发送消息
   // opts.steer=true：任务运行中发送=插话（排队注入，不抢占当前任务）
@@ -2528,6 +2603,36 @@ export function ChatClient() {
                     }} />}
                     {p.type === 'text' && msg.role === 'agent' && <SecretScanBadge text={p.text || ''} minRisk="high" />}
                     {p.type === 'image' && p.data && <img src={`data:${p.mime_type || 'image/png'};base64,${p.data}`} alt={p.name || 'image'} className="max-w-xs w-auto max-h-64 rounded-lg mt-1 object-contain" />}
+                    {p.type === 'audio' && (
+                      <div className="mt-2 rounded-xl border border-border/60 bg-background/80 backdrop-blur-sm overflow-hidden">
+                        {/* 日期在上（与文件视图音频卡片同布局，3e 统一布局铁律） */}
+                        <div className="px-3 py-1.5 border-b border-border/30 bg-muted/20">
+                          <span className="text-[10px] text-muted-foreground/60">
+                            {msg.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                        {/* 音频信息 */}
+                        <div className="px-3 py-2.5 flex items-center gap-2">
+                          <Music className="w-5 h-5 text-muted-foreground shrink-0" />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium truncate">{p.name || 'voice'}</p>
+                            {p.mime_type && <p className="text-[10px] text-muted-foreground/60">{p.mime_type}</p>}
+                          </div>
+                        </div>
+                        {/* 播放器 */}
+                        {p.data && (
+                          <div className="px-3 pb-2">
+                            <audio controls className="w-full" preload="metadata">
+                              <source src={`data:${p.mime_type || 'audio/wav'};base64,${p.data}`} />
+                            </audio>
+                          </div>
+                        )}
+                        {/* 功能按钮在下 */}
+                        <div className="flex items-center gap-1 px-3 py-1.5 border-t border-border/30 bg-muted/20">
+                          {renderAttachmentActions({ name: p.name || 'voice', data: p.data, mimeType: p.mime_type })}
+                        </div>
+                      </div>
+                    )}
                     {p.type === 'choice' && (p.choices || p.questions) && (
                       <TaskChoiceMenu
                         question={p.text || "请选择："}
@@ -2703,11 +2808,23 @@ export function ChatClient() {
               <span>正在读取文件（{readingCount}个），读取完成前无法发送...</span>
             </div>
           )}
+          {isRecording && (
+            <div className="flex items-center gap-1.5 mb-2 px-2 py-1.5 bg-red-500/10 text-red-500 rounded text-xs">
+              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+              <span>正在录音… {recordingSeconds}s（再点麦克风停止，停止后作为语音附件随消息发送）</span>
+            </div>
+          )}
+          {audioError && (
+            <div className="flex items-center gap-1.5 mb-2 px-2 py-1.5 bg-amber-500/10 text-amber-600 rounded text-xs">
+              <span className="flex-1">{audioError}</span>
+              <button onClick={() => setAudioError(null)} title="关闭"><X className="w-3 h-3" /></button>
+            </div>
+          )}
           {attachments.length > 0 && (
             <div className="flex gap-2 mb-2 flex-wrap">
               {attachments.map((a, i) => (
                 <div key={i} className="flex items-center gap-1 px-2 py-1 bg-muted rounded text-xs">
-                  {a.type === 'image' ? <ImageIcon className="w-3 h-3" /> : <FileText className="w-3 h-3" />}
+                  {a.type === 'image' ? <ImageIcon className="w-3 h-3" /> : a.type === 'audio' ? <Music className="w-3 h-3" /> : <FileText className="w-3 h-3" />}
                   <span className="truncate max-w-20">{a.name}</span>
                   <button onClick={() => setAttachments(prev => prev.filter((_, j) => j !== i))}><X className="w-3 h-3" /></button>
                 </div>
@@ -2785,6 +2902,9 @@ export function ChatClient() {
               isLoading={loading}
               placeholder={t("chat.inputPlaceholder", "输入任务，点 ✨ 展开字段（Enter 发送，Shift+Enter 换行）")}
               onFileClick={() => fileRef.current?.click()}
+              onMicClick={toggleRecording}
+              isRecording={isRecording}
+              recordingSeconds={recordingSeconds}
               onPaste={handlePaste}
               footer={<>
                   <button

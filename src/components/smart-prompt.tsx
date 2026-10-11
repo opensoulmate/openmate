@@ -10,6 +10,7 @@ import {
   ChevronUp,
   ChevronDown,
   Mic,
+  Square,
   Smile,
   Star,
   Paperclip,
@@ -46,6 +47,12 @@ interface SmartPromptProps {
   footer?: React.ReactNode;
   /** Called when file attach button is clicked */
   onFileClick?: () => void;
+  /** 语音输入（17.2）：点击麦克风开始/停止录音 */
+  onMicClick?: () => void;
+  /** 是否正在录音（按钮变红+计时） */
+  isRecording?: boolean;
+  /** 已录音秒数 */
+  recordingSeconds?: number;
   /** Paste handler for clipboard images */
   onPaste?: (e: React.ClipboardEvent) => void;
   /** Initial task value — auto-expands and triggers generate */
@@ -114,6 +121,9 @@ export function SmartPrompt({
   className,
   footer,
   onFileClick,
+  onMicClick,
+  isRecording = false,
+  recordingSeconds = 0,
   onPaste,
   hasAttachments,
   isReadingFiles = false,
@@ -388,8 +398,13 @@ export function SmartPrompt({
         <button onClick={onFileClick} className="p-1.5 rounded hover:bg-muted/30 text-muted-foreground/40 hover:text-muted-foreground transition-colors" title="文件">
           <Paperclip className="w-4 h-4" />
         </button>
-        <button className="p-1.5 rounded hover:bg-muted/30 text-muted-foreground/40 hover:text-muted-foreground transition-colors" title="语音输入">
-          <Mic className="w-4 h-4" />
+        <button
+          onClick={onMicClick}
+          className={`flex items-center gap-1 p-1.5 rounded transition-colors ${isRecording ? 'bg-red-500/15 text-red-500 hover:bg-red-500/25' : 'hover:bg-muted/30 text-muted-foreground/40 hover:text-muted-foreground'}`}
+          title={isRecording ? '停止录音' : '语音输入'}
+        >
+          {isRecording ? <Square className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+          {isRecording && <span className="text-[10px] tabular-nums">{recordingSeconds}s</span>}
         </button>
         {/* ✨ Generate button */}
         {!expanded && (
