@@ -46,11 +46,16 @@
 **选项**
 | 选项 | 内容 | 依赖 | 备注 |
 |---|---|---|---|
-| A 多模态直路由（用户原要求） | 音频直发支持 audio 的模型 | 需多模态模型 API（现有 MiMo token plan 是否支持 audio **待确认**，可能需 GPT-4o-audio/Qwen-Omni key） | 外部费用/可用性 |
+| A 多模态直路由（用户原要求） | 音频直发支持 audio 的模型 | ~~待确认~~ **已确认可行（2026-10-12 官方文档）**：MiMo token plan 同 key 直发 audio，无需 GPT-4o-audio/Qwen-Omni key | 外部费用/可用性 |
 | B 本地 whisper→文本 | faster-whisper 装进服务 venv | 零外部依赖、离线可用 | 违背"不走两步"原要求 |
 | C 混合（候选） | 有多模态配置走 A，无则 B 兜底（显式标注"转写"） | 同上 | 兼顾原要求与可用性 |
 
-**建议：C。纯 A 需先确认多模态 API 可用性（key/余额）再落地。**
+**"待确认"项查实（2026-10-12，mimo.mi.com 官方文档 audio-understanding + token-plan pricing）**：
+- **MiMo token plan 支持音频直发**：`mimo-v2.6-pro`（流水线现钉模型）/`mimo-v2.6-flash`/`mimo-v2.6-pro-ultraspeed`/`mimo-v2.5` 支持 `input_audio` 内容块（OpenAI 兼容 chat.completions，`{"type":"input_audio","input_audio":{"data":...}}`）；输入=公网 URL（≤100MB）或 **Base64 data URL**（`data:{MIME};base64,` 前缀，≤50MB，本地录音无需公网 URL）；格式 MP3/WAV/FLAC/M4A/OGG；音频 token ≈ 秒×6.25
+- 另有专用 ASR 模型 `mimo-v2.5-asr`（按音频时长计费）同在 token plan 内；TTS 系列限时免费不耗额度——B/C 兜底也可考虑 mimo-v2.5-asr 替代本地 whisper（仍属"两步"，仅作兜底备选）
+- **运营期限（顺带查实，全系统相关）**：官方公告 mimo-v2.5-pro/mimo-v2.5 自 2026-10-14 18:00 起自动路由 V2.6，**2026-10-21 10:00 后旧模型 ID 失效**——如有配置钉旧 ID 需在 10-21 前迁移
+
+**建议：C（A 优先 + 兜底）——A 的可行性前提已消除（现有 key 即可直发 audio），落地时前端录音→base64 data URL→直发 mimo-v2.6-pro 即达成"不走 whisper 两步"原要求。**
 
 ---
 
