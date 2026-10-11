@@ -5797,7 +5797,21 @@ You can send files to the user natively: to deliver a file, write a brief confir
                 self._save_progress(session_id, self._plan_visible_text(plan))
 
                 # 自省校验
-                reflection = await self._self_reflector.reflect(step)
+                # 12.3 四段计时可观测：step 自省 LLM 往返单独落账——此前静默，
+                # 周期#67 归因实证 323.7s 空洞正是本调用上游传输挂死（RemoteProtocolError
+                # 前静默约313s），轨迹里却无行可查；落 segment span 后纳入四段计时①。
+                _ref_seg = await self._traj_recorder.start_llm_span(
+                    session_id, traj_root_id,
+                    content=f"step_reflect: {step.description[:120]}")
+                try:
+                    reflection = await self._self_reflector.reflect(step)
+                except Exception:
+                    # 段span不悬挂：异常路径同样收口（失败必须可见）
+                    await self._traj_recorder.end_llm_span(session_id, _ref_seg, status="error")
+                    raise
+                await self._traj_recorder.end_llm_span(
+                    session_id, _ref_seg,
+                    status=llm_outcome_status(reflection.get("summary", "")))
                 step.reflection = reflection.get("summary", "")
                 step.error_type = reflection.get("error_type", "") or ""
 
@@ -5852,7 +5866,19 @@ You can send files to the user natively: to deliver a file, write a brief confir
                     # P0修复（retry结局说谎+落库丢失）：重试结果同样过SelfReflector
                     # （原实现无条件标SUCCESS），且先落库再推进——原continue跳过
                     # save_plan，重试结局在断点续跑时永久丢失。
-                    retry_reflection = await self._self_reflector.reflect(step)
+                    # 12.3：重试自省 LLM 往返同样落 segment span（与首试对称可观测）
+                    _ref_seg = await self._traj_recorder.start_llm_span(
+                        session_id, traj_root_id,
+                        content=f"step_reflect_retry: {step.description[:120]}")
+                    try:
+                        retry_reflection = await self._self_reflector.reflect(step)
+                    except Exception:
+                        await self._traj_recorder.end_llm_span(
+                            session_id, _ref_seg, status="error")
+                        raise
+                    await self._traj_recorder.end_llm_span(
+                        session_id, _ref_seg,
+                        status=llm_outcome_status(retry_reflection.get("summary", "")))
                     step.reflection = retry_reflection.get("summary", "")
                     step.error_type = retry_reflection.get("error_type", "") or ""
                     if retry_reflection.get("passed"):
