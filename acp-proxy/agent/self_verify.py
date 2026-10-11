@@ -75,6 +75,19 @@ _SELF_NEGATING_RE = re.compile(
 # 实测三项全"未覆盖"其中两项是锚点）。纯语音消息剥掉锚点后无正文=闲聊不自验，天然干净。
 _ANCHOR_NOTE_RE = re.compile(r"\[[^\[\]]*(?:已保存到|已随消息直发)[^\[\]]*\]")
 
+# 感知类元指令（"复述你听到的内容"/"说说音频里讲了什么"类）：要求复述附件媒体里
+# 感知到的内容，正确答案以媒体语义内容作答，与指令文本天然零词元重合——确定性
+# 词元核对必然假阴性（周期#102 真实 WS audio e2e 实证残留：答对仍判未覆盖→补做
+# 1轮+噪音横幅）。只认"纯感知复述"形态：带动作动词（写入/保存/生成…）的媒体任务
+# 是真实可验需求，仍按常规核对。词元核对验不了"听到"，不冒进修覆盖率阈值。
+_PERCEPTION_REF_RE = re.compile(
+    r"你听(?:到|见|清)|听到(?:的|了|什么|啥)|听见|听清"
+    r"|音频(?:里|中|内容|讲|说|录)|语音(?:里|中|内容|讲|说|录)"
+    r"|录音(?:里|中|内容|讲|说)|声音(?:里|中|内容)|这段(?:音频|语音|录音|声音)"
+    r"|\bwhat (?:did )?you hear\b"
+    r"|\b(?:repeat|restate|parrot)\b.{0,24}\b(?:you )?(?:heard|hear|audio)\b"
+)
+
 # 中文停用字（不进匹配词元）
 _STOP_CHARS = set(
     "的了请帮我你我要把和与等再就都也很吗呢吧啊呀一下进行做搞对给到在是"
@@ -116,6 +129,16 @@ def is_self_negating(text: str) -> bool:
     此类文本按其自身语义不得作为可验收需求项——否则必然 unmet、必然触发补做。
     """
     return bool(_SELF_NEGATING_RE.search(text or ""))
+
+def is_perception_meta(text: str) -> bool:
+    """感知类元指令判定（18.3）：'复述你听到的内容'类，确定性词元天然验不了。
+
+    正确答案以附件媒体的语义内容作答，与指令文本零词元重合是常态——"未覆盖"
+    不是可执行缺口。带动作动词（写入/保存/生成…）的媒体任务是真实可验需求，
+    不在此列（照常核对，工具产出可验）。
+    """
+    t = text or ""
+    return bool(_PERCEPTION_REF_RE.search(t)) and not bool(_ACTION_RE.search(t))
 
 
 def _split_by_markers(text: str, marker_re: re.Pattern) -> list[str]:
@@ -179,6 +202,7 @@ class VerifyItem:
     score: float  # 证据覆盖率 0~1
     evidence: str = ""
     conditional: bool = False  # 条件子句（"如果X就Y"）——不进补做清单
+    perception: bool = False  # 感知类元指令（"复述你听到的内容"类）——不进补做/不计覆盖
 
 
 @dataclass
@@ -188,7 +212,9 @@ class VerifyReport:
 
     @property
     def ok(self) -> bool:
-        return all(i.status == "met" for i in self.items)
+        # 感知类元指令不参与完成判定（18.3）：确定性词元验不了"听到"，其未覆盖
+        # 不是可执行缺口——单独一条感知元指令 = ok，不触发自检横幅
+        return all(i.status == "met" for i in self.items if not i.perception)
 
     @property
     def checked(self) -> int:
@@ -263,9 +289,17 @@ class SelfVerifier:
             if conditional and status == "unmet":
                 status = "uncertain"
 
+            # 18.3 感知类元指令封顶 uncertain：正确答案以媒体语义内容作答，词元
+            # 核对必然假阴性——"未覆盖"不进补做清单（答对仍补做1轮的残留根因）
+            perception = is_perception_meta(req)
+            if perception and status == "unmet":
+                status = "uncertain"
+
             evidence = (f"命中: " + "、".join(sorted(hit)[:6])) if hit else "无证据重合"
             if conditional:
                 evidence += "；条件项(不进补做)"
+            if perception:
+                evidence += "；感知类元指令(词元无法核验，不进补做/不计覆盖)"
             if executed_tools:
                 evidence += "；工具: " + ", ".join(e.name for e in executed_tools[:8])
             if blocked_tools:
@@ -274,10 +308,16 @@ class SelfVerifier:
                     f"{e.name}({(e.result_preview.strip() or e.permission)[:60]})"
                     for e in blocked_tools[:8]
                 )
-            items.append(VerifyItem(req, status, round(score, 2), evidence, conditional))
+            items.append(VerifyItem(req, status, round(score, 2), evidence, conditional, perception))
 
-        met = sum(1 for i in items if i.status == "met")
-        return VerifyReport(items=items, coverage=round(met / len(items), 2))
+        # 覆盖率分母不含感知类元指令（18.3 覆盖率假阴性根因：分母掺入词元天然
+        # 验不了的项 → 覆盖率假低 → "覆盖 0/N" 噪音横幅）
+        verifiable = [i for i in items if not i.perception]
+        met = sum(1 for i in verifiable if i.status == "met")
+        return VerifyReport(
+            items=items,
+            coverage=round(met / len(verifiable), 2) if verifiable else 1.0,
+        )
 
     def format_report(self, report: VerifyReport) -> str:
         """渲染自检结论（用户可见，可观测）。"""
@@ -288,11 +328,18 @@ class SelfVerifier:
         lines = [REPORT_HEADER]
         for i, item in enumerate(report.items, 1):
             label = labels.get(item.status, "")
-            if item.conditional and item.status != "met":
+            if item.perception and item.status != "met":
+                label = "（感知类元指令，无法核验）"
+            elif item.conditional and item.status != "met":
                 label = "（条件项，仅提醒）"
             lines.append(f"{icons.get(item.status, '❓')} {i}. {item.requirement}{label}")
-        met = sum(1 for x in report.items if x.status == "met")
-        lines.append(f"— 覆盖 {met}/{len(report.items)}")
+        verifiable = [x for x in report.items if not x.perception]
+        met = sum(1 for x in verifiable if x.status == "met")
+        line = f"— 覆盖 {met}/{len(verifiable)}"
+        n_perc = len(report.items) - len(verifiable)
+        if n_perc:
+            line += f"（另 {n_perc} 项感知类元指令不计覆盖）"
+        lines.append(line)
         return "\n".join(lines)
 
     def build_remediation_prompt(self, missing: list[str]) -> str:

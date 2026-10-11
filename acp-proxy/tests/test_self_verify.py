@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from agent.self_verify import (  # noqa: E402
     SelfVerifier,
     extract_requirements,
+    is_perception_meta,
 )
 
 
@@ -191,3 +192,72 @@ def test_soulmate_agent_wiring():
     assert "self._self_verifier.format_report(" in text   # 结论推送接线
     # 补做必须有上限（防失控循环）
     assert "上限1轮" in text
+
+
+# ── 5. 感知类元指令（18.3 覆盖率假阴性治理）────────────────────
+
+# 真实残留形态（周期#102 audio e2e）：探针元指令+防缓存标记行——标记行自否定
+# 被剔除后剩"复述你听到的内容"单条需求
+_PROBE_META_TEXT = "复述你听到的内容\n（此行仅为防缓存标记，忽略其语义）"
+
+
+def test_perception_meta_detection():
+    assert is_perception_meta("复述你听到的内容")
+    assert is_perception_meta("说说音频里讲了什么")
+    assert is_perception_meta("repeat what you heard")
+    # 带动作动词的媒体任务 = 真实可验需求，不降级
+    assert not is_perception_meta("把音频里的内容写入文件")
+    # 无感知引用 / 只是提到"录音"二字的普通需求
+    assert not is_perception_meta("生成月报")
+    assert not is_perception_meta("介绍录音转文字的流程")
+
+
+def test_perception_meta_extracted_then_not_remediated():
+    # 答对仍判未覆盖 → 补做1轮 = 18.1 复测残留根因；修复后不进补做清单
+    reqs = extract_requirements(_PROBE_META_TEXT)
+    assert reqs == ["复述你听到的内容"], reqs
+    v = _verifier()
+    report = v.verify(
+        _PROBE_META_TEXT,
+        "我听到的内容是：今天下午三点我们去公园放风筝，记得带上橘子和香蕉",
+        tool_calls_log=[],
+    )
+    assert len(report.items) == 1
+    assert report.items[0].perception
+    assert report.missing_requirements() == []
+    # 单条感知元指令 = ok → soulmate 侧"not ok or >=2"不触发自检横幅
+    assert report.ok
+
+
+def test_perception_meta_unmet_capped_uncertain():
+    v = _verifier()
+    report = v.verify(_PROBE_META_TEXT, "好的，马上处理", tool_calls_log=[])
+    item = report.items[0]
+    assert item.perception
+    assert item.status == "uncertain"  # unmet 封顶，绝不进补做
+    assert report.missing_requirements() == []
+
+
+def test_perception_with_action_still_verifiable():
+    v = _verifier()
+    report = v.verify(
+        "请把音频里的内容写入 notes 文件并保存下来", "好的", tool_calls_log=[]
+    )
+    assert report.items
+    assert not report.items[0].perception
+    assert report.missing_requirements()  # 真实任务未做 → 照常进补做
+
+
+def test_coverage_denominator_excludes_perception():
+    v = _verifier()
+    report = v.verify(
+        "1. 修复登录bug 2. 复述你听到的内容",
+        "登录bug已修复",
+        tool_calls_log=[{"function": {"name": "patch", "arguments": "{}"}}],
+    )
+    assert [i.perception for i in report.items] == [False, True]
+    assert report.coverage == 1.0  # 感知项不计分母（假阴性根因）
+    assert report.missing_requirements() == []
+    text = v.format_report(report)
+    assert "覆盖 1/1" in text
+    assert "感知类元指令不计覆盖" in text
