@@ -1,7 +1,7 @@
 # 蓝图 51 项逐条对账（2026-10-12 · 统筹者审计）
 
 对标源：`synthesis/openmate-rewrite-blueprint.md`（P0×25 + P1×16 + P2×10）。
-证据方法：全仓特征扫描 + 代码/测试文件定位，只认实装证据。结论：**✅43 / ⏳6 / ❌2**
+证据方法：全仓特征扫描 + 代码/测试文件定位，只认实装证据。结论：**✅48 / ⏳2 / ❌1**（2026-10-12 周期#128 更新：P0-09/P0-10/P1-01/P1-15 终验销账 ✅、P1-05 以替代实现销账 ✅(替代)）
 
 ## P0 能稳定跑（25）
 | # | 项 | 状态 | 证据 |
@@ -32,7 +32,7 @@
 |---|---|---|---|
 | 01 | 危险工具不对 personal 开放 | ✅ | 终验 2026-10-12 周期#126 **18/18 PASS**：语义真源=`agent/sandbox_policy.py` 工具面轨道隔离（tool_track：per-session显式>default_track，缺省 coding=零行为变化；store损坏/非法值 fail-closed 按 personal）；危险编码集=terminal/execute_code/process/write_file/patch/batch_execute **工具面不暴露**（registry 裁剪语义）+运行时 fail-safe 显式拒绝（指引"显式切换 coding"）；**终验暴露侧门当拍即修**（首轮 16/18）：terminal 被裁后模型改走 process 后台进程通道执行同一条 shell 命令（"拦正路留侧门"同类）→ process 入列、执行原语全家同裁，复跑 18/18；真实 WS 用户路径（同一真实会话两轮，WS→ws_acp→soulmate stdio→真实 MiMo 回合）：personal 轮 terminal touch **文件未创建**+回复如实报"没有 terminal/execute_code 等可执行工具、命令未执行"；显式切换 coding（API PUT tool_track）后同会话同指令**文件真实创建** end_turn（对照+切换语义一体实证）；API 入口=`PUT /api/agent/sandbox-policy/{sid} {"tool_track":"coding"\|"personal"}`（非法值 ok_track=False 拒绝落盘不静默纠正），describe 透出 dropped_if_personal；探针 `acp-proxy/tool_track_probe_ws.py`，证据 `evidence/p1-01-tool-track-evidence.json`。**对账表原注修正**：`user_preferences.py` 是偏好学习器（category=偏好分类）非轨道真源，轨道真源=sandbox_policy 的 tool_tracks store。边界如实声明：delegate_tasks/group_task/schedule_task 为间接通道（委派/排程执行面在执行时刻的会话轨道）、request_evolution/skill_save 走各自安全门（进化评审/单写者守卫）——是否随轨道收缩**待用户拍板** |
 | 02-04 | 子agent/worktree/深潜 | ✅ | `agent/subagent_manager.py` + worktree（session_recall/git_api） |
-| 05 | RepoMap tree-sitter | ❌ | **未实现**（现有=检索式召回，非图中心性选符号） |
+| 05 | RepoMap tree-sitter | ✅(替代) | **统筹裁决不硬造 tree-sitter 图中心性**（过度设计，2026-10-12 周期#128 以替代实现销账）：实现说明文档=`p1-05-repomap-alternative-implementation.md`（逐件 file:line 实证+引用自检记录）。替代构成=**检索式召回+token预算选符号**：①符号边界分块 FTS 索引（`agent/file_index.py` `_split_into_chunks` 正则 def/class/function/export 边界切块=无 tree-sitter 的符号粒度近似，search 按 rank+500字内容预算）②检索式召回 live path（search_files grep 多语言 include 集 / `session_recall.py` 词项覆盖+编辑距离评分（mask_of/words_of/approximate_title）无图 / 记忆三因子 / 技能检索）③token 预算选符号=`context_budget.py`（TokenBudget.usable_input/裁剪/校准因子）+工具输出溢出 spill→stub（TOOL_SPILL_CHARS 8000/LINES 2000）+`read_file_segment` 按行段取回=预算内按需取符号段。⚠️诚实边界：①无全仓调用图/无中心性排序（裁决项非缺陷，用户拍板原案可按文档 §6 升级：tree-sitter 可选依赖+只解析检索命中文件）②SessionFileIndex **半接线**如实声明（写入已接线 soulmate_agent L137/366/5467，`search()/get_file_summary()/list_indexed_files()` 无消费点——FTS 召回闭环另立小切片**待拍板**）③符号识别为正则近似（装饰器/嵌套定义/TS 重载不保证最佳切边） |
 | 06 | SEARCH/REPLACE 容错梯度 | ✅ | fuzzy/similar（`session_recall.py`/`reflex.py`） |
 | 07 | 反射上限 | ✅ | `api/reflex.py`（注：实现为失败循环上限 2 次，与蓝图 3 次不同——以实现为准） |
 | 08 | undo/checkpoint | ✅ | `agent/agent_checkpoint.py` + `edit_safety.py` |
@@ -51,5 +51,5 @@
 | 10 | fork 沙箱对照晋升 | ⏳ | dna_evolution 有 sandbox 概念；对照晋升流程待终验 |
 
 ## 缺口处理（统筹裁决）
-- **❌ P1-05 RepoMap**：不排期硬造 tree-sitter 图中心性（过度设计）；用"检索式召回+token预算选符号"作为**替代实现**立项补文档，除非你要求原方案
+- **✅ P1-05 RepoMap（替代实现，周期#128 销账）**：不排期硬造 tree-sitter 图中心性（过度设计）；"检索式召回+token预算选符号"替代实现的实现说明文档已补（`p1-05-repomap-alternative-implementation.md`，逐件 file:line 实证+引用自检）——除非用户要求原方案（升级路径见文档 §6：tree-sitter 可选依赖+只解析检索命中文件，且不得替换降级路径）；衍生待拍板小切片=SessionFileIndex FTS 召回闭环（写入已接线、search() 无消费点，详见文档 §3.1/§5）
 - **⏳×2**（P2-09/10）：全部是"语义待终验"而非未实现——排入 soulmate 车道阶段20 前部做终验收口（P0-09 已于 2026-10-12 周期#124 终验销账 ✅，P0-10 已于 2026-10-12 周期#125 终验销账 ✅ 17/17，P1-01 已于 2026-10-12 周期#126 终验销账 ✅ 18/18 含 process 侧门修复，P1-15 已于 2026-10-12 周期#127 终验销账 ✅ 28/28 含五条件独立配置+trace 落点四层实证，逐项销账进行中）
