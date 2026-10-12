@@ -72,6 +72,7 @@ from agent import memory_marker
 from agent import report_evidence  # ⚡8.2 短路合成报告治理（执行证据前提）
 from agent import gene_wire
 from agent import session_recall
+from agent import termination
 from agent import turn_lifecycle
 from agent.turn_watchdog import TurnWatchdog  # 8.3 回合级进度/超时可见（禁静默）
 from utils import network_state  # turn级park合并：turn.open/close驱动park预算
@@ -415,6 +416,10 @@ class SoulMateAgent:
             lambda record: self._stop_turn_watchdog(record.session_id),
         )
         self._turn_close_reason: dict[str, str] = {}  # session_id -> 非正常收尾原因
+        # P1-15 五终止条件组合入trace：session_id -> 本回合触发的终止条件
+        # （max_turns/token_budget/external_cancel，空=正常完成；裁决单一真源
+        # =termination.resolve()，落点=_traj_recorder.end_turn(termination=...)）
+        self._turn_termination: dict[str, str] = {}
         # ── gene技能消费回执归因清单：session_id -> 本回合注入过的技能id
         # （recommend注入→回合收口按结局回执usage，CAMEL复用带真实成败信号）──
         self._skill_injected: dict[str, list[str]] = {}
@@ -859,6 +864,21 @@ class SoulMateAgent:
             wd = TurnWatchdog(
                 session_id,
                 notify=lambda text: self._notify_client(session_id, text),
+                # P1-15 wall_clock 终止条件落 trace：软预算超限事件进轨迹（条件=
+                # wall_clock/action=soft_warn）；按用户铁律"禁硬超时杀"只提醒不终止
+                on_soft_budget=lambda budget_s, elapsed: self._traj_recorder.log_event(
+                    session_id,
+                    kind="termination_condition",
+                    content=(
+                        f"wall_clock 软预算超限 {budget_s:.0f}s"
+                        "（提醒不终止：用户铁律禁硬超时杀）"),
+                    metadata={
+                        "termination_condition": termination.TERM_WALL_CLOCK,
+                        "action": "soft_warn",
+                        "budget_s": float(budget_s),
+                        "elapsed_s": round(float(elapsed), 1),
+                    },
+                ),
             )
             store[session_id] = wd
             wd.start()
@@ -2333,6 +2353,24 @@ ACP代理目录: {cwd}/acp-proxy（后端 Python 代码在此）
 - skill_save: 技能保存（把成功流程写成SKILL.md含触发条件/步骤/坑，存技能库供复用）。刚成功完成多步骤可复用任务、或用户要求"把XX流程保存为技能/记住怎么做"时使用；同名技能默认不覆盖（更新传 overwrite=true）。保存后同类任务命中触发词会自动加载该技能\n- browser: 浏览器自动化（Playwright/CDP，真实浏览器会话）。action=goto 打开URL / snapshot 读页面标题+正文+链接 / click 点元素 / type 输入（submit=true回车）/ fill 清空填入 / eval 执行JS / screenshot 截图（返回文件路径可MEDIA下发）/ back 后退 / close 关闭会话。selector 用 CSS 选择器。需要看页面真实渲染内容、登录态页面、自动化网页操作时使用；纯静态网页抓取优先 web_extract。⚠️ 页面过长截断并自报；失败返回具体原因；页面状态跨调用保留（连续操作无需重复goto）\n- document: 文档生成（docx/pdf/xlsx，输出真实文件返回 MEDIA: 路径可直接下发）。format=docx|pdf 时 content 传块列表（heading/paragraph/bullet/table/pagebreak），format=xlsx 时传 sheets:[{{name, rows}}]。需要交付正式文档/报表/表格文件时使用；纯文本回答不需要生成文件\n- text_to_speech: 语音合成（TTS，文本→音频文件，输出返回 MEDIA: 路径可直接播放/下发）。需要把文字转成语音/音频文件（朗读稿/配音/语音播报）时使用；voice 可选（默认中文女声 zh-CN-XiaoxiaoNeural），rate 可选语速（如 +0%）。纯文字回复不需要合成音频\n- image: 图像生成/编辑（输出真实文件返回 MEDIA: 路径可直接下发）。action=generate 按 prompt 生成图像（⚠️ 未配置 AI 后端时为程序化绘制，会在结果里如实标注）；resize/crop/rotate/flip/convert/annotate/compose/thumbnail 为确定性编辑（传 path）。需要生成图片或处理图片（缩放/裁剪/加文字/拼图/转格式）时使用\n- send_file: 文件下发（本地已有文件→📎下载卡片，返回 MEDIA: 标签走既有下发通道）。path=文件绝对路径（不知道路径先用 search_files 找），message 可选随件附言。需要把本地文件交付给用户（产物/报告/日志）时使用；文件不存在/越界显式报因\n- process: 后台进程管理（长任务放后台跑，可见可管）。action=start 启动后台命令（command，返回 proc_id）/ list 列出全部 / poll 查状态 / log 看日志尾部 / kill 停止（默认 SIGTERM，force=true 才 SIGKILL）/ write 向 stdin 写入 / submit 写入并回车 / close 关闭 stdin。构建/测试/服务/长脚本等超过单次 terminal 耗时的任务用它；进程不随会话断开而终止。⚠️ 不会到点强杀长任务——超时只报状态\n
 You can send files to the user natively: to deliver a file, write a brief confirmation message (e.g. "文件已发送，请查收"), then include MEDIA:/absolute/path/to/file on a new line. The gateway extracts the tag, strips it, and sends the file as a download card. Always write some text before the MEDIA: tag — never output a bare MEDIA: tag alone. Use search_files first if you don't know the exact path. Do NOT paste file contents into chat."""
 
+    # ── P1-15 五终止条件组合入trace（lazy初始化兼容 __new__ 搭建的测试agent）──
+    def _termination_state(self) -> dict:
+        """session_id -> 本回合触发的终止条件（max_turns/token_budget/external_cancel）。"""
+        store = getattr(self, "_turn_termination", None)
+        if store is None:
+            store = {}
+            self._turn_termination = store
+        return store
+
+    def _resolve_turn_termination(self, session_id: str) -> str:
+        """终止条件组合裁决（termination.resolve 单一真源：显式条件优先，
+        其次ACP取消标记，空=正常完成）——一次消费，防跨回合残留。"""
+        explicit = self._termination_state().pop(session_id, "")
+        lifecycle = getattr(self, "_turn_lifecycle", None)
+        cancelled = bool(
+            lifecycle is not None and lifecycle.is_cancel_requested(session_id))
+        return termination.resolve(explicit=explicit, cancelled=cancelled)
+
     async def _run_llm_with_tools(
         self,
         messages: list[dict],
@@ -2351,7 +2389,8 @@ You can send files to the user natively: to deliver a file, write a brief confir
         stream_progress：0.1简单对话流式增量落库（simple路径传True）——流式积累
         处按节奏节流调用_save_progress，生成中途被杀已生成内容不丢；任务管线
         走per-step落库（调用方4425行），不开启此开关。"""
-        MAX_ROUNDS = 15
+        # P1-15 max_turns 终止条件单独可配（env SOULMATE_MAX_ROUNDS，默认15）
+        MAX_ROUNDS = termination.max_turns_limit()
         cwd = self._session_cwds.get(session_id, self._project_root)
         system_prompt = self._build_base_system_prompt(cwd)
 
@@ -3726,6 +3765,11 @@ You can send files to the user natively: to deliver a file, write a brief confir
         # （LLM 单轮慢也照发），软预算超限只提醒绝不硬杀（用户铁律：任务禁硬超时杀）──
         watchdog = self._watchdog_for(session_id)
         watchdog.beat(max_rounds=MAX_ROUNDS, tools_executed=len(all_tool_calls))
+        # P1-15 token_budget 终止条件（env SOULMATE_TURN_TOKEN_BUDGET，默认0=不限，
+        # 缺省零行为变化）：按轮累计本轮新增（回复文本+工具结果）估算token，
+        # 超预算显式终止落 trace（blueprint P1.6 Langroid max_cost 同构硬闸）
+        _token_budget = termination.turn_token_budget()
+        _turn_token_est = 0
         for _round in range(MAX_ROUNDS):
             # ── P1 span粒度round级：本轮边界标记（LLM文本切片+工具账本切片+耗时，
             # round子span在循环尾/早返点收口）──
@@ -3755,6 +3799,9 @@ You can send files to the user natively: to deliver a file, write a brief confir
                 if steer_abort:
                     activity.mark_aborted()
                     self._activity_store.upsert(activity)
+                    # P1-15：用户插话中断=external_cancel 终止条件落 trace
+                    self._termination_state()[session_id] = (
+                        termination.TERM_EXTERNAL_CANCEL)
                     logger.info(f"[steer] session {session_id} aborted via interrupt queue")
                     # kilocode #7：被排队消息顶掉=superseded（按interrupted处理不digest）；
                     # 纯用户中断=interrupted。收尾时由TurnClose订阅器裁决是否digest
@@ -4875,11 +4922,37 @@ You can send files to the user natively: to deliver a file, write a brief confir
                 all_tool_calls[_round_start:],
             )
 
+            # ── P1-15 token_budget 检查（超预算显式终止+失败必须可见）──
+            if _token_budget > 0:
+                _turn_token_est += estimate_content_tokens(
+                    full_response[_round_resp_mark:])
+                for _tr in tool_results:
+                    _turn_token_est += estimate_content_tokens(_tr.get("content", ""))
+                if _turn_token_est >= _token_budget:
+                    self._termination_state()[session_id] = (
+                        termination.TERM_TOKEN_BUDGET)
+                    _budget_note = (
+                        f"\n\n[已达本轮 token 预算({_token_budget})，估算消耗约"
+                        f"{_turn_token_est}，任务停止。如需继续，请发送新指令。]")
+                    full_response += _budget_note
+                    if self._client is not None:
+                        await self._client.session_update(
+                            session_id=session_id,
+                            update=acp.update_agent_message_text(_budget_note),
+                        )
+                        self._streamed_flags[session_id] = True
+                    logger.warning(
+                        f"[termination] session={session_id} token_budget="
+                        f"{_token_budget} 耗尽 est={_turn_token_est}")
+                    break
+
             # 如果没有工具调用，模型返回了纯文本，结束循环
             if not got_tool_call:
                 break
         else:
             # mem0 §1.1"失败必须可见"：轮次耗尽必须显式告知，不能静默返回残缺结果
+            # P1-15：max_turns 终止条件落 trace（end_turn termination=max_turns）
+            self._termination_state()[session_id] = termination.TERM_MAX_TURNS
             exhaustion_note = (
                 f"\n\n[已达最大工具调用轮次({MAX_ROUNDS})，任务停止。"
                 "如需继续，请发送新指令。]")
@@ -5298,6 +5371,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
                 # kilocode #7：异常路径turn必须收尾（close_reason=error→按interrupted不digest），
                 # 否则session残留active turn阻塞生命周期记账
                 self._turn_close_reason.pop(session_id, None)
+                self._termination_state().pop(session_id, None)
                 await self._turn_lifecycle.aclose_turn(
                     session_id, turn_lifecycle.CLOSE_ERROR
                 )
@@ -5515,6 +5589,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
 
         # ── kilocode #7 TurnOpen：turn生命周期开始（订阅器驱动观测+记忆采集）──
         self._turn_close_reason.pop(session_id, None)
+        self._termination_state().pop(session_id, None)
         self._turn_lifecycle.open_turn(
             session_id, message_id=message_id or "", user_text_len=len(user_text)
         )
@@ -6674,8 +6749,13 @@ You can send files to the user natively: to deliver a file, write a brief confir
 
         # ── trajectory span收口：回合根end_event（end_at盖章，store单一时钟
         # 推导duration；session token累计由store侧回填）──
+        # P1-15 终止条件组合裁决落 trace（_resolve_turn_termination 单一真源：
+        # 显式条件 max_turns/token_budget/external_cancel 优先，其次ACP取消标记，
+        # 空=正常完成）
+        _termination = self._resolve_turn_termination(session_id)
         await self._traj_recorder.end_turn(
-            session_id, traj_root_id, status=llm_outcome_status(full_response))
+            session_id, traj_root_id, status=llm_outcome_status(full_response),
+            termination=_termination)
 
         # ── kilocode #7 TurnClose：事件驱动记忆采集（订阅器隔离，失败不破坏会话流）──
         # close_reason语义：steer中断/取消等非正常收尾标记在此收尾；

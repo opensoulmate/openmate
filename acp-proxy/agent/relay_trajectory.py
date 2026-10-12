@@ -38,6 +38,7 @@ import time
 from dataclasses import dataclass, field
 
 from agent.frame_origin import KIND_ENGINE_CHROME, split_frames, strip_engine_chrome
+from agent import termination
 from agent.trajectory_recorder import TrajectoryRecorder, llm_outcome_status
 
 logger = logging.getLogger("acp-proxy.relay-trajectory")
@@ -271,7 +272,12 @@ class RelayTrajectory:
                     s, root_id, content=ax, duration_ms=dur,
                     status=status, tools=[], agent_id=self.agent_id, source="relay",
                 )
-                await self.recorder.end_turn(s, root_id, status=status)
+                await self.recorder.end_turn(
+                    s, root_id, status=status,
+                    # P1-15：ACP stop_reason→终止条件词汇落 trace（max_tokens=
+                    # token_budget 族，其余空=正常完成）
+                    termination=termination.from_acp_stop_reason(stop),
+                )
                 logger.debug(
                     f"[relay-traj] cli turn closed: agent={self.agent_id} sid={s} "
                     f"status={status} stop={stop or '-'} chars={len(ax)}"
@@ -310,7 +316,11 @@ class RelayTrajectory:
                 agent_id=self.agent_id,
                 source="relay",
             )
-            await self.recorder.end_turn(t.session_id, t.root_id, status=status)
+            await self.recorder.end_turn(
+                t.session_id, t.root_id, status=status,
+                # P1-15：ACP stop_reason→终止条件词汇落 trace
+                termination=termination.from_acp_stop_reason(stop),
+            )
             logger.debug(
                 f"[relay-traj] turn closed: agent={self.agent_id} sid={t.session_id} "
                 f"status={status} stop={meta_stop or '-'} chars={len(text)} "

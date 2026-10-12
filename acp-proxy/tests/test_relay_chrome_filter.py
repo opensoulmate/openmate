@@ -49,7 +49,8 @@ class FakeRecorder:
         self.calls.append(("record_llm_call", content, status))
         return "llm-1"
 
-    async def end_turn(self, session_id, root_id, status="ok", token_usage=0):
+    async def end_turn(self, session_id, root_id, status="ok", token_usage=0,
+                       termination=""):
         self.calls.append(("end_turn", status))
 
 

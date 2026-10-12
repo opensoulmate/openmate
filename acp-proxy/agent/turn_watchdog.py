@@ -60,9 +60,13 @@ class TurnWatchdog:
         heartbeat_s: float | None = None,
         soft_budget_s: float | None = None,
         max_lifetime_s: float | None = None,
+        on_soft_budget: Callable[[float, float], object] | None = None,
     ):
         self.session_id = session_id
         self._notify = notify
+        # P1-15 wall_clock 落trace钩子：软预算超限触发一次（budget_s, elapsed），
+        # None=不挂（默认零行为变化）
+        self._on_soft_budget = on_soft_budget
         self.heartbeat_s = float(
             heartbeat_s if heartbeat_s is not None
             else os.environ.get("SOULMATE_TURN_HEARTBEAT_S", DEFAULT_HEARTBEAT_S)
@@ -156,6 +160,7 @@ class TurnWatchdog:
             msg = (
                 f"{SOFT_WARN_PREFIX} {self.soft_budget_s:.0f}s（长回合），"
                 f"继续执行不中断。{msg}")
+            await self._fire_soft_budget(elapsed)
         self.beats_sent += 1
         logger.info(f"[turn-watchdog] session={self.session_id} {msg}")
         if self._notify is not None:
@@ -164,3 +169,17 @@ class TurnWatchdog:
             except Exception as e:
                 self.notify_failures += 1
                 logger.debug(f"[turn-watchdog] notify failed (non-fatal): {e}")
+
+    async def _fire_soft_budget(self, elapsed: float) -> None:
+        """软预算超限钩子（P1-15 wall_clock 条件落 trace 用，一次回合最多触发一次）。
+
+        旁路纪律同 notify：异常只计数不冒泡。"""
+        if self._on_soft_budget is None:
+            return
+        try:
+            result = self._on_soft_budget(self.soft_budget_s, elapsed)
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception as e:
+            self.notify_failures += 1
+            logger.debug(f"[turn-watchdog] on_soft_budget failed (non-fatal): {e}")

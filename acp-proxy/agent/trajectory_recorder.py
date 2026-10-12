@@ -243,6 +243,34 @@ class TrajectoryRecorder:
         return bool(data and data.get("ended"))
 
     @_fail_safe("")
+    async def log_event(
+        self, session_id: str, kind: str = "note", content: str = "",
+        metadata: dict | None = None, parent_id: str = "",
+    ) -> str:
+        """自由事件落 trace（P1-15 条件类事件用：wall_clock 软预算提醒等）。
+
+        kind 进 metadata.kind；fire-safe（失败返回''不冒泡）。事件即活动——
+        会触发 store 的"completed 自愈翻回 running"，只对 running 会话发。"""
+        if not session_id:
+            return ""
+        if not await self.ensure_session(session_id):
+            return ""
+        meta = dict(metadata or {})
+        meta.setdefault("kind", str(kind)[:40])
+        data = await self._post(
+            f"/api/trajectory/sessions/{session_id}/events",
+            {
+                "event_type": "custom",
+                "agent_id": "soulmate",
+                "content": (content or "")[:500],
+                "metadata": meta,
+                "parent_event_id": (parent_id or None),
+                "status": "ok",
+            },
+        )
+        return (data or {}).get("id", "")
+
+    @_fail_safe("")
     async def start_turn(
         self, session_id: str, user_text: str = "", agent_id: str = "soulmate"
     ) -> str:
@@ -465,23 +493,33 @@ class TrajectoryRecorder:
         return span_id
 
     async def _end_span(
-        self, session_id: str, span_id: str, status: str, token_usage: int
+        self, session_id: str, span_id: str, status: str, token_usage: int,
+        termination: str = "",
     ) -> None:
         """span收口单一真源（end_turn回合根与end_llm_span llm段共用，禁止双实现
-        漂移）：end_at盖章，store单一时钟推导duration，token按delta回填session累计。"""
+        漂移）：end_at盖章，store单一时钟推导duration，token按delta回填session累计。
+        termination（P1-15 五终止条件词汇，见 agent/termination.py）落事件
+        metadata——回合根以外的span传默认空串（正常完成语义）不变。"""
+        payload: dict = {"status": status, "token_usage": int(token_usage or 0)}
+        if termination:
+            payload["termination"] = str(termination)[:40]
         await self._post(
             f"/api/trajectory/events/{span_id}/end",
-            {"status": status, "token_usage": int(token_usage or 0)},
+            payload,
         )
 
     @_fail_safe(None)
     async def end_turn(
-        self, session_id: str, root_id: str, status: str = "ok", token_usage: int = 0
+        self, session_id: str, root_id: str, status: str = "ok", token_usage: int = 0,
+        termination: str = "",
     ) -> None:
-        """回合根span收口（end_at盖章，store侧单一时钟推导duration）。"""
+        """回合根span收口（end_at盖章，store侧单一时钟推导duration）。
+
+        termination：本回合被哪个终止条件收口（max_turns/token_budget/
+        external_cancel等，空=正常完成）——P1-15"终止条件组合入trace"落点。"""
         if not session_id or not root_id:
             return
-        await self._end_span(session_id, root_id, status, token_usage)
+        await self._end_span(session_id, root_id, status, token_usage, termination)
 
     @_fail_safe(None)
     async def end_llm_span(

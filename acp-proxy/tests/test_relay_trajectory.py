@@ -52,7 +52,8 @@ class FakeRecorder:
                            list(tools or []), agent_id, source))
         return "llm-1"
 
-    async def end_turn(self, session_id, root_id, status="ok", token_usage=0):
+    async def end_turn(self, session_id, root_id, status="ok", token_usage=0,
+                       termination=""):
         self.calls.append(("end_turn", session_id, root_id, status))
 
 

@@ -190,6 +190,13 @@ class TurnLifecycleBus:
         logger.debug(f"[turn] cancel ignored (no active turn): session={session_id}")
         return False
 
+    def is_cancel_requested(self, session_id: str) -> bool:
+        """P1-15：回合收口前查取消标记（external_cancel 终止条件落 trace 的裁决输入）。
+
+        aclose_turn 收尾时会消费掉标记，end_turn（trajectory）先于 aclose_turn
+        调用——用本方法在收口前读取，不消费。"""
+        return session_id in self._cancel_requested
+
     # ── 观测 ──
     def active(self, session_id: str) -> TurnRecord | None:
         return self._active.get(session_id)
