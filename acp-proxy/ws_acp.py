@@ -203,17 +203,20 @@ async def ws_acp_endpoint(client_ws: WebSocket):
     # 提取agent_id
     params = session_msg.get("params", {})
     logger.info(f"[ACP] session/new raw params: {json.dumps(params, ensure_ascii=False)[:200]}")
-    agent_id = params.get("agent_id") or params.get("agentId") or "soulmate"
+    # agent_id 必须显式声明（点击谁=建谁；默认值只许存在于前端入口，
+    # 服务端绝不顶替身份——铁律"每个agent都应该是独立的"）
+    meta = params.get("_meta") or {}
+    agent_id = params.get("agent_id") or params.get("agentId") or meta.get("agent_id")
+    if not agent_id:
+        logger.error("[ACP] session/new 缺少 agent_id——拒绝创建，禁止默认顶替")
+        await _send_acp(client_ws, {"jsonrpc": "2.0", "id": session_msg.get("id"), "error": {"code": -32602, "message": "session/new requires agent_id (no implicit default)"}})
+        return
     route = AGENT_ROUTES.get(agent_id)
     if route is None:
-        # 未知agent自动尝试 {agent_id} acp，fallback到soulmate
-        import shutil
-        if shutil.which(agent_id):
-            route = {"cmd": [agent_id, "acp"], "cwd": _USER_HOME}
-            logger.info(f"Dynamic route for '{agent_id}': {route['cmd']}")
-        else:
-            route = DEFAULT_ROUTE
-            logger.warning(f"Agent '{agent_id}' not found, falling back to soulmate")
+        # 未知agent响亮报错，绝不冒名顶替另一个agent的大脑
+        logger.error(f"[ACP] agent '{agent_id}' 未注册（无ACP路由）——拒绝创建会话")
+        await _send_acp(client_ws, {"jsonrpc": "2.0", "id": session_msg.get("id"), "error": {"code": -32601, "message": f"agent '{agent_id}' 不支持ACP会话（未注册）"}})
+        return
     logger.info(f"[ACP] user {user_id} → agent {agent_id} → {route['cmd']}")
 
     # ACP sessionId捕获 + 重启重放过滤（子进程重启session/load恢复用）

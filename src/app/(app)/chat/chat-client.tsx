@@ -2888,14 +2888,17 @@ export function ChatClient() {
                   const updatedSession = { ...selectedSessionRef.current, name: autoTitle };
                   selectedSessionRef.current = updatedSession;
                   setSelectedSession(updatedSession);
-                  useAppStore.getState().setActiveSession(currentSessionId, null, { sessionName: autoTitle });
+                  // 只更新标题，绝不触碰 agentId（曾在此传 null 清掉 agent 身份，
+                  // 导致点击任何 agent 新建的会话都被顶替成 soulmate——用户判死）
+                  useAppStore.getState().setActiveSession(currentSessionId, useAppStore.getState().activeAgentId, { sessionName: autoTitle });
                 }
                 setAttachments([]); setLoading(true);
                 // 计划模式添加前缀
                 const messageText = agentMode === 'plan' ? `[PLAN MODE] ${text}` : text;
                 streamingSessionIdRef.current = selectedSession?.id || null;
                 // 始终走 connectSession + waitForConnection，避免僵尸WebSocket（readyState=OPEN但对端已死）
-                const spAgentId2 = useAppStore.getState().activeAgentId || 'soulmate';
+                // agent 身份来源：会话自带 > store > 空白入口默认 soulmate（默认只许在这一处）
+                const spAgentId2 = useAppStore.getState().activeAgentId || (selectedSessionRef.current as { agentId?: string } | null)?.agentId || 'soulmate';
                 connectSession(currentSessionId, spAgentId2, text.slice(0, 30));
                 waitForConnection(currentSessionId, messageText, attachments, { steer: isSteer });
               }}
