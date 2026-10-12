@@ -1528,6 +1528,9 @@ class SoulMateAgent:
             # 系统状态体检（路线图 2.4）：只读体检，批内同样可用
             if func_name == "system_checkup":
                 return self._system_health_dispatch(func_args)
+            # 会话文件索引召回（路线图 20.1）：只读检索，批内同样可用
+            if func_name == "file_recall":
+                return self._file_recall_dispatch(func_args)
             # 定时任务调度（路线图 3.1 cron引擎）：批内同样可用
             if func_name in ("schedule_task", "schedule_list", "schedule_cancel"):
                 return self._cron_dispatch(func_name, func_args, session_id)
@@ -1695,6 +1698,60 @@ class SoulMateAgent:
         if sections is not None and not isinstance(sections, (list, tuple)):
             sections = [str(sections)]
         return checker.execute(sections)
+
+    # 会话文件索引写入上限：只索引可读文本小文件（超限/二进制显式跳过不索引）
+    _FILE_INDEX_MAX_BYTES = 200_000
+
+    def _index_file_for_recall(self, file_path: str, session_id: str) -> None:
+        """路线图 20.1：把会话中提到的真实文件内容写入 FTS 索引（写入点）。
+
+        只读文件内容交给 SessionFileIndex.index_file(file_path, content)；
+        超限/二进制/读失败显式跳过，绝不把路径字符串当内容索引（旧 bug）。
+        """
+        try:
+            size = os.path.getsize(file_path)
+            if size <= 0 or size > self._FILE_INDEX_MAX_BYTES:
+                return
+            with open(file_path, "rb") as fh:
+                raw = fh.read()
+            if b"\x00" in raw[:8192]:
+                return  # 二进制不索引
+            content = raw.decode("utf-8", errors="replace")
+            self._file_index.index_file(
+                file_path=os.path.abspath(file_path),
+                content=content,
+                metadata={"session_id": session_id},
+            )
+        except Exception:
+            pass
+
+    def _file_recall_dispatch(self, func_args: dict) -> str:
+        """file_recall 工具分发（路线图 20.1：FTS 召回闭环消费端）。
+
+        主循环与 code-mode 内层共用此入口，行为一致。只读检索已索引文件内容
+        片段（会话中提到过的文件），不改任何文件。与 _tool_recovery 同款
+        lazy-init（__new__ 构造实例未过 __init__ 自举）。
+        """
+        idx = getattr(self, "_file_index", None)
+        if idx is None:
+            idx = SessionFileIndex()
+            self._file_index = idx
+        query = str(func_args.get("query", "") or "").strip()
+        if not query:
+            return "错误: query 参数不能为空"
+        try:
+            limit = int(func_args.get("limit", 5) or 5)
+        except Exception:
+            limit = 5
+        limit = max(1, min(limit, 20))
+        results = idx.search(query, limit=limit)
+        if not results:
+            return f"文件索引中无匹配「{query}」的片段（只覆盖会话中提到并索引过的文件）"
+        lines = []
+        for r in results:
+            snippet = r.content.replace("\n", " ")[:200]
+            lines.append(f"- {r.file_path}（chunk#{r.chunk_index}）: {snippet}")
+        return f"文件索引命中 {len(results)} 段：\n" + "\n".join(lines)
 
     def _cron_dispatch(self, func_name: str, func_args: dict, session_id: str = "") -> str:
         """schedule_task/schedule_list/schedule_cancel 分发（路线图 3.1 cron引擎）。
@@ -2345,6 +2402,7 @@ ACP代理目录: {cwd}/acp-proxy（后端 Python 代码在此）
 - profile_record / profile_read: 用户画像（偏好/环境事实/身份，跨会话自动注入系统提示）。用户告知或纠正偏好、环境事实（操作系统/机器/常用工具/部署位置）、身份（角色/技能水平）→ 立即 profile_record 显式记录（fact_type=preference/environment/identity）；需要了解用户背景时用 profile_read
 - profile_audit: 用户画像审计/清理。action=list 可见复盘全部画像条目（含噪音嫌疑标记）；用户明确要求清理画像时 action=delete（先 confirm 缺省预览，用户确认后 confirm=true 执行）。⚠️ 禁止擅自清库，删除必须用户明确要求
 - system_checkup: 系统状态一键体检（只读，不改系统）。服务运行状态/端口监听/磁盘占用/内存/负载/进程（内存TopN+僵尸）六项一次查全；用户问系统/服务/磁盘/负载现状或需要运维判断时使用。sections 参数可只查部分分区
+- file_recall: 会话文件索引召回（只读）。按内容关键词检索会话中提到并索引过的文件片段（文件路径+内容片段）；用户问『之前那个文件里写了什么』『哪个文件提到过 X』或凭内容回忆文件时使用。⚠️ 只覆盖索引时快照，文件已改动请 read_file 读最新
 - schedule_task / schedule_list / schedule_cancel: 定时任务调度（SoulMate自己的cron：到点自动执行+执行日志+自动排下一次，区别于一次性唤醒）。用户要求"定时/每天/每小时/每周做某事"→ schedule_task（schedule=interval:5m 或 cron:0 9 * * *）；查看任务与执行日志→ schedule_list；停用/删除→ schedule_cancel
 - monitor_add / monitor_list / monitor_check / monitor_remove: 监控告警（对指定服务/网站做周期健康检查：异常告警+恢复通知，目标持久化）。用户要求"监控某网站/服务是否存活、挂了提醒我"→ monitor_add（kind=website/service/port）；查看监控项与最近检查→ monitor_list；立即检查→ monitor_check；停用/删除→ monitor_remove。⚠️ 监控检查只读，不改目标系统
 - wechat_route_list / wechat_route_bind / wechat_route_unbind: 微信会话级路由（peer↔OpenMate会话映射管理，持久化）。查看映射（可按peer/session_id过滤反查）→ wechat_route_list；用户要求"把某微信用户的对话换到某会话/重新绑定/纠正绑错"→ wechat_route_bind；"解绑/断开某微信用户"→ wechat_route_unbind（下次来消息自动新建会话，历史保留）。⚠️ 只改映射，不删消息、不碰消息收发与hermes侧
@@ -2956,6 +3014,31 @@ You can send files to the user natively: to deliver a file, write a brief confir
             },
         }
         builtin_tools.append(checkup_tool)
+
+        # ── 会话文件索引召回工具（路线图 20.1 召回闭环消费端）────────
+        # 写入点=_index_file_for_recall（会话中提到的文件真实内容入 FTS 索引），
+        # 本工具按内容检索已索引文件片段——写入→索引→召回完整闭环，只读。
+        file_recall_tool = {
+            "type": "function",
+            "function": {
+                "name": "file_recall",
+                "description": (
+                    "按内容检索会话中提到过的文件（FTS 全文索引召回，只读）：返回"
+                    "匹配的文件路径+内容片段。用户问『之前那个文件里……写的是什么』"
+                    "『哪个文件提到过 X』或需要凭内容回忆已索引文件时使用；"
+                    "文件已改动时仍应 read_file 读最新内容，本工具只覆盖索引时快照。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "内容检索关键词"},
+                        "limit": {"type": "integer", "description": "最多返回片段数（缺省5，上限20）"},
+                    },
+                    "required": ["query"],
+                },
+            },
+        }
+        builtin_tools.append(file_recall_tool)
 
         # ── 定时任务调度工具（路线图 3.1 cron引擎）──────────────────
         # SoulMate 自己的周期调度：schedule+执行+日志（区别于 schedule_wakeup
@@ -4638,6 +4721,14 @@ You can send files to the user natively: to deliver a file, write a brief confir
                                 te = self._tool_error_handler.handle_error(
                                     session_id, func_name, e, func_args)
                                 result = te.to_model_message()
+                        elif func_name == "file_recall":
+                            # ── 会话文件索引召回（路线图 20.1，只读）──────
+                            try:
+                                result = self._file_recall_dispatch(func_args)
+                            except Exception as e:
+                                te = self._tool_error_handler.handle_error(
+                                    session_id, func_name, e, func_args)
+                                result = te.to_model_message()
                         elif func_name in ("schedule_task", "schedule_list", "schedule_cancel"):
                             # ── 定时任务调度（路线图 3.1 cron引擎）────────
                             try:
@@ -5459,13 +5550,15 @@ You can send files to the user natively: to deliver a file, write a brief confir
         except Exception:
             pass
 
-        # ── 文件索引：索引会话中提到的文件 ──
+        # ── 文件索引：索引会话中提到的文件（路线图 20.1 召回闭环写入点）──
+        # 旧调用 index_file(session_id, fp) 传参错位（file_path 收到 session_id、
+        # content 收到路径字符串，索引存的是"路径当内容"的垃圾）——现读真实文件
+        # 内容入 FTS 索引，供 file_recall 工具召回（写入→索引→召回闭环）。
         try:
-            import re as _re_idx
-            file_mentions = _re_idx.findall(r'[\w/\-]+\.\w{1,5}', user_text)
+            file_mentions = re.findall(r'[\w/\-]+\.\w{1,5}', user_text)
             for fp in file_mentions[:3]:
-                if os.path.exists(fp):
-                    self._file_index.index_file(session_id, fp)
+                if os.path.isfile(fp):
+                    self._index_file_for_recall(fp, session_id)
         except Exception:
             pass
 
