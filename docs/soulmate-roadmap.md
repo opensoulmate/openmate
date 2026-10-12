@@ -1325,17 +1325,26 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
   写入点 `index_file(session_id, fp)` 传参错位（file_path 收 session_id、content 收
   路径字符串=索引存"路径当内容"垃圾）+search() 全库零消费者（只写不读）——
   实装/测试/证据见周期#131日志
-- [ ] 20.2 反射产生源接入点（考古实证：bootstrap_kpi._edit_reflection 明文自报
+- [x] 20.2 反射产生源接入点（考古实证：bootstrap_kpi._edit_reflection 明文自报
   "反射库 0 行（ReflectionEngine.record_reflection 无产生源接入）"——record_reflection
   写入面存在但产品链路零产生源，KPI 恒 0）：把真实反射产生源（确定性时刻：自验收尾
   出结论/工具失败恢复成功/补做自愈完成等）接入 record_reflection，反射库有真实行
   + bootstrap_kpi 反射 KPI 可观测；产生源选择查代码实证不硬造
+  ——周期#132实装：agent/reflection_sources.py 三确定性时刻合成器（from_self_verify
+  自验收尾出结论=coverage真值/missing/uncertain 入弱点、from_remediation 拒做补做
+  收口成功0.8/未自愈0.3两态、from_tool_recovery 恢复成功时刻）+record_safely fail-safe
+  旁路+soulmate_agent 四点接线（①自验结论块②补做成/败两态③_tool_recovery_execute
+  recovered 分支）；顺手修真 bug：reflection_id 同毫秒主键碰撞静默丢第二条→uuid 后缀
+  唯一化。真跑：19.2 验收真实 WS 回合自然命中→生产 reflections.db 2 行+live KPI
+  available:true（详见周期#132日志）
 - [ ] 20.3 候选·Gene 模板面对照门（P2-10 诚实边界③：gene_loop promote 提案→Gene
   模板的人审晋升通道未过对照门）——**待用户拍板**后落地，不先斩后奏
 - [ ] 20.4 候选·16.1 六项拍板项深预研（决策包已给全，仅用户要求时做深预研）
 - 常设观察（不占阶段顺序）：15.5 flaky 断言、16.3 反馈挖掘、19.2 长窗采样轮转
 
 ## 周期日志
+
+[2026-10-12 13:20] 周期#132 | 20.2 反射产生源接入点（"写了≠接线了"考古实证零产生源当拍即补）+16.3 反馈挖掘+19.2 第七轮（调研+发布）+15.5 第二十七轮：①考古确认 record_reflection 写入面存在但产品链路零调用方（读侧 get_improvement_context 已接 prompt 注入，写侧全库 grep 零消费）②实装 agent/reflection_sources.py：三确定性时刻合成器（from_self_verify 自验收尾出结论=coverage 真值非硬造+missing/uncertain 入弱点；from_remediation 拒做补做收口成功/未自愈两态；from_tool_recovery=_tool_recovery_execute recovered 时刻）+record_safely fail-safe 旁路（引擎爆炸只记日志返回 False 绝不冒泡）+None 引擎 lazy-init③soulmate_agent 四点接线（import+自验结论块（与结论横幅同门槛：多需求项或有缺口）+拒做补做成/败两态+恢复成功分支）④首跑测试 3 挂暴露真 bug：reflection_id=refl_<毫秒> 主键同毫秒碰撞→第二条 INSERT IntegrityError 被 fail-safe 吞掉=静默丢行→refl_<毫秒>_<uuid8> 唯一化（tests/test_reflection_sources.py 9/9 过）；bootstrap_kpi 0 行注释更新对齐 20.2 语义⑤回归 174 全过（bootstrap_kpi+reflection_sources+trajectory_recorder/rounds+turn_lifecycle+refusal_remediation+report_evidence+self_verify+relay_trajectory）⑥Gate3 真跑：重启 acp-proxy 加载新代码后 19.2 验收真实 WS 回合**自然命中**产生源（自验 items=2 出结论）→生产 reflections.db 真实 2 行（refl_1791781222525_e339ba80/refl_1791781238601_36b46ae6，uuid 后缀新格式，quality=0.5=coverage 真值）→live GET /api/agent/bootstrap-kpi 反射 KPI available:true count=2 avg_quality=0.5（此前恒 available=False）——产生源→存储→KPI 消费全链真实跑通⑦16.3 四触点：agent_messages 近 24h user 行=0、wechat_bridge_log.jsonl 末行仍 1791584264 历史 send_skipped、tool_failures.db 0 字节空库、ai_groups discussion_messages 70 行持平——零真实反馈维持⑧19.2 第七轮（调研+发布，tag=REJ132_1791781186，verify_mode 全 server_side）**2/2✅**：调研 36.17s（web_search 执行行=1 真源=trajectory_events+回复含 3.13/2024）+发布 15.79s（opensoul.db 投递行=1）双双 end_turn 无拒做——部署后累计 53 轮：开发 9/9、调试 5/5、发布 5/5、运维 5/5、办公 5/5、定时 4/4、多渠道 4/4、记忆 4/4、协作 4/4、调研 8/9，拒做复发率 1/53、补做自愈 1/1⑨15.5 第二十七轮：test_head_stall_aborts_fast_and_retry_recovers 单跑过（--durations call 1.39s）+32 例批跑过（18.72s）未复现→上限 3.0s 不动⑩产物清理：/tmp/soulmate_accept 已删、/tmp/refl_probe_132.txt 已删、KPI 临时 JSON 已删 | ✅ | (本次提交) | 20.2 勾选；Gate1 git diff 真实落盘（reflection_sources.py 6990B/soulmate_agent +20/reflection_engine +3/tests 175 行，三拍小步 commit 防 evo 截走）；Gate2 接线钉源码断言（三产生源各自落在真实函数路径：from_tool_recovery 在 _tool_recovery_execute 函数体内含 recovered 分支、from_remediation×2 在拒做补做两态、from_self_verify 在结论块）+最强证据=生产回合自然命中写入真源行（非探针自造）；Gate3 真实产出=9/9 新测+174 回归真实 pytest 输出+生产 reflections.db 2 行 sqlite 回读+live 端点 HTTP 回读 available:true count=2 与直算一致；⚠️诚实边界①产生源为确定性时刻合成（无 LLM 评分）：quality=coverage 真值或固定档位 0.8/0.3，语义化质量分非模型判断②自验产生源触发=结论横幅同门槛（多需求项或有缺口），单条已覆盖闲聊不产行防噪音③工具失败恢复产生源本窗口未自然命中（恢复事件低频）——接线钉+单测覆盖，留待自然命中核账④/acp/send HTTP 测试路径实测返回 hermes 启动横幅非 SoulMate 回合（无副作用、未采信为证据，真实证据全取 WS 用户路径）——该路径默认路由语义待查⑤本轮无自然拒做≠拒做消失，1/53 累计间歇率；19.2b 落账实效待自然复发核账⑥15.5 二十七轮未复现≠证明不 flaky；下周期=20.3 Gene 模板面对照门/20.4 六项深预研均待用户拍板（不先斩后奏）→期间跑常设观察（15.5/16.3/19.2 第八轮轮换：余类 定时/多渠道/记忆/协作）+代码考古规划阶段 21 候选切片（不造无依据需求）
 [2026-10-09 19:00] 周期#0 | 路线图建立+cron流水线上线 | ✅ | (本文档创建) | 首个自动周期15分钟后启动
 [2026-10-10 01:20] 周期#1 | 阶段0盘点：核实21工具/3记忆引擎/三层技能机制+缺口图；清理soulmate_agent.py损坏WIP（截断import`AgentCheckpointMan`+`return clsager`致ImportError，且属用户已否决的防双开守卫类，diff留证docs/devlog/2026-10-10-broken-idempotent-guard-wip.patch后还原HEAD，import实测恢复） | ⚠️ | 1ea328ce | 附带实测tests/test_skill_standard_layer.py 34 passed；下周期做1.1 MEMORY.md型持久记忆
 [2026-10-10 01:38] 周期#2 | 1.1 MEMORY.md型持久记忆：新增agent/persistent_memory.py（atomic_write+SOULMATE_MEMORY_PATH覆盖）+memory_read/write/append三工具进builtin_tools与主dispatch+系统提示"持久记忆"段注入（KIND_MEMORY归因，超长显式截断） | ✅ | 7cb4e532 | tests/test_persistent_memory.py 15/15过+既有回归89过（memory_echo/marker/plan_tool_ledger/sandbox_policy）+env覆盖烟测真实输出验证；遗留：code-mode内层工具面未含memory工具（后续切片补）；下周期做1.2会话历史检索对标实测
