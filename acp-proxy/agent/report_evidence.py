@@ -21,6 +21,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from agent.subagent_manager import SUBAGENT_PROMPT_MARKER
+
 # ── 账本 permission 语义（单一真源：permission_gate.GateResult.behavior 注释）──
 # allow / deny / ask→approved / ask→denied / degraded-allow / cached-allow
 EXECUTED_PERMISSIONS = {
@@ -132,7 +134,16 @@ def is_action_request(user_text: str) -> bool:
 
 
 def is_cacheable_request(user_text: str) -> bool:
-    """语义缓存准入判据：执行类请求不缓存不回放（防合成报告短路）。"""
+    """语义缓存准入判据：执行类请求不缓存不回放（防合成报告短路）。
+
+    系统派发的子代理任务 prompt（SUBAGENT_PROMPT_MARKER）同样不准入——
+    语义相似命中会把只差一个任务词的兄弟子任务答案互相回放（实证：ALPHA/BETA
+    worker prompt 仅差一个词，Jaccard≈0.95 高于 0.85 阈值，BETA 条目被命中
+    32 次、ALPHA worker 逐字回放 BETA 答案连错 11 轮）。子代理任务是执行类
+    请求，每次必须真实执行，不准入缓存读写。
+    """
+    if SUBAGENT_PROMPT_MARKER in (user_text or ""):
+        return False
     return not is_action_request(user_text)
 
 

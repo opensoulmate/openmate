@@ -23,6 +23,11 @@ from agent.report_evidence import (
     parse_ledger,
 )
 from agent.self_verify import SelfVerifier
+from agent.subagent_manager import (
+    SUBAGENT_PROMPT_MARKER,
+    Subtask,
+    build_subagent_prompt,
+)
 
 
 # ── ① 账本解析 ──────────────────────────────────────────────────
@@ -196,6 +201,22 @@ def test_cache_gate_allows_informational_requests():
         "怎么理解上下文工程？",
     ):
         assert is_cacheable_request(q), q
+
+
+def test_cache_gate_blocks_subagent_worker_prompts():
+    """子代理任务 prompt 不准入语义缓存（周期#169 ALPHA/BETA 串扰根修）。
+
+    用真实生产者 build_subagent_prompt 构造——生产者改措辞/丢标记测试即红。
+    ALPHA/BETA 仅差一个词的兄弟任务曾被 Jaccard 相似命中互相回放（BETA 条目
+    32 次命中、ALPHA worker 连错 11 轮）。
+    """
+    for goal in ("只回复一个词：ALPHA_DONE", "只回复一个词：BETA_DONE"):
+        p = build_subagent_prompt(Subtask(goal=goal))
+        assert SUBAGENT_PROMPT_MARKER in p  # 生产者确实发出标记（单一真源）
+        assert not is_cacheable_request(p), goal
+    # 空/None 输入不炸
+    assert not is_cacheable_request(SUBAGENT_PROMPT_MARKER)
+    assert is_cacheable_request("")
 
 
 def test_claims_completion_markers():
