@@ -373,6 +373,20 @@ async def agent_wakeup_executor():
         return {"error": str(e)}
 
 
+# ── P2.3 自举KPI四联整合面（只读聚合端点）──
+@app.get("/api/agent/bootstrap-kpi")
+async def bootstrap_kpi(since: float = 0.0):
+    """四联自举KPI（任务成功率/人工干预率/edit反射/compact后质量）。
+
+    只读聚合真实落库数据（trajectory turn_root / perm_decision_audit /
+    reflections.db / kind=compact 事件），无样本诚实降级不估算。"""
+    try:
+        from agent.bootstrap_kpi import compute_kpis
+        return compute_kpis(since=since or None)
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # ── kilocode supplement3 #15: 网络受限会话工具面收缩（策略API）──
 # agent子进程与本进程共享JSON store（文件真源），跨进程读写同款SandboxPolicy。
 def _sandbox_policy():

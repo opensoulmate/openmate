@@ -114,22 +114,26 @@ def _turn_roots(db_path: Path, since_iso: str | None) -> list[dict]:
 
 def _task_success(turn_roots: list[dict]) -> dict[str, Any]:
     total = len(turn_roots)
+    closed = [t for t in turn_roots if t["end_at"]]
+    open_turns = total - len(closed)
     termination_counts: dict[str, int] = {}
     success = 0
-    for t in turn_roots:
+    for t in closed:
         term = t["termination"]
         termination_counts[term or "(normal)"] = termination_counts.get(term or "(normal)", 0) + 1
         if t["status"] == "ok" and term == _SUCCESS_TERMINATION:
             success += 1
     return {
-        "available": total > 0,
+        "available": len(closed) > 0,
         "total_turns": total,
+        "closed_turns": len(closed),
+        "open_turns": open_turns,
         "success_turns": success,
-        "rate": (success / total) if total else None,
+        "rate": (success / len(closed)) if closed else None,
         "termination_counts": termination_counts,
         "source": "opensoul.db trajectory_events (turn_root)",
-        "success_semantics": "end_turn status=ok 且 termination 空（正常完成）",
-        "note": "" if total else "窗口内无回合根样本",
+        "success_semantics": "已收口回合中 end_turn status=ok 且 termination 空（正常完成）；未收口回合不计入分母",
+        "note": "" if closed else "窗口内无已收口回合根样本",
     }
 
 
@@ -231,8 +235,8 @@ def _compact_quality(db_path: Path, since_iso: str | None) -> dict[str, Any]:
         if meta.get("after_count") is not None:
             after_counts.append(int(meta["after_count"]))
         for t in turns:
-            if t["session_id"] != c["session_id"]:
-                continue
+            if t["session_id"] != c["session_id"] or not t["end_at"]:
+                continue  # 只算已收口回合（未收口无结局，不冒充成功/失败）
             ok = t["status"] == "ok" and t["termination"] == _SUCCESS_TERMINATION
             if t["created_at"] >= c["created_at"]:
                 post.append(ok)
