@@ -256,6 +256,13 @@ const simulateTokenUsage = (content: string): TokenUsage => {
 };
 
 // ── useAcpWebSocket hook（ACP JSON-RPC 2.0 协议，多会话版）────────────────
+const isTokenExpired = (t: string): boolean => {
+  try {
+    const payload = JSON.parse(atob(t.split('.')[1]));
+    return payload.exp ? payload.exp * 1000 < Date.now() : false;
+  } catch { return true; }
+};
+
 function useAcpWebSocket(params: {
   selectedAgent: AgentInfo | null;
   selectedSession: Session | null;
@@ -565,13 +572,6 @@ function useAcpWebSocket(params: {
 
     const state = getSessionState(sessionId);
     state.unmounted = false;
-
-    const isTokenExpired = (t: string): boolean => {
-      try {
-        const payload = JSON.parse(atob(t.split('.')[1]));
-        return payload.exp ? payload.exp * 1000 < Date.now() : false;
-      } catch { return true; }
-    };
 
     const sendRpcRequest = (ws: WebSocket, method: string, params: Record<string, unknown> = {}): Promise<unknown> => {
       return new Promise((resolve, reject) => {
