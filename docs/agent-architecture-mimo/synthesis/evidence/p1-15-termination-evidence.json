@@ -1,0 +1,170 @@
+{
+  "tag": "1791774830",
+  "checks": [
+    {
+      "name": "C1a max_turns 缺省15（零行为变化）",
+      "ok": true,
+      "detail": "15"
+    },
+    {
+      "name": "C1b max_turns 独立可配（env=2）",
+      "ok": true,
+      "detail": "2"
+    },
+    {
+      "name": "C1c max_turns 非法值回退默认",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "C2a token_budget 缺省0=不限（零行为变化）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "C2b token_budget 独立可配（env=8000）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "C3 五条件词汇完备",
+      "ok": true,
+      "detail": "['external_cancel', 'max_turns', 'token_budget', 'user_idle', 'wall_clock']"
+    },
+    {
+      "name": "C4 组合裁决三态（显式>external_cancel>正常）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "C5 ACP stop_reason 映射（max_tokens→token_budget族）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "S1 end_turn(termination) 真实落库回读=max_turns",
+      "ok": true,
+      "detail": "{\"kind\": \"turn_root\", \"chars\": 25, \"termination\": \"max_turns\"}"
+    },
+    {
+      "name": "S2 正常收口零误标（metadata 无 termination key）",
+      "ok": true,
+      "detail": "{\"kind\": \"turn_root\", \"chars\": 23}"
+    },
+    {
+      "name": "S3 wall_clock 软预算钩子真实触发一次",
+      "ok": true,
+      "detail": "fired=1"
+    },
+    {
+      "name": "S4 wall_clock 条件事件真实落库回读",
+      "ok": true,
+      "detail": "{\"termination_condition\": \"wall_clock\", \"action\": \"soft_warn\", \"budget_s\": 0.15, \"elapsed_s\": 0.2, \"kind\": \"termination_condition\"}"
+    },
+    {
+      "name": "S5 wall_clock 提醒不终止（用户铁律覆盖蓝图硬杀）",
+      "ok": true,
+      "detail": "soft_warned=True"
+    },
+    {
+      "name": "S6 user_idle 标记事件落trace（opensoul 真实SQLite测试）",
+      "ok": true,
+      "detail": "4 passed in 0.19s"
+    },
+    {
+      "name": "S7 external_cancel 裁决+cancelled 收口",
+      "ok": true,
+      "detail": "close=cancelled"
+    },
+    {
+      "name": "E1a max_turns 回合：回复含轮次耗尽告知",
+      "ok": true,
+      "detail": "real_sid=om-9f747a6cb2f0 msgs=2 stop=end_turn | 我先执行第一步，然后说明为什么不能\"一直循环下去\"。  [已达最大工具调用轮次(2)，任务停止。如需继续，请发送新指令。]    [已达最大工具调用轮次(2)，任务停止。如需继续，请发送新指令。]"
+    },
+    {
+      "name": "E1b max_turns 回合：真实store回读 termination=max_turns",
+      "ok": true,
+      "detail": "real_sid=om-9f747a6cb2f0 msgs=2 stop=end_turn | {\"kind\": \"turn_root\", \"chars\": 123, \"termination\": \"max_turns\"}"
+    },
+    {
+      "name": "E2a token_budget 回合：回复含预算耗尽告知",
+      "ok": true,
+      "detail": "real_sid=om-77c77fb95600 msgs=2 stop=end_turn | 续递增，无缺号、无重复 | | 数字总个数 | 2000 个（其中一位数 9 个、两位数 90 个、三位数 900 个、四位数 1001 个） | | 数值总和 | 2,001,000（= 2000×2001÷2） |  即：命令输出了 1 到 2000 的完整连续自然数序列，逐行排列，内容与命令语义完全一致，无异常。"
+    },
+    {
+      "name": "E2b token_budget 回合：真实store回读 termination=token_budget",
+      "ok": true,
+      "detail": "real_sid=om-77c77fb95600 msgs=2 stop=end_turn | {\"kind\": \"turn_root\", \"chars\": 45, \"termination\": \"token_budget\"}"
+    },
+    {
+      "name": "E3a 对照回合真实完成",
+      "ok": true,
+      "detail": "real_sid=om-6ec025222031 msgs=2 stop=end_turn | p115-normal-1791774830  p115-normal-1791774830"
+    },
+    {
+      "name": "E3b 对照回合零误标（回读无 termination key）",
+      "ok": true,
+      "detail": "real_sid=om-6ec025222031 msgs=2 stop=end_turn | {\"kind\": \"turn_root\", \"chars\": 42}"
+    },
+    {
+      "name": "W0 WS session/new 拿到真实会话",
+      "ok": true,
+      "detail": "om-3caa3425dbd1"
+    },
+    {
+      "name": "W1a WS 正常回合真实完成",
+      "ok": true,
+      "detail": "p115-ws-normal-1791774830p115-ws-normal-1791774830"
+    },
+    {
+      "name": "W1b WS 正常回合零误标（回读无 termination key）",
+      "ok": true,
+      "detail": "{\"kind\": \"turn_root\", \"chars\": 45}"
+    },
+    {
+      "name": "W2a /abort 忙时入队（中断指令已排队）",
+      "ok": true,
+      "detail": "🛑 中断指令已排队，任务将在当前步骤后停止"
+    },
+    {
+      "name": "W2b abort 回合：中断语义可见（WS流或服务端agent_messages）",
+      "ok": true,
+      "detail": "ws=🛑 收到中断指令，停止当前任务done | db=  [任务被用户插话中断]  done 请调用 terminal 工具执行命令：sleep 25。执行完成后再调用 terminal 执行 echo done。每个命令单独调用一次 terminal 工具。 p115-ws-normal-1791774830  p115-ws-normal-1791774830"
+    },
+    {
+      "name": "W2c abort 回合：真实store回读 termination=external_cancel",
+      "ok": true,
+      "detail": "{\"kind\": \"turn_root\", \"chars\": 83, \"termination\": \"external_cancel\"}"
+    },
+    {
+      "name": "W2d abort 回合 turn root 已收口（非悬挂）",
+      "ok": true,
+      "detail": "{\"kind\": \"turn_root\", \"chars\": 83, \"termination\": \"external_cancel\"}"
+    }
+  ],
+  "e2e": {
+    "max_turns_round": {
+      "sid": "om-9f747a6cb2f0",
+      "elapsed": 49.4,
+      "diag": "real_sid=om-9f747a6cb2f0 msgs=2 stop=end_turn",
+      "reply_tail": "我先执行第一步，然后说明为什么不能\"一直循环下去\"。\n\n[已达最大工具调用轮次(2)，任务停止。如需继续，请发送新指令。]\n\n\n\n[已达最大工具调用轮次(2)，任务停止。如需继续，请发送新指令。]"
+    },
+    "token_budget_round": {
+      "sid": "om-77c77fb95600",
+      "elapsed": 56.9,
+      "diag": "real_sid=om-77c77fb95600 msgs=2 stop=end_turn",
+      "reply_tail": "\n\n[已达本轮 token 预算(300)，估算消耗约635，任务停止。如需继续，请发送新指令。]\n\n命令已执行完毕（输出因过长已外置保存），回读校验结果如下：\n\n**`seq 1 2000` 结果总结**\n\n| 项目 | 内容 |\n|------|------|\n| 输出形式 | 每行一个整数，共 **2000 行** |\n| 数列范围 | 从 **1** 到 **2000**（首行 1，末行 2000，已回读验证） |\n| 步长 | 1，连续递增，无缺号、无重复 |\n| 数字总个数 | 2000 个（其中一位数 9 个、两位数 90 个、三位数 900 个、四位数 1001 个） |\n| 数值总和 | 2,001,000（= 2000×2001÷2） |\n\n即：命令输出了 1 到 2000 的完整连续自然数序列，逐行排列，内容与命令语义完全一致，无异常。"
+    },
+    "normal_round": {
+      "sid": "om-6ec025222031",
+      "diag": "real_sid=om-6ec025222031 msgs=2 stop=end_turn",
+      "reply_tail": "p115-normal-1791774830\n\np115-normal-1791774830"
+    },
+    "ws_abort_round": {
+      "sid": "om-3caa3425dbd1",
+      "reply_tail": "🛑 收到中断指令，停止当前任务done",
+      "stop": "end_turn"
+    }
+  },
+  "pass": true
+}
