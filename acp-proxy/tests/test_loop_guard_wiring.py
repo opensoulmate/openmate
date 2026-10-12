@@ -113,7 +113,8 @@ class TestSourceWiring:
         assert "[LoopGuard警告]" in text                    # WARN注入
         assert "loop-guard INTERVENE" in text               # INTERVENE合成结果
         assert "循环检测强制停止" in text                     # FORCE_STOP用户可见
-        assert "[已达最大工具调用轮次" in text                 # MAX_ROUNDS耗尽可见
+        assert "已达工具调用软上限" in text                  # 零推理收口可见（推理优先终止）
+        assert "推理优先" in text                            # 推理续期机制在源码可见
 
     def test_read_file_escape_bug_fixed(self):
         """字面量\\n转义bug：split按两字符'\\n'切分永远切不开真实换行（行号全坏）"""
@@ -172,8 +173,8 @@ class TestRealLoopWiring:
         scripts = [[call_a if i % 2 == 0 else call_b] for i in range(15)]
         agent = _wire_agent(tmp_path, scripts, gate=FakeGateDeny())
         resp, tools = run(agent._run_llm_with_tools([{"role": "user", "content": "go"}], "s1"))
-        assert "已达最大工具调用轮次(15)" in resp
-        assert "如需继续，请发送新指令" in resp
+        assert "已达工具调用软上限(15轮)" in resp
+        assert "请发送'继续'" in resp
         assert len(agent.llm_engine.seen_messages) == 15  # 恰好15轮，无16次LLM调用
 
     def test_guard_reset_between_tasks(self, tmp_path):

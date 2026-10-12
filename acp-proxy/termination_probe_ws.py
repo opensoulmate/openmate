@@ -240,7 +240,7 @@ async def layer3_engine(client: httpx.AsyncClient) -> None:
         "diag": diag1, "reply_tail": reply1[-500:]}
     meta1 = turn_root_meta(await readback_turn_events(client, real1))
     rec("E1a max_turns 回合：回复含轮次耗尽告知",
-        "已达最大工具调用轮次" in reply1, f"{diag1} | {reply1[-160:]}".replace("\n", " "))
+        "已达工具调用软上限" in reply1, f"{diag1} | {reply1[-160:]}".replace("\n", " "))
     rec("E1b max_turns 回合：真实store回读 termination=max_turns",
         bool(meta1) and meta1.get("termination") == "max_turns",
         f"{diag1} | {json.dumps(meta1, ensure_ascii=False)}")
