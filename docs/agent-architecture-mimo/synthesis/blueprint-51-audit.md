@@ -30,7 +30,7 @@
 ## P1 混合形态（16）
 | # | 项 | 状态 | 证据 |
 |---|---|---|---|
-| 01 | 危险工具不对 personal 开放 | ⏳ | 轨道/偏好在 `user_preferences.py`；工具级轨道隔离待终验 |
+| 01 | 危险工具不对 personal 开放 | ✅ | 终验 2026-10-12 周期#126 **18/18 PASS**：语义真源=`agent/sandbox_policy.py` 工具面轨道隔离（tool_track：per-session显式>default_track，缺省 coding=零行为变化；store损坏/非法值 fail-closed 按 personal）；危险编码集=terminal/execute_code/process/write_file/patch/batch_execute **工具面不暴露**（registry 裁剪语义）+运行时 fail-safe 显式拒绝（指引"显式切换 coding"）；**终验暴露侧门当拍即修**（首轮 16/18）：terminal 被裁后模型改走 process 后台进程通道执行同一条 shell 命令（"拦正路留侧门"同类）→ process 入列、执行原语全家同裁，复跑 18/18；真实 WS 用户路径（同一真实会话两轮，WS→ws_acp→soulmate stdio→真实 MiMo 回合）：personal 轮 terminal touch **文件未创建**+回复如实报"没有 terminal/execute_code 等可执行工具、命令未执行"；显式切换 coding（API PUT tool_track）后同会话同指令**文件真实创建** end_turn（对照+切换语义一体实证）；API 入口=`PUT /api/agent/sandbox-policy/{sid} {"tool_track":"coding"\|"personal"}`（非法值 ok_track=False 拒绝落盘不静默纠正），describe 透出 dropped_if_personal；探针 `acp-proxy/tool_track_probe_ws.py`，证据 `evidence/p1-01-tool-track-evidence.json`。**对账表原注修正**：`user_preferences.py` 是偏好学习器（category=偏好分类）非轨道真源，轨道真源=sandbox_policy 的 tool_tracks store。边界如实声明：delegate_tasks/group_task/schedule_task 为间接通道（委派/排程执行面在执行时刻的会话轨道）、request_evolution/skill_save 走各自安全门（进化评审/单写者守卫）——是否随轨道收缩**待用户拍板** |
 | 02-04 | 子agent/worktree/深潜 | ✅ | `agent/subagent_manager.py` + worktree（session_recall/git_api） |
 | 05 | RepoMap tree-sitter | ❌ | **未实现**（现有=检索式召回，非图中心性选符号） |
 | 06 | SEARCH/REPLACE 容错梯度 | ✅ | fuzzy/similar（`session_recall.py`/`reflex.py`） |
@@ -52,4 +52,4 @@
 
 ## 缺口处理（统筹裁决）
 - **❌ P1-05 RepoMap**：不排期硬造 tree-sitter 图中心性（过度设计）；用"检索式召回+token预算选符号"作为**替代实现**立项补文档，除非你要求原方案
-- **⏳×4**（P1-01/15、P2-09/10）：全部是"语义待终验"而非未实现——排入 soulmate 车道阶段20 前部做终验收口（P0-09 已于 2026-10-12 周期#124 终验销账 ✅，P0-10 已于 2026-10-12 周期#125 终验销账 ✅ 17/17，逐项销账进行中）
+- **⏳×3**（P1-15、P2-09/10）：全部是"语义待终验"而非未实现——排入 soulmate 车道阶段20 前部做终验收口（P0-09 已于 2026-10-12 周期#124 终验销账 ✅，P0-10 已于 2026-10-12 周期#125 终验销账 ✅ 17/17，P1-01 已于 2026-10-12 周期#126 终验销账 ✅ 18/18 含 process 侧门修复，逐项销账进行中）

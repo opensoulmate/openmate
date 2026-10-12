@@ -42,8 +42,10 @@ blueprint语义："危险编码工具绝不暴露给 personal 轨道，除非用
   工具面**（"不暴露"=工具面收缩，同 kilocode registry 语义），运行时
   fail-safe 兜底显式拒绝幻觉调用；显式 set_track("coding") 切换后恢复。
 - 边界声明：request_evolution/skill_save 走各自安全门（进化评审/单写者
-  守卫），delegate_tasks/group_task 走被委派方门禁——非"直接执行/改写"
-  原语，不入危险集；如需收紧另行拍板。
+  守卫），delegate_tasks/group_task/schedule_task 走被委派方门禁——非
+  "直接执行/改写"原语，不入危险集（⚠️ 间接通道如实声明：委派/排程的执行面
+  在执行时刻的会话轨道，personal 轨道不阻断委派排程本身，是否随轨道收缩
+  待用户拍板）；如需收紧另行拍板。
 
 失败语义（evolution-engine-patterns.md mem0 §1.1「处理必须可见，禁止静默」）：
 - store文件不存在 → 不受限（未配置=无限制，与kilocode默认一致）
@@ -80,9 +82,13 @@ TRACKS = (TRACK_CODING, TRACK_PERSONAL)
 # 危险编码工具=任意 shell + 代码执行 + 文件改写 + code-mode 批量执行
 # （"危险编码工具绝不暴露给 personal 轨道"的工具面真源；batch_execute 与
 # 网络集有交集——两轴独立判定，任一命中即裁）。
+# ⚠️ process 必须在列（周期#126 终验实证侧门）：terminal 被裁后模型改走
+# process 后台进程通道执行同一条 shell 命令="拦正路留侧门"同类缺陷，
+# 执行原语全家（terminal/execute_code/process）必须同裁。
 DANGEROUS_CODING_TOOL_NAMES = frozenset({
     "terminal",
     "execute_code",
+    "process",
     "write_file",
     "patch",
     "batch_execute",

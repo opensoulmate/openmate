@@ -412,7 +412,9 @@ class TestToolTrackStore:
 
 class TestDangerousClassification:
     def test_dangerous_coding_names(self):
-        for n in ("terminal", "execute_code", "write_file", "patch", "batch_execute"):
+        """执行原语全家必须同裁（process=周期#126 终验实证侧门，禁漏）"""
+        for n in ("terminal", "execute_code", "process", "write_file", "patch",
+                  "batch_execute"):
             assert SandboxPolicy.is_dangerous_coding_tool(n) is True
 
     def test_safe_names_not_dangerous(self):
@@ -425,7 +427,7 @@ class TestDangerousClassification:
 
 class TestTrackFilterTools:
     FACE = ("read_file", "web_search", "todo", "terminal", "execute_code",
-            "write_file", "patch", "batch_execute")
+            "process", "write_file", "patch", "batch_execute")
 
     def test_personal_drops_dangerous_keeps_safe(self, tmp_path):
         pol = SandboxPolicy(store_path=tmp_path / "pol.json")
@@ -433,7 +435,8 @@ class TestTrackFilterTools:
         kept, dropped = pol.filter_tools("s1", _tool_defs(*self.FACE))
         assert _names(kept) == ["read_file", "web_search", "todo"]
         assert sorted(dropped) == sorted(
-            ["terminal", "execute_code", "write_file", "patch", "batch_execute"])
+            ["terminal", "execute_code", "process", "write_file", "patch",
+             "batch_execute"])
 
     def test_explicit_switch_to_coding_restores_exposure(self, tmp_path):
         """blueprint："除非用户显式切换"——set_track(coding) 后危险工具回工具面"""
@@ -506,9 +509,27 @@ class TestTrackRunLlmFaceShrink:
             messages=[{"role": "user", "content": "hi"}], session_id="s1"))
         assert "回答完成" in resp
         face = agent.llm_engine.seen_tools[0]
-        for n in ("terminal", "execute_code", "write_file", "patch", "batch_execute"):
+        # process 是周期#126 终验实证的侧门（terminal被裁后模型改走process执行
+        # 同一条shell命令）——执行原语全家断言，一个都不许漏
+        for n in ("terminal", "execute_code", "process", "write_file", "patch",
+                  "batch_execute"):
             assert n not in face, f"{n} 泄漏进 personal 工具面"
         assert "read_file" in face and "todo" in face  # 日程/读取保留
+
+    def test_personal_hallucinated_process_call_refused(self, tmp_path):
+        """process 侧门回归（周期#126 e2e 实证缺陷钉死）：幻觉/绕道 process 同样被拒"""
+        tc = {"tool_calls": [{
+            "id": "p1",
+            "function": {"name": "process",
+                         "arguments": json.dumps({"action": "list"})},
+        }]}
+        agent, gate = self._agent(tmp_path, [[tc], ["完成"]], track=TRACK_PERSONAL)
+        resp, all_tool_calls = run(agent._run_llm_with_tools(
+            messages=[{"role": "user", "content": "跑个进程"}], session_id="s1"))
+        assert resp == "完成"
+        denied = [t for t in all_tool_calls if t.get("permission") == "sandbox-restricted"]
+        assert len(denied) == 1 and denied[0]["name"] == "process"
+        assert gate.calls == []
 
     def test_coding_face_keeps_dangerous_tools(self, tmp_path):
         """对照：默认 coding 轨道工具面含 terminal（零行为变化）"""
