@@ -1342,8 +1342,34 @@ SoulMate 能独立完成且质量相当 = 达标。每阶段末尾跑一次对�
 - [ ] 20.4 候选·16.1 六项拍板项深预研（决策包已给全，仅用户要求时做深预研）
 - 常设观察（不占阶段顺序）：15.5 flaky 断言、16.3 反馈挖掘、19.2 长窗采样轮转
 
+### 阶段21 · 下一批切片（周期#133 规划——代码考古实证候选，不造无依据需求）
+规划依据=周期#133 代码考古（bootstrap_kpi 自报面+产生源接线核查+待查项收口）：
+- [ ] 21.1 候选·compact KPI 语义消歧+阈值核账（KPI 自报面考古实证，20.2 同族"零产生源/
+  语义歧义"模式）：bootstrap_kpi compact_quality available:false note="窗口内无 compact
+  事件（压缩未触发或产生源未接入）"语义歧义——考古核查产生源**已接线**（soulmate_agent.py
+  `self._ctx_compressor.should_compress(messages)`→`log_event(kind="compact",
+  metadata={before_count,after_count})`+wiring 测试钉源码断言"压缩点未落 compact 事件
+  =KPI 数据源断线"），0 事件真相=571 回合未触发压缩（ContextCompressor 默认
+  max_tokens=8000×compression_threshold 0.8=6400 估算 token 门槛，中文 1.5 字/token 粗估）
+  →①KPI note 消歧（区分"未触发"与"未接入"，产生源接线状态可探测）②阈值与真实长会话
+  消息量分布核账（6400 估算门槛 vs 模型真实上下文窗口是否匹配、估算器粗估误差方向）
+- [ ] 21.2 候选·cron 常驻托管独立 daemon（3.1 遗留实证："调度循环宿主=存活的
+  SoulMateAgent 进程（stdio 子进程自举），无 agent 进程时任务不执行（错过不补跑）"——
+  schedule_task 创建的任务依赖 agent 进程存活才 fire）——形态（常驻进程 vs systemd
+  timer 触发）**待用户拍板**，拍板前不落地
+- [ ] 21.3 候选·反射 quality 语义化评分升级（20.2 诚实边界①：quality=coverage 真值或
+  固定档位 0.8/0.3 非模型判断；与 P2-10 诚实边界①"行为级对照 EvalCase+LLM judge"为
+  同族升级路径，eval_pipeline.py 已有数据集原语）——引入 LLM judge/行为证据加权有
+  成本/延迟取舍，**待用户拍板**
+- 已收口待查项（不占切片）：周期#132 诚实边界④"/acp/send 返回 hermes 横幅"查清=**设计
+  如此非缺陷**——proxy.py L97 注释明文"HTTP /acp/send（本文件硬编码hermes acp路由）"
+  +L142 spawn `hermes acp`，该入口是 hermes relay 回合记账面（RelayTrajectory），
+  hermes 启动横幅为正确语义；SoulMate 验收真源继续只取 WS 用户路径
+- 常设观察（不占阶段顺序）：15.5 flaky 断言、16.3 反馈挖掘、19.2 长窗采样轮转
+
 ## 周期日志
 
+[2026-10-12 13:35] 周期#133 | 常设观察轮（20.3/20.4 待用户拍板不先斩后奏）+代码考古规划阶段21+16.3 四触点+19.2 第八轮（定时+多渠道）+15.5 第二十八轮：①16.3 四触点（agent_messages 近 24h user 行=0、user_feedback 0 行、wechat_bridge_log.jsonl 431B mtime 仍 10-10 06:17 历史 send_skipped、tool_failures 125 行近窗全 llm:dna 合成 empty_output/read_timeout+1 历史 terminal（om-97a4f3c38d62）无新真实失败反馈、ai_groups discussion_messages 70 行持平）——零真实反馈维持②19.2 第八轮轮换（定时+多渠道，tag=REJ133_1791782200，WS 真实用户路径，verify_mode 全 server_side，结果 JSON 回读 run_tag/latency/stop_reason 与台面一致）**2/2✅**：定时 74.07s（cron_tasks.db tasks 表 accept_probe 行=1，探针自清回读 ~/.hermes/soulmate/memory/cron_tasks.db tasks=0）+多渠道 26.26s（wechat→accept_peer 出站痕迹行=1）双双 end_turn 无拒做——部署后累计 55 轮：开发 9/9、调试 5/5、发布 5/5、运维 5/5、办公 5/5、定时 5/5、多渠道 5/5、记忆 4/4、协作 4/4、调研 8/9，拒做复发率 1/55、补做自愈 1/1（下轮余类：记忆+协作）③15.5 第二十八轮：test_head_stall_aborts_fast_and_retry_recovers 单跑 3/3 过（--durations call 1.30/1.35/1.36s）+32 例批跑过（stall_guard 17+stream_stall 15，18.13s）未复现→上限 3.0s 不动④代码考古规划阶段 21（三候选切片写进路线图，不造无依据需求）：KPI 自报面考古发现 compact_quality available:false note"压缩未触发或产生源未接入"语义歧义→产生源接线核查（soulmate_agent.py should_compress→log_event kind="compact"+before/after 已接线、wiring 测试钉源码断言）→0 事件真相=571 回合未触发压缩（ContextCompressor 默认 8000×0.8=6400 估算 token 门槛）→**21.1 消歧+阈值核账**候选；21.2 cron 常驻托管（3.1 遗留"无 agent 进程任务不执行"）/21.3 反射 quality 语义化评分升级（20.2①+P2-10①同族升级路径）两候选**待用户拍板**⑤周期#132 诚实边界④销账：/acp/send HTTP 返回 hermes 横幅查清=**设计如此非缺陷**（proxy.py L97 注释"本文件硬编码hermes acp路由"+L142 spawn `hermes acp`，该入口=hermes relay 回合记账面 RelayTrajectory，hermes 横幅为正确语义）⑥反射库自然增行核账：live GET /api/agent/bootstrap-kpi edit_reflection count=3 avg_quality=0.667（#132 后又自然新增 1 行，产生源持续自然命中，非探针自造）⑦产物清理：/tmp/kpi133.json、/tmp/soulmate_accept_results.json 已删 | ✅ | (本次提交) | 阶段21 立项+21.1 候选；本轮无产品代码改动（观察+考古+docs），Gate1=roadmap git diff 真实落盘（阶段21 规划节+周期日志条目）；Gate2 不适用（无新符号）；Gate3 真实产出=19.2 验收 2/2 真实 WS 回合（结果 JSON 回读）+15.5 真实 pytest 输出（单跑 3+批跑 32）+KPI HTTP 回读+sqlite 四触点查询输出；⚠️诚实边界①21.1 阈值核账未做（本轮只立项）：6400 估算门槛是否匹配真实长会话待下周期实测消息量分布②21.2/21.3 待用户拍板不先斩后奏③本轮无自然拒做≠拒做消失（1/55 累计间歇率），19.2b 落账实效待自然复发核账④15.5 二十八轮未复现≠证明不 flaky⑤compact 0 触发仅覆盖现有 571 回合窗口（多为短探针会话），真实用户长会话分布外推未证⑥下周期=21.1 compact KPI 语义消歧+阈值核账（可直接落地无需拍板）+19.2 第九轮（记忆+协作）+15.5 例行+16.3 四触点；20.3/20.4/21.2/21.3 四项待用户拍板清单：Gene 模板面对照门、16.1 六项深预研、cron 常驻托管形态、反射评分 LLM judge 升级
 [2026-10-12 13:20] 周期#132 | 20.2 反射产生源接入点（"写了≠接线了"考古实证零产生源当拍即补）+16.3 反馈挖掘+19.2 第七轮（调研+发布）+15.5 第二十七轮：①考古确认 record_reflection 写入面存在但产品链路零调用方（读侧 get_improvement_context 已接 prompt 注入，写侧全库 grep 零消费）②实装 agent/reflection_sources.py：三确定性时刻合成器（from_self_verify 自验收尾出结论=coverage 真值非硬造+missing/uncertain 入弱点；from_remediation 拒做补做收口成功/未自愈两态；from_tool_recovery=_tool_recovery_execute recovered 时刻）+record_safely fail-safe 旁路（引擎爆炸只记日志返回 False 绝不冒泡）+None 引擎 lazy-init③soulmate_agent 四点接线（import+自验结论块（与结论横幅同门槛：多需求项或有缺口）+拒做补做成/败两态+恢复成功分支）④首跑测试 3 挂暴露真 bug：reflection_id=refl_<毫秒> 主键同毫秒碰撞→第二条 INSERT IntegrityError 被 fail-safe 吞掉=静默丢行→refl_<毫秒>_<uuid8> 唯一化（tests/test_reflection_sources.py 9/9 过）；bootstrap_kpi 0 行注释更新对齐 20.2 语义⑤回归 174 全过（bootstrap_kpi+reflection_sources+trajectory_recorder/rounds+turn_lifecycle+refusal_remediation+report_evidence+self_verify+relay_trajectory）⑥Gate3 真跑：重启 acp-proxy 加载新代码后 19.2 验收真实 WS 回合**自然命中**产生源（自验 items=2 出结论）→生产 reflections.db 真实 2 行（refl_1791781222525_e339ba80/refl_1791781238601_36b46ae6，uuid 后缀新格式，quality=0.5=coverage 真值）→live GET /api/agent/bootstrap-kpi 反射 KPI available:true count=2 avg_quality=0.5（此前恒 available=False）——产生源→存储→KPI 消费全链真实跑通⑦16.3 四触点：agent_messages 近 24h user 行=0、wechat_bridge_log.jsonl 末行仍 1791584264 历史 send_skipped、tool_failures.db 0 字节空库、ai_groups discussion_messages 70 行持平——零真实反馈维持⑧19.2 第七轮（调研+发布，tag=REJ132_1791781186，verify_mode 全 server_side）**2/2✅**：调研 36.17s（web_search 执行行=1 真源=trajectory_events+回复含 3.13/2024）+发布 15.79s（opensoul.db 投递行=1）双双 end_turn 无拒做——部署后累计 53 轮：开发 9/9、调试 5/5、发布 5/5、运维 5/5、办公 5/5、定时 4/4、多渠道 4/4、记忆 4/4、协作 4/4、调研 8/9，拒做复发率 1/53、补做自愈 1/1⑨15.5 第二十七轮：test_head_stall_aborts_fast_and_retry_recovers 单跑过（--durations call 1.39s）+32 例批跑过（18.72s）未复现→上限 3.0s 不动⑩产物清理：/tmp/soulmate_accept 已删、/tmp/refl_probe_132.txt 已删、KPI 临时 JSON 已删 | ✅ | (本次提交) | 20.2 勾选；Gate1 git diff 真实落盘（reflection_sources.py 6990B/soulmate_agent +20/reflection_engine +3/tests 175 行，三拍小步 commit 防 evo 截走）；Gate2 接线钉源码断言（三产生源各自落在真实函数路径：from_tool_recovery 在 _tool_recovery_execute 函数体内含 recovered 分支、from_remediation×2 在拒做补做两态、from_self_verify 在结论块）+最强证据=生产回合自然命中写入真源行（非探针自造）；Gate3 真实产出=9/9 新测+174 回归真实 pytest 输出+生产 reflections.db 2 行 sqlite 回读+live 端点 HTTP 回读 available:true count=2 与直算一致；⚠️诚实边界①产生源为确定性时刻合成（无 LLM 评分）：quality=coverage 真值或固定档位 0.8/0.3，语义化质量分非模型判断②自验产生源触发=结论横幅同门槛（多需求项或有缺口），单条已覆盖闲聊不产行防噪音③工具失败恢复产生源本窗口未自然命中（恢复事件低频）——接线钉+单测覆盖，留待自然命中核账④/acp/send HTTP 测试路径实测返回 hermes 启动横幅非 SoulMate 回合（无副作用、未采信为证据，真实证据全取 WS 用户路径）——该路径默认路由语义待查⑤本轮无自然拒做≠拒做消失，1/53 累计间歇率；19.2b 落账实效待自然复发核账⑥15.5 二十七轮未复现≠证明不 flaky；下周期=20.3 Gene 模板面对照门/20.4 六项深预研均待用户拍板（不先斩后奏）→期间跑常设观察（15.5/16.3/19.2 第八轮轮换：余类 定时/多渠道/记忆/协作）+代码考古规划阶段 21 候选切片（不造无依据需求）
 [2026-10-09 19:00] 周期#0 | 路线图建立+cron流水线上线 | ✅ | (本文档创建) | 首个自动周期15分钟后启动
 [2026-10-10 01:20] 周期#1 | 阶段0盘点：核实21工具/3记忆引擎/三层技能机制+缺口图；清理soulmate_agent.py损坏WIP（截断import`AgentCheckpointMan`+`return clsager`致ImportError，且属用户已否决的防双开守卫类，diff留证docs/devlog/2026-10-10-broken-idempotent-guard-wip.patch后还原HEAD，import实测恢复） | ⚠️ | 1ea328ce | 附带实测tests/test_skill_standard_layer.py 34 passed；下周期做1.1 MEMORY.md型持久记忆
