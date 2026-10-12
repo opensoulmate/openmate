@@ -1,0 +1,155 @@
+From c48cdf41d4695ebc10bfe5f08ea84425994581a6 Mon Sep 17 00:00:00 2001
+From: Hermes Agent <climbing@hermes.local>
+Date: Mon, 12 Oct 2026 15:11:28 +0800
+Subject: [PATCH 1/3] =?UTF-8?q?fix(auth):=20token=E8=BF=87=E6=9C=9F?=
+ =?UTF-8?q?=E8=AF=AF=E6=8A=A5'=E8=BF=9E=E6=8E=A5=E5=B7=B2=E6=96=AD?=
+ =?UTF-8?q?=E5=BC=80'=E8=AF=AF=E5=AF=BC=E6=8E=92=E6=9F=A5=E2=80=94?=
+ =?UTF-8?q?=E2=80=94=E8=BF=87=E6=9C=9F=E6=98=8E=E7=A4=BA'=E7=99=BB?=
+ =?UTF-8?q?=E5=BD=95=E5=B7=B2=E8=BF=87=E6=9C=9F'+=E8=B7=B3=E7=99=BB?=
+ =?UTF-8?q?=E5=BD=95?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+排查真相：jwt 24h效期，14:40:38两条WS同秒断=token过期边界，
+之后客户端零连接发起，发送等待15s超时却报'连接已断开'——误导用户与排查方向。
+现在：超时分支分辨过期/断开，过期清token跳登录并明示。
+---
+ src/app/(app)/chat/chat-client.tsx | 10 ++++++++--
+ src/locales/en.json                |  1 +
+ src/locales/zh.json                |  1 +
+ 3 files changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/src/app/(app)/chat/chat-client.tsx b/src/app/(app)/chat/chat-client.tsx
+index 7822b596..934e3ac3 100644
+--- a/src/app/(app)/chat/chat-client.tsx
++++ b/src/app/(app)/chat/chat-client.tsx
+@@ -1985,10 +1985,16 @@ export function ChatClient() {
+         const sendId = activeSid && wsMapRef.current.has(activeSid) ? activeSid : sessionId;
+         sendAcpPrompt(sendId, messageText, attachments, opts);
+       } else if (spWaited >= 15000) {
+-        // 超时15秒，放弃并提示用户
++        // 超时15秒，放弃并提示用户——先分辨"登录过期"与"连接断开"（过期误报断开曾误导排查）
+         clearInterval(spWaitConnect);
+         setLoading(false);
+-        updateSessionMessages(sessionId, prev => [...prev, { id: Date.now().toString(), role: 'agent', parts: [{ type: 'text', text: t('chat.connectionLost') }], timestamp: new Date() }]);
++        const tokNow = localStorage.getItem('openmate-token') || '';
++        const expiredNow = !tokNow || isTokenExpired(tokNow);
++        updateSessionMessages(sessionId, prev => [...prev, { id: Date.now().toString(), role: 'agent', parts: [{ type: 'text', text: expiredNow ? t('chat.sessionExpired') : t('chat.connectionLost') }], timestamp: new Date() }]);
++        if (expiredNow) {
++          localStorage.removeItem('openmate-token');
++          window.location.href = '/login';
++        }
+       }
+     }, 500);
+   }, [sendAcpPrompt, updateSessionMessages, t]);
+diff --git a/src/locales/en.json b/src/locales/en.json
+index 16c4d6a4..602d8005 100644
+--- a/src/locales/en.json
++++ b/src/locales/en.json
+@@ -215,6 +215,7 @@
+     "noResponse": "No response",
+     "requestTimeout": "Request timeout",
+     "connectionLost": "Connection lost, please try again later",
++    "sessionExpired": "Login expired, please sign in again",
+     "deleteSessionTitle": "Delete Session",
+     "deleteSessionDesc": "Are you sure you want to delete \"{{name}}\"?"
+   },
+diff --git a/src/locales/zh.json b/src/locales/zh.json
+index 5c20c0ec..6bd4c2e4 100644
+--- a/src/locales/zh.json
++++ b/src/locales/zh.json
+@@ -215,6 +215,7 @@
+     "noResponse": "无响应",
+     "requestTimeout": "请求超时",
+     "connectionLost": "连接已断开，请稍后重试",
++    "sessionExpired": "登录已过期，请重新登录",
+     "deleteSessionTitle": "删除会话",
+     "deleteSessionDesc": "确定要删除「{{name}}」吗？"
+   },
+-- 
+2.56.0
+
+
+From 6389e7dc42d5370980dc053a40c1f630a4337a4b Mon Sep 17 00:00:00 2001
+From: Hermes Agent <climbing@hermes.local>
+Date: Mon, 12 Oct 2026 15:16:17 +0800
+Subject: [PATCH 2/3] =?UTF-8?q?fix(auth):=20isTokenExpired=E6=8F=90?=
+ =?UTF-8?q?=E5=88=B0=E6=A8=A1=E5=9D=97=E7=BA=A7=EF=BC=88=E4=B8=8A=E7=AC=94?=
+ =?UTF-8?q?=E6=8F=90=E4=BA=A4=E6=9E=84=E5=BB=BA=E5=A4=B1=E8=B4=A5=E6=9C=AA?=
+ =?UTF-8?q?=E7=94=9F=E6=95=88=EF=BC=8C=E6=9C=AC=E7=AC=94=E4=BF=AE=E6=AD=A3?=
+ =?UTF-8?q?=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ src/app/(app)/chat/chat-client.tsx | 14 +++++++-------
+ 1 file changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/src/app/(app)/chat/chat-client.tsx b/src/app/(app)/chat/chat-client.tsx
+index 934e3ac3..46efb23a 100644
+--- a/src/app/(app)/chat/chat-client.tsx
++++ b/src/app/(app)/chat/chat-client.tsx
+@@ -256,6 +256,13 @@ const simulateTokenUsage = (content: string): TokenUsage => {
+ };
+ 
+ // ── useAcpWebSocket hook（ACP JSON-RPC 2.0 协议，多会话版）────────────────
++const isTokenExpired = (t: string): boolean => {
++  try {
++    const payload = JSON.parse(atob(t.split('.')[1]));
++    return payload.exp ? payload.exp * 1000 < Date.now() : false;
++  } catch { return true; }
++};
++
+ function useAcpWebSocket(params: {
+   selectedAgent: AgentInfo | null;
+   selectedSession: Session | null;
+@@ -566,13 +573,6 @@ function useAcpWebSocket(params: {
+     const state = getSessionState(sessionId);
+     state.unmounted = false;
+ 
+-    const isTokenExpired = (t: string): boolean => {
+-      try {
+-        const payload = JSON.parse(atob(t.split('.')[1]));
+-        return payload.exp ? payload.exp * 1000 < Date.now() : false;
+-      } catch { return true; }
+-    };
+-
+     const sendRpcRequest = (ws: WebSocket, method: string, params: Record<string, unknown> = {}): Promise<unknown> => {
+       return new Promise((resolve, reject) => {
+         if (ws.readyState !== WebSocket.OPEN) {
+-- 
+2.56.0
+
+
+From 6c10e33f619a1ca9540d8cf2919511fddc3f9ee5 Mon Sep 17 00:00:00 2001
+From: Hermes Agent <climbing@hermes.local>
+Date: Mon, 12 Oct 2026 15:21:03 +0800
+Subject: [PATCH 3/3] =?UTF-8?q?i18n(chat):=20=E8=A1=A5=20ja=20sessionExpir?=
+ =?UTF-8?q?ed=20=E4=B8=89locale=E9=93=81=E5=BE=8B=E5=AF=B9=E9=BD=90?=
+ =?UTF-8?q?=EF=BC=880bf1a469=20=E5=8F=AA=E5=8A=A0=E4=BA=86=20zh/en?=
+ =?UTF-8?q?=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ src/locales/ja.json | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/locales/ja.json b/src/locales/ja.json
+index 93e68392..46dc1cff 100644
+--- a/src/locales/ja.json
++++ b/src/locales/ja.json
+@@ -215,6 +215,7 @@
+     "noResponse": "なし响应",
+     "requestTimeout": "请求タイムアウト",
+     "connectionLost": "接続が切断されました。後でもう一度お試しください",
++    "sessionExpired": "ログインの有効期限が切れました。再度ログインしてください",
+     "deleteSessionTitle": "セッションを削除",
+     "deleteSessionDesc": "「{{name}}」を削除してもよろしいですか？"
+   },
+-- 
+2.56.0
+
