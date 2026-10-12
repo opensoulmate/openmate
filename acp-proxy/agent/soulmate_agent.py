@@ -6,6 +6,7 @@
 
 import asyncio
 import base64
+import contextlib
 import contextvars
 import httpx
 import re
@@ -5794,8 +5795,23 @@ You can send files to the user natively: to deliver a file, write a brief confir
             # 2. 上下文压缩：消息过多时压缩历史
             if self._ctx_compressor.should_compress(messages):
                 logger.info(f"[ctx-compress] 上下文过长，压缩历史消息")
+                _before_count = len(messages)
                 compressed = self._ctx_compressor.compress(messages)
                 if compressed:
+                    # P2.3 四联KPI"compact后质量"数据源落点：真实压缩事件入
+                    # trajectory（kind=compact+before/after数），KPI聚合面据此
+                    # 算压缩后回合成功率（bootstrap_kpi._compact_quality）。
+                    with contextlib.suppress(Exception):
+                        await self._traj_recorder.log_event(
+                            session_id,
+                            kind="compact",
+                            content=f"上下文压缩: {_before_count}→{len(compressed)} 条",
+                            metadata={
+                                "before_count": _before_count,
+                                "after_count": len(compressed),
+                            },
+                            parent_id=traj_root_id,
+                        )
                     messages = compressed
 
             # 3. 本地记忆检索引擎（与OpenSoul LTM互补）
