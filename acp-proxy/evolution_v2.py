@@ -40,6 +40,130 @@ class EvolutionV2:
         # 收敛追踪
         self._score_history: list[float] = []
         self._consecutive_no_improve = 0
+
+        # ── ALPHA_DONE 状态追踪：原子写锁（状态读写串行化）──
+        self._state_lock = asyncio.Lock()  # 所有 status 读写必须持锁
+        self._verify_sub_items = (
+            "code_change_exists",        # 代码变更存在性检查
+            "tests_passed",              # 测试通过检查
+            "non_doc_file_changed",      # 非文档文件检查
+        )
+
+    # ══════════════════════════════════════════════════════════════
+    # ALPHA_DONE 状态一致性保障（增量新增）
+    # ══════════════════════════════════════════════════════════════
+
+    async def sync_verification_state(self, item: dict, verdict: str,
+                                      sub_results: dict | None = None) -> dict:
+        """(a) 验证结果 → status 原子性同步 + (b) ALPHA_DONE 前置断言
+
+        verdict: "PASS" | "FAIL" | "BLOCKED"
+        sub_results: {子项名: "PASS"|"FAIL"|"BLOCKED"}
+        返回 {"synced": bool, "deviation": bool, "detail": str}
+        """
+        sub_results = sub_results or {}
+        async with self._state_lock:          # (d) 事务语义：持锁读改写
+            old_status = item.get("status", "UNKNOWN")
+
+            # ── (b) 状态一致性断言：任一子项 FAIL ⇒ 禁止 ALPHA_DONE ──
+            failing = [
+                name for name in self._verify_sub_items
+                if sub_results.get(name, "PASS") != "PASS"
+            ]
+            want_done = (verdict == "PASS" and not failing)
+
+            if verdict == "PASS" and failing:
+                # 判定 PASS 但子项含 FAIL → 视为 FAIL（消除第3次复现的偏差）
+                verdict = "FAIL"
+                want_done = False
+                self._record_state_deviation(
+                    item, old_status,
+                    f"verdict=PASS 但子项FAIL: {failing}",
+                )
+
+            if want_done:
+                item["status"] = "ALPHA_DONE"
+            elif verdict in ("FAIL", "BLOCKED"):
+                item["status"] = "FAILED" if verdict == "FAIL" else "BLOCKED"
+
+            # ── (c) 状态回滚：已 ALPHA_DONE 但验证含 FAIL → 强制回退 ──
+            deviation = False
+            if old_status == "ALPHA_DONE" and (verdict != "PASS" or failing):
+                item["status"] = "FAILED"
+                self._record_state_deviation(
+                    item, old_status,
+                    f"验证={verdict}, failing_sub_items={failing or 'none'} → 回退 FAILED",
+                )
+                deviation = True
+
+            item["verify_verdict"] = verdict
+            item["verify_sub_results"] = sub_results
+            item["status_updated_at"] = datetime.now(timezone.utc).isoformat()
+
+            return {
+                "synced": True,
+                "deviation": deviation,
+                "detail": f"{old_status} → {item['status']} (verdict={verdict})",
+            }
+
+    async def verify_and_mark_done(self, item: dict, verify_fn) -> dict:
+        """验证器包装：执行 verify_fn 后统一走一致性同步。
+        verify_fn 返回 {"verdict": str, "sub_results": dict} 或 (verdict, sub_results)
+        """
+        try:
+            raw = await verify_fn(item) if asyncio.iscoroutinefunction(verify_fn) else verify_fn(item)
+        except Exception as exc:
+            raw = {"verdict": "BLOCKED", "sub_results": {}, "error": str(exc)}
+
+        if isinstance(raw, tuple):
+            verdict, sub_results = raw
+        else:
+            verdict = raw.get("verdict", "FAIL")
+            sub_results = raw.get("sub_results", {})
+
+        sync = await self.sync_verification_state(item, verdict, sub_results)
+        sync["verify_raw"] = raw if isinstance(raw, dict) else {"verdict": verdict}
+        return sync
+
+    def _record_state_deviation(self, item: dict, old_status: str, reason: str):
+        """(3) 记录 STATE_DEVIATION 事件（写入失败记忆 + 本地审计）"""
+        event = {
+            "type": "STATE_DEVIATION",
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "instance_id": self.instance_id,
+            "item_id": item.get("id", "unknown"),
+            "old_status": old_status,
+            "new_status": item.get("status"),
+            "reason": reason,
+        }
+        try:
+            failure_memory.record(event)
+        except Exception:
+            pass
+        try:
+            audit_path = self.data_dir / "state_deviation.jsonl"
+            self.data_dir.mkdir(parents=True, exist_ok=True)
+            with audit_path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(event, ensure_ascii=False) + "\n")
+        except Exception as exc:
+            logger.warning("state deviation audit write failed: %s", exc)
+        self.strand._log("deviation", f"⚠️ STATE_DEVIATION: {reason[:80]}")
+
+    async def rollback_alpha_done_if_invalid(self, item: dict) -> bool:
+        """事后校验入口：对已标记 ALPHA_DONE 的条目做一致性复查并必要时回退。"""
+        async with self._state_lock:
+            if item.get("status") != "ALPHA_DONE":
+                return False
+            sub = item.get("verify_sub_results", {}) or {}
+            failing = [n for n in self._verify_sub_items if sub.get(n, "PASS") != "PASS"]
+            if item.get("verify_verdict") == "PASS" and not failing:
+                return False
+            item["status"] = "FAILED"
+            self._record_state_deviation(
+                item, "ALPHA_DONE",
+                f"事后复查不一致: verdict={item.get('verify_verdict')}, failing={failing or 'none'}",
+            )
+            return True
     
     async def run(self, failure_batch: list[dict]) -> dict:
         """执行完整的进化流程"""
