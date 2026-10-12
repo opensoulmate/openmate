@@ -1,0 +1,124 @@
+{
+ "probe": "p2-09-bootstrap-kpi",
+ "run_at": "2026-10-12T12:04:14+0800",
+ "semantics": {
+  "task_success": "已收口回合（turn_root end_at非空）中 end_turn status=ok 且 termination空 = 成功；termination_counts 透明单列",
+  "human_intervention": "每回合人工干预次数 = (perm_decision_audit requires_human=1 + turn_root termination=external_cancel) / 回合数",
+  "edit_reflection": "reflections.db 行数/应用数/平均质量分",
+  "compact_quality": "kind=compact 事件后回合成功率 vs 前回合成功率（同会话、已收口回合）"
+ },
+ "checks": [
+  {
+   "name": "真实生产数据直接计算",
+   "ok": true,
+   "evidence": "total_turns=557 closed=553 success=528 rate=0.9548"
+  },
+  {
+   "name": "live HTTP端点 GET /api/agent/bootstrap-kpi 200",
+   "ok": true,
+   "evidence": "systemctl重启acp-proxy-a/b后 curl 200，body含四联KPI全键"
+  },
+  {
+   "name": "端点与直算同源一致",
+   "ok": true,
+   "evidence": "rate/interventions 逐值相等"
+  },
+  {
+   "name": "人工干预面真实数据",
+   "ok": true,
+   "evidence": "ask_events=185 external_cancel=2 interventions=187 rate=0.3357"
+  },
+  {
+   "name": "termination分布与P1-15落点吻合",
+   "ok": true,
+   "evidence": "{'(normal)': 547, 'max_turns': 3, 'external_cancel': 2, 'token_budget': 1}（max_turns/token_budget/external_cancel 为 P1-15 终验落的探针回合，真源在库）"
+  },
+  {
+   "name": "反射面诚实降级",
+   "ok": true,
+   "evidence": "reflections.db 0行，available=False+note明示无产生源，未拿0冒充表现良好"
+  },
+  {
+   "name": "compact面诚实降级",
+   "ok": true,
+   "evidence": "生产无 compact 事件（should_compress 未触发过），available=False；产生源本周期已接线（soulmate 压缩点 log_event kind=compact），待自然触发后出数"
+  },
+  {
+   "name": "单元测试",
+   "ok": true,
+   "evidence": "tests/test_bootstrap_kpi.py 15/15（四联正例+空样本诚实降级+kind串味防污染+since窗口+坏JSON/缺库容噪+接线钉×2）"
+  },
+  {
+   "name": "回归",
+   "ok": true,
+   "evidence": "trajectory_recorder/trajectory_rounds/termination/turn_lifecycle/relay_trajectory×2 + refusal_remediation/self_verify 共 178 全过"
+  },
+  {
+   "name": "端点接线",
+   "ok": true,
+   "evidence": "app.py @app.get('/api/agent/bootstrap-kpi') 注册（import app 路由表回读 True）+ compute_kpis 真实消费"
+  }
+ ],
+ "live_kpi_full": {
+  "generated_at": 1791777808.9579773,
+  "since": null,
+  "task_success": {
+   "available": true,
+   "total_turns": 557,
+   "closed_turns": 553,
+   "open_turns": 4,
+   "success_turns": 528,
+   "rate": 0.9547920433996383,
+   "termination_counts": {
+    "(normal)": 547,
+    "max_turns": 3,
+    "external_cancel": 2,
+    "token_budget": 1
+   },
+   "source": "opensoul.db trajectory_events (turn_root)",
+   "success_semantics": "已收口回合中 end_turn status=ok 且 termination 空（正常完成）；未收口回合不计入分母",
+   "note": ""
+  },
+  "human_intervention": {
+   "available": true,
+   "turns": 557,
+   "ask_events": 185,
+   "external_cancel_turns": 2,
+   "interventions": 187,
+   "rate": 0.3357271095152603,
+   "source": "perm_decision_audit(requires_human) + turn_root(termination=external_cancel)",
+   "note": ""
+  },
+  "edit_reflection": {
+   "available": false,
+   "count": 0,
+   "applied": 0,
+   "avg_quality": null,
+   "source": "~/.hermes/soulmate/reflection/reflections.db",
+   "note": "反射库 0 行（ReflectionEngine.record_reflection 无产生源接入）"
+  },
+  "compact_quality": {
+   "available": false,
+   "compact_events": 0,
+   "post_compact_turns": 0,
+   "post_compact_success_rate": null,
+   "pre_compact_success_rate": null,
+   "avg_before_count": null,
+   "avg_after_count": null,
+   "source": "trajectory_events custom kind=compact",
+   "note": "窗口内无 compact 事件（压缩未触发或产生源未接入）"
+  },
+  "sources": {
+   "trajectory_db": "/home/climbing/opensoul/data/opensoul.db",
+   "permission_db": "/home/climbing/.hermes/opensoul/immune/permission.db",
+   "reflections_db": "/home/climbing/.hermes/soulmate/reflection/reflections.db"
+  }
+ },
+ "honest_boundaries": [
+  "成功率语义保守（status=ok且termination空才算成功），未收口4回合不入分母不冒充成功",
+  "人工干预率分母=回合数，ask_events 按事件计（审批是工具级非回合级），rate>1 可能（每回合干预次数语义，非回合占比）",
+  "edit反射/compact后质量生产无样本（产生源未接入/未触发），如实降级不估算——compact 产生源本周期已接线，自然触发后自动出数",
+  "反射产生源（ReflectionEngine.record_reflection）仍无调用方（写了≠接线了，接入点待用户拍板：edit 收尾/失败反思钩子）",
+  "全量历史窗口（since=None），非滚动窗"
+ ]
+}

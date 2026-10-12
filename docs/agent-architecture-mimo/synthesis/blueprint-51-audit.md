@@ -1,7 +1,7 @@
 # 蓝图 51 项逐条对账（2026-10-12 · 统筹者审计）
 
 对标源：`synthesis/openmate-rewrite-blueprint.md`（P0×25 + P1×16 + P2×10）。
-证据方法：全仓特征扫描 + 代码/测试文件定位，只认实装证据。结论：**✅48 / ⏳2 / ❌1**（2026-10-12 周期#128 更新：P0-09/P0-10/P1-01/P1-15 终验销账 ✅、P1-05 以替代实现销账 ✅(替代)）
+证据方法：全仓特征扫描 + 代码/测试文件定位，只认实装证据。结论：**✅50 / ⏳1 / ❌0**（2026-10-12 周期#129 更新：P2-09 自举 KPI 终验销账 ✅ 10/10；周期#128 P0-09/P0-10/P1-01/P1-15 终验销账 ✅、P1-05 以替代实现销账 ✅(替代)（原 ❌1 归零并入 ✅））
 
 ## P0 能稳定跑（25）
 | # | 项 | 状态 | 证据 |
@@ -47,9 +47,9 @@
 | 03 | 异步可重放/降级 | ✅ | ws_acp 重放语义 + degrade |
 | 04-06 | 经验提取→人审→合并 | ✅ | `learn/experience_collector.py` + `extract_patterns` + `gene_loop.py` propose + skill_rewrite 保真门 |
 | 07/08 | 评测集/CI门禁 | ✅ | `benchmark/eval_loop.py`（llm_judge+regression） |
-| 09 | 自举 KPI | ⏳ | benchmark 有指标面；四联 KPI（成功率/干预率/反射/compact质量）待整合 |
+| 09 | 自举 KPI | ✅ | 终验 2026-10-12 周期#129 **10/10 PASS**：四联 KPI 整合面=`agent/bootstrap_kpi.py` `compute_kpis()` 单一只读聚合真源（GET `/api/agent/bootstrap-kpi`，app.py 注册）——①任务成功率←trajectory turn_root（保守语义：已收口回合中 status=ok 且 termination 空=成功，未收口不入分母；termination_counts 透明单列）②人工干预率←perm_decision_audit(requires_human=1)+turn_root(external_cancel)③edit 反射次数←reflections.db④compact 后质量←kind=compact 事件后回合成功率 vs 前回合（同会话对照，"compact 不得破坏会话"同源）。**生产真跑**（重启 acp-proxy 后 live 端点=直算同源一致）：557 回合/553 收口/成功率 95.48%、干预 187 次（ask 185+打断 2）=0.336/回合、termination 分布 (normal) 547/max_turns 3/external_cancel 2/token_budget 1（P1-15 探针回合真源在库）；**compact 产生源当拍即接线**（soulmate 压缩点 log_event kind=compact+before/after 计数，此前只有一行 logger.info 无账本=KPI 必然无样本）。测试 15/15（四联正例/空样本诚实降级/kind 串味防污染/since 窗口/坏 JSON+缺库容噪/接线钉×2）+回归 178 过。证据 `evidence/p2-09-bootstrap-kpi-evidence.json`。诚实边界：反射产生源（record_reflection）仍无调用方（接入点待拍板）；两面生产无样本如实降级 |
 | 10 | fork 沙箱对照晋升 | ⏳ | dna_evolution 有 sandbox 概念；对照晋升流程待终验 |
 
 ## 缺口处理（统筹裁决）
 - **✅ P1-05 RepoMap（替代实现，周期#128 销账）**：不排期硬造 tree-sitter 图中心性（过度设计）；"检索式召回+token预算选符号"替代实现的实现说明文档已补（`p1-05-repomap-alternative-implementation.md`，逐件 file:line 实证+引用自检）——除非用户要求原方案（升级路径见文档 §6：tree-sitter 可选依赖+只解析检索命中文件，且不得替换降级路径）；衍生待拍板小切片=SessionFileIndex FTS 召回闭环（写入已接线、search() 无消费点，详见文档 §3.1/§5）
-- **⏳×2**（P2-09/10）：全部是"语义待终验"而非未实现——排入 soulmate 车道阶段20 前部做终验收口（P0-09 已于 2026-10-12 周期#124 终验销账 ✅，P0-10 已于 2026-10-12 周期#125 终验销账 ✅ 17/17，P1-01 已于 2026-10-12 周期#126 终验销账 ✅ 18/18 含 process 侧门修复，P1-15 已于 2026-10-12 周期#127 终验销账 ✅ 28/28 含五条件独立配置+trace 落点四层实证，逐项销账进行中）
+- **⏳×1**（P2-10 fork 沙箱对照晋升终验，下拍第一优先）：语义待终验——排入 soulmate 车道阶段20 前部做终验收口（P0-09 已于 2026-10-12 周期#124 终验销账 ✅，P0-10 已于 2026-10-12 周期#125 终验销账 ✅ 17/17，P1-01 已于 2026-10-12 周期#126 终验销账 ✅ 18/18 含 process 侧门修复，P1-15 已于 2026-10-12 周期#127 终验销账 ✅ 28/28 含五条件独立配置+trace 落点四层实证，P2-09 已于 2026-10-12 周期#129 终验销账 ✅ 10/10 含四联 KPI 整合面+compact 产生源接线，逐项销账进行中）
