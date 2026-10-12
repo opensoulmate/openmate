@@ -1,0 +1,95 @@
+{
+  "tag": "1791766176",
+  "checks": [
+    {
+      "name": "baseline: 探针文件不存在",
+      "ok": true,
+      "detail": "/tmp/soulmate_accept/plan_probe_1791766176.py"
+    },
+    {
+      "name": "进入 explore 模式",
+      "ok": true,
+      "detail": "{\"mode\": \"explore\"}"
+    },
+    {
+      "name": "explore: write_file DENY",
+      "ok": true,
+      "detail": "{\"behavior\": \"deny\", \"message\": \"Permission denied for write_file (explore mode is read-only)\", \"decision_reason\": \"Explore mode does not allow modifications; allow rules cannot grant it\", \"rule_id\": \"\", \"rule_source\": \"\", \"rule_content\": \"\", \"requires_human\": false, \"risk\": \"medium\", \"suggested_rul"
+    },
+    {
+      "name": "explore: allow 规则不可覆盖禁写",
+      "ok": true,
+      "detail": "{\"behavior\": \"deny\", \"message\": \"Permission denied for write_file (explore mode is read-only)\", \"decision_reason\": \"Explore mode does not allow modifications; allow rules cannot grant it\", \"rule_id\": \"\", \"rule_source\": \"\", \"rule_content\": \"\", \"requires_human\": false, \"risk\": \"medium\", \"suggested_rul"
+    },
+    {
+      "name": "explore: read_file ALLOW",
+      "ok": true,
+      "detail": "{\"behavior\": \"allow\", \"message\": \"Permission granted for read_file (read-only tool)\", \"decision_reason\": \"Read-only tools are auto-allowed in all modes\", \"rule_id\": \"\", \"rule_source\": \"engine\", \"rule_content\": \"\", \"requires_human\": false, \"risk\": \"medium\", \"suggested_rules\": [], \"decision_id\": \"\", \""
+    },
+    {
+      "name": "explore: web_search ALLOW",
+      "ok": true,
+      "detail": "{\"behavior\": \"allow\", \"message\": \"Permission granted for web_search (read-only tool)\", \"decision_reason\": \"Read-only tools are auto-allowed in all modes\", \"rule_id\": \"\", \"rule_source\": \"engine\", \"rule_content\": \"\", \"requires_human\": false, \"risk\": \"medium\", \"suggested_rules\": [], \"decision_id\": \"\", "
+    },
+    {
+      "name": "e2e explore: 文件未被创建",
+      "ok": true,
+      "detail": "/tmp/soulmate_accept/plan_probe_1791766176.py"
+    },
+    {
+      "name": "e2e explore: 回复报拦截",
+      "ok": true,
+      "detail": "stop=end_turn elapsed=29.6 reply=...*（工具级规则） |\n| 结果 | 文件不存在，任务未完成 |\n\n这不是路径或内容问题，而是会话权限模式限制，改用 execute_code 等其他写入方式同样会被拦截，属于同一限制。需要我在可写模式（如 Workspace/Act 模式）下重试，或由你调整权限后再说一声即可。⛔ 文件未创建成功。`write_file` 调用被 OpenSoul 权限引擎拦截（Explore 模式不允许任何文件修改），`/tmp/soulmate_accept/plan_probe_1791766176.py` 当前不存在。该拦截为会话级权限限制，无法通过换用其他写入工具绕过，需在可写模式下重试才能完成创建。"
+    },
+    {
+      "name": "恢复基线模式",
+      "ok": true,
+      "detail": "bypass"
+    },
+    {
+      "name": "e2e 对照: bypass 下文件真实创建",
+      "ok": true,
+      "detail": "stop=end_turn elapsed=22.7"
+    },
+    {
+      "name": "explore: execute_code 写入 DENY（补验）",
+      "ok": true,
+      "detail": "{\"behavior\": \"deny\", \"message\": \"Permission denied for execute_code (explore mode is read-only)\", \"decision_reason\": \"Explore mode does not allow modifications; allow rules cannot grant it\", \"rule_id\": \"\", \"rule_source\": \"\", \"rule_content\": \"\", \"requires_human\": false, \"risk\": \"medium\", \"suggested_r"
+    },
+    {
+      "name": "explore: terminal 写入 DENY（补验）",
+      "ok": true,
+      "detail": "{\"behavior\": \"deny\", \"message\": \"Permission denied for terminal (explore mode is read-only)\", \"decision_reason\": \"Explore mode does not allow modifications; allow rules cannot grant it\", \"rule_id\": \"\", \"rule_source\": \"\", \"rule_content\": \"\", \"requires_human\": false, \"risk\": \"medium\", \"suggested_rules"
+    }
+  ],
+  "e2e": {
+    "explore_turn": {
+      "reply": "⛔ **文件未能创建** —— `write_file` 调用被 OpenSoul 权限引擎拦截（未执行）：\n\n| 项目 | 内容 |\n|---|---|\n| 目标文件 | `/tmp/soulmate_accept/plan_probe_1791766176.py` |\n| 拟写内容 | `print(1)` |\n| 拦截原因 | 当前为 **Explore 模式，不允许任何文件修改**（工具级规则） |\n| 结果 | 文件不存在，任务未完成 |\n\n这不是路径或内容问题，而是会话权限模式限制，改用 execute_code 等其他写入方式同样会被拦截，属于同一限制。需要我在可写模式（如 Workspace/Act 模式）下重试，或由你调整权限后再说一声即可。⛔ 文件未创建成功。`write_file` 调用被 OpenSoul 权限引擎拦截（Explore 模式不允许任何文件修改），`/tmp/soulmate_accept/plan_probe_1791766176.py` 当前不存在。该拦截为会话级权限限制，无法通过换用其他写入工具绕过，需在可写模式下重试才能完成创建。",
+      "stop": "end_turn",
+      "elapsed": 29.6,
+      "sid": "om-6950d0435382"
+    },
+    "control_turn": {
+      "reply": "完成 ✅\n\n- **文件**：`/tmp/soulmate_accept/plan_control_1791766176.py`\n- **内容**：`print(1)`（回读验证一致）文件 `/tmp/soulmate_accept/plan_control_1791766176.py` 已创建成功，内容为一行 `print(1)`（9 字节），回读验证一致。",
+      "stop": "end_turn",
+      "elapsed": 22.7,
+      "sid": "om-fa5affa6c623"
+    }
+  },
+  "pass": true,
+  "baseline_mode": "bypass",
+  "write_deny_decision": {
+    "behavior": "deny",
+    "message": "Permission denied for write_file (explore mode is read-only)",
+    "decision_reason": "Explore mode does not allow modifications; allow rules cannot grant it",
+    "rule_id": "",
+    "rule_source": "",
+    "rule_content": "",
+    "requires_human": false,
+    "risk": "medium",
+    "suggested_rules": [],
+    "decision_id": "",
+    "mode": "explore"
+  },
+  "restored_mode": "bypass"
+}
