@@ -1,0 +1,389 @@
+{
+  "probe": "p2-10-fork-sandbox-compare-promote",
+  "run_tag": "P210_1791778938",
+  "ts": "2026-10-12T12:22:19+0800",
+  "passed": true,
+  "total": 8,
+  "checks": [
+    {
+      "name": "A1 候选胜出→晋升",
+      "ok": true,
+      "detail": "promote=True baseline_score=1.0 candidate_score=1.0"
+    },
+    {
+      "name": "A1b 沙箱独立评测落痕",
+      "ok": true,
+      "detail": "baseline_checks=4 candidate_checks=4"
+    },
+    {
+      "name": "A2 候选劣于基线→不晋",
+      "ok": true,
+      "detail": "promote=False reasons=['零丢失断言失败: steps_lossless, triggers_superset']"
+    },
+    {
+      "name": "A3 prompt 类双向",
+      "ok": true,
+      "detail": "win=True lose=False lose_reasons=['零丢失断言失败: baseline_lines_retained']"
+    },
+    {
+      "name": "B1 坑沉淀经对照门晋升主配置",
+      "ok": true,
+      "detail": "action=evolved revision=2 file=/home/climbing/openmate/acp-proxy/data/fork_promote_probe_library/p2-10晋升探针/SKILL.md 含新坑=True"
+    },
+    {
+      "name": "C1 语义改写经对照门晋升主配置",
+      "ok": true,
+      "detail": "action=rewritten reason=改写1步+新增1触发词 含改写=True 含新触发词=True"
+    },
+    {
+      "name": "D1 沙箱超时→kept_baseline 主配置不动",
+      "ok": true,
+      "detail": "action=kept_baseline reason=fork沙箱对照未晋升（主配置不动）: 候选沙箱评测未通过: sandbox timeout (>0.01s)——按候选未通过收编; 候选评分 0.00 < 阈值 0.70 revision 3→3"
+    },
+    {
+      "name": "E 清理归零",
+      "ok": true,
+      "detail": "library/db removed=True"
+    }
+  ],
+  "gate_verdicts": {
+    "win": {
+      "promote": true,
+      "kind": "skill_md",
+      "reasons": [],
+      "baseline": {
+        "ok": true,
+        "score": 1.0,
+        "checks": [
+          {
+            "name": "parseable_steps",
+            "passed": true,
+            "detail": "steps=2"
+          },
+          {
+            "name": "steps_nonempty",
+            "passed": true,
+            "detail": "步骤条目均非空"
+          },
+          {
+            "name": "triggers_present",
+            "passed": true,
+            "detail": "triggers=2"
+          },
+          {
+            "name": "sections_marked",
+            "passed": true,
+            "detail": "步骤/触发条件分区标题存在"
+          }
+        ],
+        "error": ""
+      },
+      "candidate": {
+        "ok": true,
+        "score": 1.0,
+        "checks": [
+          {
+            "name": "parseable_steps",
+            "passed": true,
+            "detail": "steps=2"
+          },
+          {
+            "name": "steps_nonempty",
+            "passed": true,
+            "detail": "步骤条目均非空"
+          },
+          {
+            "name": "triggers_present",
+            "passed": true,
+            "detail": "triggers=2"
+          },
+          {
+            "name": "sections_marked",
+            "passed": true,
+            "detail": "步骤/触发条件分区标题存在"
+          }
+        ],
+        "error": ""
+      },
+      "pairwise": {
+        "ok": true,
+        "checks": [
+          {
+            "name": "steps_lossless",
+            "passed": true,
+            "detail": "baseline_steps=2 candidate_steps=2 count_ok=True carriers_ok=True"
+          },
+          {
+            "name": "triggers_superset",
+            "passed": true,
+            "detail": "baseline=2 candidate=2"
+          },
+          {
+            "name": "pitfalls_superset",
+            "passed": true,
+            "detail": "baseline=1 candidate=2"
+          },
+          {
+            "name": "verify_preserved",
+            "passed": true,
+            "detail": "基线验证段保留"
+          }
+        ]
+      }
+    },
+    "lose": {
+      "promote": false,
+      "kind": "skill_md",
+      "reasons": [
+        "零丢失断言失败: steps_lossless, triggers_superset"
+      ],
+      "baseline": {
+        "ok": true,
+        "score": 1.0,
+        "checks": [
+          {
+            "name": "parseable_steps",
+            "passed": true,
+            "detail": "steps=2"
+          },
+          {
+            "name": "steps_nonempty",
+            "passed": true,
+            "detail": "步骤条目均非空"
+          },
+          {
+            "name": "triggers_present",
+            "passed": true,
+            "detail": "triggers=2"
+          },
+          {
+            "name": "sections_marked",
+            "passed": true,
+            "detail": "步骤/触发条件分区标题存在"
+          }
+        ],
+        "error": ""
+      },
+      "candidate": {
+        "ok": true,
+        "score": 1.0,
+        "checks": [
+          {
+            "name": "parseable_steps",
+            "passed": true,
+            "detail": "steps=1"
+          },
+          {
+            "name": "steps_nonempty",
+            "passed": true,
+            "detail": "步骤条目均非空"
+          },
+          {
+            "name": "triggers_present",
+            "passed": true,
+            "detail": "triggers=1"
+          },
+          {
+            "name": "sections_marked",
+            "passed": true,
+            "detail": "步骤/触发条件分区标题存在"
+          }
+        ],
+        "error": ""
+      },
+      "pairwise": {
+        "ok": false,
+        "checks": [
+          {
+            "name": "steps_lossless",
+            "passed": false,
+            "detail": "baseline_steps=2 candidate_steps=1 count_ok=False carriers_ok=False"
+          },
+          {
+            "name": "triggers_superset",
+            "passed": false,
+            "detail": "baseline=2 candidate=1"
+          },
+          {
+            "name": "pitfalls_superset",
+            "passed": true,
+            "detail": "baseline=1 candidate=1"
+          },
+          {
+            "name": "verify_preserved",
+            "passed": true,
+            "detail": "基线验证段保留"
+          }
+        ]
+      }
+    },
+    "prompt_win": {
+      "promote": true,
+      "kind": "prompt",
+      "reasons": [],
+      "baseline": {
+        "ok": true,
+        "score": 1.0,
+        "checks": [
+          {
+            "name": "nonblank",
+            "passed": true,
+            "detail": "len=17"
+          },
+          {
+            "name": "no_control_chars",
+            "passed": true,
+            "detail": "无异常控制字符"
+          },
+          {
+            "name": "fences_balanced",
+            "passed": true,
+            "detail": "code_fences=0"
+          },
+          {
+            "name": "length_bounds",
+            "passed": true,
+            "detail": "chars=17"
+          }
+        ],
+        "error": ""
+      },
+      "candidate": {
+        "ok": true,
+        "score": 1.0,
+        "checks": [
+          {
+            "name": "nonblank",
+            "passed": true,
+            "detail": "len=28"
+          },
+          {
+            "name": "no_control_chars",
+            "passed": true,
+            "detail": "无异常控制字符"
+          },
+          {
+            "name": "fences_balanced",
+            "passed": true,
+            "detail": "code_fences=0"
+          },
+          {
+            "name": "length_bounds",
+            "passed": true,
+            "detail": "chars=28"
+          }
+        ],
+        "error": ""
+      },
+      "pairwise": {
+        "ok": true,
+        "checks": [
+          {
+            "name": "baseline_lines_retained",
+            "passed": true,
+            "detail": "missing=0/2"
+          }
+        ]
+      }
+    },
+    "prompt_lose": {
+      "promote": false,
+      "kind": "prompt",
+      "reasons": [
+        "零丢失断言失败: baseline_lines_retained"
+      ],
+      "baseline": {
+        "ok": true,
+        "score": 1.0,
+        "checks": [
+          {
+            "name": "nonblank",
+            "passed": true,
+            "detail": "len=17"
+          },
+          {
+            "name": "no_control_chars",
+            "passed": true,
+            "detail": "无异常控制字符"
+          },
+          {
+            "name": "fences_balanced",
+            "passed": true,
+            "detail": "code_fences=0"
+          },
+          {
+            "name": "length_bounds",
+            "passed": true,
+            "detail": "chars=17"
+          }
+        ],
+        "error": ""
+      },
+      "candidate": {
+        "ok": true,
+        "score": 1.0,
+        "checks": [
+          {
+            "name": "nonblank",
+            "passed": true,
+            "detail": "len=8"
+          },
+          {
+            "name": "no_control_chars",
+            "passed": true,
+            "detail": "无异常控制字符"
+          },
+          {
+            "name": "fences_balanced",
+            "passed": true,
+            "detail": "code_fences=0"
+          },
+          {
+            "name": "length_bounds",
+            "passed": true,
+            "detail": "chars=8"
+          }
+        ],
+        "error": ""
+      },
+      "pairwise": {
+        "ok": false,
+        "checks": [
+          {
+            "name": "baseline_lines_retained",
+            "passed": false,
+            "detail": "missing=1/2"
+          }
+        ]
+      }
+    }
+  },
+  "funnel_promotion": {
+    "action": "evolved",
+    "revision_before": 1,
+    "revision_after": 2,
+    "added": [
+      "read_file 可能报错「错误: 文件不存在或为空: /tmp/not-there」（recoverable）—— 本次未恢复，执行前先核对参数/路径，失败即停不要硬跑"
+    ],
+    "file": "/home/climbing/openmate/acp-proxy/data/fork_promote_probe_library/p2-10晋升探针/SKILL.md",
+    "body_contains_new_pitfall": true
+  },
+  "rewrite_promotion": {
+    "action": "rewritten",
+    "revision_after": 3,
+    "added_triggers": [
+      "p210改写探针"
+    ],
+    "body_contains_rewording": true
+  },
+  "failclosed_denial": {
+    "action": "kept_baseline",
+    "reason": "fork沙箱对照未晋升（主配置不动）: 候选沙箱评测未通过: sandbox timeout (>0.01s)——按候选未通过收编; 候选评分 0.00 < 阈值 0.70",
+    "revision_unchanged": true,
+    "body_unchanged": true
+  },
+  "cleanup": {
+    "probe_library_removed": true,
+    "final_body_for_record": "# P2-10晋升探针\n\n## 触发条件\n- p210探针\n- 晋升探针\n- p210改写探针\n\n## 步骤\n1. 第一步读取 /tmp/p210_probe.txt（措辞改写）\n2. 第二步写入结果到 /tmp/p210_out.txt\n\n## 坑\n- 原有坑：路径要绝对\n- read_file 可能报错「错误: 文件不存在或为空: /tmp/not-there」（recoverable）—— 本次未恢复，执行前先核对参数/路径，失败即停不要硬跑\n\n## 验证\n跑一遍确认输出"
+  }
+}
