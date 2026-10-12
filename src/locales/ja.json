@@ -215,6 +215,7 @@
     "noResponse": "なし响应",
     "requestTimeout": "请求タイムアウト",
     "connectionLost": "接続が切断されました。後でもう一度お試しください",
+    "sessionExpired": "ログインの有効期限が切れました。再度ログインしてください",
     "deleteSessionTitle": "セッションを削除",
     "deleteSessionDesc": "「{{name}}」を削除してもよろしいですか？"
   },
