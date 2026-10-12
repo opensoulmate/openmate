@@ -1985,10 +1985,16 @@ export function ChatClient() {
         const sendId = activeSid && wsMapRef.current.has(activeSid) ? activeSid : sessionId;
         sendAcpPrompt(sendId, messageText, attachments, opts);
       } else if (spWaited >= 15000) {
-        // 超时15秒，放弃并提示用户
+        // 超时15秒，放弃并提示用户——先分辨"登录过期"与"连接断开"（过期误报断开曾误导排查）
         clearInterval(spWaitConnect);
         setLoading(false);
-        updateSessionMessages(sessionId, prev => [...prev, { id: Date.now().toString(), role: 'agent', parts: [{ type: 'text', text: t('chat.connectionLost') }], timestamp: new Date() }]);
+        const tokNow = localStorage.getItem('openmate-token') || '';
+        const expiredNow = !tokNow || isTokenExpired(tokNow);
+        updateSessionMessages(sessionId, prev => [...prev, { id: Date.now().toString(), role: 'agent', parts: [{ type: 'text', text: expiredNow ? t('chat.sessionExpired') : t('chat.connectionLost') }], timestamp: new Date() }]);
+        if (expiredNow) {
+          localStorage.removeItem('openmate-token');
+          window.location.href = '/login';
+        }
       }
     }, 500);
   }, [sendAcpPrompt, updateSessionMessages, t]);

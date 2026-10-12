@@ -215,6 +215,7 @@
     "noResponse": "No response",
     "requestTimeout": "Request timeout",
     "connectionLost": "Connection lost, please try again later",
+    "sessionExpired": "Login expired, please sign in again",
     "deleteSessionTitle": "Delete Session",
     "deleteSessionDesc": "Are you sure you want to delete \"{{name}}\"?"
   },

@@ -215,6 +215,7 @@
     "noResponse": "无响应",
     "requestTimeout": "请求超时",
     "connectionLost": "连接已断开，请稍后重试",
+    "sessionExpired": "登录已过期，请重新登录",
     "deleteSessionTitle": "删除会话",
     "deleteSessionDesc": "确定要删除「{{name}}」吗？"
   },
