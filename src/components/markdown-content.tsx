@@ -2,7 +2,7 @@
 import { copyToClipboard } from "@/lib/clipboard";
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { Copy, Check, Pencil, Eye, EyeOff } from 'lucide-react';
+import { Copy, Check, Pencil, Eye, EyeOff, FileText, Download } from 'lucide-react';
 import { useState, useCallback, lazy, Suspense, useMemo, memo, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -182,6 +182,120 @@ const MemoizedMermaid = memo(({ code }: { code: string }) => (
   <MermaidDiagram code={code} />
 ));
 
+// ── MEDIA 标签文件卡片（消息视图；3e 统一布局：顶部路径栏/中部文件信息/底部按钮栏）──
+// 历史：renderMediaTags 曾于 e3ffdd19 落地、后被 evo（fb1a5be4 [evo:a]）删除——
+// 用户实际报障"发给我呀"（2026-10-12 周期#152）即此回归，恢复后勿再删。
+function mimeForFile(fileName: string): string {
+  const ext = fileName.split('.').pop()?.toLowerCase() || '';
+  const map: Record<string, string> = {
+    doc: 'application/msword',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    xls: 'application/vnd.ms-excel',
+    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ppt: 'application/vnd.ms-powerpoint',
+    pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    pdf: 'application/pdf',
+    md: 'text/markdown',
+    txt: 'text/plain',
+    json: 'application/json',
+    html: 'text/html',
+    htm: 'text/html',
+    csv: 'text/csv',
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    svg: 'image/svg+xml',
+    mp3: 'audio/mpeg',
+    wav: 'audio/wav',
+    mp4: 'video/mp4',
+  };
+  return map[ext] || 'application/octet-stream';
+}
+
+function MediaFileCard({ filePath }: { filePath: string }) {
+  const fileName = filePath.split('/').pop() || filePath;
+  const mimeType = mimeForFile(fileName);
+  const downloadUrl = `http://${window.location.hostname}:8092/api/file?path=${encodeURIComponent(filePath)}`;
+
+  return (
+    <div className="my-2 rounded-xl border border-border/60 bg-background/80 overflow-hidden">
+      {/* 顶部：路径栏（灰条，3e 统一布局） */}
+      <div className="px-3 py-1.5 border-b border-border/30 bg-muted/20">
+        <span className="text-[10px] text-muted-foreground/60 truncate block">{filePath}</span>
+      </div>
+      {/* 中部：文件信息 */}
+      <div className="px-3 py-2.5 flex items-center gap-2">
+        <FileText className="w-5 h-5 text-muted-foreground shrink-0" />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium truncate">{fileName}</p>
+          <p className="text-[10px] text-muted-foreground/60">{mimeType}</p>
+        </div>
+      </div>
+      {/* 底部：功能按钮栏（预览/下载/复制，3e 统一布局） */}
+      <div className="flex items-center gap-1 px-3 py-1.5 border-t border-border/30 bg-muted/20">
+        <button
+          onClick={async (e) => {
+            e.stopPropagation();
+            try {
+              const resp = await fetch(downloadUrl);
+              if (!resp.ok) return;
+              const blob = await resp.blob();
+              const url = URL.createObjectURL(new Blob([blob], { type: mimeType }));
+              const store = useAppStore.getState();
+              store.setPendingFilePreview({ url, name: fileName, mimeType });
+              store.setRightPanelOpen(true);
+            } catch (err) {
+              console.warn('[media-preview] Failed:', err);
+            }
+          }}
+          className="flex items-center gap-1 px-2 py-1 rounded text-xs text-primary hover:bg-primary/10 transition-colors"
+        >
+          <Eye className="w-3 h-3" />
+          预览
+        </button>
+        <a
+          href={downloadUrl}
+          download={fileName}
+          className="flex items-center gap-1 px-2 py-1 rounded text-xs text-muted-foreground hover:bg-muted/50 transition-colors"
+        >
+          <Download className="w-3 h-3" />
+          下载
+        </a>
+        <button
+          onClick={(e) => { e.stopPropagation(); copyToClipboard(filePath); }}
+          className="flex items-center gap-1 px-2 py-1 rounded text-xs text-muted-foreground hover:bg-muted/50 transition-colors"
+        >
+          <Copy className="w-3 h-3" />
+          复制路径
+        </button>
+      </div>
+    </div>
+  );
+}
+
+type MediaSegment = { type: 'text'; text: string } | { type: 'file'; filePath: string };
+
+function extractMediaSegments(content: string): MediaSegment[] {
+  const out: MediaSegment[] = [];
+  const re = /MEDIA:(\S+)/g;
+  const seen = new Set<string>();
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) {
+    if (m.index > last) out.push({ type: 'text', text: content.slice(last, m.index) });
+    const filePath = m[1];
+    if (!seen.has(filePath)) {
+      seen.add(filePath);
+      out.push({ type: 'file', filePath });
+    }
+    last = m.index + m[0].length;
+  }
+  if (last < content.length) out.push({ type: 'text', text: content.slice(last) });
+  return out;
+}
+
 // Main markdown content component
 interface MarkdownContentProps {
   content: string;
@@ -214,6 +328,31 @@ const MarkdownContent = memo(function MarkdownContent({ content, onCodeApply }: 
     // P1 流式输出脱敏展示：密钥段落→可揭示胶囊（其余span透传）
     span: SecretAwareSpan,
   }), [onCodeApply, t]);
+
+  // MEDIA 标签拦截：文本段照常走 markdown 渲染，文件段渲染下载卡片（消息视图）
+  const segments = useMemo(() => extractMediaSegments(content), [content]);
+  const hasMedia = useMemo(() => segments.some(s => s.type === 'file'), [segments]);
+
+  if (hasMedia) {
+    return (
+      <div className="markdown-content">
+        {segments.map((s, i) =>
+          s.type === 'file' ? (
+            <MediaFileCard key={`media-${i}`} filePath={s.filePath} />
+          ) : s.text.trim() ? (
+            <ReactMarkdown
+              key={`md-${i}`}
+              remarkPlugins={[remarkGfm]}
+              rehypePlugins={[rehypeSecretMask]}
+              components={components}
+            >
+              {s.text}
+            </ReactMarkdown>
+          ) : null
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="markdown-content">
