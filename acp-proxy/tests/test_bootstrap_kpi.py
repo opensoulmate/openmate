@@ -11,7 +11,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agent.bootstrap_kpi import compute_kpis  # noqa: E402
+import agent.bootstrap_kpi as bk  # noqa: E402
+from agent.bootstrap_kpi import (  # noqa: E402
+    _compact_producer_status,
+    _compact_threshold_context,
+    compute_kpis,
+)
 
 _TRAJ_SCHEMA = """
 CREATE TABLE trajectory_events (
@@ -317,3 +322,88 @@ def test_app_exposes_bootstrap_kpi_endpoint():
     text = src.read_text(encoding="utf-8")
     assert '@app.get("/api/agent/bootstrap-kpi")' in text
     assert "compute_kpis" in text
+
+
+# ── 7. 21.1 消歧：产生源接线状态可探测（"未触发"≠"未接入"） ─────────
+
+def test_producer_status_wired_on_real_source():
+    # 生产源码接线钉：soulmate_agent 压缩点已接线时探测必须如实报 wired
+    st = _compact_producer_status()
+    assert st["producer_status"] == "wired", st
+
+
+def test_producer_status_three_states(tmp_path):
+    wired = tmp_path / "w.py"
+    wired.write_text('if self._ctx_compressor.should_compress(m):\n    log(kind="compact")\n')
+    assert _compact_producer_status(wired)["producer_status"] == "wired"
+
+    no_trig = tmp_path / "nt.py"
+    no_trig.write_text('log(kind="compact")\n')
+    st = _compact_producer_status(no_trig)
+    assert st["producer_status"] == "not_wired" and "should_compress" in st["producer_evidence"]
+
+    no_ledger = tmp_path / "nl.py"
+    no_ledger.write_text("self._ctx_compressor.should_compress(m)\n")
+    st2 = _compact_producer_status(no_ledger)
+    assert st2["producer_status"] == "not_wired" and "kind=compact" in st2["producer_evidence"]
+
+    st3 = _compact_producer_status(tmp_path / "missing.py")
+    assert st3["producer_status"] == "unknown" and st3["producer_evidence"]
+
+
+def test_compact_threshold_context_reads_compressor_defaults():
+    thr = _compact_threshold_context()
+    # 门槛语境可对照：与 ContextCompressor 构造缺省同源（8000×0.8=6400）
+    assert thr["trigger_estimate_tokens"] == 6400
+    assert thr["trigger_estimate_tokens"] == int(thr["max_tokens"] * thr["compression_threshold"])
+
+
+def test_compact_empty_note_disambiguates_not_wired(tmp_path, monkeypatch):
+    # "未接入"态：note 明说数据源断线（不再是含糊的"未触发或产生源未接入"）
+    monkeypatch.setattr(
+        bk, "_compact_producer_status",
+        lambda *a, **k: {"producer_status": "not_wired",
+                         "producer_evidence": "test: 无 kind=compact 落账"})
+    cq = compute_kpis(db_path=tmp_path / "missing.db", permission_db=tmp_path / "n.db",
+                      reflections_db=tmp_path / "n.db")["compact_quality"]
+    assert cq["available"] is False and cq["producer_status"] == "not_wired"
+    assert "未接入" in cq["note"]
+    assert "test: 无 kind=compact 落账" == cq["producer_evidence"]
+    assert "未触发" not in cq["note"]
+    assert cq["trigger_estimate_tokens"] == 6400  # 门槛语境照常透出
+
+
+def test_compact_empty_note_disambiguates_wired_untriggered(tmp_path, monkeypatch):
+    # "已接线未触发"态：note 报未触发+可对照门槛，不得报"未接入/断线"
+    monkeypatch.setattr(
+        bk, "_compact_producer_status",
+        lambda *a, **k: {"producer_status": "wired", "producer_evidence": "test"})
+    cq = compute_kpis(db_path=tmp_path / "missing.db", permission_db=tmp_path / "n.db",
+                      reflections_db=tmp_path / "n.db")["compact_quality"]
+    assert cq["available"] is False and cq["producer_status"] == "wired"
+    assert "未触发" in cq["note"] and "6400" in cq["note"]
+    assert "未接入" not in cq["note"] and "断线" not in cq["note"]
+
+
+def test_compact_empty_note_unknown_state(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        bk, "_compact_producer_status",
+        lambda *a, **k: {"producer_status": "unknown", "producer_evidence": "test: 源码不可读"})
+    cq = compute_kpis(db_path=tmp_path / "missing.db", permission_db=tmp_path / "n.db",
+                      reflections_db=tmp_path / "n.db")["compact_quality"]
+    assert cq["producer_status"] == "unknown" and "无法探测" in cq["note"]
+
+
+def test_compact_populated_exposes_producer_and_threshold(tmp_path):
+    # 有真实 compact 事件时同样透出 producer_status/threshold（形状一致可对照）
+    traj = _mk_traj(
+        tmp_path / "t.db",
+        [{"created_at": "2026-01-01T00:00:01"}],
+        extra_events=[
+            {"sid": "s1", "metadata": {"kind": "compact", "before_count": 30, "after_count": 8},
+             "created_at": "2026-01-01T00:00:02"},
+        ])
+    cq = compute_kpis(db_path=traj, permission_db=tmp_path / "n.db",
+                      reflections_db=tmp_path / "n.db")["compact_quality"]
+    assert cq["available"] and cq["producer_status"] == "wired"
+    assert cq["trigger_estimate_tokens"] == 6400

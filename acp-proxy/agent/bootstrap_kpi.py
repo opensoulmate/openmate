@@ -192,6 +192,56 @@ def _edit_reflection(refl_db: Path, since_iso: str | None) -> dict[str, Any]:
     }
 
 
+def _compact_producer_status(src_path: Path | None = None) -> dict[str, Any]:
+    """compact 产生源接线状态探测（21.1 消歧：区分"未触发"与"未接入"）。
+
+    确定性源码检视（soulmate_agent 压缩点），不猜不冒充：
+    - wired     = 压缩点既有 should_compress 判定又有 kind="compact" 落账；
+    - not_wired = 缺任一（无判定=压缩触发未接线；有判定无落账=KPI 数据源断线）；
+    - unknown   = 源码不可读（诚实降级，不冒充任一态）。
+    """
+    path = src_path or (Path(__file__).resolve().parent / "soulmate_agent.py")
+    try:
+        src = path.read_text(encoding="utf-8", errors="replace")
+    except Exception as e:  # 不可读=不可探测，如实报 unknown
+        return {"producer_status": "unknown",
+                "producer_evidence": f"源码不可读: {type(e).__name__}"}
+    has_trigger = "should_compress(" in src
+    has_ledger = 'kind="compact"' in src or "kind='compact'" in src
+    if has_trigger and has_ledger:
+        return {"producer_status": "wired",
+                "producer_evidence":
+                    f"{path.name} 压缩点含 should_compress 判定+kind=compact 落账"}
+    if not has_trigger:
+        return {"producer_status": "not_wired",
+                "producer_evidence":
+                    f"{path.name} 无 should_compress 判定（压缩触发未接线）"}
+    return {"producer_status": "not_wired",
+            "producer_evidence":
+                f"{path.name} 有压缩判定但无 kind=compact 落账（KPI 数据源断线）"}
+
+
+def _compact_threshold_context() -> dict[str, Any]:
+    """压缩触发门槛语境（阈值核账透明化：0 事件须可对照门槛解读）。
+
+    读 ContextCompressor 构造缺省（与 soulmate_agent._ctx_compressor 同源
+    `from agent.context_compression import ContextCompressor`）；import/构造
+    失败诚实降级 trigger_estimate_tokens=None，不猜数。
+    """
+    try:
+        from agent.context_compression import ContextCompressor
+        c = ContextCompressor()
+        return {
+            "max_tokens": c.max_tokens,
+            "compression_threshold": c.compression_threshold,
+            "trigger_estimate_tokens": int(c.max_tokens * c.compression_threshold),
+        }
+    except Exception as e:
+        return {"max_tokens": None, "compression_threshold": None,
+                "trigger_estimate_tokens": None,
+                "threshold_note": f"门槛不可读: {type(e).__name__}"}
+
+
 def _compact_quality(db_path: Path, since_iso: str | None) -> dict[str, Any]:
     sql = (
         "SELECT session_id, metadata_json, created_at FROM trajectory_events "
@@ -212,6 +262,17 @@ def _compact_quality(db_path: Path, since_iso: str | None) -> dict[str, Any]:
         compacts.append({"session_id": sid, "meta": meta, "created_at": created_at or ""})
 
     if not compacts:
+        # 21.1 消歧：0 事件区分"产生源未接入（数据源断线）"与"已接线未触发（阈值未到）"
+        prod = _compact_producer_status()
+        thr = _compact_threshold_context()
+        if prod["producer_status"] == "wired":
+            note = ("窗口内无 compact 事件（产生源已接线：窗口内未触发压缩——"
+                    f"估算门槛约 {thr.get('trigger_estimate_tokens')} token）")
+        elif prod["producer_status"] == "not_wired":
+            note = (f"窗口内无 compact 事件（产生源未接入：{prod['producer_evidence']}）")
+        else:
+            note = (f"窗口内无 compact 事件（产生源接线状态无法探测："
+                    f"{prod['producer_evidence']}）")
         return {
             "available": False,
             "compact_events": 0,
@@ -220,8 +281,10 @@ def _compact_quality(db_path: Path, since_iso: str | None) -> dict[str, Any]:
             "pre_compact_success_rate": None,
             "avg_before_count": None,
             "avg_after_count": None,
+            **prod,
+            **thr,
             "source": "trajectory_events custom kind=compact",
-            "note": "窗口内无 compact 事件（压缩未触发或产生源未接入）",
+            "note": note,
         }
 
     # 逐 compact 事件切分同会话回合（按 created_at 文本序可比 ISO）
@@ -254,6 +317,9 @@ def _compact_quality(db_path: Path, since_iso: str | None) -> dict[str, Any]:
         "pre_compact_success_rate": _rate(pre),
         "avg_before_count": round(sum(before_counts) / len(before_counts), 1) if before_counts else None,
         "avg_after_count": round(sum(after_counts) / len(after_counts), 1) if after_counts else None,
+        "producer_status": "wired",  # 有真实 compact 事件落账=产生源实证在工作
+        "producer_evidence": f"窗口内 {len(compacts)} 条 kind=compact 事件真实落账",
+        **_compact_threshold_context(),
         "source": "trajectory_events custom kind=compact + 同会话回合结局",
         "note": "",
     }
