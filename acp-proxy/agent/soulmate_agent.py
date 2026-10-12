@@ -100,6 +100,7 @@ from agent.intent_classifier import IntentClassifier
 from agent.user_preferences import UserPreferenceLearner
 from agent.knowledge_graph import KnowledgeGraph
 from agent.reflection_engine import ReflectionEngine
+from agent import reflection_sources
 from agent.memory_consolidator import MemoryConsolidator
 from agent.skill_learner import SkillLearner
 from agent.observability import ObservabilityManager, SpanType, SpanStatus
@@ -1632,6 +1633,11 @@ class SoulMateAgent:
                 )
                 logger.warning(
                     f"[tool-recovery] {func_name} 第{attempt}次{step.action}成功")
+                # 20.2 产生源③：工具失败恢复成功（fail-safe 旁路，绝不冒泡）
+                reflection_sources.from_tool_recovery(
+                    getattr(self, "_reflection_engine", None),
+                    session_id, func_name, attempt, step.action,
+                    kind.value, first_result)
                 return result
             mgr.record(
                 session_id, step.tool_name, mgr.classify(result).value, result,
@@ -6499,10 +6505,20 @@ You can send files to the user natively: to deliver a file, write a brief confir
                         full_response, _tool, fix_resp)
                     logger.info(
                         f"[refusal-remedy] session={session_id} 补做成功: {_tool}")
+                    # 20.2 产生源②：补做自愈完成（成功态）
+                    reflection_sources.from_remediation(
+                        getattr(self, "_reflection_engine", None),
+                        session_id, "refusal-remedy", _tool, True,
+                        user_text=user_text)
                 else:
                     logger.warning(
                         f"[refusal-remedy] session={session_id} 补做后 {_tool} "
                         f"仍未执行，走既有更正声明路径")
+                    # 20.2 产生源②：补做自愈完成（未自愈态，诚实记失败）
+                    reflection_sources.from_remediation(
+                        getattr(self, "_reflection_engine", None),
+                        session_id, "refusal-remedy", _tool, False,
+                        user_text=user_text)
             except Exception as e:
                 logger.warning(
                     f"[refusal-remedy] session={session_id} 补做失败(非致命): {e}")
@@ -6608,6 +6624,10 @@ You can send files to the user natively: to deliver a file, write a brief confir
                         session_id=session_id,
                         update=acp.update_agent_message_text(report_text),
                     )
+                # 20.2 产生源①：自验收尾出结论（fail-safe 旁路）
+                reflection_sources.from_self_verify(
+                    getattr(self, "_reflection_engine", None),
+                    session_id, user_text, verify_report, _remediated)
             logger.info(
                 f"[self-verify] items={len(verify_report.items)}, "
                 f"coverage={verify_report.coverage}, missing={missing}, remediated={_remediated}"
