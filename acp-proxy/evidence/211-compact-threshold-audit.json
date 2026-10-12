@@ -1,0 +1,40 @@
+{
+  "slice": "21.1 阈值核账（只读审计，不改行为）",
+  "message_volume_vs_threshold": {
+    "sessions": 258,
+    "messages_total": 547,
+    "est_tokens_max": 5051,
+    "est_tokens_p50": 257,
+    "est_tokens_p90": 787,
+    "est_tokens_p99": 2614,
+    "sessions_over_threshold": 0,
+    "pct_over_threshold": 0.0,
+    "threshold_estimate_tokens": 6400
+  },
+  "estimator_formula_audit": {
+    "docstring_claim": "中文约1.5字/token（tokens ≈ zh_chars / 1.5 ≈ 0.67×zh_chars）",
+    "code_formula": "int(chinese_chars * 1.5 + other_chars / 4)",
+    "docstring_present": true,
+    "code_times15_present": true,
+    "contradiction": true,
+    "direction": "系统性高估中文 ~2.25×（×1.5 vs 自述 ÷1.5）→ 压缩触发偏早",
+    "effective_real_zh_tokens_at_threshold": 2844
+  },
+  "real_calibration_token_attribution": {
+    "samples": 948,
+    "sum_estimated": 15789296,
+    "sum_actual": 15882477,
+    "factor_actual_over_estimated": 1.0059,
+    "avg_gap_actual_minus_estimated": 98.3,
+    "direction": "估算偏低（实际更大）→ 裁剪/门槛相对真实 token 偏晚",
+    "note": "此为 token_attribution 估算器（estimate_content_tokens）方向，非 context_compression._estimate_tokens；两估算器不同源，分开陈述"
+  },
+  "threshold_vs_model_window": {
+    "model": "mimo",
+    "model_context_window": 65536,
+    "threshold_estimate_tokens": 6400,
+    "threshold_pct_of_window": 9.77,
+    "threshold_pct_after_zh_overestimate": 4.34,
+    "verdict": "6400 估算门槛仅占真实窗口 ~10%（中文高估修正后 ~4.3%），压缩触发远早于模型上下文实际需要；门槛偏保守=宁早压缩保会话可续"
+  }
+}
