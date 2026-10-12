@@ -50,7 +50,7 @@ _DEGRADED_HARD_PATTERNS = [
         r"\bdd\s+if=",
         r":\(\)\{\s*:\|:&\s*\};:",
         r">\s*/dev/sd",
-        r"\bchmod\s+-R\s+777\s+/",
+        r"\bchmod\s+-R\s+777\s+/(?:\s|$|\*)",
     )
 ]
 

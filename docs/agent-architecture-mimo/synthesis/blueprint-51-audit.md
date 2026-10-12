@@ -13,7 +13,7 @@
 | 06 | 连点/打断对应 | ✅ | `tests/test_steering.py` |
 | 07/08 | schema_version/doctor | ✅ | `agent/schema_doctor.py` |
 | 09 | Plan 模式禁写盘 | ✅ | Plan语义=`PermissionMode.EXPLORE`（allow规则不可授予修改→Step3 DENY）；终验 2026-10-12 周期#124 **12/12 PASS**：引擎层 write_file/execute_code/terminal 写入全 DENY+显式 allow 规则不可覆盖+read_file/web_search 只读 ALLOW；真实 WS 用户路径（soulmate 真实 LLM 回合）explore 态 write_file 文件未创建+回复报拦截，bypass 对照组文件真实创建；探针 `acp-proxy/plan_mode_probe_ws.py`，证据 `evidence/p0-09-plan-mode-evidence.json`（入口为 API `PUT /api/immune/permission/mode`，UI 开关另案） |
-| 10 | 高危强制 ask | ⏳ | 高危语义在 `error_codes`/风险评估（`soul/risk/assessor.py`）；force_ask 路径待终验 |
+| 10 | 高危强制 ask | ✅ | 终验 2026-10-12 周期#125 **17/17 PASS**：bypass（最宽松档）下 sudo/rm -rf/curl POST/机密读取/系统目录写全强制 ask（requires_human=True）+灾难命令 rm -rf / hard deny 不可覆盖+DONT_ASK→DENY 绝不静默；网关层（真实 PermissionGate×真实引擎）无人值守 ask→拦截 ask-denied（-32012"未审批拦截"语义）/真人拒绝→ask-denied/批准→ask-approved+同参 cached-allow+perm_decision_audit outcome 回写（服务端真源）；真实 WS 用户路径（soulmate 真实 LLM 回合，bypass 态）wire 捕获 session/request_permission（强制 ask 到达真人通道）+拒绝审批后文件未创建+非高危对照组文件真实创建。**终验发现并根因修复**：毁机硬规则"rm -rf /"子串匹配误伤 `rm -rf /tmp/x`（过度硬否决→合法删除无法人工批准）→锚定正则只命中根目标（opensoul `permission_engine._ANCHORED_ROOT_RES`，与 acp-proxy 降级层同源锚定；test_permission_engine 52/52 含 3 新增回归）。探针 `acp-proxy/high_risk_probe_ws.py`，证据 `evidence/p0-10-force-ask-evidence.json`；语义边界实录：发消息类 message_send 在 default 强制 ask、bypass 走模式兜底放行（改动会破坏无人值守微信发消息工作流，待用户拍板不冒进） |
 | 11 | .env/密钥 deny | ✅ | `soulmate_agent.py` secrets 处理 + `dna_evolution.py` |
 | 12 | ToolFailure 三级 | ✅ | `agent/tool_errors.py` + `tool_recovery.py` |
 | 13 | abort 级联取消 | ✅ | `app.py` abort + cascade（systemic_test） |
@@ -52,4 +52,4 @@
 
 ## 缺口处理（统筹裁决）
 - **❌ P1-05 RepoMap**：不排期硬造 tree-sitter 图中心性（过度设计）；用"检索式召回+token预算选符号"作为**替代实现**立项补文档，除非你要求原方案
-- **⏳×5**（P0-10、P1-01/15、P2-09/10）：全部是"语义待终验"而非未实现——排入 soulmate 车道阶段20 前部做终验收口（P0-09 已于 2026-10-12 周期#124 终验销账 ✅，逐项销账进行中）
+- **⏳×4**（P1-01/15、P2-09/10）：全部是"语义待终验"而非未实现——排入 soulmate 车道阶段20 前部做终验收口（P0-09 已于 2026-10-12 周期#124 终验销账 ✅，P0-10 已于 2026-10-12 周期#125 终验销账 ✅ 17/17，逐项销账进行中）
