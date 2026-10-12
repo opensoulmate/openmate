@@ -333,6 +333,29 @@ class SkillRewriter:
             )
 
         # 字段不动约束：description/坑/验证逐字透传（取舍类改动不在此通道）
+        # ── P2-10 fork 沙箱对照晋升门（蓝图 P2.4）：语义改写候选晋升主配置前 fork 对照 ──
+        try:
+            from agent.fork_promote import compare_and_decide, render_skill_artifact
+
+            candidate_md = render_skill_artifact(
+                name=existing.get("name") or slug,
+                description=existing.get("description") or "",
+                triggers=new_triggers,
+                steps=new_steps,
+                pitfalls=old_pitfalls,
+                verify=old_verify,
+                category=existing.get("category") or "general",
+            )
+            verdict = compare_and_decide("skill_md", existing.get("body") or "", candidate_md)
+        except Exception as e:
+            verdict = {"promote": False, "reasons": [f"对照晋升门异常: {e}"]}
+        if not verdict.get("promote"):
+            return RewriteOutcome(
+                skill_id, slug, "rejected",
+                "fork沙箱对照未晋升（主配置不动）: "
+                + "; ".join(str(r) for r in (verdict.get("reasons") or []))[:300],
+                revision_before=rev_before,
+            )
         try:
             saved = saver.save_flow(
                 name=existing.get("name") or slug,

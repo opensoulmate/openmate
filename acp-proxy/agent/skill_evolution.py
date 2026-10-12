@@ -48,7 +48,7 @@ class EvolutionResult:
 
     skill_id: str
     slug: str
-    action: str  # evolved | no_change | skipped
+    action: str  # evolved | no_change | skipped | kept_baseline
     reason: str = ""
     added: list[str] = field(default_factory=list)
     revision_before: int = 0
@@ -334,6 +334,33 @@ class SkillEvolver:
         triggers = sections["triggers"] or [
             t.strip() for t in str(existing.get("triggers") or "").split(",") if t.strip()
         ]
+        # ── P2-10 fork 沙箱对照晋升门（蓝图 P2.4）：晋升主配置前 fork 对照 ──
+        # 候选（坑只增）在 fork 沙箱独立子进程与基线同评对照，不劣于基线才落盘。
+        try:
+            from agent.fork_promote import compare_and_decide, render_skill_artifact
+
+            candidate_md = render_skill_artifact(
+                name=existing.get("name") or slug,
+                description=existing.get("description") or "",
+                triggers=triggers,
+                steps=sections["steps"],
+                pitfalls=cur_pitfalls + added,
+                verify=sections["verify"],
+                category=existing.get("category") or "general",
+            )
+            verdict = compare_and_decide("skill_md", existing.get("body") or "", candidate_md)
+        except Exception as e:
+            verdict = {"promote": False, "reasons": [f"对照晋升门异常: {e}"]}
+        if not verdict.get("promote"):
+            reason = (
+                "fork沙箱对照未晋升（主配置不动）: "
+                + "; ".join(str(r) for r in (verdict.get("reasons") or []))
+            )[:300]
+            logger.warning(f"[skill-evolution] {slug} {reason}")
+            return EvolutionResult(
+                skill_id, slug, "kept_baseline", reason, added=added,
+                revision_before=rev_before,
+            )
         try:
             saved = saver.save_flow(
                 name=existing.get("name") or slug,
