@@ -3865,7 +3865,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
         # （特殊长任务永不被计数误杀），全程零推理才收口；收口也只请用户'继续'续跑。
         # 硬停只剩：token预算(钱的客观事实)/LoopGuard(重复失败事实)/用户中断。──
         _CHECK_INTERVAL = 8
-        _round = 0
+        _round = -1  # 0基（与 range(MAX_ROUNDS) 语义一致：0..MAX_ROUNDS-1）
         _cycle_text_start = len(full_response)
         while True:
             _round += 1
@@ -5056,28 +5056,28 @@ You can send files to the user natively: to deliver a file, write a brief confir
             if not got_tool_call:
                 break
             # ── 周期进展自评（推理门）：请求模型评估进展/重复失败/继续还是收尾 ──
-            if _round % _CHECK_INTERVAL == 0:
+            if (_round + 1) % _CHECK_INTERVAL == 0:
                 messages.append({"role": "user", "content": (
-                    f"【进展自评】你已执行 {_round} 轮工具调用。请用一小段推理评估："
+                    f"【进展自评】你已执行 {_round + 1} 轮工具调用。请用一小段推理评估："
                     "①距目标的完成度 ②是否在重复同一失败 ③决定：继续/换策略/收尾"
                     "（收尾=直接输出总结，不再调工具）。")})
             # ── 软上限=推理续期点：有可见推理→自动续期；全程零推理→收口待续 ──
-            if _round >= MAX_ROUNDS:
+            if _round + 1 >= MAX_ROUNDS:
                 reasoned = len(full_response) > _cycle_text_start
                 if reasoned:
                     messages.append({"role": "user", "content": (
-                        f"\n\n[工具调用 {_round} 轮（软上限）——检测到你持续有推理输出，"
+                        f"\n\n[工具调用 {_round + 1} 轮（软上限）——检测到你持续有推理输出，"
                         "预算自动续期，这不是终止。请简述当前进度后继续；"
                         "若已完成，直接输出收尾总结。]")})
                     logger.info(
-                        f"[termination] session={session_id} 软上限{_round}轮→有推理，续期")
-                    MAX_ROUNDS += max(_round, termination.max_turns_limit())
+                        f"[termination] session={session_id} 软上限{_round + 1}轮→有推理，续期")
+                    MAX_ROUNDS += max(_round + 1, termination.max_turns_limit())
                     _cycle_text_start = len(full_response)
                 else:
                     # mem0 §1.1"失败必须可见"：收口必须显式告知；P1-15 落 trace
                     self._termination_state()[session_id] = termination.TERM_MAX_TURNS
                     wrap_note = (
-                        f"\n\n[已达工具调用软上限({_round}轮)，且全程零推理（未响应自评请求）"
+                        f"\n\n[已达工具调用软上限({_round + 1}轮)，且全程零推理（未响应自评请求）"
                         "——按推理优先原则收口。如需继续，请发送'继续'（断点上下文已保留）。]")
                     full_response += wrap_note
                     if self._client is not None:
