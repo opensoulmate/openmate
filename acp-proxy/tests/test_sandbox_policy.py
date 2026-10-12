@@ -346,3 +346,213 @@ class TestCodeModeInnerFailsafe:
             "s1", "web_search", {"query": "x"}, "/tmp"))
         assert "[SANDBOX DENIED]" not in out
         assert [c[0] for c in gate.calls] == ["web_search"]
+
+
+# ════════════════════════════════════════════════════════════════
+# 6. P1-01 工具轨道隔离 — 危险编码工具不对 personal 开放
+# ════════════════════════════════════════════════════════════════
+
+from agent.sandbox_policy import (
+    DANGEROUS_CODING_TOOL_NAMES,
+    TRACK_CODING,
+    TRACK_PERSONAL,
+)
+
+
+class TestToolTrackStore:
+    def test_default_track_is_coding_zero_change(self, tmp_path):
+        """默认 coding = 零行为变化（存量会话不受影响）"""
+        pol = SandboxPolicy(store_path=tmp_path / "none.json")
+        assert pol.tool_track("s1") == TRACK_CODING
+
+    def test_set_track_persists_across_instances(self, tmp_path):
+        p = tmp_path / "pol.json"
+        assert SandboxPolicy(store_path=p).set_track("s1", TRACK_PERSONAL) is True
+        assert SandboxPolicy(store_path=p).tool_track("s1") == TRACK_PERSONAL
+        assert SandboxPolicy(store_path=p).tool_track("other") == TRACK_CODING
+
+    def test_per_session_track_overrides_default(self, tmp_path):
+        p = tmp_path / "pol.json"
+        pol = SandboxPolicy(store_path=p)
+        pol.set_default_track(TRACK_PERSONAL)
+        pol.set_track("coding-s", TRACK_CODING)  # 显式切换压过default
+        assert pol.tool_track("any") == TRACK_PERSONAL
+        assert pol.tool_track("coding-s") == TRACK_CODING
+
+    def test_invalid_track_refused_not_silently_fixed(self, tmp_path):
+        pol = SandboxPolicy(store_path=tmp_path / "pol.json")
+        assert pol.set_track("s1", "hacker") is False
+        assert pol.tool_track("s1") == TRACK_CODING  # 未落盘
+
+    def test_corrupt_store_fail_closed_personal(self, tmp_path):
+        p = tmp_path / "pol.json"
+        p.write_text("{not json", encoding="utf-8")
+        pol = SandboxPolicy(store_path=p)
+        assert pol.tool_track("s1") == TRACK_PERSONAL  # fail-closed收紧
+
+    def test_invalid_stored_track_value_fail_closed_personal(self, tmp_path):
+        p = tmp_path / "pol.json"
+        p.write_text(json.dumps({"tool_tracks": {"s1": "bogus"}}), encoding="utf-8")
+        assert SandboxPolicy(store_path=p).tool_track("s1") == TRACK_PERSONAL
+
+    def test_clear_session_clears_track_too(self, tmp_path):
+        p = tmp_path / "pol.json"
+        pol = SandboxPolicy(store_path=p)
+        pol.set_track("s1", TRACK_PERSONAL)
+        pol.clear_session("s1")
+        assert SandboxPolicy(store_path=p).tool_track("s1") == TRACK_CODING
+
+    def test_snapshot_reports_tracks(self, tmp_path):
+        pol = SandboxPolicy(store_path=tmp_path / "pol.json")
+        pol.set_track("s9", TRACK_PERSONAL)
+        snap = pol.snapshot()
+        assert snap["tool_tracks"] == {"s9": TRACK_PERSONAL}
+        assert snap["default_track"] == TRACK_CODING
+
+
+class TestDangerousClassification:
+    def test_dangerous_coding_names(self):
+        for n in ("terminal", "execute_code", "write_file", "patch", "batch_execute"):
+            assert SandboxPolicy.is_dangerous_coding_tool(n) is True
+
+    def test_safe_names_not_dangerous(self):
+        """personal 轨道保留面=日程/搜索/消息/读取类轻工具"""
+        for n in ("read_file", "search_files", "web_search", "web_extract",
+                  "todo", "message_send", "schedule_task", "memory_read",
+                  "send_file", "clarify", "check_evolution_status", ""):
+            assert SandboxPolicy.is_dangerous_coding_tool(n) is False
+
+
+class TestTrackFilterTools:
+    FACE = ("read_file", "web_search", "todo", "terminal", "execute_code",
+            "write_file", "patch", "batch_execute")
+
+    def test_personal_drops_dangerous_keeps_safe(self, tmp_path):
+        pol = SandboxPolicy(store_path=tmp_path / "pol.json")
+        pol.set_track("s1", TRACK_PERSONAL)
+        kept, dropped = pol.filter_tools("s1", _tool_defs(*self.FACE))
+        assert _names(kept) == ["read_file", "web_search", "todo"]
+        assert sorted(dropped) == sorted(
+            ["terminal", "execute_code", "write_file", "patch", "batch_execute"])
+
+    def test_explicit_switch_to_coding_restores_exposure(self, tmp_path):
+        """blueprint："除非用户显式切换"——set_track(coding) 后危险工具回工具面"""
+        pol = SandboxPolicy(store_path=tmp_path / "pol.json")
+        pol.set_track("s1", TRACK_PERSONAL)
+        pol.set_track("s1", TRACK_CODING)  # 显式切换
+        kept, dropped = pol.filter_tools("s1", _tool_defs(*self.FACE))
+        assert dropped == [] and len(kept) == len(self.FACE)
+
+    def test_other_sessions_unaffected_by_personal_track(self, tmp_path):
+        pol = SandboxPolicy(store_path=tmp_path / "pol.json")
+        pol.set_track("s1", TRACK_PERSONAL)
+        kept, dropped = pol.filter_tools("s2", _tool_defs(*self.FACE))
+        assert dropped == [] and len(kept) == len(self.FACE)
+
+    def test_two_axes_union(self, tmp_path):
+        """personal + 网络受限两轴独立、任一命中即裁"""
+        pol = SandboxPolicy(store_path=tmp_path / "pol.json")
+        pol.set_track("s1", TRACK_PERSONAL)
+        pol.set_restricted("s1", True)
+        kept, dropped = pol.filter_tools(
+            "s1", _tool_defs("read_file", "web_search", "terminal"),
+            mcp_names={"srv__fetch"})
+        assert _names(kept) == ["read_file"]
+        assert sorted(dropped) == sorted(["web_search", "terminal"])
+
+
+class TestTrackDenyReason:
+    def test_personal_dangerous_tool_denied(self, tmp_path):
+        pol = SandboxPolicy(store_path=tmp_path / "pol.json")
+        pol.set_track("s1", TRACK_PERSONAL)
+        reason = pol.deny_reason("s1", "terminal")
+        assert reason and "[SANDBOX DENIED]" in reason
+        assert "personal 轨道" in reason and "显式切换" in reason
+
+    def test_personal_safe_tool_returns_none(self, tmp_path):
+        pol = SandboxPolicy(store_path=tmp_path / "pol.json")
+        pol.set_track("s1", TRACK_PERSONAL)
+        assert pol.deny_reason("s1", "read_file") is None
+        assert pol.deny_reason("s1", "web_search") is None  # 网络轴未受限
+
+    def test_coding_dangerous_tool_returns_none(self, tmp_path):
+        pol = SandboxPolicy(store_path=tmp_path / "pol.json")
+        assert pol.deny_reason("s1", "terminal") is None
+
+    def test_describe_lists_track_and_dropped(self, tmp_path):
+        pol = SandboxPolicy(store_path=tmp_path / "pol.json")
+        pol.set_track("s1", TRACK_PERSONAL)
+        d = pol.describe("s1", tool_names=["terminal", "read_file", "web_search"])
+        assert d["tool_track"] == TRACK_PERSONAL
+        assert d["dropped_if_personal"] == ["terminal"]
+        assert d["dropped_if_restricted"] == []  # 网络轴独立未触发
+
+
+class TestTrackRunLlmFaceShrink:
+    """真实 _run_llm_with_tools 路径 E2E（CapturingLLM 观察真实 tools kwarg）"""
+
+    def _agent(self, tmp_path, scripts, track=None):
+        agent = make_agent(tmp_path, acquired=True, scripts=scripts)
+        agent.llm_engine = CapturingLLM(scripts)
+        gate = FakeGate(allow=False)
+        agent._permission_gate = gate
+        if track:
+            agent._sandbox_policy.set_track("s1", track)
+        return agent, gate
+
+    def test_personal_face_excludes_dangerous_tools(self, tmp_path):
+        agent, _ = self._agent(tmp_path, [["回答完成"]], track=TRACK_PERSONAL)
+        resp, _ = run(agent._run_llm_with_tools(
+            messages=[{"role": "user", "content": "hi"}], session_id="s1"))
+        assert "回答完成" in resp
+        face = agent.llm_engine.seen_tools[0]
+        for n in ("terminal", "execute_code", "write_file", "patch", "batch_execute"):
+            assert n not in face, f"{n} 泄漏进 personal 工具面"
+        assert "read_file" in face and "todo" in face  # 日程/读取保留
+
+    def test_coding_face_keeps_dangerous_tools(self, tmp_path):
+        """对照：默认 coding 轨道工具面含 terminal（零行为变化）"""
+        agent, _ = self._agent(tmp_path, [["回答完成"]])
+        run(agent._run_llm_with_tools(
+            messages=[{"role": "user", "content": "hi"}], session_id="s1"))
+        face = agent.llm_engine.seen_tools[0]
+        assert "terminal" in face and "execute_code" in face
+
+    def test_personal_hallucinated_dangerous_call_refused(self, tmp_path):
+        """兜底：模型幻觉出被裁危险工具 → [SANDBOX DENIED] 合成结果，gate/执行不触达"""
+        tc = {"tool_calls": [{
+            "id": "t1",
+            "function": {"name": "terminal",
+                         "arguments": json.dumps({"command": "touch /tmp/never"})},
+        }]}
+        agent, gate = self._agent(tmp_path, [[tc], ["完成"]], track=TRACK_PERSONAL)
+        resp, all_tool_calls = run(agent._run_llm_with_tools(
+            messages=[{"role": "user", "content": "跑个命令"}], session_id="s1"))
+        assert resp == "完成"
+        denied = [t for t in all_tool_calls if t.get("permission") == "sandbox-restricted"]
+        assert len(denied) == 1 and denied[0]["name"] == "terminal"
+        assert gate.calls == []  # 拒绝发生在gate之前=真实拦截
+        assert not Path("/tmp/never").exists()
+
+    def test_coding_call_reaches_gate(self, tmp_path):
+        """对照：coding 轨道同一调用照常进 gate（拦截是轨道所致）"""
+        tc = {"tool_calls": [{
+            "id": "t2",
+            "function": {"name": "terminal",
+                         "arguments": json.dumps({"command": "echo hi"})},
+        }]}
+        agent, gate = self._agent(tmp_path, [[tc], ["完成"]], track=TRACK_CODING)
+        run(agent._run_llm_with_tools(
+            messages=[{"role": "user", "content": "跑个命令"}], session_id="s1"))
+        assert [c[0] for c in gate.calls] == ["terminal"]
+
+    def test_code_mode_inner_dangerous_denied(self, tmp_path):
+        """code-mode 内层双保险：personal 轨道批内危险调用显式拒绝"""
+        agent = make_agent(tmp_path, acquired=True, scripts=[])
+        agent._sandbox_policy.set_track("s1", TRACK_PERSONAL)
+        gate = FakeGate(allow=True)
+        agent._permission_gate = gate
+        out = run(agent._code_mode_tool_call(
+            "s1", "terminal", {"command": "echo never"}, "/tmp"))
+        assert "[SANDBOX DENIED]" in out and "personal 轨道" in out
+        assert gate.calls == []

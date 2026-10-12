@@ -391,14 +391,19 @@ async def sandbox_policy_snapshot():
 
 @app.get("/api/agent/sandbox-policy/{session_id}")
 async def sandbox_policy_describe(session_id: str):
-    """会话策略+受影响网络类工具面（"限制了什么"可观测）。
+    """会话策略+受影响工具面（"限制了什么"可观测）：网络轴+P1-01轨道轴。
 
     MCP动态工具（server__tool）同属网络类但清单由agent侧持有，具体裁剪
     以agent日志`[sandbox]`行为准。"""
     try:
-        from agent.sandbox_policy import NETWORK_TOOL_NAMES
+        from agent.sandbox_policy import (
+            DANGEROUS_CODING_TOOL_NAMES,
+            NETWORK_TOOL_NAMES,
+        )
         from agent.mcp_resources import MCP_RESOURCE_TOOL_NAMES
-        static_names = sorted(set(NETWORK_TOOL_NAMES) | set(MCP_RESOURCE_TOOL_NAMES))
+        static_names = sorted(
+            set(NETWORK_TOOL_NAMES) | set(MCP_RESOURCE_TOOL_NAMES)
+            | set(DANGEROUS_CODING_TOOL_NAMES))
         data = _sandbox_policy().describe(session_id, tool_names=static_names)
         data["note"] = ("MCP动态工具(server__tool)同样按网络类裁剪；"
                         "生效清单见agent日志[sandbox]行")
@@ -409,12 +414,22 @@ async def sandbox_policy_describe(session_id: str):
 
 @app.put("/api/agent/sandbox-policy/{session_id}")
 async def sandbox_policy_set(session_id: str, req: dict):
-    """设置会话网络限制 {"network_restricted": true|false}（per-session显式覆盖）"""
-    if "network_restricted" not in req:
-        return {"error": "missing field: network_restricted"}
-    ok = _sandbox_policy().set_restricted(session_id, bool(req["network_restricted"]))
-    return {"ok": ok, "session_id": session_id,
-            "network_restricted": bool(req["network_restricted"])}
+    """设置会话策略（per-session显式覆盖），两轴可单独或一起设：
+    {"network_restricted": true|false}  网络轴
+    {"tool_track": "coding"|"personal"} 轨道轴（P1-01，"用户显式切换"入口）"""
+    results: dict = {"session_id": session_id}
+    if "network_restricted" in req:
+        results["network_restricted"] = bool(req["network_restricted"])
+        results["ok_network"] = _sandbox_policy().set_restricted(
+            session_id, bool(req["network_restricted"]))
+    if "tool_track" in req:
+        results["tool_track"] = str(req["tool_track"])
+        results["ok_track"] = _sandbox_policy().set_track(
+            session_id, str(req["tool_track"]))
+    if "network_restricted" not in req and "tool_track" not in req:
+        return {"error": "missing field: network_restricted or tool_track"}
+    results["ok"] = all(v for k, v in results.items() if k.startswith("ok_"))
+    return results
 
 
 @app.delete("/api/agent/sandbox-policy/{session_id}")
