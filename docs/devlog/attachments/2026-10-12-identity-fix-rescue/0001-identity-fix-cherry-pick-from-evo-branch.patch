@@ -1,0 +1,84 @@
+From 64802af9e3c1429d43fd91ed28abb55cf91e709a Mon Sep 17 00:00:00 2001
+From: Hermes Agent <climbing@hermes.local>
+Date: Mon, 12 Oct 2026 14:06:41 +0800
+Subject: [PATCH] =?UTF-8?q?fix(agent):=20=E6=96=B0=E5=BB=BA=E4=BC=9A?=
+ =?UTF-8?q?=E8=AF=9D=E8=BA=AB=E4=BB=BD=E9=A1=B6=E6=9B=BF=E6=A0=B9=E4=BF=AE?=
+ =?UTF-8?q?=E2=80=94=E2=80=94=E7=82=B9=E5=87=BB=E8=B0=81=E5=BB=BA=E8=B0=81?=
+ =?UTF-8?q?=EF=BC=8C=E9=BB=98=E8=AE=A4=E5=8F=AA=E8=AE=B8=E5=9C=A8=E7=A9=BA?=
+ =?UTF-8?q?=E7=99=BD=E5=85=A5=E5=8F=A3?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+用户铁律：点击哪个agent的新建就建谁的；只有什么都不点的全局新建才默认soulmate。
+- 根因：标题自动命名块把activeAgentId清成null，随后||'soulmate'吞掉身份→所有会话变soulmate
+- 修1：标题更新保留agentId（setActiveSession第二参传当前值不再传null）
+- 修2：connectSession取会话自带agentId>store>入口默认，链路深处无默认
+- 修3：ws_acp session/new 强制显式agent_id（缺→-32602拒绝），未注册→-32601响亮报错
+- 实测：agent_id=hermes→Started hermes subprocess；无agent_id→拒绝（journal铁证）
+---
+ acp-proxy/ws_acp.py                | 21 ++++++++++++---------
+ src/app/(app)/chat/chat-client.tsx |  7 +++++--
+ 2 files changed, 17 insertions(+), 11 deletions(-)
+
+diff --git a/acp-proxy/ws_acp.py b/acp-proxy/ws_acp.py
+index 181dad2f..4f365d17 100644
+--- a/acp-proxy/ws_acp.py
++++ b/acp-proxy/ws_acp.py
+@@ -203,17 +203,20 @@ async def ws_acp_endpoint(client_ws: WebSocket):
+     # 提取agent_id
+     params = session_msg.get("params", {})
+     logger.info(f"[ACP] session/new raw params: {json.dumps(params, ensure_ascii=False)[:200]}")
+-    agent_id = params.get("agent_id") or params.get("agentId") or "soulmate"
++    # agent_id 必须显式声明（点击谁=建谁；默认值只许存在于前端入口，
++    # 服务端绝不顶替身份——铁律"每个agent都应该是独立的"）
++    meta = params.get("_meta") or {}
++    agent_id = params.get("agent_id") or params.get("agentId") or meta.get("agent_id")
++    if not agent_id:
++        logger.error("[ACP] session/new 缺少 agent_id——拒绝创建，禁止默认顶替")
++        await _send_acp(client_ws, {"jsonrpc": "2.0", "id": session_msg.get("id"), "error": {"code": -32602, "message": "session/new requires agent_id (no implicit default)"}})
++        return
+     route = AGENT_ROUTES.get(agent_id)
+     if route is None:
+-        # 未知agent自动尝试 {agent_id} acp，fallback到soulmate
+-        import shutil
+-        if shutil.which(agent_id):
+-            route = {"cmd": [agent_id, "acp"], "cwd": _USER_HOME}
+-            logger.info(f"Dynamic route for '{agent_id}': {route['cmd']}")
+-        else:
+-            route = DEFAULT_ROUTE
+-            logger.warning(f"Agent '{agent_id}' not found, falling back to soulmate")
++        # 未知agent响亮报错，绝不冒名顶替另一个agent的大脑
++        logger.error(f"[ACP] agent '{agent_id}' 未注册（无ACP路由）——拒绝创建会话")
++        await _send_acp(client_ws, {"jsonrpc": "2.0", "id": session_msg.get("id"), "error": {"code": -32601, "message": f"agent '{agent_id}' 不支持ACP会话（未注册）"}})
++        return
+     logger.info(f"[ACP] user {user_id} → agent {agent_id} → {route['cmd']}")
+ 
+     # ACP sessionId捕获 + 重启重放过滤（子进程重启session/load恢复用）
+diff --git a/src/app/(app)/chat/chat-client.tsx b/src/app/(app)/chat/chat-client.tsx
+index b5c6b72b..7822b596 100644
+--- a/src/app/(app)/chat/chat-client.tsx
++++ b/src/app/(app)/chat/chat-client.tsx
+@@ -2888,14 +2888,17 @@ export function ChatClient() {
+                   const updatedSession = { ...selectedSessionRef.current, name: autoTitle };
+                   selectedSessionRef.current = updatedSession;
+                   setSelectedSession(updatedSession);
+-                  useAppStore.getState().setActiveSession(currentSessionId, null, { sessionName: autoTitle });
++                  // 只更新标题，绝不触碰 agentId（曾在此传 null 清掉 agent 身份，
++                  // 导致点击任何 agent 新建的会话都被顶替成 soulmate——用户判死）
++                  useAppStore.getState().setActiveSession(currentSessionId, useAppStore.getState().activeAgentId, { sessionName: autoTitle });
+                 }
+                 setAttachments([]); setLoading(true);
+                 // 计划模式添加前缀
+                 const messageText = agentMode === 'plan' ? `[PLAN MODE] ${text}` : text;
+                 streamingSessionIdRef.current = selectedSession?.id || null;
+                 // 始终走 connectSession + waitForConnection，避免僵尸WebSocket（readyState=OPEN但对端已死）
+-                const spAgentId2 = useAppStore.getState().activeAgentId || 'soulmate';
++                // agent 身份来源：会话自带 > store > 空白入口默认 soulmate（默认只许在这一处）
++                const spAgentId2 = useAppStore.getState().activeAgentId || (selectedSessionRef.current as { agentId?: string } | null)?.agentId || 'soulmate';
+                 connectSession(currentSessionId, spAgentId2, text.slice(0, 30));
+                 waitForConnection(currentSessionId, messageText, attachments, { steer: isSteer });
+               }}
+-- 
+2.56.0
+
