@@ -5,7 +5,8 @@
    并在**独立子进程**里跑同一套确定性评测（`python -m agent.fork_promote --harness`）——
    候选崩溃/挂死只污染自己这路，主进程与基线不受影响（超时即判失败收编）。
 2. **对照**：同一评测双跑 + 评分对比（candidate.score >= baseline.score）
-   + 成对零丢失断言（步骤/触发词/坑只增不减、验证保留）。
+   + 成对零丢失断言（步骤数量一致且语义载体零丢失——措辞可改、命令/路径/
+   引号/数字不可丢，触发词/坑只增不减，验证保留）。
 3. **晋升主配置**：候选全部通过且不低于基线才返回 promote=True（调用方随后
    才走 SkillSaver.save_flow 单一写入源落盘）；否则 keep baseline，主配置不动。
 
@@ -129,6 +130,7 @@ def _pairwise_checks(kind: str, baseline_content: str, candidate_content: str) -
 
     if kind == KIND_SKILL_MD:
         from agent.skill_evolution import parse_sections
+        from agent.skill_rewrite import hard_tokens
 
         base = parse_sections(baseline_content)
         cand = parse_sections(candidate_content)
@@ -142,8 +144,22 @@ def _pairwise_checks(kind: str, baseline_content: str, candidate_content: str) -
                     return False
             return True
 
-        add("steps_lossless", retained(base["steps"], cand["steps"]),
-            f"baseline_steps={len(base['steps'])} candidate_steps={len(cand['steps'])}")
+        # 步骤零丢失（与 skill_rewrite 保真门同语义）：数量一致 + 语义载体
+        # （命令/路径/引号/flag/数字/常量）原样保留——措辞可改，载体不可丢。
+        # 基线无步骤（无可丢载体）→ 空满足（真空真），不拦新建型候选。
+        base_steps = list(base["steps"])
+        cand_steps = list(cand["steps"])
+        if not base_steps:
+            count_ok = tokens_ok = True
+        else:
+            count_ok = len(base_steps) == len(cand_steps)
+            tokens_ok = count_ok and all(
+                all(tok in cand_steps[i] for tok in hard_tokens(base_steps[i]))
+                for i in range(len(base_steps))
+            )
+        add("steps_lossless", count_ok and tokens_ok,
+            f"baseline_steps={len(base_steps)} candidate_steps={len(cand_steps)}"
+            f" count_ok={count_ok} carriers_ok={tokens_ok}")
         add("triggers_superset", retained(base["triggers"], cand["triggers"]),
             f"baseline={len(base['triggers'])} candidate={len(cand['triggers'])}")
         add("pitfalls_superset", retained(base["pitfalls"], cand["pitfalls"]),
