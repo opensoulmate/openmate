@@ -7,6 +7,7 @@ import logging
 import json
 import time
 import sqlite3
+import uuid
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional
@@ -77,7 +78,9 @@ class ReflectionEngine:
     ) -> ReflectionEntry:
         """记录一次反思"""
         entry = ReflectionEntry(
-            reflection_id=f"refl_{int(time.time() * 1000)}",
+            # 20.2：毫秒时间戳单独作主键会同毫秒碰撞（第二条 INSERT 静默丢失）
+            # ——补 uuid 短后缀保证唯一，refl_ 前缀保持兼容
+            reflection_id=f"refl_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}",
             session_id=session_id,
             task_description=task_description,
             result_summary=result_summary,

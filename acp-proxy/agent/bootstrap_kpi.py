@@ -179,7 +179,7 @@ def _edit_reflection(refl_db: Path, since_iso: str | None) -> dict[str, Any]:
             "applied": 0,
             "avg_quality": None,
             "source": "~/.hermes/soulmate/reflection/reflections.db",
-            "note": "反射库 0 行（ReflectionEngine.record_reflection 无产生源接入）",
+            "note": "反射库 0 行（窗口内无产生源触发：自验结论/补做收口/失败恢复均未发生）",
         }
     count, applied, avg_q = rows[0]
     return {
