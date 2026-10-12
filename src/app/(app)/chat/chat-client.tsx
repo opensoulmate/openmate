@@ -26,6 +26,45 @@ import { pickRecorderMimeType, blobToAudioAttachment } from '@/lib/audio-record'
 const getApiUrl = () => getApiBaseUrl();
 const getWsUrl = () => getApiUrl().replace('http', 'ws');
 
+// 二进制安全文件获取：优先走 ACP Proxy(8092) 的 /api/file 直出字节流（MEDIA 卡片同款）。
+// 修复：8090 /api/file 返回 JSON 文本（二进制被按文本解码再编码），导致 docx/xlsx/pdf/图片下载损坏。
+const getFileDirectUrl = (filePath: string) =>
+  `http://${window.location.hostname}:8092/api/file?path=${encodeURIComponent(filePath)}`;
+
+async function fetchFileBlob(filePath: string, mimeType?: string): Promise<Blob | undefined> {
+  try {
+    const resp = await fetch(getFileDirectUrl(filePath));
+    const ct = resp.headers.get('content-type') || '';
+    if (resp.ok && !ct.includes('application/json')) return await resp.blob();
+  } catch (err) { console.warn('[file-fetch] direct failed:', err); }
+  // 兜底：原 JSON 接口（纯文本可用；二进制经文本转码会损坏，仅作最后手段）
+  try {
+    const apiBase = getApiUrl();
+    const resp = await fetch(`${apiBase}/api/file?path=${encodeURIComponent(filePath)}`);
+    if (resp.ok) {
+      const ct = resp.headers.get('content-type') || '';
+      if (ct.includes('application/json')) {
+        const data = await resp.json();
+        if (typeof data.content !== 'string') return undefined;
+        return new Blob([data.content], { type: mimeType || 'text/plain' });
+      }
+      return await resp.blob();
+    }
+  } catch (err) { console.warn('[file-fetch] fallback failed:', err); }
+  return undefined;
+}
+
+async function fetchFileDataUrl(filePath: string, mimeType?: string): Promise<string | undefined> {
+  const blob = await fetchFileBlob(filePath, mimeType);
+  if (!blob) return undefined;
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return `data:${mimeType || blob.type || 'application/octet-stream'};base64,${btoa(bin)}`;
+}
+
 // Tag a session with its owning agent via OpenSoul API
 // This persists server-side, works across devices/browsers
 async function tagSessionAgent(sessionId: string, agentId: string): Promise<void> {
@@ -1451,15 +1490,7 @@ export function ChatClient() {
         if (f.data) {
           dataUrl = `data:${f.mimeType || 'application/octet-stream'};base64,${f.data}`;
         } else if (f.filePath) {
-          try {
-            const apiBase = getApiUrl();
-            const resp = await fetch(`${apiBase}/api/file?path=${encodeURIComponent(f.filePath)}`);
-            if (resp.ok) {
-              const data = await resp.json();
-              const b64 = btoa(unescape(encodeURIComponent(data.content || '')));
-              dataUrl = `data:${f.mimeType || 'text/plain'};base64,${b64}`;
-            }
-          } catch (err) { console.warn('[file-preview] Failed:', err); }
+          dataUrl = await fetchFileDataUrl(f.filePath, f.mimeType);
         }
         if (dataUrl) {
           store.setPendingFilePreview({ url: dataUrl, name: f.name, mimeType: f.mimeType });
@@ -1479,16 +1510,13 @@ export function ChatClient() {
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a'); a.href = url; a.download = f.name; a.click(); URL.revokeObjectURL(url);
         } else if (f.filePath) {
-          try {
-            const apiBase = getApiUrl();
-            const resp = await fetch(`${apiBase}/api/file?path=${encodeURIComponent(f.filePath)}`);
-            if (resp.ok) {
-              const content = (await resp.json()).content || '';
-              const blob = new Blob([content], { type: f.mimeType || 'text/plain' });
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement('a'); a.href = url; a.download = f.name; a.click(); URL.revokeObjectURL(url);
-            }
-          } catch (err) { console.warn('[file-download] Failed:', err); }
+          const blob = await fetchFileBlob(f.filePath, f.mimeType);
+          if (blob) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a'); a.href = url; a.download = f.name; a.click(); URL.revokeObjectURL(url);
+          } else {
+            console.warn('[file-download] Failed:', f.filePath);
+          }
         }
       }} className="flex items-center gap-1 px-2 py-1 rounded text-xs text-muted-foreground hover:bg-muted/50 transition-colors">
         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
@@ -2313,15 +2341,7 @@ export function ChatClient() {
                         if (f.data) {
                           dataUrl = `data:${f.mimeType || 'image/png'};base64,${f.data}`;
                         } else if (f.filePath) {
-                          try {
-                            const apiBase = getApiUrl();
-                            const resp = await fetch(`${apiBase}/api/file?path=${encodeURIComponent(f.filePath)}`);
-                            if (resp.ok) {
-                              const data = await resp.json();
-                              const b64 = btoa(unescape(encodeURIComponent(data.content || '')));
-                              dataUrl = `data:${f.mimeType || 'image/png'};base64,${b64}`;
-                            }
-                          } catch {}
+                          dataUrl = await fetchFileDataUrl(f.filePath, f.mimeType || 'image/png');
                         }
                         if (dataUrl) {
                           store.setPendingFilePreview({ url: dataUrl, name: f.name, mimeType: f.mimeType });
