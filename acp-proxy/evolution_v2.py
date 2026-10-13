@@ -40,6 +40,66 @@ class EvolutionV2:
         # 收敛追踪
         self._score_history: list[float] = []
         self._consecutive_no_improve = 0
+
+    def _prefilter_improvements(self, candidates: list[dict]) -> tuple[list[dict], list[dict]]:
+        """改进项预过滤：过滤掉明显不可用的改进项，防止低质量改进占用验证资源。
+
+        检查项：
+          1. 目标文件存在性（相对 repo_root 解析）
+          2. 改进描述是否包含可执行的 old_string/new_string 或等效补丁信息
+
+        返回 (valid_candidates, rejected_candidates)
+        """
+        valid: list[dict] = []
+        rejected: list[dict] = []
+
+        for cand in candidates:
+            reason = None
+
+            # --- 检查1: 目标文件存在性 ---
+            target = cand.get("target_file") or cand.get("file") or ""
+            if not target:
+                reason = "缺少目标文件字段(target_file/file)"
+            else:
+                resolved = (self.repo_root / target).resolve()
+                if not resolved.exists():
+                    reason = f"目标文件不存在: {target}"
+                elif not resolved.is_file():
+                    reason = f"目标路径不是文件: {target}"
+
+            # --- 检查2: 是否包含可执行的 old_string/new_string 或补丁 ---
+            if reason is None:
+                has_edit = (
+                    (cand.get("old_string") and cand.get("new_string"))
+                    or (cand.get("old_str") and cand.get("new_str"))
+                    or (cand.get("diff") and isinstance(cand["diff"], str) and cand["diff"].strip())
+                    or (cand.get("patch") and isinstance(cand["patch"], str) and cand["patch"].strip())
+                )
+                if not has_edit:
+                    reason = "缺少可执行的 old_string/new_string 或 diff/patch 补丁信息"
+
+            # --- 检查3: old_string 与 new_string 不能完全相同（无意义改动）---
+            if reason is None:
+                os_val = cand.get("old_string") or cand.get("old_str") or ""
+                ns_val = cand.get("new_string") or cand.get("new_str") or ""
+                if os_val and ns_val and os_val == ns_val:
+                    reason = "old_string 与 new_string 完全相同，无意义改动"
+
+            if reason is None:
+                valid.append(cand)
+            else:
+                cand["prefilter_rejected_reason"] = reason
+                rejected.append(cand)
+                self.strand._log(
+                    "prefilter",
+                    f"🚫 预过滤拒绝: {target or '(no file)'} — {reason}",
+                )
+
+        self.strand._log(
+            "prefilter",
+            f"🔎 预过滤完成: {len(valid)}通过 / {len(rejected)}拒绝（共{len(candidates)}）",
+        )
+        return valid, rejected
     
     async def run(self, failure_batch: list[dict]) -> dict:
         """执行完整的进化流程"""
