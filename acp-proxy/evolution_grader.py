@@ -105,11 +105,32 @@ async def grade_code(strand, applied: list[dict], original_plan: dict) -> dict:
     # 只展示diff（提交物），不展示生成过程（借鉴SWE-agent ReviewSubmission）
     # code_review评审输入扩容(evo修复④): 每补丁800字截断只给评审者看文件开头几行→
     # "代码变更信息不完整"误拒(cycle237实证)。补丁展示2500字/8个，评审总预算12000。
-    # code_review评审输入扩容: 800字截断只给评审者看文件开头几行→误拒"信息不完整"
-    diff_summary = "\n".join([
-        f"--- {p['target_file']} ---\n{p.get('content', '')[:2500]}"
-        for p in applied[:8]
-    ])
+    # 自验证修复(#347拍板): 提交物视图优先给完整增量edits(old/new成对=真diff逐项可核)，
+    # 整文件content超预算时显式标注"仅展示前N字/共M字"（禁静默截断冒充完整提交物）。
+    def _submission_view(p: dict) -> str:
+        edits = p.get("edits") or []
+        target = p.get("target_file", "?")
+        if edits:
+            parts = [f"--- {target} (增量修改 {len(edits)} 处，完整diff) ---"]
+            for i, e in enumerate(edits, 1):
+                parts.append(
+                    f"[edit {i}] old_string:\n{e.get('old_string', '')}\n"
+                    f"[edit {i}] new_string:\n{e.get('new_string', '')}"
+                )
+            return "\n".join(parts)
+        content = p.get("content", "")
+        total = p.get("content_len", len(content))
+        if len(content) < total:
+            # 记录本身被截断（旧打包形态）——如实标注，不冒充完整
+            return (
+                f"--- {target} (⚠️ 提交物不完整：仅{len(content)}/共{total}字，"
+                f"打包层截断) ---\n{content}"
+            )
+        if len(content) > 2500:
+            return f"--- {target} (新文件，共{total}字，仅展示前2500字) ---\n{content[:2500]}"
+        return f"--- {target} (新文件，共{total}字，完整) ---\n{content}"
+
+    diff_summary = "\n".join([_submission_view(p) for p in applied[:8]])
 
     prompt = f"""{GRADER_SYSTEM_PROMPT}
 

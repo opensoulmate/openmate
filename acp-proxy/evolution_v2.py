@@ -8,6 +8,7 @@
 5. 程序化验证优先：集成测试结果不需要LLM裁判（借鉴CAMEL）
 """
 import asyncio
+import hashlib
 import json
 import logging
 import time
@@ -26,6 +27,78 @@ logger = logging.getLogger("evolution-v2")
 # 配置
 MAX_RETRIES = 2                # 重试次数（从3降到2，因为有失败记忆了）
 PLATEAU_ROUNDS = 3
+
+
+def package_applied_record(change: dict, content: str, edits: list | None = None) -> dict:
+    """打包"应用成功"的提交物记录（提交物打包层，自验证修复：全量保留禁截断）。
+
+    根因修复（周期#347 拍板"自验证修复待办"）：此前记录只留 content[:500]，
+    Grader 收到的提交物在打包/序列化层被截断→code_review 误拒"提交物diff严重截断"。
+    现在保留全量 content + 长度 + sha256 + 增量 edits（可逐项验证的真 diff）。
+    """
+    return {
+        **change,
+        "status": "applied",
+        "content": content,
+        "content_len": len(content),
+        "content_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+        "edits": edits or [],
+        "truncated": False,
+    }
+
+
+def verify_submission_integrity(applied: list, repo_root: Path) -> dict:
+    """提交前完整性校验+截断检测函数（打包/序列化层自验证，用户拍板修法）。
+
+    逐项判据（验证标准=Grader 收到完整 N 项变更且逐项可验证）：
+    1. 无截断：len(content)==content_len 且 truncated 不为 True；
+       无 content_len 的旧形态记录（content[:500] 截断打包）判 truncated（不可验证）
+    2. 与磁盘一致：记录 content 与目标文件当前字节一致（提交物=已落地内容）
+    3. 增量可核：edit 模式每条 old_string/new_string 完整保留（非空成对）
+    返回 {"complete", "summary", "items": [{target_file, ok, checks}], "truncated_items", "mismatched_items"}。
+    只校验+如实报出，不做静默修补（根因已在打包层修掉，此函数是自验证不是堵漏守卫）。
+    """
+    items = []
+    truncated_items = []
+    mismatched_items = []
+    for rec in applied:
+        target = rec.get("target_file", "?")
+        content = rec.get("content", "") or ""
+        checks = {
+            "has_content": bool(content),
+            "no_truncation_flag": rec.get("truncated") is not True,
+            "len_matches": ("content_len" in rec) and (rec.get("content_len") == len(content)),
+            "disk_matches": False,
+            "edits_complete": True,
+        }
+        fpath = repo_root / target
+        if fpath.exists():
+            try:
+                checks["disk_matches"] = fpath.read_text(encoding="utf-8") == content
+            except OSError:
+                checks["disk_matches"] = False
+        for e in (rec.get("edits") or []):
+            if not (isinstance(e, dict) and e.get("old_string") and e.get("new_string")):
+                checks["edits_complete"] = False
+        ok = all(checks.values())
+        items.append({"target_file": target, "ok": ok, "checks": checks})
+        if not (checks["has_content"] and checks["no_truncation_flag"] and checks["len_matches"]):
+            truncated_items.append(target)
+        if checks["has_content"] and not checks["disk_matches"]:
+            mismatched_items.append(target)
+    complete = all(i["ok"] for i in items) and bool(items)
+    summary = (
+        f"{sum(1 for i in items if i['ok'])}/{len(items)}项完整"
+        + (f"，截断:{truncated_items}" if truncated_items else "")
+        + (f"，与磁盘不一致:{mismatched_items}" if mismatched_items else "")
+    )
+    return {
+        "complete": complete,
+        "summary": summary,
+        "items": items,
+        "truncated_items": truncated_items,
+        "mismatched_items": mismatched_items,
+    }
 
 
 class EvolutionV2:
@@ -214,6 +287,14 @@ class EvolutionV2:
             # 提交到实验分支
             changed_files = [p["target_file"] for p in applied]
             bm.commit_changes(f"evo: round-{round_id}", changed_files)
+            
+            # ── 阶段4.5: 提交前完整性校验+截断检测（自验证，#347拍板修法）──
+            integrity = verify_submission_integrity(applied, self.repo_root)
+            result["stages"]["submission_integrity"] = integrity
+            self.strand._log(
+                "implement",
+                f"{'✅' if integrity['complete'] else '❌'} 提交物完整性校验: {integrity['summary']}",
+            )
             
             # ── 阶段5: 独立grader评审代码 ──
             code_review = await evolution_grader.grade_code(self.strand, applied, plan)
@@ -436,6 +517,7 @@ class EvolutionV2:
                 content = "\n".join(lines[1:-1]) if len(lines) > 2 else content
             
             # 应用修改
+            applied_edits = []
             try:
                 if existing and '"edits"' in content:
                     # 增量edit模式
@@ -446,6 +528,7 @@ class EvolutionV2:
                         new = edit.get("new_string", "")
                         if old and old in new_content:
                             new_content = new_content.replace(old, new, 1)
+                            applied_edits.append({"old_string": old, "new_string": new})
                         else:
                             results.append({**change, "status": "failed", "reason": f"old_string not found: {old[:50]}"})
                             continue
@@ -476,7 +559,9 @@ class EvolutionV2:
                     tmp.write(content)
                     tmp_path = tmp.name
                 os.rename(tmp_path, str(full_path))
-                results.append({**change, "status": "applied", "content": content[:500]})
+                # 自验证修复（#347拍板）：提交物打包层禁截断——此前 content[:500] 截断
+                # 打包导致 Grader 收到残缺提交物误拒"提交物diff严重截断"
+                results.append(package_applied_record(change, content, applied_edits))
             
             except Exception as e:
                 results.append({**change, "status": "failed", "reason": f"apply failed: {e}"})
