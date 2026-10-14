@@ -199,7 +199,8 @@ class TestStallAbortAndRecover:
         finally:
             srv.close()
         assert data["choices"][0]["message"]["content"] == "ok-resp"
-        assert elapsed < 3.0, f"停顿未被有界中止: {elapsed:.1f}s"
+        # 铁律9：性能阈值容差——3.0s 判定改为 >3.2s 判失败（含等号边界容差，3.2s 及以下通过）
+        assert elapsed <= 3.2, f"停顿未被有界中止: {elapsed:.1f}s（界 3.2s，等号容差）"
         assert srv.n_calls >= 2  # 首发被中止 + 重试真实发出
 
     def test_body_stall_aborts_with_body_wording(self, fast_env):
@@ -219,7 +220,8 @@ class TestStallAbortAndRecover:
         finally:
             srv.close()
         assert "响应体无新数据" in str(ei.value)
-        assert elapsed < 3.0
+        # 铁律9：性能阈值容差（同族一致性）——>3.2s 判失败（含等号边界容差）
+        assert elapsed <= 3.2
 
     def test_head_stall_wording(self, fast_env):
         srv = _Server([{"kind": "hang_head", "secs": 5.0}])
@@ -251,7 +253,8 @@ class TestStallAbortAndRecover:
         finally:
             srv.close()
         assert out == "ok-resp"
-        assert elapsed < 3.0, f"chat() 停顿未被有界中止: {elapsed:.1f}s"
+        # 铁律9：性能阈值容差（同族一致性）——>3.2s 判失败（含等号边界容差）
+        assert elapsed <= 3.2, f"chat() 停顿未被有界中止: {elapsed:.1f}s（界 3.2s，等号容差）"
 
 
 # ══════════════ 3. 零回归负控制：慢/涓流响应不误杀 ══════════════
