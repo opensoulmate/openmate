@@ -440,6 +440,7 @@
     "installed": "Installed",
     "testConnection": "Test Connection",
     "edit": "Edit",
+    "addAgent": "Add Custom Agent",
     "somaNode": "Soma Node",
     "somaDescription": "Local data collection node",
     "aiAgent": "AI Agent",

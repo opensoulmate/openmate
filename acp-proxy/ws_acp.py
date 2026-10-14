@@ -52,7 +52,7 @@ JWT_ALGORITHM = "HS256"
 AGENT_ROUTES = {
     # 原生 ACP（各自独立的大脑）
     "soulmate":  {"cmd": [sys.executable, "-m", "agent.start", "--stdio"], "cwd": _ACPPROXY_DIR},
-    "hermes":    {"cmd": ["hermes", "acp"], "cwd": _USER_HOME},
+    "hermes":    {"cmd": ["hermes", "acp"], "cwd": _USER_HOME, "transport": "pty"},
     "mimo":  {"cmd": ["mimo", "acp"], "cwd": _USER_HOME},
     "opencode":  {"cmd": ["opencode", "acp"], "cwd": _USER_HOME},
     # 自研适配器（ollama 无生态桥，已实测可用）
@@ -263,7 +263,7 @@ async def ws_acp_endpoint(client_ws: WebSocket):
         entry = e
     reattached = entry is not None
     proc = None
-    use_pty = agent_id == "hermes"
+    use_pty = route.get("transport") == "pty"  # 传输=配置（能力是数据不是代码）
     master_fd = None
     if reattached:
         proc = entry["proc"]
@@ -666,8 +666,77 @@ async def list_agents():
             installed = True  # 桥包按需下载
         else:
             installed = bool(_sh.which(first)) or first == sys.executable
-        out.append({"id": aid, "cmd": cmd, "installed": installed})
+        out.append({"id": aid, "cmd": cmd, "installed": installed,
+                    "name": route.get("name", aid), "icon": route.get("icon"),
+                    "description": route.get("description", ""),
+                    "custom": bool(route.get("custom")),
+                    "transport": route.get("transport", "stdio")})
     return {"agents": out}
+
+
+# ── 自定义Agent=一行配置（借鉴 AionUi配置行 / Paseo extends:acp / Octo AgentCard / Paperclip配置）：
+# 落库即并入 AGENT_ROUTES——注册=检测=列表一条真源，建完即可开会话。──
+_CUSTOM_AGENTS_PATH = os.path.join(_ACPPROXY_DIR, "data", "custom_agents.json")
+
+
+def _load_custom_agents() -> list:
+    try:
+        with open(_CUSTOM_AGENTS_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
+def _save_custom_agents(rows: list) -> None:
+    os.makedirs(os.path.dirname(_CUSTOM_AGENTS_PATH), exist_ok=True)
+    with open(_CUSTOM_AGENTS_PATH, "w", encoding="utf-8") as f:
+        json.dump(rows, f, ensure_ascii=False, indent=2)
+
+
+_BUILTIN_AGENT_IDS = set(AGENT_ROUTES.keys())
+
+
+def _apply_custom_agents() -> None:
+    for row in _load_custom_agents():
+        AGENT_ROUTES[row["id"]] = {
+            "cmd": row["cmd"],
+            "cwd": row.get("cwd", _USER_HOME),
+            "probe_timeout": float(row.get("probe_timeout", 15)),
+            "transport": row.get("transport", "stdio"),
+            "custom": True,
+            "name": row.get("name", row["id"]),
+            "icon": row.get("icon", "\U0001F916"),
+            "description": row.get("description", ""),
+        }
+
+
+_apply_custom_agents()
+
+
+@agents_router.post("/agents")
+async def create_custom_agent(payload: dict):
+    """自定义Agent=一行配置（id/名称/图标/启动命令/传输）——保存即注册，出现在会话列表。"""
+    aid = str(payload.get("id") or "").strip()
+    cmd = payload.get("cmd")
+    if not aid or not isinstance(cmd, list) or not cmd or not all(isinstance(c, str) for c in cmd):
+        return {"ok": False, "detail": "id 与 cmd（字符串数组）必填"}
+    if aid in _BUILTIN_AGENT_IDS:
+        return {"ok": False, "detail": "内置agent不可覆盖，请换 id"}
+    rows = [r for r in _load_custom_agents() if r.get("id") != aid]
+    rows.append(payload)
+    _save_custom_agents(rows)
+    _apply_custom_agents()
+    return {"ok": True, "agent": payload}
+
+
+@agents_router.delete("/agents/{agent_id}")
+async def delete_custom_agent(agent_id: str):
+    rows = _load_custom_agents()
+    if not any(r.get("id") == agent_id for r in rows):
+        return {"ok": False, "detail": "仅自定义agent可删除"}
+    _save_custom_agents([r for r in rows if r.get("id") != agent_id])
+    AGENT_ROUTES.pop(agent_id, None)
+    return {"ok": True}
 
 
 def _probe_agent(cmd: list) -> dict:

@@ -244,6 +244,48 @@ export function AgentsClient() {
     }
   }, []);
 
+  // ── 自定义Agent：一行配置即Agent（借鉴 AionUi配置行/Paseo extends:acp/Octo AgentCard/Paperclip配置）──
+  const [showAddAgent, setShowAddAgent] = useState(false);
+  const [newAgent, setNewAgent] = useState({ id: '', name: '', icon: '🤖', description: '', cmd: '', cwd: '', transport: 'stdio' });
+  const acpBase = typeof window !== 'undefined' ? `http://${window.location.hostname}:8092` : 'http://127.0.0.1:8092';
+  const loadCustom = useCallback(async () => {
+    try {
+      const res = await fetch(`${acpBase}/api/agents`);
+      const data = await res.json();
+      const rows = ((data.agents || []) as any[]).filter(a => a.custom).map(a => ({
+        id: a.id, name: a.name || a.id, icon: a.icon || '🤖', description: a.description || '',
+        available: !!a.installed, version: '', installCommand: '', custom: true, binary: a.cmd?.[0] || '',
+      })) as AgentInfo[];
+      if (rows.length) setAgents(prev => [...rows, ...prev.filter(p => !rows.some(r => r.id === p.id))]);
+    } catch { /* 代理不可达时列表保持原样 */ }
+  }, [acpBase]);
+  useEffect(() => { loadCustom(); /* eslint-disable-next-line */ }, []);
+  const submitCustomAgent = useCallback(async () => {
+    const cmdParts = newAgent.cmd.trim().split(/\s+/).filter(Boolean);
+    if (!newAgent.id.trim() || !cmdParts.length) return;
+    try {
+      const res = await fetch(`${acpBase}/api/agents`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: newAgent.id.trim(), name: newAgent.name.trim() || newAgent.id.trim(),
+          icon: newAgent.icon || '🤖', description: newAgent.description.trim(),
+          cmd: cmdParts, cwd: newAgent.cwd.trim() || undefined, transport: newAgent.transport,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setShowAddAgent(false);
+        setNewAgent({ id: '', name: '', icon: '🤖', description: '', cmd: '', cwd: '', transport: 'stdio' });
+        await detect(); await loadCustom();
+      } else { alert(data.detail || '保存失败'); }
+    } catch { alert('代理不可达'); }
+  }, [newAgent, acpBase, detect, loadCustom]);
+  const deleteCustomAgent = useCallback(async (id: string) => {
+    try { await fetch(`${acpBase}/api/agents/${id}`, { method: 'DELETE' }); } catch { /* 假删也要从列表消失 */ }
+    setAgents(prev => prev.filter(a => a.id !== id));
+  }, [acpBase]);
+
   return (
     <PageLayout
       title={t('agents.title')}
@@ -251,9 +293,14 @@ export function AgentsClient() {
       badge={agents.length + " 个Agent"}
       workspace={workspaceContent}
       headerActions={
+        <>
         <button onClick={detect} className="px-2 lg:px-4 py-2 rounded-lg border hover:bg-muted flex items-center gap-2 text-xs lg:text-sm">
           <RefreshCw className="w-4 h-4" /> {t('agents.autoDetect')}
         </button>
+        <button onClick={() => setShowAddAgent(true)} className="px-2 lg:px-4 py-2 rounded-lg border hover:bg-muted flex items-center gap-2 text-xs lg:text-sm">
+          ＋ {t('agents.addAgent')}
+        </button>
+        </>
       }
     >
       <div className="px-3 lg:px-6 py-4 lg:py-6 h-full overflow-y-auto">
@@ -349,7 +396,7 @@ export function AgentsClient() {
                       className="px-2 py-1.5 rounded-lg text-xs border hover:bg-muted disabled:opacity-50 touch-manipulation" title={t('agents.restart')}>
                       <ArrowUpCircle className="w-3 h-3" />
                     </button>
-                    <button onClick={(e) => { e.stopPropagation(); handleUninstall(agent); }}
+                    <button onClick={(e) => { e.stopPropagation(); (agent as any).custom ? deleteCustomAgent(agent.id) : handleUninstall(agent); }}
                       className="px-2 py-1.5 rounded-lg text-xs border border-red-500/30 text-red-500 hover:bg-red-500/5 touch-manipulation" title={t('agents.deleteAgent')}>
                       <Trash2 className="w-3 h-3" />
                     </button>
@@ -479,6 +526,51 @@ export function AgentsClient() {
         })}
       </div>
       </div>
+      {/* 添加自定义Agent：一行配置即注册（注册=检测=列表一条真源） */}
+      {showAddAgent && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setShowAddAgent(false)}>
+          <div className="bg-card rounded-xl border p-4 w-full max-w-md space-y-2" onClick={e => e.stopPropagation()}>
+            <h3 className="font-medium text-sm mb-1">{t('agents.addAgent')}</h3>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="text-xs text-muted-foreground">ID（英文唯一标识）
+                <input value={newAgent.id} onChange={e => setNewAgent({ ...newAgent, id: e.target.value })}
+                  className="mt-1 w-full px-2 py-1.5 rounded border border-border bg-background text-xs" placeholder="my-agent" />
+              </label>
+              <label className="text-xs text-muted-foreground">名称
+                <input value={newAgent.name} onChange={e => setNewAgent({ ...newAgent, name: e.target.value })}
+                  className="mt-1 w-full px-2 py-1.5 rounded border border-border bg-background text-xs" placeholder="我的Agent" />
+              </label>
+              <label className="text-xs text-muted-foreground">图标（emoji）
+                <input value={newAgent.icon} onChange={e => setNewAgent({ ...newAgent, icon: e.target.value })}
+                  className="mt-1 w-full px-2 py-1.5 rounded border border-border bg-background text-xs" />
+              </label>
+              <label className="text-xs text-muted-foreground">传输方式
+                <select value={newAgent.transport} onChange={e => setNewAgent({ ...newAgent, transport: e.target.value })}
+                  className="mt-1 w-full px-2 py-1.5 rounded border border-border bg-background text-xs">
+                  <option value="stdio">stdio</option>
+                  <option value="pty">pty</option>
+                </select>
+              </label>
+            </div>
+            <label className="text-xs text-muted-foreground block">描述
+              <input value={newAgent.description} onChange={e => setNewAgent({ ...newAgent, description: e.target.value })}
+                className="mt-1 w-full px-2 py-1.5 rounded border border-border bg-background text-xs" />
+            </label>
+            <label className="text-xs text-muted-foreground block">启动命令（空格分隔，ACP协议入口）
+              <input value={newAgent.cmd} onChange={e => setNewAgent({ ...newAgent, cmd: e.target.value })}
+                className="mt-1 w-full px-2 py-1.5 rounded border border-border bg-background text-xs font-mono" placeholder="python3 my_agent_acp.py --stdio" />
+            </label>
+            <label className="text-xs text-muted-foreground block">工作目录（可选）
+              <input value={newAgent.cwd} onChange={e => setNewAgent({ ...newAgent, cwd: e.target.value })}
+                className="mt-1 w-full px-2 py-1.5 rounded border border-border bg-background text-xs font-mono" placeholder="/home/climbing" />
+            </label>
+            <div className="flex justify-end gap-2 pt-1">
+              <button onClick={() => setShowAddAgent(false)} className="px-3 py-1.5 rounded-lg border text-xs">取消</button>
+              <button onClick={submitCustomAgent} className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs">保存并注册</button>
+            </div>
+          </div>
+        </div>
+      )}
     </PageLayout>
   );
 }
