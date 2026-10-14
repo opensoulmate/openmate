@@ -606,8 +606,9 @@ function useAcpWebSocket(params: {
     }
     const existingWs = wsMapRef.current.get(sessionId);
     console.debug(`[ACP-DEBUG] connectSession(${sessionId}) existing=${existingWs ? existingWs.readyState : 'none'}`);
-    if (existingWs && existingWs.readyState === WebSocket.OPEN) return; // 已连接
-    if (existingWs) { existingWs.close(); wsMapRef.current.delete(sessionId); } // 清理已关闭的WS
+    // 同一会话=一条连接（函数复用原则）：已连接/建握手中一律复用，绝不重复建
+    if (existingWs && (existingWs.readyState === WebSocket.OPEN || existingWs.readyState === WebSocket.CONNECTING)) return;
+    if (existingWs) { existingWs.close(); wsMapRef.current.delete(sessionId); } // 清理已死的WS
 
     const state = getSessionState(sessionId);
     state.unmounted = false;
@@ -633,9 +634,14 @@ function useAcpWebSocket(params: {
     const performHandshake = async (ws: WebSocket) => {
       try {
         await sendRpcRequest(ws, 'initialize', { protocolVersion: 1 });
-        // 优先使用已有的ACP session ID（重连时避免创建重复会话）；temp键也带上，服务端按键幂等去重
+        // 语义分流（2026-10-14 根修"多余会话"）：新建=session/new，续用=session/load。
+        // 此前续用也发 session/new——对无去重的 agent（hermes 等）每次重连都真铸新会话；
+        // soulmate 靠私有 client-key 去重掩盖了这个 bug（所以"只有 soulmate 正常"）。
         const existingAcpSid = state.acpSessionId || (sessionId.startsWith('temp-') ? undefined : sessionId);
-        const result = await sendRpcRequest(ws, 'session/new', { cwd: '/', mcpServers: [], agent_id: agentId, _meta: { session_id: existingAcpSid || sessionId } }) as { session_id?: string; sessionId?: string };
+        const result = (existingAcpSid
+          ? await sendRpcRequest(ws, 'session/load', { session_id: existingAcpSid })
+          : await sendRpcRequest(ws, 'session/new', { cwd: '/', mcpServers: [], agent_id: agentId, _meta: { session_id: sessionId } })
+        ) as { session_id?: string; sessionId?: string };
         const acpSid = result?.session_id || result?.sessionId;
         if (acpSid) {
           state.acpSessionId = acpSid;

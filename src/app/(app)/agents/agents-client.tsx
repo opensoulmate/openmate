@@ -227,6 +227,23 @@ export function AgentsClient() {
     />
   ) : null;
 
+  // 测试连接：真 ACP 探测（POST /api/agents/probe）——检测成功=真握手，禁一刀切判定
+  const [testing, setTesting] = useState<Record<string, 'running' | 'ok' | 'fail'>>({});
+  const testConnection = useCallback(async (agent: AgentInfo) => {
+    setTesting(prev => ({ ...prev, [agent.id]: 'running' }));
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/api/agents/probe`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({ agent_id: agent.id }),
+      });
+      const data = await res.json();
+      setTesting(prev => ({ ...prev, [agent.id]: data?.ok ? 'ok' : 'fail' }));
+    } catch {
+      setTesting(prev => ({ ...prev, [agent.id]: 'fail' }));
+    }
+  }, []);
+
   return (
     <PageLayout
       title={t('agents.title')}
@@ -282,7 +299,7 @@ export function AgentsClient() {
       </div>
 
       {/* Agent Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 lg:gap-4">
+      <div className="flex flex-col gap-2">
         {filtered.map(agent => {
           const install = installs[agent.id];
           const isInstalling = install && (install.status === 'running' || install.status === 'starting');
@@ -293,53 +310,56 @@ export function AgentsClient() {
           return (
             <div key={agent.id} className={`rounded-xl border bg-card transition-all cursor-pointer ${isDetailSelected ? 'border-primary ring-1 ring-primary/30' : isSelected ? 'border-primary/50' : agent.available ? 'border-green-500/30' : 'border-border'} hover:border-primary/50`}
                   onClick={() => handleAgentClick(agent)}>
-              <div className="p-4">
-                <div className="flex items-start gap-3 mb-3">
-                  {/* Checkbox */}
-                  <button onClick={(e) => { e.stopPropagation(); toggleSelect(agent.id); }} className="mt-1 shrink-0 touch-manipulation">
-                    {isSelected ? <CheckSquare size={16} className="text-primary" /> : <Square size={16} className="text-muted-foreground" />}
+              {/* AionUi布局铁律：每个agent独立一行——logo｜名称+状态药丸｜测试连接｜编辑 */}
+              <div className="px-3 py-2.5 flex items-center gap-3">
+                <button onClick={(e) => { e.stopPropagation(); toggleSelect(agent.id); }} className="shrink-0 touch-manipulation">
+                  {isSelected ? <CheckSquare size={15} className="text-primary" /> : <Square size={15} className="text-muted-foreground" />}
+                </button>
+                {(agent as any).logo ? (
+                  <img src={(agent as any).logo} alt={agent.name} className="w-9 h-9 rounded-lg object-contain bg-muted shrink-0" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                ) : (
+                  <span className="w-9 h-9 rounded-lg bg-muted flex items-center justify-center text-lg shrink-0">{agent.icon}</span>
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-medium truncate text-sm">{agent.name}</h3>
+                    {agent.available ? (
+                      <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-green-500/10 text-green-600 shrink-0">{t('agents.installed')}{agent.version ? ` v${agent.version}` : ''}</span>
+                    ) : (
+                      <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-muted text-muted-foreground shrink-0">{t('agents.unavailable')}</span>
+                    )}
+                  </div>
+                  {agent.description && <p className="text-xs text-muted-foreground truncate hidden sm:block">{agent.description}</p>}
+                </div>
+                <button onClick={(e) => { e.stopPropagation(); testConnection(agent); }}
+                  className="px-2.5 py-1.5 rounded-lg text-xs border hover:bg-muted flex items-center gap-1 shrink-0 touch-manipulation" title={t('agents.testConnection')}>
+                  {testing[agent.id] === 'running' ? <Loader2 className="w-3 h-3 animate-spin" />
+                    : testing[agent.id] === 'ok' ? <CheckCircle className="w-3 h-3 text-green-500" />
+                    : testing[agent.id] === 'fail' ? <XCircle className="w-3 h-3 text-red-500" />
+                    : null}
+                  {testing[agent.id] === 'ok' ? 'OK' : testing[agent.id] === 'fail' ? 'FAIL' : t('agents.testConnection')}
+                </button>
+                <button onClick={(e) => { e.stopPropagation(); setConfiguringAgent(configuringAgent === agent.id ? null : agent.id); }}
+                  className="px-2.5 py-1.5 rounded-lg text-xs border hover:bg-muted shrink-0 touch-manipulation" title={t('agents.modelConfig')}>
+                  {t('agents.edit')}
+                </button>
+                {agent.available ? (
+                  <>
+                    <button onClick={(e) => { e.stopPropagation(); handleUpdate(agent); }} disabled={!!isInstalling}
+                      className="px-2 py-1.5 rounded-lg text-xs border hover:bg-muted disabled:opacity-50 touch-manipulation" title={t('agents.restart')}>
+                      <ArrowUpCircle className="w-3 h-3" />
+                    </button>
+                    <button onClick={(e) => { e.stopPropagation(); handleUninstall(agent); }}
+                      className="px-2 py-1.5 rounded-lg text-xs border border-red-500/30 text-red-500 hover:bg-red-500/5 touch-manipulation" title={t('agents.deleteAgent')}>
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </>
+                ) : (
+                  <button onClick={(e) => { e.stopPropagation(); startInstall(agent); }} disabled={!!isInstalling}
+                    className="px-2.5 py-1.5 rounded-lg text-xs border hover:bg-muted flex items-center gap-1 disabled:opacity-50 touch-manipulation">
+                    {isInstalling ? <><Loader2 className="w-3 h-3 animate-spin" /> {t('agents.installing')}</> : <><Download className="w-3 h-3" /> {t('agents.install')}</>}
                   </button>
-                  {(agent as any).logo ? <img src={(agent as any).logo} alt={agent.name} className="w-10 h-10 rounded-lg object-contain bg-muted" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden"); }} /> : null}
-                  <span className={`text-xl lg:text-2xl ${(agent as any).logo ? "hidden" : ""}`}>{agent.icon}</span>
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-medium truncate">{agent.name}</h3>
-                    <p className="text-xs text-muted-foreground truncate">{agent.description}</p>
-                  </div>
-                  {agent.available ? <CheckCircle className="w-5 h-5 text-green-500 shrink-0" /> : <XCircle className="w-5 h-5 text-muted-foreground shrink-0" />}
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div className="text-xs text-muted-foreground">
-                    {agent.available ? (
-                      <span className="text-green-500">● {t('agents.installed')}{agent.version ? ` v${agent.version}` : ''}</span>
-                    ) : (
-                      <span>● {t('agents.unavailable')}</span>
-                    )}
-                  </div>
-                  <div className="flex gap-1">
-                    {agent.available ? (
-                      <>
-                        <button onClick={(e) => { e.stopPropagation(); setConfiguringAgent(configuringAgent === agent.id ? null : agent.id); }}
-                          className="px-2 py-1.5 lg:py-1 rounded-lg text-xs border hover:bg-muted flex items-center gap-1 touch-manipulation" title={t('agents.modelConfig')}>
-                          ⚙️
-                        </button>
-                        <button onClick={(e) => { e.stopPropagation(); handleUpdate(agent); }} disabled={!!isInstalling}
-                          className="px-2 py-1.5 lg:py-1 rounded-lg text-xs border hover:bg-muted flex items-center gap-1 disabled:opacity-50 touch-manipulation" title={t('agents.restart')}>
-                          <ArrowUpCircle className="w-3 h-3" />
-                        </button>
-                        <button onClick={(e) => { e.stopPropagation(); handleUninstall(agent); }}
-                          className="px-2 py-1.5 lg:py-1 rounded-lg text-xs border border-red-500/30 text-red-500 hover:bg-red-500/5 flex items-center gap-1 touch-manipulation" title={t('agents.deleteAgent')}>
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-                      </>
-                    ) : (
-                      <button onClick={(e) => { e.stopPropagation(); startInstall(agent); }} disabled={!!isInstalling}
-                        className="px-2.5 py-1.5 lg:py-1 rounded-lg text-xs border hover:bg-muted flex items-center gap-1 disabled:opacity-50 transition-colors touch-manipulation">
-                        {isInstalling ? <><Loader2 className="w-3 h-3 animate-spin" /> {t('agents.installing')}</> : <><Download className="w-3 h-3" /> {t('agents.install')}</>}
-                      </button>
-                    )}
-                  </div>
-                </div>
+                )}
               </div>
 
               {/* Install progress */}

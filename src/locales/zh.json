@@ -438,6 +438,8 @@
     "error": "异常",
     "install": "安装",
     "installed": "已安装",
+    "testConnection": "测试连接",
+    "edit": "编辑",
     "somaNode": "Soma 节点",
     "somaDescription": "自家采集分身节点",
     "aiAgent": "AI Agent",
