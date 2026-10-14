@@ -232,7 +232,7 @@ export function AgentsClient() {
   const testConnection = useCallback(async (agent: AgentInfo) => {
     setTesting(prev => ({ ...prev, [agent.id]: 'running' }));
     try {
-      const res = await fetch(`${getApiBaseUrl()}/api/agents/probe`, {
+      const res = await fetch(`${acpBase}/agents/probe`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
         body: JSON.stringify({ agent_id: agent.id }),
@@ -250,7 +250,7 @@ export function AgentsClient() {
   const acpBase = typeof window !== 'undefined' ? `http://${window.location.hostname}:8092` : 'http://127.0.0.1:8092';
   const loadCustom = useCallback(async () => {
     try {
-      const res = await fetch(`${acpBase}/api/agents`);
+      const res = await fetch(`${acpBase}/agents`);
       const data = await res.json();
       const rows = ((data.agents || []) as any[]).filter(a => a.custom).map(a => ({
         id: a.id, name: a.name || a.id, icon: a.icon || '🤖', description: a.description || '',
@@ -264,7 +264,7 @@ export function AgentsClient() {
     const cmdParts = newAgent.cmd.trim().split(/\s+/).filter(Boolean);
     if (!newAgent.id.trim() || !cmdParts.length) return;
     try {
-      const res = await fetch(`${acpBase}/api/agents`, {
+      const res = await fetch(`${acpBase}/agents`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
