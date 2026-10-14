@@ -196,37 +196,6 @@ export function AgentsClient() {
   });
   const availableCount = agents.filter(a => a.available).length;
 
-  if (loading) return <div className="flex items-center justify-center h-full"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
-
-  // Build workspace content from detail item
-  const workspaceContent = detailItem?.type === 'agent' ? (
-    <DetailPanel
-      title={detailItem.data.name}
-      subtitle={detailItem.data.description}
-      icon={<span className="text-lg">{detailItem.data.icon}</span>}
-      badge={detailItem.data.available ? '可用' : '不可用'}
-      onClose={closeDetail}
-      sections={[
-        {
-          title: '基本信息',
-          items: [
-            { label: 'ID', value: detailItem.data.id },
-            { label: '二进制', value: detailItem.data.binary || 'N/A' },
-            { label: '路径', value: detailItem.data.path || 'N/A' },
-            { label: '操作系统', value: detailItem.data.os || 'N/A' },
-          ],
-        },
-        {
-          title: '配置',
-          items: [
-            { label: '提供商', value: detailItem.data.provider || '默认' },
-            { label: '模型', value: detailItem.data.model || '默认' },
-          ],
-        },
-      ]}
-    />
-  ) : null;
-
   // 测试连接：真 ACP 探测（POST /api/agents/probe）——检测成功=真握手，禁一刀切判定
   const [testing, setTesting] = useState<Record<string, 'running' | 'ok' | 'fail'>>({});
   const testConnection = useCallback(async (agent: AgentInfo) => {
@@ -285,6 +254,37 @@ export function AgentsClient() {
     try { await fetch(`${acpBase}/api/agents/${id}`, { method: 'DELETE' }); } catch { /* 假删也要从列表消失 */ }
     setAgents(prev => prev.filter(a => a.id !== id));
   }, [acpBase]);
+
+  if (loading) return <div className="flex items-center justify-center h-full"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
+
+  // Build workspace content from detail item
+  const workspaceContent = detailItem?.type === 'agent' ? (
+    <DetailPanel
+      title={detailItem.data.name}
+      subtitle={detailItem.data.description}
+      icon={<span className="text-lg">{detailItem.data.icon}</span>}
+      badge={detailItem.data.available ? '可用' : '不可用'}
+      onClose={closeDetail}
+      sections={[
+        {
+          title: '基本信息',
+          items: [
+            { label: 'ID', value: detailItem.data.id },
+            { label: '二进制', value: detailItem.data.binary || 'N/A' },
+            { label: '路径', value: detailItem.data.path || 'N/A' },
+            { label: '操作系统', value: detailItem.data.os || 'N/A' },
+          ],
+        },
+        {
+          title: '配置',
+          items: [
+            { label: '提供商', value: detailItem.data.provider || '默认' },
+            { label: '模型', value: detailItem.data.model || '默认' },
+          ],
+        },
+      ]}
+    />
+  ) : null;
 
   return (
     <PageLayout
