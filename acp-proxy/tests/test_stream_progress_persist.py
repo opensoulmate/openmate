@@ -7,8 +7,9 @@ per-step落库（_save_progress），此切片补齐simple路径三层：
 
 1. 节流触发：流式积累处按节奏调用_save_progress（每积累≥800字或距上次≥2秒取先到）；
 2. 接管：最终回复由_save_message_final原地接管同一行，不重复插入；
-3. 无重复/不串行：新回合开始_reset_progress_row作废上回合遗留指针，旧行部分内容
-   原样保留（恢复语义），新回合自建新行——绝不UPDATE旧行覆盖丢失。
+3. 回合隔离（2026-10-23 刀1）：进度行按turn_key归属——B回合开跑不清A的指针
+   （旧_reset_progress_row机制删除），A的最终回复接回A自己的半截行，同段话不再
+   "半截行+新插完整版"存两遍；同message_id重试还能接回旧半截行。
 """
 
 import asyncio
@@ -143,41 +144,53 @@ class TestProgressRowLifecycle:
         agent = _bare_agent()
         saver = agent._progress_saver(SID)
         saver("部分内容先行落库")   # 8字 ≥ 5 → 触发
-        pid = agent.sessions[SID]["_progress_id"]
+        pid = agent.sessions[SID]["_progress_rows"][""]
         final = "部分内容先行落库，以及最终完整回复全文。"
         agent._save_message_final(SID, final)
         rows = _rows(agent)
         assert len(rows) == 1, "最终回复必须接管同一行，不得重复插入"
         assert rows[0][0] == pid
         assert rows[0][2] == final
-        assert "_progress_id" not in agent.sessions[SID]
+        assert not agent.sessions[SID].get("_progress_rows"), "接管后键已清"
 
-    def test_stale_progress_row_not_hijacked_by_next_turn(self, monkeypatch):
-        # 上回合中途被杀残留_progress_id → 新回合必须自建新行，旧行内容不被覆盖
+    def test_interleaved_turns_takeover_own_rows(self, monkeypatch):
+        # 刀1回归（2026-10-23，用户"好多重复的话"实证病灶）：A回合未完B回合开跑
+        # （插话/重试场景），A的最终回复必须接回A自己的半截行——旧行为
+        # _reset_progress_row清指针→A落新行=同段话"半截行+完整版"存两遍。
         monkeypatch.setattr(sa, "_PROGRESS_SAVE_CHARS", 5)
         monkeypatch.setattr(sa, "_PROGRESS_SAVE_INTERVAL_S", 2.0)
         agent = _bare_agent()
-        saver1 = agent._progress_saver(SID)
-        saver1("上回合已生成的部分")
-        old_pid = agent.sessions[SID]["_progress_id"]
+        saver_a = agent._progress_saver(SID, "turn-a")
+        saver_a("A回合已生成的部分")
+        a_pid = agent.sessions[SID]["_progress_rows"]["turn-a"]
         old_content = _rows(agent)[0][2]
-        # ── 新回合开始（_prompt_inner接线点等价调用）──
-        agent._reset_progress_row(SID)
-        assert "_progress_id" not in agent.sessions[SID]
-        saver2 = agent._progress_saver(SID)
-        saver2("本回合新内容")
-        new_pid = agent.sessions[SID]["_progress_id"]
-        assert new_pid != old_pid, "新回合必须自建新行，不得复用上回合残留指针"
-        agent._save_message_final(SID, "本回合新内容收尾")
+        saver_b = agent._progress_saver(SID, "turn-b")
+        saver_b("B回合内容")
+        b_pid = agent.sessions[SID]["_progress_rows"]["turn-b"]
+        assert a_pid != b_pid, "交错回合必须各建各的行"
+        # A 在 B 开跑之后才收尾（交错时刻）——必须接管 A 自己的行
+        agent._save_message_final(SID, "A回合完整回复", turn_key="turn-a")
+        agent._save_message_final(SID, "B回合完整回复", turn_key="turn-b")
         rows = _rows(agent)
-        assert len(rows) == 2, "旧行保留+新行接管，共两行"
+        assert len(rows) == 2, "交错回合各接管各的行，共两行不重复"
         by_id = {r[0]: r[2] for r in rows}
-        assert by_id[old_pid] == old_content, "旧行部分内容必须原样保留（恢复语义）"
-        assert by_id[new_pid] == "本回合新内容收尾"
+        assert by_id[a_pid] == "A回合完整回复", "A必须接管自己的半截行，不得新插"
+        assert by_id[b_pid] == "B回合完整回复"
 
-    def test_reset_without_session_no_crash(self):
+    def test_same_turn_retry_reclaims_partial_row(self, monkeypatch):
+        # 同message_id重试：新尝试接管旧半截行（不重复）
+        monkeypatch.setattr(sa, "_PROGRESS_SAVE_CHARS", 5)
+        monkeypatch.setattr(sa, "_PROGRESS_SAVE_INTERVAL_S", 2.0)
         agent = _bare_agent()
-        agent._reset_progress_row("no-such-session")  # 不炸即可
+        saver = agent._progress_saver(SID, "prompt:m1")
+        saver("第一次尝试的半截")
+        pid = agent.sessions[SID]["_progress_rows"]["prompt:m1"]
+        saver2 = agent._progress_saver(SID, "prompt:m1")
+        saver2("第二次尝试重写了内容")
+        assert agent.sessions[SID]["_progress_rows"]["prompt:m1"] == pid
+        agent._save_message_final(SID, "重试后的完整回复", turn_key="prompt:m1")
+        rows = _rows(agent)
+        assert len(rows) == 1 and rows[0][0] == pid and rows[0][2] == "重试后的完整回复"
 
     def test_final_without_progress_row_inserts_new(self):
         # 无增量行时最终保存照常新插（向后兼容）
@@ -202,15 +215,18 @@ class TestWiring:
     def test_wiring_saver_called_at_accumulation_and_tail(self):
         src = self._src()
         assert src.count("_stream_save(full_response)") == 2  # 流式积累 + round尾flush
-        assert "_stream_save = self._progress_saver(session_id) if stream_progress else None" in src
+        assert "_stream_save = self._progress_saver(session_id, turn_key) if stream_progress else None" in src
 
-    def test_wiring_prompt_inner_resets_progress_row(self):
+    def test_wiring_prompt_inner_turn_key_isolated(self):
         src = self._src()
-        assert src.count("self._reset_progress_row(session_id)") == 1
-        # 必须在_prompt_inner内（回合真正开始处），不在prompt()的choice/排队早退路径
+        # 旧 _reset_progress_row 机制必须彻底移除（刀1：作废指针=半截行孤儿+重复行根源）
+        assert "self._reset_progress_row(" not in src, "旧作废指针机制不得残留调用"
+        # 回合键在 _prompt_inner 回合真正开始处计算，与 writer_id 同源
         inner_at = src.index("async def _prompt_inner")
-        reset_at = src.index("self._reset_progress_row(session_id)")
-        assert inner_at < reset_at
+        key_at = src.index('_turn_key = f"prompt:{message_id or id(prompt)}"')
+        assert inner_at < key_at
+        # final 接管必须带回合键
+        assert "self._save_message_final(session_id, full_response, metadata=_marker_json, turn_key=_turn_key)" in src
 
     def test_wiring_task_pipeline_per_step_save_kept(self):
         src = self._src()

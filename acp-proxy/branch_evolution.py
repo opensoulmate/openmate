@@ -53,9 +53,16 @@ class BranchManager:
         # 确保在base分支且干净
         status = self._git("status", "--porcelain")
         if status.stdout.strip():
-            # 有未提交更改——先stash
-            logger.info("Stashing uncommitted changes before branching")
-            self._git("stash", "push", "-m", f"evo-pre-branch-{int(time.time())}")
+            # 未提交工作=他人/手动在途工作，evo 无权清扫（2026-10-23 防误伤根修）。
+            # 旧行为"先 stash 再切"（evo-pre-branch-*）把在途修复无声扫进 stash——
+            # 2026-10-22 实证：Hermes 的未提交修复被扫走、改完的文件瞬间"回到 HEAD"。
+            # docstring 契约本来就是拒绝；stash 是后来的错误放宽，现在回归契约：
+            # 谁在途谁提交，evo 不代替别人决定。返回 None=本周期跳过，下周期再试。
+            logger.warning(
+                "[branch-evolution] 工作树有未提交更改（疑似他人在途工作），拒绝切实验分支。"
+                "请先提交/收尾在途更改后重试。明细:\n" + status.stdout.strip()[:500]
+            )
+            return None
         
         current = self._git("branch", "--show-current")
         if current.stdout.strip() != self.base_branch:

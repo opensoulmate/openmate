@@ -508,17 +508,23 @@ class SoulMateAgent:
                 parts.append(f"## 步骤{i + 1}：{getattr(s, 'description', '')}\n\n{s.result}")
         return "\n\n".join(parts)
 
-    def _save_progress(self, session_id: str, text: str) -> None:
+    def _save_progress(self, session_id: str, text: str, turn_key: str = "") -> None:
         """增量落库：生成中的回复按当前内容存一条 assistant 行（首次插入复用 _save_message，
         后续原地更新同一行）。生成中途被杀（切页/断连/取消）已有内容不丢；
-        正常走完由 _save_message_final 接管同一行写入最终回复。"""
+        正常走完由 _save_message_final 接管同一行写入最终回复。
+
+        turn_key=回合归属键（2026-10-23 刀1）：进度行按回合隔离——B 回合开跑不再
+        清 A 的指针（旧 _reset_progress_row 语义），A 的最终回复接回 A 自己的半截行，
+        同一段话不再"半截行+新插完整版"存两遍；同 message_id 重试还能接回旧半截行。
+        同一回合内 progress 与 final 必须传同一 turn_key。"""
         if not text or not text.strip():
             return
         sess = self.sessions.get(session_id)
         if sess is None:
             return
         try:
-            pid = sess.get("_progress_id")
+            rows = sess.setdefault("_progress_rows", {})
+            pid = rows.get(turn_key)
             if pid:
                 db = self._get_db()
                 try:
@@ -529,14 +535,15 @@ class SoulMateAgent:
             else:
                 pid = self._save_message(session_id, "assistant", text, metadata=json.dumps({"progress": True}))
                 if pid:
-                    sess["_progress_id"] = pid
+                    rows[turn_key] = pid
         except Exception as e:
             logger.warning(f"[progress] 增量落库失败: {e}")
 
-    def _save_message_final(self, session_id: str, text: str, metadata: str | None = None) -> None:
-        """最终回复落库：若存在增量落库行则原地接管（更新为完整内容，避免重复行），否则正常插入。"""
+    def _save_message_final(self, session_id: str, text: str, metadata: str | None = None, turn_key: str = "") -> None:
+        """最终回复落库：若本回合存在增量落库行则原地接管（更新为完整内容，避免重复行），
+        否则正常插入。turn_key 语义见 _save_progress（按回合隔离，互不劫持）。"""
         sess = self.sessions.get(session_id) or {}
-        pid = sess.pop("_progress_id", None)
+        pid = (sess.get("_progress_rows") or {}).pop(turn_key, None)
         if pid:
             try:
                 db = self._get_db()
@@ -554,21 +561,12 @@ class SoulMateAgent:
                 logger.warning(f"[progress] 接管增量行失败，回退新插: {e}")
         self._save_message(session_id, "assistant", text, metadata=metadata)
 
-    def _reset_progress_row(self, session_id: str) -> None:
-        """回合开始时作废上一回合遗留的增量落库行指针（只清内存指针，不动库）。
-
-        上一回合生成中途被杀会残留 _progress_id；若不清，本回合的增量落库/最终
-        接管会UPDATE那条旧行——上一回合的部分内容被覆盖丢失、本回合还顶着旧时间
-        戳的位置。清掉后本回合自建新行，旧行的部分内容原样保留在库（正是恢复语义）。"""
-        sess = self.sessions.get(session_id)
-        if sess is not None:
-            sess.pop("_progress_id", None)
-
-    def _progress_saver(self, session_id: str):
+    def _progress_saver(self, session_id: str, turn_key: str = ""):
         """0.1 流式增量落库节流器：返回 callable(text)，按节奏调用 _save_progress。
 
         节流规则=每积累≥_PROGRESS_SAVE_CHARS字或距上次落库≥_PROGRESS_SAVE_INTERVAL_S
-        秒（取先到）；低于双阈值不落库（避免每chunk一写）。text是累计全文（非增量）。"""
+        秒（取先到）；低于双阈值不落库（避免每chunk一写）。text是累计全文（非增量）。
+        turn_key=回合归属键（2026-10-23 刀1，见 _save_progress）。"""
         state = {"ts": time.time(), "len": 0}
 
         def _maybe_save(text: str) -> None:
@@ -577,7 +575,7 @@ class SoulMateAgent:
                 len(text) - state["len"] >= _PROGRESS_SAVE_CHARS
                 or now - state["ts"] >= _PROGRESS_SAVE_INTERVAL_S
             ):
-                self._save_progress(session_id, text)
+                self._save_progress(session_id, text, turn_key)
                 state["ts"] = now
                 state["len"] = len(text)
 
@@ -2448,6 +2446,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
         user_text: str = "",
         traj_seg_id: str = "",
         stream_progress: bool = False,
+        turn_key: str = "",
     ) -> tuple[str, list[dict]]:
         """LLM推理 + 工具调用循环。模型返回tool_calls就执行，纯文本就结束。
 
@@ -2557,7 +2556,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
         full_response = ""
         all_tool_calls = []  # 收集所有工具调用
         # 0.1 流式增量落库节流器（仅simple路径开启）
-        _stream_save = self._progress_saver(session_id) if stream_progress else None
+        _stream_save = self._progress_saver(session_id, turn_key) if stream_progress else None
 
         # 获取 MCP 工具 + 进化引擎工具
         mcp_tools = await self._fetch_mcp_tools()
@@ -5533,9 +5532,11 @@ You can send files to the user natively: to deliver a file, write a brief confir
             )
             return PromptResponse(stop_reason="refusal")
 
-        # 0.1 流式增量落库：新回合开始，作废上回合遗留的增量行指针（防接管串行——
-        # 旧行部分内容保留，新回合自建新行）
-        self._reset_progress_row(session_id)
+        # 0.1 流式增量落库（2026-10-23 刀1）：进度行按回合键隔离（见 _save_progress）。
+        # 旧 _reset_progress_row"作废上回合指针"机制删除——它把被插话/重试打断的回合
+        # 指针清掉，该回合最终回复只能新插行=同一段话"半截行+完整版"存两遍（用户
+        # "好多重复的话"实证病灶）。回合键与 Writer Fencing 的 writer_id 同源。
+        _turn_key = f"prompt:{message_id or id(prompt)}"
         # 9.1 send_file 待交付清单：回合开始作废上回合残留（防串回合误交付）
         _pending = getattr(self, "_pending_send_media", None)
         if _pending:
@@ -6382,6 +6383,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
                     messages, session_id, matched_skills=matched_skills,
                     user_text=user_text, traj_seg_id=_traj_seg,
                     stream_progress=True,  # 0.1 simple路径流式增量落库
+                    turn_key=_turn_key,  # 刀1：进度行按回合归属
                 )
                 llm_duration = time.time() - llm_start
                 self._tracer.end_span(span_id, {"response_len": len(full_response), "tool_calls": len(tool_calls_log)})
@@ -6698,7 +6700,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
         _marker_json = memory_marker.metadata_json(
             memory_marker.from_recall(sources=recalled_ids, texts=recalled_texts)
         )
-        self._save_message_final(session_id, full_response, metadata=_marker_json)
+        self._save_message_final(session_id, full_response, metadata=_marker_json, turn_key=_turn_key)
         logger.info(f"Response [{session_id}]: {full_response[:100]}")
         logger.info(f"[prompt] done, response_len={len(full_response)}, tools={tool_calls_log}")
 
