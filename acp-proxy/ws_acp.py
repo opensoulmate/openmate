@@ -202,13 +202,15 @@ async def ws_acp_endpoint(client_ws: WebSocket):
 
     # 提取agent_id
     params = session_msg.get("params", {})
-    logger.info(f"[ACP] session/new raw params: {json.dumps(params, ensure_ascii=False)[:200]}")
+    # 标签按真实 method 打（2026-10-22 修正：此前 load 也印"session/new raw"误导排查；
+    # session/new 事件的既有 grep 照常命中）
+    logger.info(f"[ACP] {session_msg.get('method') or 'session/new'} raw params: {json.dumps(params, ensure_ascii=False)[:200]}")
     # agent_id 必须显式声明（点击谁=建谁；默认值只许存在于前端入口，
     # 服务端绝不顶替身份——铁律"每个agent都应该是独立的"）
     meta = params.get("_meta") or {}
     agent_id = params.get("agent_id") or params.get("agentId") or meta.get("agent_id")
     if not agent_id:
-        logger.error("[ACP] session/new 缺少 agent_id——拒绝创建，禁止默认顶替")
+        logger.error(f"[ACP] {session_msg.get('method') or 'session/new'} 缺少 agent_id——拒绝创建，禁止默认顶替")
         await _send_acp(client_ws, {"jsonrpc": "2.0", "id": session_msg.get("id"), "error": {"code": -32602, "message": "session/new requires agent_id (no implicit default)"}})
         return
     route = AGENT_ROUTES.get(agent_id)
@@ -336,11 +338,12 @@ async def ws_acp_endpoint(client_ws: WebSocket):
         for msg in buffered_msgs:
             if msg.get("method") == "initialize":
                 msg.setdefault("params", {})["protocolVersion"] = 1
-            # session/new 的 agent_id 是给proxy路由用的，子进程不认识，去掉
-            if msg.get("method") == "session/new":
+            # session/new|load 的 agent_id 是给proxy路由用的，子进程不认识，去掉
+            if msg.get("method") in ("session/new", "session/load"):
                 msg.setdefault("params", {}).pop("agent_id", None)
                 msg.get("params", {}).pop("agentId", None)
-                # 注入子进程需要的必填字段（cwd, mcpServers）
+                # 注入子进程需要的必填字段（cwd, mcpServers）——SDK 的 new/load
+                # 参数模型都必填（load_session 签名 cwd,session_id,mcp_servers）
                 p = msg["params"]
                 if "cwd" not in p:
                     p["cwd"] = route.get("cwd", _USER_HOME)

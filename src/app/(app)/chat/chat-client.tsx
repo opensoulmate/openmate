@@ -638,8 +638,11 @@ function useAcpWebSocket(params: {
         // 此前续用也发 session/new——对无去重的 agent（hermes 等）每次重连都真铸新会话；
         // soulmate 靠私有 client-key 去重掩盖了这个 bug（所以"只有 soulmate 正常"）。
         const existingAcpSid = state.acpSessionId || (sessionId.startsWith('temp-') ? undefined : sessionId);
+        // 身份链（2026-10-22 补全）：load 也显式带 agent_id——proxy 对首条会话消息
+        // 统一要求显式身份（session/new 强制 agent_id 的同一铁律），load 不带会被
+        // "禁止默认顶替"门拒 → 续用会话死在"连接已断开"。身份仍来自点开的入口，零默认。
         const result = (existingAcpSid
-          ? await sendRpcRequest(ws, 'session/load', { session_id: existingAcpSid })
+          ? await sendRpcRequest(ws, 'session/load', { session_id: existingAcpSid, agent_id: agentId })
           : await sendRpcRequest(ws, 'session/new', { cwd: '/', mcpServers: [], agent_id: agentId, _meta: { session_id: sessionId } })
         ) as { session_id?: string; sessionId?: string };
         const acpSid = result?.session_id || result?.sessionId;
