@@ -52,6 +52,11 @@ _DONE_MARKERS = (
 # 分句兜底：长任务无枚举时按分号/句末拆
 _CLAUSE_SPLIT_RE = re.compile(r"[；;。\n]+")
 
+# 结构检出（_structure_tokens 用）：markdown 表格 / 列表 / JSON / 代码围栏
+_TABLE_SEP_RE = re.compile(r"^\s*\|[\s:\-|]+\|\s*$", re.M)
+_LIST_RE = re.compile(r"^\s*(?:[-*•]|\d+[.)、])\s+\S", re.M)
+_JSON_RE = re.compile(r"^[{[][\s\S]*[}\]]$")
+
 # 条件子句（"如果X就Y / 如遇X则Y"类）：是否触发取决于运行时条件，确定性核对
 # 无法观测条件是否成立——"未覆盖"≠"没做"，不能进补做清单（⚡8.5c-①实证：
 # 补做条件子句只会诱发"补做结果/逐项说明"式逐条复盘元叙事，违反"简短回答"约束）
@@ -105,8 +110,38 @@ def _tokens(text: str) -> set[str]:
                 toks.add(run)
         for i in range(len(run) - 1):
             bg = run[i : i + 2]
-            if not (bg[0] in _STOP_CHARS and bg[1] in _STOP_CHARS):
+            # 弱 bigram（含停用字）= 跨词边界噪声（"格对""蕉的""个维"）+ 指令脚手架
+            # （"请用""不要"），对称过滤（需求侧/证据侧同口径）。不过滤会把纯产物型
+            # 回答（表格/JSON，天然不复述请求措辞）的覆盖率压到假 unmet → 触发补做
+            # 整题重答 → 追加拼接 → 同一答案出现两遍（2026-10-23 周期#664 实证）。
+            if bg[0] not in _STOP_CHARS and bg[1] not in _STOP_CHARS:
                 toks.add(bg)
+    return toks
+
+
+def _structure_tokens(response: str) -> set[str]:
+    """回复的结构化产出 → 格式线索词证据（语义桥：请求措辞 ↔ 回复结构）。
+
+    请求点名"表格/列表/JSON/代码"时，回复以对应结构交付 = 该格式词有证据。
+    纯产物型回答天然不复述请求措辞（表里没有"表格"两个字），纯词元核对必然
+    假阴性——2026-10-23 周期#664 实证：纯表格回答 6/27=0.22 误判 unmet →
+    补做整题重答被追加 → 同一张表在回复里出现两遍。确定性检出，不走 LLM。
+    """
+    t = response or ""
+    toks: set[str] = set()
+    low = t.lower()
+    has_table = bool(_TABLE_SEP_RE.search(t)) or "<table" in low
+    has_list = bool(_LIST_RE.search(t))
+    has_json = bool(_JSON_RE.search(t.strip()))
+    has_fence = "```" in t
+    if has_table:
+        toks.update({"表格", "markdown"})
+    if has_list:
+        toks.update({"列表", "清单"})
+    if has_json:
+        toks.add("json")
+    if has_fence:
+        toks.update({"代码", "markdown"})
     return toks
 
 
@@ -258,7 +293,7 @@ class SelfVerifier:
             tool_bits.append(f"{e.name} {e.arguments}")
         tool_text = " ".join(tool_bits)
 
-        ev_tokens = _tokens(response or "") | _tokens(tool_text)
+        ev_tokens = _tokens(response or "") | _tokens(tool_text) | _structure_tokens(response or "")
         has_executed = bool(executed_tools)
 
         items: list[VerifyItem] = []

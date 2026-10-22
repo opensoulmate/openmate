@@ -6591,8 +6591,10 @@ You can send files to the user natively: to deliver a file, write a brief confir
             )
             if _avail.false_claims:
                 full_response = report_evidence.amend_availability(full_response, _avail)
-                # 横幅块出正文（2026-10-22）：amend 前置横幅剥除只留更正正文
-                full_response, _nb2 = frame_origin.strip_notice_banner(full_response)
+                # 可用性更正=回答内容（把模型的假话更正过来，必须留在用户看到的回复里），
+                # 不是元横幅——禁 strip_notice_banner 剥除（2026-10-23 周期#664 回归修复：
+                # 01:00 双通道清理误把更正块当横幅剥掉，多行更正块按"首个空行"整块被吃，
+                # 原假话不带更正落库 = 比不更正更糟）。横幅帧第二通道已砍，仅此一处更正。
                 logger.warning(
                     f"[tool-avail] session={session_id} 可用性误报×{len(_avail.false_claims)}: "
                     + "; ".join(f"{c.tool_name or 'generic'}({c.proof})" for c in _avail.false_claims))

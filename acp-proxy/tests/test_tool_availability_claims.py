@@ -8,6 +8,7 @@
 ④ amend_availability/banner 更正声明（原文保留、无误报原文返回）
 ⑤ soulmate_agent 接线护栏（工具面真源+_active_tool_names+先于自检）
 """
+import inspect
 import os
 import sys
 
@@ -184,7 +185,11 @@ def test_wiring_availability_check_uses_tool_face_truth_source():
     assert "report_evidence.assess_availability(" in src
     assert 'getattr(self, "_active_tool_names", None)' in src
     assert "report_evidence.amend_availability(full_response, _avail)" in src
-    assert "report_evidence.availability_banner(_avail)" in src
+    # 横幅生产者接线在 amend_availability 内部（2026-10-23 周期#664 钉子纠偏：
+    # 旧钉断言 agent 源里直接调 availability_banner(_avail)——接线早已收进
+    # amend_availability，钉子成死断言；改为钉生产者真实接线点）。
+    import agent.report_evidence as _re
+    assert "availability_banner(" in inspect.getsource(_re.amend_availability)
 
 
 def test_wiring_availability_before_self_verify_and_after_evidence():
