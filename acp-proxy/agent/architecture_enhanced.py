@@ -79,10 +79,13 @@ class EnhancedArchitecture:
         # 立即返回→覆盖活跃claim）= 并发prompt都能"获取"栅栏，串行化完全失效；
         # 且插话语义（Khoj interrupt_queue/goose Steer）要求运行中消息立即拒绝→进插话队列
         # 在turn间隙注入，而非等待整个任务结束。session_guard唯一消费方=soulmate prompt()。
+        # stale_after=1200s 对齐 turn_watchdog 的回合上限 960s（2026-10-23）：心跳已按轮
+        # 接线（soulmate 主循环 watchdog.beat 同点位），过期抢夺只兜真死 writer——此前
+        # 180s < 长回合时长且心跳零接线，claim 被当死 writer 抢走 → 并发回合双份生成。
         self.writer_fence = SessionWriterFence(
             action=WriteAction.REJECT,
             timeout=60.0,
-            stale_after=180.0,
+            stale_after=1200.0,
         )
         
         # 2. Lane Queue

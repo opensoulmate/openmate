@@ -74,6 +74,20 @@ def _split_banner_frame(text: str) -> str | None:
     return body if sep else None
 
 
+def strip_notice_banner(text: str) -> tuple[str, int]:
+    """剥合并回复文本开头的 audit_notice 横幅块（amend_* 前置横幅的生产者契约）。
+
+    横幅+正文同帧 → 返回正文（剥除数 1）；纯横幅帧或非横幅开头 → 原样返回 0
+    （纯横幅=回复本体，失败必须可见；正文中间的横幅字样不误伤——只判帧首）。
+    """
+    if origin_of(text) != KIND_AUDIT_NOTICE:
+        return text, 0
+    body = _split_banner_frame(text)
+    if body is not None and body.strip():
+        return body, 1
+    return text, 0
+
+
 def split_frames(texts: list[str]) -> tuple[str, dict[str, int]]:
     """合并回复文本按帧来源过滤。
 

@@ -726,6 +726,14 @@ function useAcpWebSocket(params: {
         }
         state.pendingRequests.clear();
 
+        // 4000=被同一会话的新连接顶替（服务端单观察窗语义）：静默退场，不重连防翻转
+        if (event.code === 4000) {
+          console.warn('[ACP] 观察窗已被新连接顶替，不重连');
+          if (wsMapRef.current.get(sessionId) === ws) wsMapRef.current.delete(sessionId);
+          setWsConnected(wsMapRef.current.size > 0);
+          return;
+        }
+
         // 服务端主动关闭(1000)且无token才跳登录；有token就重连
         if (event.code === 1000 && !state.unmounted) {
           const storedToken = localStorage.getItem('openmate-token');

@@ -81,6 +81,7 @@ from agent.dynamic_prompt import DynamicPromptBuilder
 from agent.memory_retrieval import MemoryRetrievalEngine
 from agent.persistent_memory import PersistentMemory
 from agent.experience_sink import ExperienceSink
+from agent import frame_origin
 from agent.self_verify import SelfVerifier
 from agent.tool_cache import ToolResultCache
 from agent.tool_auditor import ToolAuditor
@@ -865,7 +866,10 @@ class SoulMateAgent:
                 wd.stop()
             wd = TurnWatchdog(
                 session_id,
-                notify=lambda text: self._notify_client(session_id, text),
+                # 系统帧出聊天正文（2026-10-22 双通道清理）：⏳心跳/⚠️软预算是
+                # frame_origin 定义的纯状态帧（丢弃类），只走 on_soft_budget 轨迹
+                # 钩子留痕，不再推聊天——聊天里只留回答本身。
+                notify=None,
                 # P1-15 wall_clock 终止条件落 trace：软预算超限事件进轨迹（条件=
                 # wall_clock/action=soft_warn）；按用户铁律"禁硬超时杀"只提醒不终止
                 on_soft_budget=lambda budget_s, elapsed: self._traj_recorder.log_event(
@@ -3876,6 +3880,10 @@ You can send files to the user natively: to deliver a file, write a brief confir
             _round_t0 = time.time()
             _round_resp_mark = len(full_response)
             watchdog.beat(round_index=_round + 1, tools_executed=len(all_tool_calls))
+            # Writer Fencing 心跳（2026-10-23 接线）：每轮证明 writer 活着——此前
+            # heartbeat() 全仓零调用（写了≠接线了），长回合 claim 被 stale 抢夺
+            # → 并发回合双份生成。与 watchdog.beat 同点位：回合边界=存活证据。
+            self._arch.writer_fence.heartbeat(session_id)
             # ── P1: turn间隙批量注入插话 ──
             # goose Steer: between-turns drain（上一角色=Tool或回合刚结束）+ with_steer标记；
             # Khoj interrupt_queue: 拼进当前任务历史、保留已完成迭代继续跑；
@@ -6559,14 +6567,13 @@ You can send files to the user natively: to deliver a file, write a brief confir
             if _evidence.verdict in ("blocked", "unsupported"):
                 _banner = report_evidence.governance_banner(_evidence)
                 full_response = report_evidence.amend_response(full_response, _evidence)
+                # 横幅块出正文（2026-10-22）：amend 前置横幅剥除只留治理正文
+                full_response, _nb = frame_origin.strip_notice_banner(full_response)
                 logger.warning(
                     f"[report-evidence] session={session_id} verdict={_evidence.verdict} "
                     f"executed={len(_evidence.executed)} blocked={len(_evidence.blocked)}")
-                if self._client is not None and _banner:
-                    await self._client.session_update(
-                        session_id=session_id,
-                        update=acp.update_agent_message_text("\n" + _banner),
-                    )
+                # 治理横幅不再单推聊天帧（2026-10-22 双通道清理）：amend_response 已把
+                # 治理文本并入落库回复（有用通道），横幅帧是第二条纯噪音通道。
         except Exception as e:
             logger.debug(f"[report-evidence] 治理失败(非致命): {e}")
 
@@ -6582,15 +6589,13 @@ You can send files to the user natively: to deliver a file, write a brief confir
             )
             if _avail.false_claims:
                 full_response = report_evidence.amend_availability(full_response, _avail)
+                # 横幅块出正文（2026-10-22）：amend 前置横幅剥除只留更正正文
+                full_response, _nb2 = frame_origin.strip_notice_banner(full_response)
                 logger.warning(
                     f"[tool-avail] session={session_id} 可用性误报×{len(_avail.false_claims)}: "
                     + "; ".join(f"{c.tool_name or 'generic'}({c.proof})" for c in _avail.false_claims))
-                if self._client is not None:
-                    await self._client.session_update(
-                        session_id=session_id,
-                        update=acp.update_agent_message_text(
-                            "\n" + report_evidence.availability_banner(_avail)),
-                    )
+                # 可用性横幅不再单推聊天帧（2026-10-22 双通道清理）：amend_availability
+                # 的正文更正保留进回复（有用），横幅帧第二通道砍。
         except Exception as e:
             logger.debug(f"[tool-avail] 可用性核验失败(非致命): {e}")
 
@@ -6647,11 +6652,8 @@ You can send files to the user natively: to deliver a file, write a brief confir
                 report_text = self._self_verifier.format_report(verify_report)
                 if _remediated:
                     report_text += "\n（未覆盖项已补做1轮并复检）"
-                if self._client is not None:
-                    await self._client.session_update(
-                        session_id=session_id,
-                        update=acp.update_agent_message_text(report_text),
-                    )
+                # 🔍自检报告不再单推聊天帧（2026-10-22 双通道清理）：报告只走日志+
+                # 反思引擎（有用通道），推聊天=复读用户需求原文的纯噪音（周期#43 病灶）。
                 # 20.2 产生源①：自验收尾出结论（fail-safe 旁路）
                 reflection_sources.from_self_verify(
                     getattr(self, "_reflection_engine", None),

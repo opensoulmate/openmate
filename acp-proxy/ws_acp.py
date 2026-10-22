@@ -271,6 +271,17 @@ async def ws_acp_endpoint(client_ws: WebSocket):
         proc = entry["proc"]
         use_pty = entry["use_pty"]
         master_fd = entry.get("master_fd")
+        # 单观察窗替换语义（2026-10-22 双通道清理）：同一会话新 WS=顶替旧观察窗，
+        # 绝不并存——双观察窗把同一生成流各推一份，前端逐块交错双写（表格语法被
+        # 搅烂、回复复读）。被顶替方以 close 4000 'superseded' 退场，客户端见 4000
+        # 不重连（防顶替翻转）。
+        for old_ws in list(entry["subs"] or ()):
+            if old_ws is not client_ws:
+                entry["subs"].discard(old_ws)
+                try:
+                    await old_ws.close(code=4000, reason="superseded")
+                except Exception:
+                    pass
         entry["subs"].add(client_ws)
         logger.info(f"[ACP] reattach: 会话已有后台子进程 (pid={proc.pid}), 接回观察窗")
     try:

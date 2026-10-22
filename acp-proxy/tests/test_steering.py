@@ -260,10 +260,17 @@ class TestActivityStore:
 # SoulMateAgent harness — prompt()插话分支 + _run_llm_with_tools接线
 # ════════════════════════════════════════════════════════════════
 
+class FakeFence:
+    """writer fence替身：主循环每轮调 heartbeat（2026-10-23 接线），替身须建模该协作者"""
+    def heartbeat(self, session_id):
+        pass
+
+
 class FakeArch:
     """session_guard模拟：acquired=False模拟'会话正在运行'"""
     def __init__(self, acquired: bool):
         self._acquired = acquired
+        self.writer_fence = FakeFence()
 
     @asynccontextmanager
     async def session_guard(self, session_id, writer_id=""):
