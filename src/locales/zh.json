@@ -217,7 +217,8 @@
     "connectionLost": "连接已断开，请稍后重试",
     "sessionExpired": "登录已过期，请重新登录",
     "deleteSessionTitle": "删除会话",
-    "deleteSessionDesc": "确定要删除「{{name}}」吗？"
+    "deleteSessionDesc": "确定要删除「{{name}}」吗？",
+    "sessionNotAccessible": "无法查看该会话：不存在或无权访问"
   },
   "knowledge": {
     "title": "知识库",
@@ -440,7 +441,7 @@
     "installed": "已安装",
     "testConnection": "测试连接",
     "edit": "编辑",
-    "addAgent": "添加自定义Agent",
+    "addAgent": "添加 Agent",
     "somaNode": "Soma 节点",
     "somaDescription": "自家采集分身节点",
     "aiAgent": "AI Agent",
@@ -448,7 +449,6 @@
     "mcpAgent": "MCP Agent",
     "mcpDescription": "MCP 协议接入",
     "custom": "自定义",
-    "addAgent": "添加 Agent",
     "autoDetect": "自动检测",
     "noAgents": "暂无 Agent",
     "deleteAgent": "删除 Agent",

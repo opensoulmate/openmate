@@ -217,7 +217,8 @@
     "connectionLost": "接続が切断されました。後でもう一度お試しください",
     "sessionExpired": "ログインの有効期限が切れました。再度ログインしてください",
     "deleteSessionTitle": "セッションを削除",
-    "deleteSessionDesc": "「{{name}}」を削除してもよろしいですか？"
+    "deleteSessionDesc": "「{{name}}」を削除してもよろしいですか？",
+    "sessionNotAccessible": "この会話は表示できません：存在しないか、アクセス権がありません"
   },
   "knowledge": {
     "title": "ナレッジベース",

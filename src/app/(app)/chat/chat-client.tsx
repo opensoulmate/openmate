@@ -1240,6 +1240,9 @@ export function ChatClient() {
   const [clearTrigger, setClearTrigger] = useState(0);
   const [loadFieldsTrigger, setLoadFieldsTrigger] = useState(0);
   const pendingSessionIdRef = useRef<string | null>(null);
+  // URL ?session= 直载（会话不在 /api/sessions 列表时按 id 直载，禁静默空历史/静默改道）
+  const [urlSessionError, setUrlSessionError] = useState<string | null>(null);
+  const urlSessionDirectRef = useRef<string | null>(null);
   // per-session loading: derived from sessionDataMap for current session
   const effectiveSessionIdForLoading = useAppStore((s) => s.activeSessionId) || pendingSessionIdRef.current;
   const loading = effectiveSessionIdForLoading ? (sessionDataMap.get(effectiveSessionIdForLoading)?.loading || false) : false;
@@ -1891,6 +1894,57 @@ export function ChatClient() {
         return;
       }
     }
+    // URL 指定的会话不在 /api/sessions 列表（如验收/探针会话）：按 id 直载。
+    // 禁静默空历史、禁静默改道新会话——?session 空历史修复（周期#667）
+    if (!agents.length) return; // 会话列表仍在加载，等下一轮
+    if (urlSessionDirectRef.current === sid) return;
+    urlSessionDirectRef.current = sid;
+    (async () => {
+      try {
+        // 可读性以 messages API 为准（会话行可能不在 agent_sessions——验收/探针会话即此形态，
+        // GET /api/sessions/{id} 对其 404 但 messages 可读）
+        const r = await fetch(`${getApiUrl()}/api/sessions/${sid}/messages`, { headers: { Authorization: `Bearer ${getToken()}` } });
+        if (!r.ok) {
+          setUrlSessionError(t('chat.sessionNotAccessible'));
+          return;
+        }
+        const d = await r.json();
+        const msgs = (d.messages || []) as Array<Record<string, unknown>>;
+        // 身份取消息自带 source（agent_id），不走链路兜底
+        let agentId = (msgs.find(m => m.source)?.source as string) || '';
+        let title = ((msgs.find(m => m.role === 'user')?.content as string) || '').slice(0, 30);
+        if (!msgs.length) {
+          // 空历史≠可访问：messages 对不存在的 id 也回 200 空表——
+          // 以 detail 端点分辨「真会话（空历史）」与「不存在」，不存在=明确提示
+          const dr = await fetch(`${getApiUrl()}/api/sessions/${sid}`, { headers: { Authorization: `Bearer ${getToken()}` } });
+          if (!dr.ok) {
+            setUrlSessionError(t('chat.sessionNotAccessible'));
+            return;
+          }
+          const dd = await dr.json();
+          agentId = (dd.source as string) || '';
+          title = (dd.title as string) || '';
+        }
+        if (!agentId) agentId = 'soulmate';
+        if (!title) title = sid;
+        const known = agents.find(a => a.id === agentId);
+        const agent: AgentInfo = known ?? {
+          id: agentId,
+          name: agentId,
+          icon: agentId === 'soulmate' ? SOULMATE_ICON : '',
+          logo: agentId === 'soulmate' ? SOULMATE_LOGO : undefined,
+          description: '',
+          installed: true,
+          sessions: [],
+          expanded: false,
+        };
+        const session: Session = { id: sid, name: title, platform: 'hermes' } as Session;
+        selectSession(session, agent);
+      } catch (e) {
+        console.error('[url-session] direct load failed:', e);
+        setUrlSessionError(t('chat.sessionNotAccessible'));
+      }
+    })();
   }, [agents]);
 
   // When store agentId changes, switch selectedAgent and clear session/messages
@@ -2046,6 +2100,7 @@ export function ChatClient() {
 
   const selectSession = (session: Session, agent: AgentInfo) => {
     console.log(`[selectSession] session.id=${session.id}, agent.id=${agent.id}`);
+    setUrlSessionError(null);
     // Update store (single source of truth for activeSessionId)
     useAppStore.getState().setActiveSession(session.id, agent.id === 'soulmate' ? null : agent.id, {
       agentName: agent.name,
@@ -2587,7 +2642,12 @@ export function ChatClient() {
 
 {/* Messages view */}
           {chatView === 'messages' && (<>
-          {messages.length === 0 && (
+          {messages.length === 0 && urlSessionError && (
+            <div className="flex flex-col items-center justify-center h-full">
+              <div className="rounded-xl border border-border bg-card px-4 py-3 text-sm text-muted-foreground">{urlSessionError}</div>
+            </div>
+          )}
+          {messages.length === 0 && !urlSessionError && (
             <div className="flex flex-col items-center justify-center h-full max-w-2xl mx-auto">
               <h2 className="text-xl lg:text-2xl font-semibold mb-4 lg:mb-8">{t("chat.welcomeMessage")}</h2>
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 lg:gap-3 w-full">

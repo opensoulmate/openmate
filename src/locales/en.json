@@ -217,7 +217,8 @@
     "connectionLost": "Connection lost, please try again later",
     "sessionExpired": "Login expired, please sign in again",
     "deleteSessionTitle": "Delete Session",
-    "deleteSessionDesc": "Are you sure you want to delete \"{{name}}\"?"
+    "deleteSessionDesc": "Are you sure you want to delete \"{{name}}\"?",
+    "sessionNotAccessible": "Cannot view this session: it does not exist or you have no access"
   },
   "knowledge": {
     "title": "Knowledge Base",
@@ -440,7 +441,7 @@
     "installed": "Installed",
     "testConnection": "Test Connection",
     "edit": "Edit",
-    "addAgent": "Add Custom Agent",
+    "addAgent": "Add Agent",
     "somaNode": "Soma Node",
     "somaDescription": "Local data collection node",
     "aiAgent": "AI Agent",
@@ -448,7 +449,6 @@
     "mcpAgent": "MCP Agent",
     "mcpDescription": "MCP protocol integration",
     "custom": "Custom",
-    "addAgent": "Add Agent",
     "autoDetect": "Auto Detect",
     "noAgents": "No Agents",
     "deleteAgent": "Delete Agent",
