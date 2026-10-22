@@ -134,6 +134,19 @@ async def _handle_task_delegate(params: dict[str, Any], request_id: Any) -> JSON
         metadata=metadata,
     )
 
+    # 启动Agent任务（target_agent 分流，2026-10-23）：
+    # evo=确定性处理端（evo_agent）内联执行并同步返回 result_data（require_result
+    # 语义，即时动作无需轮询）；其余照旧走 bridge→Agent Engine（8787 ACP）。
+    # Agent↔Agent 业务数据只走 A2A 链路（三层协议隔离）。
+    if params.get("target_agent") == "evo":
+        reply = await _run_evo_task(task.id, msg, params.get("task_type", "query_status"))
+        return _success_response(request_id, {
+            "task_id": task.id,
+            "status": "completed",
+            "result_data": {"reply": reply},
+            "accepted_at": int(asyncio.get_event_loop().time()),
+        })
+
     # 启动后台Agent任务
     asyncio.create_task(_agent_task_worker(task.id, msg))
 
@@ -316,6 +329,37 @@ async def _handle_agent_heartbeat(params: dict[str, Any], request_id: Any) -> JS
         "status": status,
         "acknowledged": True,
     })
+
+
+async def _run_evo_task(task_id: str, message: Message | None, task_type: str) -> str:
+    """evo 任务：确定性处理（目标收件箱/状态应答），不经过 Agent Engine。
+
+    状态机照走（working→completed/failed），应答落 task 历史（全链路溯源），
+    并同步返回应答文本。evo 的处理是即时确定性动作，调用方无需轮询。
+    """
+    from models import TaskState
+
+    from evo_agent import handle as evo_handle
+
+    store = get_task_store()
+    try:
+        await store.update_task_status(task_id, TaskState.WORKING)
+        text = ""
+        if message and message.parts:
+            text = "".join(getattr(p, "text", "") or "" for p in message.parts)
+        reply = await evo_handle(task_type, text)
+        reply_msg = Message(role="agent", parts=[TextPart(text=reply)])
+        await store.add_message(task_id, reply_msg)
+        await store.update_task_status(task_id, TaskState.COMPLETED, status_message=reply_msg)
+        return reply
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"[evo] task {task_id} 处理失败: {e}")
+        fail_msg = Message(role="agent", parts=[TextPart(text=f"evo 处理失败: {e}")])
+        try:
+            await store.update_task_status(task_id, TaskState.FAILED, status_message=fail_msg)
+        except Exception:  # noqa: BLE001
+            pass
+        return f"evo 处理失败: {e}"
 
 
 async def _agent_task_worker(task_id: str, message: Message | None) -> None:

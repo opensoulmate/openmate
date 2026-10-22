@@ -1531,6 +1531,9 @@ class SoulMateAgent:
             # 系统状态体检（路线图 2.4）：只读体检，批内同样可用
             if func_name == "system_checkup":
                 return self._system_health_dispatch(func_args)
+            # evo 转达（2026-10-23，Agent↔Agent A2A）：批内同样可用
+            if func_name == "evo_communicate":
+                return self._evo_communicate_dispatch(func_args)
             # 会话文件索引召回（路线图 20.1）：只读检索，批内同样可用
             if func_name == "file_recall":
                 return self._file_recall_dispatch(func_args)
@@ -1691,6 +1694,41 @@ class SoulMateAgent:
         lines.append("删除方法: profile_audit(action=delete, pref_ids=[...], confirm=true)。"
                      "⚠️ 数据删除需用户明确确认，先用 confirm 缺省做预览。")
         return "\n".join(lines)
+
+    def _evo_communicate_dispatch(self, func_args: dict) -> str:
+        """evo 转达工具（2026-10-23）：用户↔SoulMate（ACP 人机）→ a2a/task/delegate → evo（A2A）。
+
+        三层协议隔离：Agent 间业务数据只走 A2A 链路；SoulMate 只转达用户意图、
+        回传 evo 原话，不冒名替 evo 说话（每 agent 独立铁律）。evo 处理端是确定性
+        动作（目标收件箱/状态检索），delegate 同步返回 result_data.reply，无需轮询。
+        """
+        action = (func_args.get("action") or "query_status").strip()
+        content = (func_args.get("content") or "").strip()
+        try:
+            resp = httpx.post(
+                "http://127.0.0.1:8093/rpc/a2a",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "a2a/task/delegate",
+                    "params": {
+                        "target_agent": "evo",
+                        "task_type": action,
+                        "message": content or action,
+                        "trace_id": f"soulmate-evo-{int(time.time())}",
+                    },
+                },
+                timeout=15.0,
+            )
+            data = resp.json()
+            if "error" in data:
+                return f"evo 通道错误: {data['error']}"
+            result = (data.get("result") or {}).get("result_data") or {}
+            return result.get("reply") or (
+                f"evo 无应答（task_id={(data.get('result') or {}).get('task_id')}）"
+            )
+        except Exception as e:  # noqa: BLE001
+            return f"evo 通道不可达: {e}"
 
     def _system_health_dispatch(self, func_args: dict) -> str:
         """system_checkup 工具分发（路线图 2.4：服务/端口/磁盘/内存/负载/进程一键体检）。
@@ -2410,6 +2448,7 @@ ACP代理目录: {cwd}/acp-proxy（后端 Python 代码在此）
 - profile_record / profile_read: 用户画像（偏好/环境事实/身份，跨会话自动注入系统提示）。用户告知或纠正偏好、环境事实（操作系统/机器/常用工具/部署位置）、身份（角色/技能水平）→ 立即 profile_record 显式记录（fact_type=preference/environment/identity）；需要了解用户背景时用 profile_read
 - profile_audit: 用户画像审计/清理。action=list 可见复盘全部画像条目（含噪音嫌疑标记）；用户明确要求清理画像时 action=delete（先 confirm 缺省预览，用户确认后 confirm=true 执行）。⚠️ 禁止擅自清库，删除必须用户明确要求
 - system_checkup: 系统状态一键体检（只读，不改系统）。服务运行状态/端口监听/磁盘占用/内存/负载/进程（内存TopN+僵尸）六项一次查全；用户问系统/服务/磁盘/负载现状或需要运维判断时使用。sections 参数可只查部分分区
+- evo_communicate: 与进化协调者 evo 对话（Agent↔Agent A2A 转达，回执是 evo 原话）。用户说「告诉evo：…」或下达进化目标→set_goal（content=目标原话）；问 evo 在干嘛/进展→query_status；问为什么这么改/依据→explain（content=主题词）
 - file_recall: 会话文件索引召回（只读）。按内容关键词检索会话中提到并索引过的文件片段（文件路径+内容片段）；用户问『之前那个文件里写了什么』『哪个文件提到过 X』或凭内容回忆文件时使用。⚠️ 只覆盖索引时快照，文件已改动请 read_file 读最新
 - schedule_task / schedule_list / schedule_cancel: 定时任务调度（SoulMate自己的cron：到点自动执行+执行日志+自动排下一次，区别于一次性唤醒）。用户要求"定时/每天/每小时/每周做某事"→ schedule_task（schedule=interval:5m 或 cron:0 9 * * *）；查看任务与执行日志→ schedule_list；停用/删除→ schedule_cancel
 - monitor_add / monitor_list / monitor_check / monitor_remove: 监控告警（对指定服务/网站做周期健康检查：异常告警+恢复通知，目标持久化）。用户要求"监控某网站/服务是否存活、挂了提醒我"→ monitor_add（kind=website/service/port）；查看监控项与最近检查→ monitor_list；立即检查→ monitor_check；停用/删除→ monitor_remove。⚠️ 监控检查只读，不改目标系统
@@ -3023,6 +3062,36 @@ You can send files to the user natively: to deliver a file, write a brief confir
             },
         }
         builtin_tools.append(checkup_tool)
+
+        # evo 转达：与进化协调者 evo 的 Agent↔Agent 对话（A2A 通道，2026-10-23）。
+        evo_tool = {
+            "type": "function",
+            "function": {
+                "name": "evo_communicate",
+                "description": (
+                    "与进化协调者 evo 对话（Agent↔Agent A2A 转达）。"
+                    "用户说『告诉evo：…』/给进化下目标→action=set_goal（content=目标原话）；"
+                    "问 evo 在干嘛/进展→action=query_status；问为什么这么改/依据→action=explain"
+                    "（content=主题词）。返回 evo 的原话回执，转述时保持原意，不冒名。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["set_goal", "query_status", "explain"],
+                            "description": "set_goal=下达目标；query_status=查动态；explain=解释主题",
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "目标原话（set_goal）或主题词（explain）；query_status 可留空",
+                        },
+                    },
+                    "required": ["action"],
+                },
+            },
+        }
+        builtin_tools.append(evo_tool)
 
         # ── 会话文件索引召回工具（路线图 20.1 召回闭环消费端）────────
         # 写入点=_index_file_for_recall（会话中提到的文件真实内容入 FTS 索引），
@@ -4739,6 +4808,14 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             # ── 系统状态体检（路线图 2.4，只读）──────────
                             try:
                                 result = self._system_health_dispatch(func_args)
+                            except Exception as e:
+                                te = self._tool_error_handler.handle_error(
+                                    session_id, func_name, e, func_args)
+                                result = te.to_model_message()
+                        elif func_name == "evo_communicate":
+                            # ── evo 转达（Agent↔Agent A2A，2026-10-23）────
+                            try:
+                                result = self._evo_communicate_dispatch(func_args)
                             except Exception as e:
                                 te = self._tool_error_handler.handle_error(
                                     session_id, func_name, e, func_args)

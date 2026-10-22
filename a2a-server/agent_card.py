@@ -61,6 +61,15 @@ AGENT_SKILL_PRESETS: dict[str, dict] = {
             {"id": "document-search", "name": "文档搜索", "description": "在文档集合中搜索匹配内容", "tags": ["search", "document"]},
         ],
     },
+    "evo": {
+        "name": "Evo",
+        "description": "自主进化协调者：管理开发车道的进化目标与状态应答（用户经 SoulMate 对话下达目标）",
+        "skills": [
+            {"id": "set-goal", "name": "进化目标", "description": "将用户下达的进化目标写入目标收件箱，三车道每周期必读", "tags": ["goal", "evolution"]},
+            {"id": "query-status", "name": "动态查询", "description": "返回三仓真实动态：最近提交/路线图尾/未完成目标", "tags": ["status", "observability"]},
+            {"id": "explain", "name": "决策解释", "description": "按主题检索 commits 与路线图，给出证据化解释", "tags": ["explain", "evidence"]},
+        ],
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -73,7 +82,7 @@ def _discover_agents() -> list[str]:
     soulmate 是内置主Agent，始终可用。
     其他Agent通过 shutil.which() 动态发现（和ACP层保持一致）。
     """
-    found = ["soulmate"]  # 内置主Agent，始终可用
+    found = ["soulmate", "evo"]  # 内置Agent始终可用（evo=进化协调者，A2A处理端）
 
     # 检查已知Agent是否在PATH中
     for name in AGENT_SKILL_PRESETS:
