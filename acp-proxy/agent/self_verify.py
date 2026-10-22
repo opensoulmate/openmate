@@ -20,6 +20,7 @@ import re
 from dataclasses import dataclass, field
 
 from agent.report_evidence import parse_ledger
+from agent.subagent_manager import SUBAGENT_PROMPT_MARKER
 
 # 自检报告首行（frame_origin 采集侧帧分类的单一真源——改措辞须同步语义）
 REPORT_HEADER = "🔍 需求自检（对照原始需求逐条核对）："
@@ -79,6 +80,20 @@ _SELF_NEGATING_RE = re.compile(
 # 拆成需求项必然 unmet → 每条带附件消息必触发补做 + "覆盖 0/N" 噪音横幅（语音消息
 # 实测三项全"未覆盖"其中两项是锚点）。纯语音消息剥掉锚点后无正文=闲聊不自验，天然干净。
 _ANCHOR_NOTE_RE = re.compile(r"\[[^\[\]]*(?:已保存到|已随消息直发)[^\[\]]*\]")
+
+# 子代理任务脚手架（2026-10-23 周期#666，REJ661 真实缺陷）：delegate worker 回合
+# prompt 由 build_subagent_prompt 模板拼装（声明行「【SoulMate子代理任务】…」＋目标行
+# 「子任务目标：…」＋背景行＋要求行）。模板行是派发机制不是用户需求——把脚手架行拆成
+# 需求项必然 unmet（worker 纯产出回答天然不复述模板措辞）→ 假 unmet → 补做 → 目标词/
+# 结论重复×2（"重复的话"家族残余面）。唯一需求 = 子任务目标本身（#664 修的是主 turn
+# 词元/脚手架词面，本件是子代理轮残面）。
+_SUBAGENT_GOAL_BLOCK_RE = re.compile(
+    r"子任务目标：(.*?)(?=\n（所属父任务背景：|\n补充背景/约束：|\n要求：|$)",
+    re.S,
+)
+# 纯字面量输出目标（"只回复一个词：X"类）：交付物 = X 本体，格式前缀是指令脚手架
+# （与 _SELF_NEGATING_RE 同哲学：按其自身语义不是可验收内容）。
+_PURE_OUTPUT_GOAL_RE = re.compile(r"^只[^：:]*[：:]\s*(.+)$")
 
 # 感知类元指令（"复述你听到的内容"/"说说音频里讲了什么"类）：要求复述附件媒体里
 # 感知到的内容，正确答案以媒体语义内容作答，与指令文本天然零词元重合——确定性
@@ -189,6 +204,26 @@ def _split_by_markers(text: str, marker_re: re.Pattern) -> list[str]:
     return items
 
 
+def _extract_subagent_requirements(text: str) -> list[str]:
+    """子代理 worker 回合：唯一需求 = 子任务目标，模板脚手架行不是需求。
+
+    声明行/背景行/要求行按其自身语义是派发机制（"系统派发的并行子任务，非用户
+    消息"自己就说了不是用户消息），不得作为可验收需求项——否则纯产出型 worker
+    回答必然假 unmet → 补做 → 目标词重复。纯字面量输出目标（"只回复一个词：X"）
+    再收窄到交付物本体 X：格式前缀是指令脚手架，交付物就是 X。
+    """
+    m = _SUBAGENT_GOAL_BLOCK_RE.search(text or "")
+    if not m:
+        return []
+    goal = _clean_item(m.group(1))
+    if not goal:
+        return []
+    pure = _PURE_OUTPUT_GOAL_RE.match(goal)
+    if pure:
+        goal = _clean_item(pure.group(1))
+    return [goal] if goal else []
+
+
 def extract_requirements(text: str) -> list[str]:
     """从用户原始请求提取需求清单。空列表 = 闲聊/不可拆，不进入自验。
 
@@ -200,6 +235,9 @@ def extract_requirements(text: str) -> list[str]:
     text = _ANCHOR_NOTE_RE.sub("", text).strip()
     if not text:
         return []
+    # 子代理 worker 回合：脚手架行不进需求项（唯一需求=子任务目标，见上）
+    if SUBAGENT_PROMPT_MARKER in text:
+        return _extract_subagent_requirements(text)
 
     items = _split_by_markers(text, _MARKER_RE)
     if not items:
