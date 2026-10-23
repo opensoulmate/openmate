@@ -17,6 +17,8 @@
 """
 
 import asyncio
+import logging
+import socket
 import sys
 from pathlib import Path
 
@@ -347,3 +349,109 @@ def test_end_llm_span_empty_id_noop_and_never_raise():
     run(rec2.end_llm_span("s1", "seg-1"))  # 不抛即过
     assert run(rec2.start_llm_span("s1", "root")) == ""
     assert run(rec2.record_round("s1", "seg", tools=[{"name": "t"}])) == ""
+
+
+# ── 8. #678 ReadTimeout 丢批次修复：读预算/安全重试/可见丢弃/对账 ──────
+
+
+class _SilentServer:
+    """真实TCP沉默server：收请求、读body、永不回响应——复现 #678 ReadTimeout。"""
+
+    def __init__(self):
+        self.accepted = 0
+        self._server = None
+        self.port = 0
+
+    async def __aenter__(self):
+        async def _handle(reader, writer):
+            self.accepted += 1
+            try:
+                await reader.read(65536)
+            except Exception:  # noqa: BLE001
+                pass
+            await asyncio.Event().wait()  # 永不回复
+
+        self._server = await asyncio.start_server(_handle, "127.0.0.1", 0)
+        self.port = self._server.sockets[0].getsockname()[1]
+        return self
+
+    async def __aexit__(self, *exc):
+        assert self._server is not None
+        self._server.close()
+        await self._server.wait_closed()
+
+
+def test_timeout_default_and_env_override(monkeypatch):
+    rec = TrajectoryRecorder()
+    assert rec.timeout == 8.0, "读预算须与 8090 拥塞段匹配（#678：1.5s 过紧丢批次）"
+    monkeypatch.setenv("SOULMATE_TRAJ_TIMEOUT_S", "3.5")
+    assert TrajectoryRecorder().timeout == 3.5
+    monkeypatch.setenv("SOULMATE_TRAJ_TIMEOUT_S", "not-a-float")
+    assert TrajectoryRecorder().timeout == 8.0, "坏 env 值回落默认不炸"
+    assert TrajectoryRecorder(timeout=0.3).timeout == 0.3, "显式参数仍优先"
+
+
+def test_read_timeout_visible_drop_and_no_retry(caplog):
+    """#678 主场景（真实TCP传输）：读超时→可见丢弃（warning+异常类名）＋
+    禁补发（请求可能已写入，重试=重复行）。"""
+
+    async def main():
+        async with _SilentServer() as srv:
+            rec = TrajectoryRecorder(
+                base_url=f"http://127.0.0.1:{srv.port}", timeout=0.5
+            )
+            with caplog.at_level(logging.WARNING, logger="acp-proxy.trajectory-recorder"):
+                out = await rec._post(
+                    "/api/trajectory/sessions/s1/events",
+                    {"event_type": "tool_call", "session_id": "s1"},
+                )
+            return rec, srv, out
+
+    rec, srv, out = run(main())
+    assert out is None
+    assert srv.accepted == 1, "ReadTimeout 服务端可能已写入，禁重试（accepted 应=1）"
+    st = rec.stats()
+    assert st == {"sent": 1, "ok": 0, "failed": 1, "retried": 0, "dropped": 1}
+    text = "\n".join(r.getMessage() for r in caplog.records)
+    assert "ReadTimeout" in text, "失败日志必须带异常类名（str(e) 为空的可见性缺口）"
+    assert "dropped" in text and "event=tool_call" in text, "丢弃须可见+带对账摘要"
+    assert "stats=" in text
+
+
+def test_connect_error_safe_retry_then_drop():
+    """connect 类错误（确定没写入）→ 安全重试 1 次后仍失败=可见丢弃+对账计数。"""
+
+    async def main():
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        dead_port = s.getsockname()[1]
+        s.close()  # 端口即关——connection refused
+        rec = TrajectoryRecorder(base_url=f"http://127.0.0.1:{dead_port}", timeout=0.5)
+        out = await rec._post("/api/trajectory/sessions/s1/events", {"event_type": "x"})
+        return rec, out
+
+    rec, out = run(main())
+    assert out is None
+    st = rec.stats()
+    assert st["sent"] == 1 and st["retried"] == 1 and st["dropped"] == 1 and st["ok"] == 0
+    assert st == {"sent": 1, "ok": 0, "failed": 1, "retried": 1, "dropped": 1}
+
+
+def test_stats_reconcile_sent_ok_dropped():
+    """对账计数：成功+失败混合后 sent=ok+dropped（发出行数 vs 落库行数可查）。"""
+
+    async def main():
+        async with _SilentServer() as srv:
+            rec = TrajectoryRecorder(
+                base_url=f"http://127.0.0.1:{srv.port}", timeout=0.5,
+                max_consecutive_failures=99,
+            )
+            await rec._post("/x", {"event_type": "a"})
+            await rec._post("/x", {"event_type": "b"})
+            return rec, srv
+
+    rec, srv = run(main())
+    st = rec.stats()
+    assert st["sent"] == 2 and st["dropped"] == 2 and st["ok"] == 0
+    assert st["sent"] == st["ok"] + st["dropped"], "对账恒等式：发出=落库+丢弃"
+    assert srv.accepted == 2

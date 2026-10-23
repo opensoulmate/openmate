@@ -24,8 +24,10 @@ GET /sessions/{id}/trace 嵌套树端点即有真实数据。
 
 from __future__ import annotations
 
+import asyncio
 import functools
 import logging
+import os
 import re
 import time
 
@@ -36,6 +38,25 @@ from agent.read_turn import is_heading_prefix, warn_line_is_failure
 logger = logging.getLogger("acp-proxy.trajectory-recorder")
 
 TRAJECTORY_BASE_URL = "http://127.0.0.1:8090"
+
+
+def _env_float(name: str, default: float) -> float:
+    """env 浮点配置（坏值回落默认，观察面配置不炸主链）。"""
+    try:
+        return float(os.getenv(name, "") or default)
+    except (TypeError, ValueError):
+        return default
+
+
+def _payload_summary(payload: dict) -> str:
+    """丢弃告警里的payload摘要（对账用：哪个session哪个事件丢了）。"""
+    try:
+        return (
+            f"event={payload.get('event_type', '?')} "
+            f"session={payload.get('session_id', '-')}"
+        )
+    except Exception:  # noqa: BLE001 — 摘要本身绝不添乱
+        return "event=?"
 
 # llm_engine把LLM失败作为可见文本chunk回传而非抛异常（"[LLM错误: …]"/
 # "[LLM响应超时]"，见llm_engine.py:474等）——结局判定必须认这些失败标记。
@@ -130,7 +151,11 @@ def _fail_safe(fallback):
             try:
                 return await fn(*args, **kwargs)
             except Exception as e:
-                logger.debug(f"[trajectory] {fn.__name__} failed (non-fatal): {e}")
+                # 异常类名必带：str(e) 可能为空（ReadTimeout() 空消息实证 #678）
+                logger.debug(
+                    f"[trajectory] {fn.__name__} failed (non-fatal): "
+                    f"{type(e).__name__}: {e}"
+                )
                 return fallback
 
         return wrapper
@@ -144,17 +169,28 @@ class TrajectoryRecorder:
     def __init__(
         self,
         base_url: str = TRAJECTORY_BASE_URL,
-        timeout: float = 1.5,
+        timeout: float | None = None,
         max_consecutive_failures: int = 3,
         cooldown_s: float = 60.0,
     ):
+        # 读预算与 8090 响应延迟分布匹配（#678 真因链：1.5s 读预算 vs 全器官
+        # stats 扫描风暴约 4s 拥塞 → ReadTimeout 丢事件批次 → tool_call 行缺失
+        # → verify 判据 miss）。默认 8.0s 覆盖观察到的拥塞段，env 可调。
+        if timeout is None:
+            timeout = _env_float("SOULMATE_TRAJ_TIMEOUT_S", 8.0)
         self.base_url = base_url.rstrip("/")
-        self.timeout = timeout
+        self.timeout = float(timeout)
         self.max_consecutive_failures = max_consecutive_failures
         self.cooldown_s = cooldown_s
         self._ensured_sessions: set[str] = set()
         self._consecutive_failures = 0
         self._paused_until = 0.0
+        # 对账计数（期望④：发出行数 vs 落库行数可查，禁静默丢弃）
+        self._stats = {"sent": 0, "ok": 0, "failed": 0, "retried": 0, "dropped": 0}
+
+    def stats(self) -> dict:
+        """发出/落库/丢弃对账计数（只读拷贝）。"""
+        return dict(self._stats)
 
     # ── 传输 + 熔断 ─────────────────────────────────────────────
 
@@ -170,37 +206,80 @@ class TrajectoryRecorder:
         allow_404=True：目标不存在（如session收口时session还没建）=正常no-op
         返回None，不计熔断失败——end_session的404是常态不是故障，不能让它把
         合法写入打进冷却窗。
+
+        重试语义（#678 ReadTimeout 丢批次真因链后续）：
+        - 请求未到达服务端的错误（Connect*/Write*/Pool*）→ 立即重试一次，
+          确定没写入、零重复行风险；
+        - 响应读超时/读断（ReadTimeout/ReadError）→ **不重试**（请求可能已
+          被服务端写入，盲目补发=重复行），靠读预算上调覆盖拥塞段；
+        - 任何最终失败 = 可见丢弃：warning 带异常类名+payload 摘要+对账计数，
+          禁静默（mem0 §1.1 失败必须可见）。
         """
         if self.is_paused:
             return None
         url = f"{self.base_url}{path}"
-        try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                resp = await client.post(url, json=payload)
-            if resp.status_code == 404 and allow_404:
-                return None
-            if resp.status_code >= 400:
-                raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:120]}")
-            data = resp.json()
-            if self._consecutive_failures:
-                logger.warning(
-                    f"[trajectory] recovered after {self._consecutive_failures} failures "
-                    f"(last ok: {path})"
-                )
-                self._consecutive_failures = 0
-            return data if isinstance(data, dict) else None
-        except Exception as e:
-            self._consecutive_failures += 1
-            if self._consecutive_failures >= self.max_consecutive_failures:
-                self._paused_until = time.time() + self.cooldown_s
-                logger.warning(
-                    f"[trajectory] {self._consecutive_failures} consecutive failures, "
-                    f"pausing writes for {self.cooldown_s:.0f}s: {e}"
-                )
-                self._consecutive_failures = 0
-            else:
-                logger.debug(f"[trajectory] post {path} failed (non-fatal): {e}")
-            return None
+        self._stats["sent"] += 1
+        attempts_allowed = 2  # 首发 + connect 类安全重试 1 次
+        last_err: Exception | None = None
+        for attempt in range(1, attempts_allowed + 1):
+            if attempt > 1:
+                self._stats["retried"] += 1
+                await asyncio.sleep(0.2)
+            try:
+                async with httpx.AsyncClient(
+                    timeout=httpx.Timeout(
+                        self.timeout, connect=min(2.0, self.timeout)
+                    )
+                ) as client:
+                    resp = await client.post(url, json=payload)
+                if resp.status_code == 404 and allow_404:
+                    return None
+                if resp.status_code >= 400:
+                    raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:120]}")
+                data = resp.json()
+                self._stats["ok"] += 1
+                if self._consecutive_failures:
+                    logger.warning(
+                        f"[trajectory] recovered after {self._consecutive_failures} failures "
+                        f"(last ok: {path})"
+                    )
+                    self._consecutive_failures = 0
+                return data if isinstance(data, dict) else None
+            except Exception as e:
+                last_err = e
+                # 请求未到达类才重试；ReadTimeout/ReadError 可能已写入禁补发
+                if attempt < attempts_allowed and isinstance(
+                    e,
+                    (
+                        httpx.ConnectError,
+                        httpx.ConnectTimeout,
+                        httpx.WriteError,
+                        httpx.WriteTimeout,
+                        httpx.PoolTimeout,
+                    ),
+                ):
+                    continue
+                break
+        # 最终失败：可见丢弃（异常类名必带——str(e) 可能为空，#678 实证）
+        self._consecutive_failures += 1
+        self._stats["failed"] += 1
+        self._stats["dropped"] += 1
+        err = f"{type(last_err).__name__}: {last_err}"
+        summary = _payload_summary(payload)
+        if self._consecutive_failures >= self.max_consecutive_failures:
+            self._paused_until = time.time() + self.cooldown_s
+            logger.warning(
+                f"[trajectory] {self._consecutive_failures} consecutive failures, "
+                f"pausing writes for {self.cooldown_s:.0f}s: {err} "
+                f"(dropped: {path} {summary}; stats={self._stats})"
+            )
+            self._consecutive_failures = 0
+        else:
+            logger.warning(
+                f"[trajectory] post {path} dropped (non-fatal): {err} "
+                f"({summary}; stats={self._stats})"
+            )
+        return None
 
     # ── 公共面（全部never-raise）────────────────────────────────
 
