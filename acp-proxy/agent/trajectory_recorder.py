@@ -482,7 +482,9 @@ class TrajectoryRecorder:
                     "metadata": {
                         "name": str(t.get("name", ""))[:120],
                         "arguments": str(t.get("arguments", ""))[:400],
-                        "result_preview": str(t.get("result_preview", ""))[:300],
+                        # 证据面预算与 soulmate_agent 账本条目同源（report_evidence.
+                        # EVIDENCE_PREVIEW_CHARS）——上游 [:300] 曾二次截短账本证据
+                        "result_preview": str(t.get("result_preview", ""))[:2000],
                         "permission": str(t.get("permission", ""))[:60],
                         "cached": bool(t.get("cached", False)),
                     },

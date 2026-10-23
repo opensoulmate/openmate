@@ -35,6 +35,14 @@ EXECUTED_PERMISSIONS = {
 
 BLOCKED_PERMISSIONS = {"deny", "ask-denied", "sandbox-restricted"}
 
+# 证据面 result_preview 预算（周期#690）：账本判据消费方（如 12.2 verify_ops 需
+# 在预览内取到 8090+磁盘双事实）曾因 [:200] 截断假阴性（REJ686 运维轮实证：预览
+# 恰 200 字符腰斩于 "[ports] ✅ 8090（opens"，磁盘段在截断点外）。证据面是内部
+# 账本非用户可见输出，预算须覆盖工具结果全文量级（system_checkup ≈500-800 字符）。
+# 注意：用户可见报告的 step 结果截断（soulmate_agent 报告装配 [:150]/[:200]）是
+# 另一件待拍板口径，不在本预算范围内。
+EVIDENCE_PREVIEW_CHARS = 2000
+
 # 回复里的完成声称标记（"说了≠做了"——声称本身不是证据）
 COMPLETION_CLAIM_MARKERS = (
     "任务执行报告",

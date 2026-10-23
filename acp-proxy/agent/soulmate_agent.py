@@ -4390,7 +4390,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
                                 all_tool_calls.append({
                                     "name": func_name,
                                     "arguments": func_args,
-                                    "result_preview": redact_secrets(str(result))[0][:200],
+                                    "result_preview": redact_secrets(str(result))[0][:report_evidence.EVIDENCE_PREVIEW_CHARS],
                                     "cached": True,
                                     # 15.2 工具执行时长落账（缓存命中=查找耗时，如实近0）
                                     "duration_ms": (time.time() - tool_start) * 1000,
@@ -5008,7 +5008,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
                         all_tool_calls.append({
                             "name": func_name,
                             "arguments": func_args,
-                            "result_preview": (redact_secrets(str(result))[0][:200] if result else ""),
+                            "result_preview": (redact_secrets(str(result))[0][:report_evidence.EVIDENCE_PREVIEW_CHARS] if result else ""),
                             # 15.2 工具执行时长落账：执行点计时进账本条目
                             # （tool_start=权限门后执行段起点，含缓存检查/恢复重试全程）
                             "duration_ms": (time.time() - tool_start) * 1000,
