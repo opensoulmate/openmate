@@ -5043,11 +5043,13 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             logger.warning(f"[tool-audit] 失败(非致命，但审计缺失): {_audit_err}")
 
                         # ── SoulBrain反思学习 ──────────────
+                        # 周期#677 brain 修复②③：端口 3100→8090（Brain API 真源=
+                        # OpenSoul 8090；3100 是 OpenMate Next.js，修前 12 行全 404）
+                        # ＋租户语义=pinned default（无 token 禁自报租户，省略 tenant_id）
                         try:
                             await httpx.AsyncClient().post(
-                                "http://127.0.0.1:3100/api/brain/verify",
+                                "http://127.0.0.1:8090/api/brain/verify",
                                 json={
-                                    "tenant_id": "openmate",
                                     "agent_id": session_id[:8],
                                     "task_id": session_id[:8],
                                     "action": f"{func_name}({json.dumps(func_args, ensure_ascii=False)[:200]})",
@@ -5978,11 +5980,13 @@ You can send files to the user natively: to deliver a file, write a brief confir
                 pass
 
         # ── SoulBrain认知层：意图理解+风险评估 ──────────────
+        # 周期#677 brain 修复②③：端口 3100→8090（Brain API 真源=OpenSoul 8090）
+        # ＋租户语义=pinned default（无 token 禁自报租户，省略 tenant_id；
+        #   修前 tenant_id=openmate 被 bind_identity 403「self-report rejected」）
         try:
             brain_resp = await httpx.AsyncClient().post(
-                "http://127.0.0.1:3100/api/brain/think",
+                "http://127.0.0.1:8090/api/brain/think",
                 json={
-                    "tenant_id": "openmate",
                     "agent_id": session_id[:8],
                     "user_input": user_text,
                     "repo_root": str(self._project_root) if self._project_root else "",
