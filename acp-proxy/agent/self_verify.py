@@ -95,6 +95,63 @@ _SUBAGENT_GOAL_BLOCK_RE = re.compile(
 # （与 _SELF_NEGATING_RE 同哲学：按其自身语义不是可验收内容）。
 _PURE_OUTPUT_GOAL_RE = re.compile(r"^只[^：:]*[：:]\s*(.+)$")
 
+# 执行方式约束（"请勿拆分子任务、勿做任务规划，直接在一个回合里连续调用工具完成"
+# /"禁止合并多条命令、禁止使用 batch_execute"类）：约束的是"怎么干活"（工具调用
+# 方式/拆分策略），不是交付物——回复措辞天然不含约束原文，词元核对必然假 unmet
+# → 补做 1 轮 → "补充内容为空——该补做项未包含任何新的待执行内容…"元叙事混进
+# 回复正文（周期#670 真实 WS 长回合探针 om-72539c270140 journal 实证：
+# items=3 missing=['【单一连续任务，请勿拆分子任务…】'] remediated=True）。
+# 判定三要件（确定性，同条件子句/感知类哲学——确定性词元验不了"遵守约束"）：
+# ①约束头：剥【…】标签后以否定式祈使开头（请勿/勿/禁止/…）或纯方式祈使开头
+#   （直接在/一次调用/每条/逐条/…）；②含工作方式词（拆分/规划/合并/回合/…）；
+# ③不含交付物动词（生成/写/删除/汇报/…）——"禁止合并输出，请生成报告"类
+# 含交付物需求、"请不要删除我的配置文件"类实质约束不受影响，照常核对。
+_DIRECTIVE_HEAD_RE = re.compile(
+    r"^\s*(?:请勿|勿|禁止|严禁|不得|不要|别|无需|不用)")
+_METHOD_HEAD_RE = re.compile(
+    r"^\s*(?:直接在|一次(?:性)?调用|每[条个]|逐条|分步|单步|下一条|在同一?回合)")
+_WORK_METHOD_RE = re.compile(
+    r"拆分|拆开|任务规划|规划|合并|批处理|batch|分步|逐条|每[条个]|下一条"
+    r"|一次(?:性)?调用|一个回合|调用方式|中断|提前执行|重复执行|同时执行")
+_DELIVERABLE_VERB_RE = re.compile(
+    r"生成|创建|写|改|建|修复|删除|发送|安装|运行|测试|检查|实现|更新|配置"
+    r"|部署|迁移|重构|优化|提交|推送|下载|上传|整理|清理|分析|汇报|说明|总结"
+    r"|展示|输出|回答|复述")
+_LABEL_WRAP_RE = re.compile(r"^【([^】]*)】\s*(.*)$", re.S)
+# 标签内短前缀（"单一连续任务，请勿…"类：括内先标签后约束）——短标签不改变
+# 其后文本的需求/约束属性，判头时剥一层（只剥 1 次、限 12 字符，防误剥正文）
+_SHORT_LABEL_RE = re.compile(r"^[^，,、：:]{1,12}[，,、：:]\s*")
+
+
+def is_work_directive(text: str) -> bool:
+    """执行方式约束判定：约束"怎么干活"的行，不是可验收交付物。
+
+    【…】标签括起整行时（如【单一连续任务，请勿…】）用括内文本判头——
+    标签本身（【紧急】/【要求】）不改变其内容的需求/约束属性。
+    """
+    s = (text or "").strip()
+    if not s:
+        return False
+    m = _LABEL_WRAP_RE.match(s)
+    wrapped = False
+    if m:
+        rest, inner = m.group(2).strip(), m.group(1).strip()
+        if not rest:
+            wrapped = True
+            s = inner
+        else:
+            s = rest
+        if not s:
+            return False
+    head = s
+    if not (_DIRECTIVE_HEAD_RE.match(head) or _METHOD_HEAD_RE.match(head)):
+        # 短标签剥离只用于【…】括起整行形态（括内先标签后约束），不放宽普通正文
+        if wrapped:
+            head = _SHORT_LABEL_RE.sub("", s, count=1)
+    if not (_DIRECTIVE_HEAD_RE.match(head) or _METHOD_HEAD_RE.match(head)):
+        return False
+    return bool(_WORK_METHOD_RE.search(s)) and not bool(_DELIVERABLE_VERB_RE.search(s))
+
 # 感知类元指令（"复述你听到的内容"/"说说音频里讲了什么"类）：要求复述附件媒体里
 # 感知到的内容，正确答案以媒体语义内容作答，与指令文本天然零词元重合——确定性
 # 词元核对必然假阴性（周期#102 真实 WS audio e2e 实证残留：答对仍判未覆盖→补做
@@ -276,6 +333,7 @@ class VerifyItem:
     evidence: str = ""
     conditional: bool = False  # 条件子句（"如果X就Y"）——不进补做清单
     perception: bool = False  # 感知类元指令（"复述你听到的内容"类）——不进补做/不计覆盖
+    directive: bool = False  # 执行方式约束（"请勿拆分子任务/禁止合并"类）——不进补做/不计覆盖
 
 
 @dataclass
@@ -286,8 +344,10 @@ class VerifyReport:
     @property
     def ok(self) -> bool:
         # 感知类元指令不参与完成判定（18.3）：确定性词元验不了"听到"，其未覆盖
-        # 不是可执行缺口——单独一条感知元指令 = ok，不触发自检横幅
-        return all(i.status == "met" for i in self.items if not i.perception)
+        # 不是可执行缺口——单独一条感知元指令 = ok，不触发自检横幅。
+        # 执行方式约束同理（周期#670）：词元验不了"遵守约束"，不参与完成判定。
+        return all(i.status == "met" for i in self.items
+                   if not i.perception and not i.directive)
 
     @property
     def checked(self) -> int:
@@ -368,11 +428,19 @@ class SelfVerifier:
             if perception and status == "unmet":
                 status = "uncertain"
 
+            # 周期#670 执行方式约束封顶 uncertain：约束的遵守是行为不是措辞，词元
+            # 核对必然假 unmet——"未覆盖"不构成可执行缺口（同条件子句/感知类哲学）
+            directive = is_work_directive(req)
+            if directive and status == "unmet":
+                status = "uncertain"
+
             evidence = (f"命中: " + "、".join(sorted(hit)[:6])) if hit else "无证据重合"
             if conditional:
                 evidence += "；条件项(不进补做)"
             if perception:
                 evidence += "；感知类元指令(词元无法核验，不进补做/不计覆盖)"
+            if directive:
+                evidence += "；执行方式约束(词元无法核验，不进补做/不计覆盖)"
             if executed_tools:
                 evidence += "；工具: " + ", ".join(e.name for e in executed_tools[:8])
             if blocked_tools:
@@ -381,11 +449,12 @@ class SelfVerifier:
                     f"{e.name}({(e.result_preview.strip() or e.permission)[:60]})"
                     for e in blocked_tools[:8]
                 )
-            items.append(VerifyItem(req, status, round(score, 2), evidence, conditional, perception))
+            items.append(VerifyItem(req, status, round(score, 2), evidence,
+                                    conditional, perception, directive))
 
-        # 覆盖率分母不含感知类元指令（18.3 覆盖率假阴性根因：分母掺入词元天然
-        # 验不了的项 → 覆盖率假低 → "覆盖 0/N" 噪音横幅）
-        verifiable = [i for i in items if not i.perception]
+        # 覆盖率分母不含感知类元指令/执行方式约束（18.3 覆盖率假阴性根因：分母掺入
+        # 词元天然验不了的项 → 覆盖率假低 → "覆盖 0/N" 噪音横幅）
+        verifiable = [i for i in items if not i.perception and not i.directive]
         met = sum(1 for i in verifiable if i.status == "met")
         return VerifyReport(
             items=items,
@@ -403,15 +472,23 @@ class SelfVerifier:
             label = labels.get(item.status, "")
             if item.perception and item.status != "met":
                 label = "（感知类元指令，无法核验）"
+            elif item.directive and item.status != "met":
+                label = "（执行方式约束，无法核验）"
             elif item.conditional and item.status != "met":
                 label = "（条件项，仅提醒）"
             lines.append(f"{icons.get(item.status, '❓')} {i}. {item.requirement}{label}")
-        verifiable = [x for x in report.items if not x.perception]
+        verifiable = [x for x in report.items if not x.perception and not x.directive]
         met = sum(1 for x in verifiable if x.status == "met")
         line = f"— 覆盖 {met}/{len(verifiable)}"
-        n_perc = len(report.items) - len(verifiable)
+        n_perc = sum(1 for x in report.items if x.perception)
+        n_dir = sum(1 for x in report.items if x.directive)
+        parts = []
         if n_perc:
-            line += f"（另 {n_perc} 项感知类元指令不计覆盖）"
+            parts.append(f"{n_perc} 项感知类元指令")
+        if n_dir:
+            parts.append(f"{n_dir} 项执行方式约束")
+        if parts:
+            line += f"（另 {'、'.join(parts)}不计覆盖）"
         lines.append(line)
         return "\n".join(lines)
 
