@@ -82,6 +82,7 @@ from agent.memory_retrieval import MemoryRetrievalEngine
 from agent.persistent_memory import PersistentMemory
 from agent.experience_sink import ExperienceSink
 from agent import frame_origin
+from agent import execution_narration  # evo目标：执行旁白（完成度/决定类）路由——回复正文只留回答
 from agent.self_verify import SelfVerifier
 from agent.tool_cache import ToolResultCache
 from agent.tool_auditor import ToolAuditor
@@ -3940,6 +3941,10 @@ You can send files to the user natively: to deliver a file, write a brief confir
         _CHECK_INTERVAL = 8
         _round = -1  # 0基（与 range(MAX_ROUNDS) 语义一致：0..MAX_ROUNDS-1）
         _cycle_text_start = len(full_response)
+        # 执行旁白路由状态（evo目标 2026-10-23）：_narration_round=自评轮下标，
+        # _narration_seen=本轮已见旁白（推理门"有可见推理"的判据之一）
+        _narration_round = -1
+        _narration_seen = False
         while True:
             _round += 1
             # ── P1 span粒度round级：本轮边界标记（LLM文本切片+工具账本切片+耗时，
@@ -3947,6 +3952,11 @@ You can send files to the user natively: to deliver a file, write a brief confir
             _round_start = len(all_tool_calls)
             _round_t0 = time.time()
             _round_resp_mark = len(full_response)
+            # ── 执行旁白路由（evo目标 2026-10-23）：自评轮按行拆旁白/正文──
+            _round_narr_text = ""
+            _narr_splitter = (
+                execution_narration.NarrationSplitter()
+                if _round == _narration_round else None)
             watchdog.beat(round_index=_round + 1, tools_executed=len(all_tool_calls))
             # Writer Fencing 心跳（2026-10-23 接线）：每轮证明 writer 活着——此前
             # heartbeat() 全仓零调用（写了≠接线了），长回合 claim 被 stale 抢夺
@@ -3987,7 +3997,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
                     )
                     await self._traj_record_round(
                         session_id, traj_seg_id, _round,
-                        full_response[_round_resp_mark:],
+                        _round_narr_text + full_response[_round_resp_mark:],
                         (time.time() - _round_t0) * 1000,
                         all_tool_calls[_round_start:],
                     )
@@ -4112,7 +4122,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             logger.warning(f"[loop-guard] session={session_id} FORCE_STOP，任务提前终止")
                             await self._traj_record_round(
                                 session_id, traj_seg_id, _round,
-                                full_response[_round_resp_mark:],
+                                _round_narr_text + full_response[_round_resp_mark:],
                                 (time.time() - _round_t0) * 1000,
                                 all_tool_calls[_round_start:],
                             )
@@ -4217,7 +4227,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
                                 f"[infection-guard] session={session_id} TERMINATE，工具调用未执行")
                             await self._traj_record_round(
                                 session_id, traj_seg_id, _round,
-                                full_response[_round_resp_mark:],
+                                _round_narr_text + full_response[_round_resp_mark:],
                                 (time.time() - _round_t0) * 1000,
                                 all_tool_calls[_round_start:],
                             )
@@ -5061,6 +5071,14 @@ You can send files to the user natively: to deliver a file, write a brief confir
                     chunk_text = str(chunk) if not isinstance(chunk, str) else chunk
                     if chunk_text:
                         round_had_text = True
+                        # ── 执行旁白路由（自评轮）：旁白行不进正文流，只留日志/轨迹
+                        # （evo目标 2026-10-23「回复正文不得混入执行旁白」）──
+                        if _narr_splitter is not None:
+                            _body_inc, _narr_inc = _narr_splitter.feed(chunk_text)
+                            if _narr_inc:
+                                _round_narr_text += _narr_inc
+                                _narration_seen = True
+                            chunk_text = _body_inc
                         # ── P0输出侧护栏：流式增量脱敏（Warp"边流边脱敏，完整秘密
                         # 绝不显示"）——feed()只返回可安全外发部分，未完结token压在
                         # holdback里等下个chunk补全后整体替换；full_response同样只
@@ -5090,6 +5108,31 @@ You can send files to the user natively: to deliver a file, write a brief confir
                     "(本轮无工具调用也无文本输出)"
                 )
 
+            # ── 执行旁白路由收口（自评轮）：flush 拆分余量——旁白只进日志/轨迹，
+            # 正文走 redactor 脱敏后进回复（fail-safe：识别不出的行一律归正文）──
+            if _narr_splitter is not None:
+                _nb_tail, _nn_tail = _narr_splitter.flush()
+                if _nn_tail:
+                    _round_narr_text += _nn_tail
+                    _narration_seen = True
+                if _nb_tail:
+                    _nb_safe = redactor.feed(_nb_tail)
+                    if _nb_safe:
+                        full_response += _nb_safe
+                        if _stream_save is not None:
+                            _stream_save(full_response)
+                        if self._client is not None:
+                            await self._client.session_update(
+                                session_id=session_id,
+                                update=acp.update_agent_message_text(_nb_safe),
+                            )
+                            self._streamed_flags[session_id] = True
+            if _round_narr_text:
+                # 有用通道=日志+轨迹（_traj_record_round content 含旁白），聊天正文不进
+                logger.info(
+                    f"[execution-narration] session={session_id} round={_round} "
+                    f"旁白进日志/轨迹({len(_round_narr_text)}B): "
+                    f"{redact_secrets(_round_narr_text)[0][:300]}")
             # ── round边界=本轮LLM流结束：冲出redactor holdback尾部（redactor是
             # "每个流式输出生命周期一个实例"——round就是流的生命周期；不在此flush，
             # 本轮尾部token（CJK无空白整段）压在holdback里，round span内容为空且
@@ -5108,7 +5151,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
             # round级span收口（本round的LLM文本+工具执行批，挂在llm段span下）
             await self._traj_record_round(
                 session_id, traj_seg_id, _round,
-                full_response[_round_resp_mark:],
+                _round_narr_text + full_response[_round_resp_mark:],
                 (time.time() - _round_t0) * 1000,
                 all_tool_calls[_round_start:],
             )
@@ -5141,14 +5184,16 @@ You can send files to the user natively: to deliver a file, write a brief confir
             if not got_tool_call:
                 break
             # ── 周期进展自评（推理门）：请求模型评估进展/重复失败/继续还是收尾 ──
+            # 执行旁白路由（evo目标 2026-10-23）：自评回答只进日志/轨迹，
+            # 回复正文不得混入完成度/决定类旁白（NarrationSplitter 按行剥）。
             if (_round + 1) % _CHECK_INTERVAL == 0:
-                messages.append({"role": "user", "content": (
-                    f"【进展自评】你已执行 {_round + 1} 轮工具调用。请用一小段推理评估："
-                    "①距目标的完成度 ②是否在重复同一失败 ③决定：继续/换策略/收尾"
-                    "（收尾=直接输出总结，不再调工具）。")})
+                messages.append({"role": "user", "content":
+                    execution_narration.build_self_assess_prompt(_round + 1)})
+                _narration_round = _round + 1
             # ── 软上限=推理续期点：有可见推理→自动续期；全程零推理→收口待续 ──
             if _round + 1 >= MAX_ROUNDS:
-                reasoned = len(full_response) > _cycle_text_start
+                reasoned = (len(full_response) > _cycle_text_start
+                            or _narration_seen)
                 if reasoned:
                     messages.append({"role": "user", "content": (
                         f"\n\n[工具调用 {_round + 1} 轮（软上限）——检测到你持续有推理输出，"

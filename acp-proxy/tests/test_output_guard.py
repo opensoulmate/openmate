@@ -255,7 +255,9 @@ class TestWiring:
 
     def test_stream_feed_flush_callsites(self):
         src = inspect.getsource(SoulMateAgent._run_llm_with_tools)
-        assert src.count("redactor.feed(") == 1  # 纯文本chunk路径
+        # 纯文本chunk路径 + 自评轮执行旁白路由的正文余量（evo目标 2026-10-23：
+        # 两处外发都必须走 redactor.feed 脱敏——旁白路由不给裸文本开口子）
+        assert src.count("redactor.feed(") == 2
         # 终局return + FORCE_STOP早退 + 注入审计TERMINATE早退 + round边界收口
         # （round=本轮LLM流的生命周期终点：不flush则CJK无空白尾部token压在
         # holdback里跨轮串扰、round span内容为空——round级span嵌套轮新增）
