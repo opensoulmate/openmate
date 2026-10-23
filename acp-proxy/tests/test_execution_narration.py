@@ -196,10 +196,45 @@ def test_finish_form_keeps_summary_strips_narration(tmp_path):
     assert "决定：收尾" in rounds[8]["content"], "旁白进轨迹（有用通道）"
 
 
-def test_non_assess_round_zero_stripping(tmp_path):
-    """非自评轮零剥除：正文里的同字样/标记不误伤"""
+def test_non_assess_round_unmarked_lookalike_not_stripped(tmp_path):
+    """非自评轮：无标记的同字样正文不误伤（fail-safe 宁可多显示）"""
+    agent = _agent_with_client(tmp_path, [["这是正文测试 ③决定：继续"]])
+    resp, tools = run(agent._run_llm_with_tools(
+        [{"role": "user", "content": "go"}], "s1", traj_seg_id="seg-1"))
+    assert resp == "这是正文测试 ③决定：继续"
+    assert agent._traj_recorder.rounds[0]["content"] == resp
+
+
+def test_non_assess_round_marker_line_strips(tmp_path):
+    """非自评轮：契约标记行（【自评】…）=旁白，按标记常量语义剥出正文。
+
+    真实样本（周期#670 om-c101c546974f 修后复验实证）：模型在自评轮之外（round=9）
+    自发再写一条【自评】行——旧契约"只在自评轮剥"让它混进回复正文（evo 目标
+    "回复正文不得混入执行旁白"被击穿）。标记常量是生产者契约单一真源：以标记
+    开头的行按其自身语义就是旁白，任何轮次都不属于用户回答。
+    """
     agent = _agent_with_client(tmp_path, [["【自评】这是正文测试 ③决定：继续"]])
     resp, tools = run(agent._run_llm_with_tools(
         [{"role": "user", "content": "go"}], "s1", traj_seg_id="seg-1"))
-    assert resp == "【自评】这是正文测试 ③决定：继续"
-    assert agent._traj_recorder.rounds[0]["content"] == resp
+    assert "【自评】" not in resp and "决定" not in resp, f"标记行混进正文: {resp!r}"
+    # 有用通道=轨迹保留（不丢证据）
+    assert "【自评】" in agent._traj_recorder.rounds[0]["content"]
+
+
+def test_real_leak_sample_round9_marker_stripped(tmp_path):
+    """真实泄漏样本逐字钉死：round8 自评轮旁白＋round9 自发标记行都不得进正文"""
+    leak_line = "【自评】①9/12 完成 ②无失败重复 ③继续"
+    final = "共执行了 12 条命令（TURN1～TURN12），全部成功。"
+    agent = _agent_with_client(tmp_path, _tool_rounds() + [
+        ["【自评】①8/12条命令已完成 ②无重复失败 ③决定：继续\n", _tc(args={"command": "echo 9"})],
+        [leak_line, _tc(args={"command": "echo 10"})],
+        [final],
+    ])
+    resp, tools = run(agent._run_llm_with_tools(
+        [{"role": "user", "content": "go"}], "s1", traj_seg_id="seg-1"))
+    assert resp == final, f"回复正文必须只留回答: {resp!r}"
+    for word in ("【自评】", "完成度", "决定"):
+        assert word not in resp
+    rounds = agent._traj_recorder.rounds
+    assert "①8/12条命令已完成" in rounds[8]["content"], "自评轮旁白进轨迹"
+    assert leak_line in rounds[9]["content"], "round9 标记行进轨迹（有用通道不丢）"

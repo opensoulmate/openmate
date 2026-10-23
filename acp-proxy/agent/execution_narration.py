@@ -73,11 +73,17 @@ class NarrationSplitter:
     前导空行随第一个实质行的归属走（旁白块后的空行=分隔行随旁白，正文前导空行随正文）。
     """
 
-    def __init__(self) -> None:
+    def __init__(self, marker_only: bool = False) -> None:
         self._buf = ""
         self._leading = True
         self._blanks: list[str] = []
         self.narration_text = ""   # 已剥出的旁白全文（日志/轨迹通道）
+        # marker_only：非自评轮的全轮次守约模式——只剥契约标记行（【自评】等），
+        # 无标记的同字样正文不误伤（fail-safe 宁可多显示）。真实泄漏样本
+        # （周期#670 om-c101c546974f）：模型在自评轮之外自发再写【自评】行，
+        # 旧契约"只在自评轮剥"让它混进回复正文——标记常量是生产者契约单一真源，
+        # 以标记开头的行按其自身语义就是旁白，任何轮次都不属于用户回答。
+        self._marker_only = marker_only
 
     def _drain(self, final: bool) -> tuple[str, str]:
         body_out: list[str] = []
@@ -91,6 +97,13 @@ class NarrationSplitter:
             else:
                 break
             stripped = piece.rstrip("\n")
+            if self._marker_only:
+                if _MARKER_LINE_RE.match(stripped):
+                    narr_out.append(piece)
+                    self.narration_text += piece
+                else:
+                    body_out.append(piece)
+                continue
             if self._leading:
                 if not stripped.strip():
                     self._blanks.append(piece)      # 前导空行先扣留，随首个实质行走

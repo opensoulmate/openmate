@@ -3954,9 +3954,8 @@ You can send files to the user natively: to deliver a file, write a brief confir
             _round_resp_mark = len(full_response)
             # ── 执行旁白路由（evo目标 2026-10-23）：自评轮按行拆旁白/正文──
             _round_narr_text = ""
-            _narr_splitter = (
-                execution_narration.NarrationSplitter()
-                if _round == _narration_round else None)
+            _narr_splitter = execution_narration.NarrationSplitter(
+                marker_only=_round != _narration_round)  # 670: 其余轮只剥契约标记行
             watchdog.beat(round_index=_round + 1, tools_executed=len(all_tool_calls))
             # Writer Fencing 心跳（2026-10-23 接线）：每轮证明 writer 活着——此前
             # heartbeat() 全仓零调用（写了≠接线了），长回合 claim 被 stale 抢夺
