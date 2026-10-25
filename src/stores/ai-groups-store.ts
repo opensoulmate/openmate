@@ -153,17 +153,12 @@ interface AIGroupsState {
   showCreate: boolean;
   newName: string;
   newDesc: string;
-  /** 建组选成员（用户拍板：创建群组必须能选择参与的 agent） */
-  availableAgents: { agent_id: string; name: string; role?: string; model?: string }[];
+  /** 建组选成员（用户拍板：群组成员=系统接入的 AI agent，只能勾选不能凭空造） */
+  availableAgents: { agent_id?: string; name: string; role?: string; model?: string }[];
   newMembers: { agent_id?: string; name: string; role: string; model: string }[];
-  newMemberName: string;
-  newMemberRole: string;
   fetchAvailableAgents: () => Promise<void>;
   toggleNewMember: (a: { agent_id?: string; name: string; role?: string; model?: string }) => void;
-  addNewMember: () => void;
-  removeNewMember: (idx: number) => void;
-  setNewMemberName: (v: string) => void;
-  setNewMemberRole: (v: string) => void;
+  setMemberRole: (key: string, role: string) => void;
 
   // Edit group name inline
   editingGroupId: string | null;
@@ -291,8 +286,6 @@ export const useAIGroupsStore = create<AIGroupsState>((set, get) => ({
   newName: '',
   availableAgents: [],
   newMembers: [],
-  newMemberName: '',
-  newMemberRole: 'executor',
   newDesc: '',
   editingGroupId: null,
   editingName: '',
@@ -709,19 +702,10 @@ export const useAIGroupsStore = create<AIGroupsState>((set, get) => ({
     });
   },
 
-  addNewMember: () => {
-    const { newMemberName, newMemberRole, newMembers } = get();
-    const name = newMemberName.trim();
-    if (!name || newMembers.some((m) => m.name === name)) return;
-    set({ newMembers: [...newMembers, { name, role: newMemberRole, model: '' }], newMemberName: '' });
+  /** 已选成员改角色（顾问/执行/验证/人工） */
+  setMemberRole: (key, role) => {
+    set((s) => ({ newMembers: s.newMembers.map((m) => ((m.agent_id || m.name) === key ? { ...m, role } : m)) }));
   },
-
-  removeNewMember: (idx) => {
-    set((s) => ({ newMembers: s.newMembers.filter((_, i) => i !== idx) }));
-  },
-
-  setNewMemberName: (v) => set({ newMemberName: v }),
-  setNewMemberRole: (v) => set({ newMemberRole: v }),
 
   deleteGroup: async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();

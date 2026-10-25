@@ -42,12 +42,7 @@ export function AIGroupsSidebar() {
   const newMembers = useAIGroupsStore((s) => s.newMembers);
   const toggleNewMember = useAIGroupsStore((s) => s.toggleNewMember);
   const fetchAvailableAgents = useAIGroupsStore((s) => s.fetchAvailableAgents);
-  const newMemberName = useAIGroupsStore((s) => s.newMemberName);
-  const newMemberRole = useAIGroupsStore((s) => s.newMemberRole);
-  const setNewMemberName = useAIGroupsStore((s) => s.setNewMemberName);
-  const setNewMemberRole = useAIGroupsStore((s) => s.setNewMemberRole);
-  const addNewMember = useAIGroupsStore((s) => s.addNewMember);
-  const removeNewMember = useAIGroupsStore((s) => s.removeNewMember);
+  const setMemberRole = useAIGroupsStore((s) => s.setMemberRole);
   const deleteGroup = useAIGroupsStore((s) => s.deleteGroup);
   const renameGroup = useAIGroupsStore((s) => s.renameGroup);
 
@@ -70,42 +65,30 @@ export function AIGroupsSidebar() {
                   <span className="text-[11px] text-muted-foreground">参与成员</span>
                   <span className="text-[10px] text-muted-foreground">已选 {newMembers.length}</span>
                 </div>
-                <div className="max-h-28 overflow-y-auto space-y-0.5">
+                <div className="max-h-36 overflow-y-auto space-y-0.5">
                   {availableAgents.length === 0 ? (
-                    <p className="text-[10px] text-muted-foreground px-1">注册名册加载中…（也可下方自定义）</p>
+                    <p className="text-[10px] text-muted-foreground px-1">接入的 Agent 加载中…</p>
                   ) : availableAgents.map((a) => {
-                    const checked = newMembers.some((m) => (a.agent_id && m.agent_id === a.agent_id) || (!a.agent_id && m.name === a.name));
+                    const picked = newMembers.find((m) => (a.agent_id && m.agent_id === a.agent_id) || (!a.agent_id && m.name === a.name));
                     return (
-                      <label key={a.agent_id || a.name} className="flex items-center gap-1.5 px-1.5 py-1 rounded hover:bg-muted cursor-pointer">
-                        <input type="checkbox" checked={checked} onChange={() => toggleNewMember(a)} className="accent-primary" />
-                        <span className="text-xs truncate">{a.name}</span>
-                        {a.model && <span className="text-[10px] text-muted-foreground ml-auto truncate">{a.model}</span>}
-                      </label>
+                      <div key={a.agent_id || a.name} className="flex items-center gap-1.5 px-1.5 py-1 rounded hover:bg-muted">
+                        <input type="checkbox" checked={!!picked} onChange={() => toggleNewMember(a)} className="accent-primary" />
+                        <span className="text-xs truncate flex-1">{a.name}</span>
+                        {picked && (
+                          <select value={picked.role}
+                            onChange={(e) => setMemberRole(picked.agent_id || picked.name, e.target.value)}
+                            className="px-1 py-0.5 bg-background border border-border rounded text-[10px] focus:outline-none">
+                            <option value="advisor">顾问</option>
+                            <option value="executor">执行</option>
+                            <option value="verifier">验证</option>
+                            <option value="human">人工</option>
+                          </select>
+                        )}
+                      </div>
                     );
                   })}
                 </div>
-                <div className="flex gap-1">
-                  <input value={newMemberName} onChange={e => setNewMemberName(e.target.value)} placeholder="自定义成员名"
-                    className="flex-1 min-w-0 px-2 py-1 bg-background border border-border rounded text-xs focus:outline-none" />
-                  <select value={newMemberRole} onChange={e => setNewMemberRole(e.target.value)}
-                    className="px-1.5 py-1 bg-background border border-border rounded text-[11px] focus:outline-none">
-                    <option value="advisor">顾问</option>
-                    <option value="executor">执行</option>
-                    <option value="verifier">验证</option>
-                    <option value="human">人工</option>
-                  </select>
-                  <button onClick={addNewMember} className="px-2 py-1 bg-muted border border-border rounded text-xs hover:bg-accent">添加</button>
-                </div>
-                {newMembers.length > 0 && (
-                  <div className="flex flex-wrap gap-1">
-                    {newMembers.map((m, i) => (
-                      <span key={`${m.name}-${i}`} className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary">
-                        {m.name}
-                        <button onClick={() => removeNewMember(i)} className="hover:text-red-400">×</button>
-                      </span>
-                    ))}
-                  </div>
-                )}
+                <p className="text-[10px] text-muted-foreground px-1">勾选入组，每个成员可指派角色</p>
               </div>
               <div className="flex gap-1.5">
                 <button onClick={createGroup} disabled={loading}

@@ -936,14 +936,19 @@ function AgentLeaderboard() {
  * ==================================================================== */
 function AddAgentSection({
   show, onToggle, agent, onChange, onAdd,
-}: {
+  }: {
   show: boolean;
   onToggle: () => void;
   agent: { name: string; role: string; model: string };
   onChange: (a: { name: string; role: string; model: string }) => void;
   onAdd: () => void;
-}) {
-  return (
+  }) {
+   const availableAgents = useAIGroupsStore((s) => s.availableAgents);
+   const fetchAvailableAgents = useAIGroupsStore((s) => s.fetchAvailableAgents);
+   const selectedGroup = useAIGroupsStore((s) => s.selectedGroup);
+   useEffect(() => { if (show) fetchAvailableAgents(); }, [show, fetchAvailableAgents]);
+   const choices = availableAgents.filter((a) => !(selectedGroup?.agents || []).some((m) => m.name === a.name));
+   return (
     <div className="space-y-2">
       {/* 展开/收起按钮 */}
       <button onClick={onToggle}
@@ -955,9 +960,18 @@ function AddAgentSection({
       {/* 添加表单 */}
       {show && (
         <div className="p-3 rounded-lg border border-border bg-muted/30 space-y-2">
-          <input value={agent.name} onChange={e => onChange({ ...agent, name: e.target.value })}
-            placeholder="Agent 名称"
-            className="w-full px-2 py-1.5 bg-background border border-border rounded text-xs focus:outline-none focus:ring-1 focus:ring-primary" />
+          <p className="text-[11px] text-muted-foreground">成员=系统接入的 AI Agent，选择入组</p>
+          <select value={agent.name}
+            onChange={e => {
+              const picked = availableAgents.find((a) => (a.agent_id || a.name) === e.target.value);
+              onChange({ ...agent, name: picked?.name || e.target.value, model: picked?.model || '' });
+            }}
+            className="w-full px-2 py-1.5 bg-background border border-border rounded text-xs focus:outline-none focus:ring-1 focus:ring-primary">
+            <option value="">选择接入的 Agent…</option>
+            {choices.map((a) => (
+              <option key={a.agent_id || a.name} value={a.agent_id || a.name}>{a.name}</option>
+            ))}
+          </select>
           <div className="flex gap-2">
             <select value={agent.role} onChange={e => onChange({ ...agent, role: e.target.value })}
               className="flex-1 px-2 py-1.5 bg-background border border-border rounded text-xs focus:outline-none focus:ring-1 focus:ring-primary">
@@ -966,9 +980,6 @@ function AddAgentSection({
               <option value="verifier">verifier (验证者)</option>
               <option value="human">human (人工)</option>
             </select>
-            <input value={agent.model} onChange={e => onChange({ ...agent, model: e.target.value })}
-              placeholder="模型名称"
-              className="flex-1 px-2 py-1.5 bg-background border border-border rounded text-xs focus:outline-none focus:ring-1 focus:ring-primary" />
           </div>
           <button onClick={onAdd} disabled={!agent.name.trim()}
             className="w-full px-3 py-1.5 bg-primary text-primary-foreground rounded text-xs font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors">
