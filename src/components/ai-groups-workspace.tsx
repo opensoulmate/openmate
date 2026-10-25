@@ -6,6 +6,7 @@ import {
   Bot, FileText, Image as ImageIcon, Globe, Download, Trash2,
   ChevronDown, ChevronRight, Clock, User,
   ListChecks, Activity, RotateCcw, Loader2, RefreshCw, X, AlertTriangle,
+  Award,
 } from 'lucide-react';
 import { useAIGroupsStore, type AITask, type AISubTask, type TaskEvent } from '@/stores/ai-groups-store';
 
@@ -371,7 +372,155 @@ function TaskCard({ task }: { task: AITask }) {
             (task.subtasks || []).map((st) => <SubtaskRow key={st.id} subtask={st} />)
           )}
           {timelineTaskId === task.id && <TaskExecutionTimeline targetLabel="主任务" />}
+          {/* 任务评审（一级界面常驻）——994ad7a7 丢失功能接回 */}
+          <TaskReviewPanel task={task} />
         </div>
+      )}
+    </div>
+  );
+}
+
+/** 任务评审面板（评分表单+分数明细）——994ad7a7 重构中丢失的功能面，2026-10-23 接回 */
+function TaskReviewPanel({ task }: { task: AITask }) {
+  const selectedGroup = useAIGroupsStore((s) => s.selectedGroup);
+  const activeTaskReview = useAIGroupsStore((s) => s.activeTaskReview);
+  const setActiveTaskReview = useAIGroupsStore((s) => s.setActiveTaskReview);
+  const scoreValue = useAIGroupsStore((s) => s.scoreValue);
+  const setScoreValue = useAIGroupsStore((s) => s.setScoreValue);
+  const scoreReason = useAIGroupsStore((s) => s.scoreReason);
+  const setScoreReason = useAIGroupsStore((s) => s.setScoreReason);
+  const scoreCapability = useAIGroupsStore((s) => s.scoreCapability);
+  const setScoreCapability = useAIGroupsStore((s) => s.setScoreCapability);
+  const scorerAgentId = useAIGroupsStore((s) => s.scorerAgentId);
+  const setScorerAgentId = useAIGroupsStore((s) => s.setScorerAgentId);
+  const submitScore = useAIGroupsStore((s) => s.submitScore);
+  const [submitting, setSubmitting] = useState(false);
+
+  const review = activeTaskReview && activeTaskReview.task_id === task.id ? activeTaskReview : null;
+
+  const handleOpen = () => {
+    setActiveTaskReview({
+      task_id: task.id,
+      result: '',
+      status: 'reviewing',
+      round: 1,
+      assignments: [],
+      scores: [],
+      avg_score: typeof task.quality_score === 'number' ? task.quality_score : 0,
+      discussion_messages: [],
+    });
+  };
+
+  const handleSubmit = async () => {
+    if (!scorerAgentId) return;
+    setSubmitting(true);
+    await submitScore(task.id, scorerAgentId, scoreValue, scoreReason, scoreCapability);
+    setScoreReason('');
+    setScoreCapability('');
+    setScorerAgentId('');
+    setSubmitting(false);
+  };
+
+  return (
+    <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2.5 space-y-2">
+      {!review ? (
+        <button
+          onClick={handleOpen}
+          className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 rounded text-[11px] bg-amber-500/15 text-amber-500 hover:bg-amber-500/25 transition-colors"
+        >
+          <Award className="w-3.5 h-3.5" />
+          任务评审
+        </button>
+      ) : (
+        <>
+          <div className="flex items-center gap-2">
+            <Award className="w-4 h-4 text-amber-400" />
+            <span className="text-xs font-medium">任务评审</span>
+            {review.avg_score > 0 && (
+              <span className="ml-auto text-xs font-bold text-amber-400">
+                平均分: {review.avg_score.toFixed(1)}/10
+              </span>
+            )}
+            <button onClick={() => setActiveTaskReview(null)} className="text-muted-foreground hover:text-foreground">
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+
+          {review.scores.length > 0 && (
+            <div className="space-y-1.5">
+              {review.scores.map((s, i) => (
+                <div key={i} className="flex items-center gap-2 text-xs">
+                  <span className="text-muted-foreground w-16 truncate">{s.scorer_name}</span>
+                  <div className="flex-1 h-1.5 bg-background rounded-full overflow-hidden">
+                    <div className="h-full bg-amber-400 rounded-full" style={{ width: `${s.score * 10}%` }} />
+                  </div>
+                  <span className="font-medium w-6 text-right">{s.score}</span>
+                  <span className="text-muted-foreground flex-1 truncate">{s.reason}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {review.status !== 'scored' && (
+            <div className="space-y-2 pt-2 border-t border-border">
+              <div className="flex items-center gap-2">
+                <label className="text-[11px] text-muted-foreground w-14 shrink-0">评分者</label>
+                <select
+                  value={scorerAgentId}
+                  onChange={(e) => setScorerAgentId(e.target.value)}
+                  className="flex-1 min-w-0 px-2 py-1 bg-background border border-border rounded text-xs focus:outline-none"
+                >
+                  <option value="">选择Agent...</option>
+                  {(selectedGroup?.agents || []).map((a) => (
+                    <option key={a.agent_id} value={a.agent_id}>
+                      {a.name} ({a.role})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-[11px] text-muted-foreground w-14 shrink-0">分数</label>
+                <input
+                  type="range"
+                  min="1"
+                  max="10"
+                  value={scoreValue}
+                  onChange={(e) => setScoreValue(parseInt(e.target.value))}
+                  className="flex-1"
+                />
+                <span className="text-xs font-bold w-5 text-center">{scoreValue}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-[11px] text-muted-foreground w-14 shrink-0">能力维度</label>
+                <input
+                  value={scoreCapability}
+                  onChange={(e) => setScoreCapability(e.target.value)}
+                  placeholder="如：代码、设计、分析..."
+                  className="flex-1 min-w-0 px-2 py-1 bg-background border border-border rounded text-xs focus:outline-none"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-[11px] text-muted-foreground w-14 shrink-0">理由</label>
+                <input
+                  value={scoreReason}
+                  onChange={(e) => setScoreReason(e.target.value)}
+                  placeholder="评分理由..."
+                  className="flex-1 min-w-0 px-2 py-1 bg-background border border-border rounded text-xs focus:outline-none"
+                />
+              </div>
+              <button
+                onClick={handleSubmit}
+                disabled={!scorerAgentId || !scoreReason.trim() || !scoreCapability.trim() || submitting}
+                className="w-full px-3 py-1.5 bg-amber-500 text-white rounded text-xs hover:bg-amber-600 disabled:opacity-50 transition-colors"
+              >
+                {submitting ? '提交中...' : '提交评分'}
+              </button>
+            </div>
+          )}
+          {review.status === 'scored' && (
+            <div className="text-center text-xs text-emerald-400 pt-1">✅ 所有评分已完成</div>
+          )}
+        </>
       )}
     </div>
   );

@@ -249,6 +249,8 @@ interface AIGroupsState {
   startEditAgent: (agent: AgentRole) => void;
   saveEditAgent: (agentId: string) => Promise<void>;
   fetchAgentProfile: (agentId: string) => Promise<void>;
+  /** 提交任务评分（任务评审）→ POST /{gid}/tasks/{tid}/score */
+  submitScore: (taskId: string, scorerAgentId: string, score: number, reason: string, capability: string) => Promise<any>;
 }
 
 export const useAIGroupsStore = create<AIGroupsState>((set, get) => ({
@@ -742,6 +744,43 @@ export const useAIGroupsStore = create<AIGroupsState>((set, get) => ({
       console.error('Failed to fetch agent profile:', e);
     }
     set({ loadingProfile: null });
+  },
+
+  /** 提交任务评分 → POST /{gid}/tasks/{tid}/score，后端写 agent_scores+能力档案，前端同步本地 TaskReview */
+  submitScore: async (taskId, scorerAgentId, score, reason, capability) => {
+    const { selectedGroup, activeTaskReview } = get();
+    if (!selectedGroup) return null;
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/api/ai-groups/${selectedGroup.id}/tasks/${taskId}/score`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ scorer_agent_id: scorerAgentId, score, reason, capability }),
+      });
+      if (!res.ok) return null;
+      const result = await res.json();
+      if (activeTaskReview && activeTaskReview.task_id === taskId) {
+        const scorer = (selectedGroup.agents || []).find((a) => a.agent_id === scorerAgentId);
+        const newScores = [...activeTaskReview.scores, {
+          scorer_agent_id: scorerAgentId,
+          scorer_name: scorer?.name || scorerAgentId,
+          score, reason, capability,
+        }];
+        set({
+          activeTaskReview: {
+            ...activeTaskReview,
+            scores: newScores,
+            avg_score: typeof result?.avg_score === 'number'
+              ? result.avg_score
+              : newScores.reduce((s, e) => s + e.score, 0) / newScores.length,
+            status: newScores.length >= (selectedGroup.agents?.length || 0) ? 'scored' : 'reviewing',
+          },
+        });
+      }
+      return result;
+    } catch (e) {
+      console.error('Failed to submit score:', e);
+      return null;
+    }
   },
 
   // ── 任务执行过程可视化 ──────────────────────────────────────────

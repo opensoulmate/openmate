@@ -15,6 +15,7 @@ import {
   PanelLeft, Settings, X,
   Plus, Trash2, Edit3, Check, XIcon,
   StopCircle,
+  Trophy, ArrowUp, ArrowDown, ArrowRight,
 } from 'lucide-react';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
@@ -849,6 +850,82 @@ function AgentMemberList({
           );
         })}
       </div>
+      {/* 能力档案·综合排名（一级界面常驻）——994ad7a7 丢失功能接回 */}
+      <AgentLeaderboard />
+    </div>
+  );
+}
+
+/* ====================================================================
+ * 能力档案 + 综合排名（一级界面常驻）——994ad7a7 重构中丢失的功能面，2026-10-23 接回
+ * ==================================================================== */
+function AgentLeaderboard() {
+  const selectedGroup = useAIGroupsStore((s) => s.selectedGroup);
+  const agentProfiles = useAIGroupsStore((s) => s.agentProfiles);
+  const loadingProfile = useAIGroupsStore((s) => s.loadingProfile);
+  const fetchAgentProfile = useAIGroupsStore((s) => s.fetchAgentProfile);
+  const agents = selectedGroup?.agents || [];
+  if (agents.length === 0) return null;
+
+  return (
+    <div className="mt-3 pt-3 border-t border-border space-y-2">
+      <div className="flex items-center gap-1.5">
+        <Trophy className="w-3.5 h-3.5 text-amber-400" />
+        <span className="text-xs font-medium">能力档案 · 综合排名</span>
+        <button
+          onClick={() => agents.forEach((a) => { if (!agentProfiles[a.agent_id]) fetchAgentProfile(a.agent_id); })}
+          className="ml-auto text-[10px] px-2 py-0.5 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+        >
+          {agents.some((a) => loadingProfile === a.agent_id) ? '加载中...' : '刷新档案'}
+        </button>
+      </div>
+      {agents.map((a) => {
+        const profile = agentProfiles[a.agent_id];
+        return (
+          <div key={a.agent_id} className="rounded-lg border border-border/50 bg-muted/20 p-2 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-medium truncate">{a.name}</span>
+              {profile ? (
+                <div className="flex items-center gap-1">
+                  <Trophy className="w-3 h-3 text-amber-400" />
+                  <span className="text-[11px] font-bold text-amber-400">{profile.overall_rank.toFixed(1)}</span>
+                </div>
+              ) : (
+                <button
+                  onClick={() => fetchAgentProfile(a.agent_id)}
+                  className="text-[10px] px-2 py-0.5 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+                >
+                  {loadingProfile === a.agent_id ? '加载中...' : '查看能力档案'}
+                </button>
+              )}
+            </div>
+            {profile &&
+              profile.capabilities.map((cap, ci) => (
+                <div key={ci} className="space-y-0.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-muted-foreground">{cap.capability}</span>
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] font-medium">{cap.avg_score.toFixed(1)}</span>
+                      {cap.trend === 'up' ? (
+                        <ArrowUp className="w-3 h-3 text-emerald-400" />
+                      ) : cap.trend === 'down' ? (
+                        <ArrowDown className="w-3 h-3 text-red-400" />
+                      ) : (
+                        <ArrowRight className="w-3 h-3 text-muted-foreground" />
+                      )}
+                    </div>
+                  </div>
+                  <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all duration-500 bg-primary"
+                      style={{ width: `${Math.min(cap.avg_score * 10, 100)}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+          </div>
+        );
+      })}
     </div>
   );
 }
