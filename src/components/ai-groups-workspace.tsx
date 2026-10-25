@@ -291,8 +291,16 @@ function TaskCard({ task }: { task: AITask }) {
   const timelineTaskId = useAIGroupsStore((s) => s.timelineTaskId);
   const openTaskTimeline = useAIGroupsStore((s) => s.openTaskTimeline);
   const closeTaskTimeline = useAIGroupsStore((s) => s.closeTaskTimeline);
+  const taskConsensus = useAIGroupsStore((s) => s.taskConsensus[task.id]);
+  const fetchTaskConsensus = useAIGroupsStore((s) => s.fetchTaskConsensus);
+  useEffect(() => { if (expanded) fetchTaskConsensus(task.id); }, [expanded, task.id, fetchTaskConsensus]);
 
   const statusCfg = TASK_STATUS_CONFIG[task.status] || TASK_STATUS_CONFIG.pending;
+  // S1 阶段徽章（临时工作小组七阶段）：集思广益 → 执行中 → 成果评审 → 已正式发布
+  const phase = task.status === 'scored' ? { label: '已正式发布', cls: 'bg-emerald-500/15 text-emerald-500' }
+    : (task.status === 'completed' || task.status === 'reviewing') ? { label: '成果评审', cls: 'bg-purple-500/15 text-purple-400' }
+    : (task.status === 'executing' || task.status === 'assigned' || taskConsensus?.status === 'locked') ? { label: '执行中', cls: 'bg-blue-500/15 text-blue-400' }
+    : { label: '集思广益', cls: 'bg-amber-500/15 text-amber-500' };
   // 时间线面板归属判定：主任务 id 或其任一子任务 id
   const isTimelineOpen =
     timelineTaskId === task.id || (task.subtasks || []).some((st) => st.id === timelineTaskId);
@@ -323,6 +331,9 @@ function TaskCard({ task }: { task: AITask }) {
           <div className="flex items-center gap-1.5 mt-1 flex-wrap">
             <span className={`text-[10px] px-1.5 py-0.5 rounded ${statusCfg.bg} ${statusCfg.color}`}>
               {statusCfg.label}
+            </span>
+            <span className={`text-[10px] px-1.5 py-0.5 rounded ${phase.cls}`}>
+              {phase.label}
             </span>
             {typeof task.quality_score === 'number' && task.quality_score > 0 && (
               <span className="text-[10px] text-muted-foreground">质量 {task.quality_score.toFixed(1)}</span>

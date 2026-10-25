@@ -69,6 +69,15 @@ export interface ScoringEntry {
   capability: string;
 }
 
+/** S1 共识单——临时工作小组模型（docs/ai-groups-model.md）：分工表+事先约定验收标准 */
+export interface TaskConsensus {
+  task_id: string;
+  assignments: { agent_id: string; subgoal: string }[];
+  acceptance_criteria: string[];
+  status: 'draft' | 'locked';
+  updated_at?: string;
+}
+
 export interface TaskReview {
   task_id: string;
   result: string;
@@ -251,6 +260,10 @@ interface AIGroupsState {
   fetchAgentProfile: (agentId: string) => Promise<void>;
   /** 提交任务评分（任务评审）→ POST /{gid}/tasks/{tid}/score */
   submitScore: (taskId: string, scorerAgentId: string, score: number, reason: string, capability: string) => Promise<any>;
+  /** 共识单：读取/保存（status='locked'=达成一致，事先约定生效） */
+  taskConsensus: Record<string, TaskConsensus>;
+  fetchTaskConsensus: (taskId: string) => Promise<void>;
+  saveTaskConsensus: (taskId: string, assignments: TaskConsensus['assignments'], acceptanceCriteria: string[], status: 'draft' | 'locked') => Promise<boolean>;
 }
 
 export const useAIGroupsStore = create<AIGroupsState>((set, get) => ({
@@ -278,6 +291,7 @@ export const useAIGroupsStore = create<AIGroupsState>((set, get) => ({
   editGroupName: '',
   editGroupDesc: '',
   activeTaskReview: null,
+  taskConsensus: {},
   discussionLoading: false,
   currentDiscussionId: null,
   agentProfiles: {},
@@ -780,6 +794,46 @@ export const useAIGroupsStore = create<AIGroupsState>((set, get) => ({
     } catch (e) {
       console.error('Failed to submit score:', e);
       return null;
+    }
+  },
+
+  /** S1 共识单读取 */
+  fetchTaskConsensus: async (taskId) => {
+    const { selectedGroup } = get();
+    if (!selectedGroup) return;
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/api/ai-groups/${selectedGroup.id}/tasks/${taskId}/consensus`, { headers: authHeaders() });
+      const data = await res.json();
+      if (data?.consensus) {
+        set((s) => ({ taskConsensus: { ...s.taskConsensus, [taskId]: data.consensus } }));
+      }
+    } catch (e) {
+      console.error('Failed to fetch consensus:', e);
+    }
+  },
+
+  /** S1 共识单保存/锁定（status='locked'=达成一致，事先约定生效） */
+  saveTaskConsensus: async (taskId, assignments, acceptanceCriteria, status) => {
+    const { selectedGroup } = get();
+    if (!selectedGroup) return false;
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/api/ai-groups/${selectedGroup.id}/tasks/${taskId}/consensus`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ assignments, acceptance_criteria: acceptanceCriteria, status }),
+      });
+      if (!res.ok) return false;
+      const data = await res.json();
+      set((s) => ({
+        taskConsensus: {
+          ...s.taskConsensus,
+          [taskId]: { task_id: taskId, assignments, acceptance_criteria: acceptanceCriteria, status, updated_at: data?.updated_at },
+        },
+      }));
+      return true;
+    } catch (e) {
+      console.error('Failed to save consensus:', e);
+      return false;
     }
   },
 
