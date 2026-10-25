@@ -38,6 +38,16 @@ export function AIGroupsSidebar() {
   const loading = useAIGroupsStore((s) => s.loading);
   const selectGroup = useAIGroupsStore((s) => s.selectGroup);
   const createGroup = useAIGroupsStore((s) => s.createGroup);
+  const availableAgents = useAIGroupsStore((s) => s.availableAgents);
+  const newMembers = useAIGroupsStore((s) => s.newMembers);
+  const toggleNewMember = useAIGroupsStore((s) => s.toggleNewMember);
+  const fetchAvailableAgents = useAIGroupsStore((s) => s.fetchAvailableAgents);
+  const newMemberName = useAIGroupsStore((s) => s.newMemberName);
+  const newMemberRole = useAIGroupsStore((s) => s.newMemberRole);
+  const setNewMemberName = useAIGroupsStore((s) => s.setNewMemberName);
+  const setNewMemberRole = useAIGroupsStore((s) => s.setNewMemberRole);
+  const addNewMember = useAIGroupsStore((s) => s.addNewMember);
+  const removeNewMember = useAIGroupsStore((s) => s.removeNewMember);
   const deleteGroup = useAIGroupsStore((s) => s.deleteGroup);
   const renameGroup = useAIGroupsStore((s) => s.renameGroup);
 
@@ -54,6 +64,49 @@ export function AIGroupsSidebar() {
                 className="w-full px-2.5 py-1.5 bg-background border border-border rounded text-xs focus:outline-none focus:ring-1 focus:ring-primary/50" />
               <input value={newDesc} onChange={e => setNewDesc(e.target.value)} placeholder={t("aiGroups.descriptionOptional")}
                 className="w-full px-2.5 py-1.5 bg-background border border-border rounded text-xs focus:outline-none focus:ring-1 focus:ring-primary/50" />
+              {/* 参与成员——创建群组即选人（用户拍板：建组必须能选择参与的 agent） */}
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] text-muted-foreground">参与成员</span>
+                  <span className="text-[10px] text-muted-foreground">已选 {newMembers.length}</span>
+                </div>
+                <div className="max-h-28 overflow-y-auto space-y-0.5">
+                  {availableAgents.length === 0 ? (
+                    <p className="text-[10px] text-muted-foreground px-1">注册名册加载中…（也可下方自定义）</p>
+                  ) : availableAgents.map((a) => {
+                    const checked = newMembers.some((m) => (a.agent_id && m.agent_id === a.agent_id) || (!a.agent_id && m.name === a.name));
+                    return (
+                      <label key={a.agent_id || a.name} className="flex items-center gap-1.5 px-1.5 py-1 rounded hover:bg-muted cursor-pointer">
+                        <input type="checkbox" checked={checked} onChange={() => toggleNewMember(a)} className="accent-primary" />
+                        <span className="text-xs truncate">{a.name}</span>
+                        {a.model && <span className="text-[10px] text-muted-foreground ml-auto truncate">{a.model}</span>}
+                      </label>
+                    );
+                  })}
+                </div>
+                <div className="flex gap-1">
+                  <input value={newMemberName} onChange={e => setNewMemberName(e.target.value)} placeholder="自定义成员名"
+                    className="flex-1 min-w-0 px-2 py-1 bg-background border border-border rounded text-xs focus:outline-none" />
+                  <select value={newMemberRole} onChange={e => setNewMemberRole(e.target.value)}
+                    className="px-1.5 py-1 bg-background border border-border rounded text-[11px] focus:outline-none">
+                    <option value="advisor">顾问</option>
+                    <option value="executor">执行</option>
+                    <option value="verifier">验证</option>
+                    <option value="human">人工</option>
+                  </select>
+                  <button onClick={addNewMember} className="px-2 py-1 bg-muted border border-border rounded text-xs hover:bg-accent">添加</button>
+                </div>
+                {newMembers.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {newMembers.map((m, i) => (
+                      <span key={`${m.name}-${i}`} className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+                        {m.name}
+                        <button onClick={() => removeNewMember(i)} className="hover:text-red-400">×</button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div className="flex gap-1.5">
                 <button onClick={createGroup} disabled={loading}
                   className="flex-1 px-2.5 py-1.5 bg-primary text-primary-foreground rounded text-xs hover:bg-primary/90 disabled:opacity-50">
@@ -64,7 +117,7 @@ export function AIGroupsSidebar() {
               </div>
             </div>
           )}
-          <button onClick={() => setShowCreate(!showCreate)}
+          <button onClick={() => { setShowCreate(!showCreate); if (!showCreate) fetchAvailableAgents(); }}
             className="w-full flex items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
             <Plus className="w-3.5 h-3.5" />
             {t("aiGroups.createGroup") || "新建群组"}

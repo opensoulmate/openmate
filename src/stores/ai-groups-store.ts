@@ -153,6 +153,17 @@ interface AIGroupsState {
   showCreate: boolean;
   newName: string;
   newDesc: string;
+  /** 建组选成员（用户拍板：创建群组必须能选择参与的 agent） */
+  availableAgents: { agent_id: string; name: string; role?: string; model?: string }[];
+  newMembers: { agent_id?: string; name: string; role: string; model: string }[];
+  newMemberName: string;
+  newMemberRole: string;
+  fetchAvailableAgents: () => Promise<void>;
+  toggleNewMember: (a: { agent_id?: string; name: string; role?: string; model?: string }) => void;
+  addNewMember: () => void;
+  removeNewMember: (idx: number) => void;
+  setNewMemberName: (v: string) => void;
+  setNewMemberRole: (v: string) => void;
 
   // Edit group name inline
   editingGroupId: string | null;
@@ -278,6 +289,10 @@ export const useAIGroupsStore = create<AIGroupsState>((set, get) => ({
   wsTypingUsers: [],          // 初始无输入用户
   showCreate: false,
   newName: '',
+  availableAgents: [],
+  newMembers: [],
+  newMemberName: '',
+  newMemberRole: 'executor',
   newDesc: '',
   editingGroupId: null,
   editingName: '',
@@ -647,19 +662,66 @@ export const useAIGroupsStore = create<AIGroupsState>((set, get) => ({
   },
 
   createGroup: async () => {
-    const { newName, newDesc } = get();
+    const { newName, newDesc, newMembers } = get();
     if (!newName.trim()) return;
     set({ loading: true });
     try {
       await fetch(`${getApiBaseUrl()}/api/ai-groups`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify({ name: newName, description: newDesc, agents: [] }),
+        body: JSON.stringify({ name: newName, description: newDesc, agents: newMembers }),
       });
-      set({ newName: '', newDesc: '', showCreate: false });
+      set({ newName: '', newDesc: '', newMembers: [], showCreate: false });
       get().fetchGroups();
     } finally { set({ loading: false }); }
   },
+
+  /** 建组选成员：拉系统注册 agent 名册（未注册不进列表，一条真源） */
+  fetchAvailableAgents: async () => {
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/api/agents/registry`, { headers: authHeaders() });
+      const data = await res.json();
+      const rows = Array.isArray(data?.agents) ? data.agents : [];
+      set({
+        availableAgents: rows.map((r: any) => ({
+          agent_id: r.agent_id || r.id,
+          name: r.name || r.agent_id || r.id,
+          role: r.role,
+          model: r.model,
+        })),
+      });
+    } catch (e) {
+      console.error('Failed to fetch available agents:', e);
+    }
+  },
+
+  toggleNewMember: (a) => {
+    set((s) => {
+      const id = a.agent_id;
+      const same = (m: { agent_id?: string; name: string }) =>
+        (id && m.agent_id === id) || (!id && m.name === a.name);
+      const exists = s.newMembers.some(same);
+      return {
+        newMembers: exists
+          ? s.newMembers.filter((m) => !same(m))
+          : [...s.newMembers, { agent_id: a.agent_id, name: a.name, role: a.role || 'executor', model: a.model || '' }],
+      };
+    });
+  },
+
+  addNewMember: () => {
+    const { newMemberName, newMemberRole, newMembers } = get();
+    const name = newMemberName.trim();
+    if (!name || newMembers.some((m) => m.name === name)) return;
+    set({ newMembers: [...newMembers, { name, role: newMemberRole, model: '' }], newMemberName: '' });
+  },
+
+  removeNewMember: (idx) => {
+    set((s) => ({ newMembers: s.newMembers.filter((_, i) => i !== idx) }));
+  },
+
+  setNewMemberName: (v) => set({ newMemberName: v }),
+  setNewMemberRole: (v) => set({ newMemberRole: v }),
 
   deleteGroup: async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
