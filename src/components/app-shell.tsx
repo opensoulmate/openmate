@@ -294,6 +294,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     });
   }, [t]);
 
+  // ── 旧 chunk 自动换血（2026-10-25）：部署会换 chunk 哈希，用户开着的旧会话引用失效 chunk
+  // 后事件链静默失效（"按钮点了没反应"）。发现加载失败→自动换新一次（sessionStorage 防循环）。
+  useEffect(() => {
+    const handler = (e: ErrorEvent) => {
+      const msg = String(e.message || '');
+      const isChunk = /ChunkLoadError|Loading chunk .* failed|Failed to fetch dynamically imported module|error loading dynamically imported module/i.test(msg);
+      if (!isChunk) return;
+      if (sessionStorage.getItem('openmate-chunk-reloaded') === '1') return;
+      sessionStorage.setItem('openmate-chunk-reloaded', '1');
+      window.location.reload();
+    };
+    window.addEventListener('error', handler);
+    window.addEventListener('unhandledrejection', (e: PromiseRejectionEvent) => handler({ message: String(e.reason) } as ErrorEvent));
+    return () => window.removeEventListener('error', handler);
+  }, []);
+
   // Only fetch sessions on chat page — other pages don't need the session list
   const isChatRoute = pathname.startsWith('/chat');
   const sidebarRefreshKey = useAppStore((s) => s.sidebarRefreshKey);
