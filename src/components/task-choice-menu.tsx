@@ -40,6 +40,10 @@ export function composeAskAnswers(
     .join("\n");
 }
 
+// ── Hermes clarify 卡片视觉契约：A/B/C/D 字母徽章 + 首项"(Recommended)"展示标（仅展示，答案文本原样）──
+const RECOMMENDED_LABEL = "(Recommended)";
+const letterFor = (i: number): string => String.fromCharCode(65 + i);
+
 function AskQuestionCard({
   title,
   questions,
@@ -77,77 +81,97 @@ function AskQuestionCard({
     setSubmitted(true);
   };
 
+  const answeredCount = questions.filter(answered).length;
+
   return (
-    <div className="mt-2 rounded-xl border border-border/60 bg-background/80 backdrop-blur-sm overflow-hidden">
-      {/* 标题 */}
-      <div className="px-4 py-2.5 border-b border-border/40 bg-muted/30">
-        <p className="text-sm font-medium text-foreground/90">{title}</p>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          {t("askUser.multiHint", "多个问题请一次作答后提交")}
-        </p>
+    <div className="mt-2 rounded-xl border border-border bg-card/95 shadow-lg overflow-hidden" data-slot="clarify-card">
+      {/* 顶栏：已回答 x/y（Hermes 契约） */}
+      <div className="flex items-center justify-between px-4 pt-3 pb-1">
+        <span className="text-xs text-muted-foreground">
+          已回答 {answeredCount}/{questions.length}
+        </span>
+        <span className="text-xs text-muted-foreground/60">{title ? "💬?" : ""}</span>
       </div>
 
       {/* 问题块 */}
-      {questions.map((q, qi) => (
-        <div key={q.id} className="px-4 py-3 border-b border-border/30">
-          <p className="text-sm font-medium text-foreground/90">
-            <span className="text-primary mr-1">{qi + 1}.</span>
-            {q.question}
-            {q.multi && (
-              <span className="ml-2 text-xs text-muted-foreground">
-                {t("askUser.multiTag", "可多选")}
+      <div className="px-4 pb-2 grid gap-4">
+        {questions.map((q, qi) => (
+          <div key={q.id} className="grid gap-1.5">
+            <div className="flex items-start gap-2">
+              <span className="flex-1 whitespace-pre-wrap text-[0.95rem] font-medium text-foreground/95 leading-relaxed">
+                {q.question}
               </span>
-            )}
-          </p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {q.options.map((opt) => {
-              const on = (answers[q.id] || []).includes(opt.id);
-              return (
-                <button
-                  key={opt.id}
-                  onClick={() => toggle(q, opt.id)}
-                  disabled={disabled || submitted}
-                  title={opt.description}
-                  className={`px-3 py-1.5 rounded-lg text-sm border transition-all
-                    ${on
-                      ? "bg-primary/10 border-primary text-primary"
-                      : "border-border/60 text-foreground/80 hover:bg-muted/50 active:bg-muted/70 cursor-pointer"
-                    } ${disabled || submitted ? "opacity-60 cursor-not-allowed" : ""}`}
-                >
-                  {on ? "✓ " : ""}
-                  {opt.label}
-                </button>
-              );
-            })}
-          </div>
-          {q.allow_custom && !submitted && (
-            <input
-              type="text"
-              value={customTexts[q.id] || ""}
-              onChange={(e) => setCustomTexts((prev) => ({ ...prev, [q.id]: e.target.value }))}
-              placeholder={t("askUser.customPlaceholder", "或输入自定义内容...")}
-              disabled={disabled}
-              className="mt-2 w-full text-sm bg-transparent outline-none border-b border-border/40 pb-1 placeholder:text-muted-foreground/50"
-            />
-          )}
-        </div>
-      ))}
+              {q.options.length > 0 && (
+                <span className="mt-0.5 shrink-0 rounded bg-muted/40 px-1.5 py-0.5 text-[0.625rem] text-muted-foreground">
+                  {q.multi ? t("askUser.multiTag", "可多选") : "选一个"}
+                </span>
+              )}
+            </div>
 
-      {/* 提交 */}
+            {/* 选项行：A/B/C/D 字母徽章（首项=推荐展示标） */}
+            <div className="grid gap-1">
+              {q.options.map((opt, oi) => {
+                const on = (answers[q.id] || []).includes(opt.id);
+                return (
+                  <button
+                    key={opt.id}
+                    onClick={() => toggle(q, opt.id)}
+                    disabled={disabled || submitted}
+                    title={opt.description}
+                    className={`flex w-full items-start gap-2.5 rounded-lg border px-2.5 py-2 text-left text-sm transition-colors
+                      ${on
+                        ? "border-primary/70 bg-primary/15 text-foreground"
+                        : "border-border/70 bg-background/40 text-foreground/90 hover:bg-muted/30"
+                      } ${disabled || submitted ? "opacity-60 cursor-not-allowed" : ""}`}
+                  >
+                    <span className={`mt-px flex h-5 w-5 shrink-0 items-center justify-center rounded border text-[0.6875rem] font-semibold ${on ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground"}`}>
+                      {letterFor(oi)}
+                    </span>
+                    <span className="flex-1 whitespace-pre-wrap wrap-anywhere leading-relaxed">
+                      {opt.label}
+                      {oi === 0 && q.options.length > 1 && (
+                        <span className="ml-1.5 text-[0.75rem] text-muted-foreground/70">{RECOMMENDED_LABEL}</span>
+                      )}
+                    </span>
+                  </button>
+                );
+              })}
+
+              {/* 其他（输入你的答案）——Hermes 契约常驻行 */}
+              {!submitted && (
+                <div className="flex items-center gap-2.5 rounded-lg border border-dashed border-border/60 px-2.5 py-1.5">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-border text-[0.6875rem] font-semibold text-muted-foreground/60">
+                    {letterFor(q.options.length)}
+                  </span>
+                  <input
+                    type="text"
+                    value={customTexts[q.id] || ""}
+                    onChange={(e) => setCustomTexts((prev) => ({ ...prev, [q.id]: e.target.value }))}
+                    placeholder="其他 (输入你的答案)"
+                    disabled={disabled}
+                    className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* 底栏：确认并继续 */}
       {!submitted && (
-        <div className="flex items-center justify-end px-3 py-2.5 border-t border-border/40 bg-muted/20">
+        <div className="flex items-center justify-end gap-2 border-t border-border px-4 py-2.5">
           <button
             onClick={handleSubmit}
             disabled={!allAnswered || disabled}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-sm"
+            className="rounded-lg bg-primary px-3.5 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-30 disabled:cursor-not-allowed transition-opacity"
           >
-            <Send className="w-3.5 h-3.5" />
-            {t("askUser.submit", "提交全部作答")}
+            {t("askUser.submit", "确认并继续")}
           </button>
         </div>
       )}
       {submitted && (
-        <div className="px-4 py-2 border-t border-border/40 bg-muted/20 text-xs text-primary">
+        <div className="px-4 py-2 border-t border-border text-xs text-primary">
           {t("askUser.submitted", "已提交作答")}
         </div>
       )}
@@ -207,41 +231,49 @@ export function TaskChoiceMenu({
   };
 
   return (
-    <div className="mt-2 rounded-xl border border-border/60 bg-background/80 backdrop-blur-sm overflow-hidden">
-      {/* 标题 */}
-      <div className="px-4 py-2.5 border-b border-border/40 bg-muted/30">
-        <p className="text-sm font-medium text-foreground/90">{question}</p>
+    <div className="mt-2 rounded-xl border border-border bg-card/95 shadow-lg overflow-hidden" data-slot="clarify-card">
+      {/* 题干 + 选一个（Hermes 契约） */}
+      <div className="flex items-start gap-2 px-4 pt-3 pb-1">
+        <span className="flex-1 whitespace-pre-wrap text-[0.95rem] font-medium text-foreground/95 leading-relaxed">{question}</span>
+        {options.length > 0 && (
+          <span className="mt-0.5 shrink-0 rounded bg-muted/40 px-1.5 py-0.5 text-[0.625rem] text-muted-foreground">选一个</span>
+        )}
       </div>
 
-      {/* 选项列表 */}
-      <div className="divide-y divide-border/30">
-        {pagedOptions.map((opt, idx) => (
-          <button
-            key={opt.id}
-            onClick={() => handleSelect(opt)}
-            disabled={disabled || !!selected}
-            className={`w-full text-left px-4 py-3 flex items-start gap-3 transition-all
-              ${selected === opt.id
-                ? "bg-primary/10 border-l-2 border-primary"
-                : selected
-                  ? "opacity-50 cursor-not-allowed"
-                  : "hover:bg-muted/50 active:bg-muted/70 cursor-pointer"
-              }`}
-          >
-            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center mt-0.5">
-              {page * pageSize + idx + 1}
-            </span>
-            <div className="min-w-0 flex-1">
-              <span className="text-sm font-medium text-foreground/90">{opt.label}</span>
-              {opt.description && (
-                <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{opt.description}</p>
-              )}
-            </div>
-            {selected === opt.id && (
-              <span className="flex-shrink-0 text-xs text-primary font-medium mt-1">✓ 已选择</span>
-            )}
-          </button>
-        ))}
+      {/* 选项行：A/B/C/D 字母徽章（首项=推荐展示标） */}
+      <div className="px-4 pb-2 grid gap-1">
+        {pagedOptions.map((opt, idx) => {
+          const on = selected === opt.id;
+          const gidx = page * pageSize + idx;
+          return (
+            <button
+              key={opt.id}
+              onClick={() => handleSelect(opt)}
+              disabled={disabled || !!selected}
+              title={opt.description}
+              className={`flex w-full items-start gap-2.5 rounded-lg border px-2.5 py-2 text-left text-sm transition-colors
+                ${on
+                  ? "border-primary/70 bg-primary/15 text-foreground"
+                  : selected
+                    ? "opacity-50 cursor-not-allowed border-border/70 bg-background/40"
+                    : "border-border/70 bg-background/40 text-foreground/90 hover:bg-muted/30 cursor-pointer"
+                }`}
+            >
+              <span className={`mt-px flex h-5 w-5 shrink-0 items-center justify-center rounded border text-[0.6875rem] font-semibold ${on ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground"}`}>
+                {letterFor(gidx)}
+              </span>
+              <span className="flex-1 min-w-0 whitespace-pre-wrap wrap-anywhere leading-relaxed">
+                <span className="text-sm">{opt.label}</span>
+                {gidx === 0 && options.length > 1 && (
+                  <span className="ml-1.5 text-[0.75rem] text-muted-foreground/70">{RECOMMENDED_LABEL}</span>
+                )}
+                {opt.description && (
+                  <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{opt.description}</p>
+                )}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {/* 分页 */}
@@ -267,17 +299,20 @@ export function TaskChoiceMenu({
         </div>
       )}
 
-      {/* 自定义输入 */}
+      {/* 其他（输入你的答案）——Hermes 契约 */}
       {!selected && (
-        <div className="flex items-center gap-2 px-3 py-2.5 border-t border-border/40 bg-muted/20">
+        <div className="flex items-center gap-2.5 mx-4 mb-3 rounded-lg border border-dashed border-border/60 px-2.5 py-1.5">
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-border text-[0.6875rem] font-semibold text-muted-foreground/60">
+            {letterFor(options.length)}
+          </span>
           <input
             type="text"
             value={customText}
             onChange={e => setCustomText(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') handleCustomSubmit(); }}
-            placeholder="或输入自定义内容..."
+            placeholder="其他 (输入你的答案)"
             disabled={disabled}
-            className="flex-1 text-sm bg-transparent outline-none placeholder:text-muted-foreground/50"
+            className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
           />
           <button
             onClick={handleCustomSubmit}

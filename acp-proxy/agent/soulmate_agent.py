@@ -3792,7 +3792,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
             "type": "function",
             "function": {
                 "name": "clarify",
-                "description": "当任务复杂、有多种可能的理解方式时，弹出交互式提问卡让用户确认。两种形态：①单问题=question+options；②多问题/多选=questions（1-5问一次作答，multi=true可多选，allow_custom=true允许用户自定义作答）。用户作答后你会收到作答文本作为工具结果（多问格式：每行『问题：选项A、选项B』）。",
+                "description": "当任务复杂、有多种可能的理解方式时，弹出交互式提问卡让用户确认。两种形态：①单问题=question+options；②多问题/多选=questions（1-5问一次作答，multi=true可多选，allow_custom=true允许用户自定义作答）。选项按最优在前排列（第一个将标注为Recommended推荐项）。用户作答后你会收到作答文本作为工具结果（多问格式：每行『问题：选项A、选项B』）。",
                 "parameters": {
                     "type": "object",
                     "properties": {
