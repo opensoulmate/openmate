@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import { useRef, useEffect, useCallback, useState } from "react";
+import { createPortal } from "react-dom";
 import { getUserName, getUserId, clearUser } from "@/lib/api-client";
 import {
   MessageSquare, Users, BookOpen, Workflow, Settings, Brain, Activity,
@@ -112,6 +113,8 @@ export function BottomNav({ totalUnread = 0, onOpenConversations }: BottomNavPro
   const isLongPress = useRef(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
+  const popupRef = useRef<HTMLDivElement>(null);
+  const [menuPos, setMenuPos] = useState<{ bottom: number; left: number } | null>(null);
 
   // 插件导航项状态
   const [pluginNavItems, setPluginNavItems] = useState<PluginNavItem[]>([]);
@@ -148,7 +151,9 @@ export function BottomNav({ totalUnread = 0, onOpenConversations }: BottomNavPro
   useEffect(() => {
     if (!userMenuOpen) return;
     const handler = (e: MouseEvent) => {
-      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) setUserMenuOpen(false);
+      const inBtn = userMenuRef.current && userMenuRef.current.contains(e.target as Node);
+      const inPopup = popupRef.current && popupRef.current.contains(e.target as Node);
+      if (!inBtn && !inPopup) setUserMenuOpen(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
@@ -188,15 +193,19 @@ export function BottomNav({ totalUnread = 0, onOpenConversations }: BottomNavPro
       left={
         <div className="relative w-12 h-full flex items-center justify-center" ref={userMenuRef}>
           <button
-            onClick={() => setUserMenuOpen(!userMenuOpen)}
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              setMenuPos({ bottom: window.innerHeight - r.top + 8, left: Math.min(Math.max(8, r.left), Math.max(8, window.innerWidth - 232)) });
+              setUserMenuOpen(!userMenuOpen);
+            }}
             className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-[11px] font-semibold text-primary-foreground transition-transform hover:scale-105"
           >
             {userId[0].toUpperCase()}
           </button>
 
           {/* User popup menu */}
-          {userMenuOpen && (
-            <div className="absolute bottom-full left-0 mb-2 w-56 rounded-xl border border-border bg-card shadow-lg overflow-hidden z-50">
+          {userMenuOpen && menuPos && createPortal(
+            <div ref={popupRef} style={{ position: 'fixed', bottom: menuPos.bottom, left: menuPos.left }} className="w-56 rounded-xl border border-border bg-card shadow-lg overflow-hidden z-[100]">
               <div className="p-3 border-b border-border">
                 <div className="flex items-center gap-2.5">
                   <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-sm font-medium text-primary-foreground">
@@ -227,7 +236,7 @@ export function BottomNav({ totalUnread = 0, onOpenConversations }: BottomNavPro
                   {t("account.logout", "退出登录")}
                 </button>
               </div>
-            </div>
+            </div>, document.body
           )}
         </div>
       }
