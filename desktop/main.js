@@ -36,6 +36,7 @@ function createWindow() {
     icon: path.join(__dirname, 'icon.png'),
     backgroundColor: '#0b0f14',
     autoHideMenuBar: true,
+    titleBarStyle: 'hidden', // 原生标题条隐藏——窗口控制进 TopBar（与设置同区）
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -85,6 +86,15 @@ function createTray() {
     console.error('[tray]', e.message);
   }
 }
+
+// 窗口控制（TopBar 三钮：最小化/最大化/关闭）
+ipcMain.on('win-minimize', (e) => BrowserWindow.fromWebContents(e.sender)?.minimize());
+ipcMain.on('win-maximize', (e) => {
+  const w = BrowserWindow.fromWebContents(e.sender);
+  if (!w) return;
+  w.isMaximized() ? w.unmaximize() : w.maximize();
+});
+ipcMain.on('win-close', (e) => BrowserWindow.fromWebContents(e.sender)?.close());
 
 // 主题联动：OpenMate 切主题 → 系统标题栏/窗口底色跟着切
 ipcMain.on('openmate-theme-change', (e, mode) => {
