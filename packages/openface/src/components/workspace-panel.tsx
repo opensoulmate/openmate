@@ -196,6 +196,8 @@ export interface WorkspacePanelProps {
   className?: string;
   /** External file to preview — when this changes, automatically opens in a file-preview tab */
   pendingFilePreview?: { url: string; name: string; mimeType?: string } | null;
+  /** 桌面壳桥注入：外链/新窗口 → 开 web-browser 新标签页 */
+  pendingWebUrl?: string | null;
 }
 
 // ── WorkspacePanel ─────────────────────────────────────────────────
@@ -209,6 +211,7 @@ export function WorkspacePanel({
   onSelectionAIEdit,
   className,
   pendingFilePreview,
+  pendingWebUrl = null,
 }: WorkspacePanelProps) {
   const isMobile = useIsMobile();
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -275,6 +278,13 @@ export function WorkspacePanel({
       }
     });
   }, [pendingFilePreview, sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 桌面壳桥注入：外链/新窗口 → workspace 新 web-browser 标签页
+  useEffect(() => {
+    if (!pendingWebUrl) return;
+    addTab('web-browser', { url: pendingWebUrl });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingWebUrl, sessionId]);
 
   const wsState = workspaceMap[sessionId] ?? { tabs: [createTab('new-tab')], activeTabId: '' };
   const tabs = wsState.tabs;

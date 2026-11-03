@@ -108,6 +108,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pendingFilePreview = useAppStore((s) => s.pendingFilePreview);
   const toggleRightPanel = useAppStore((s) => s.toggleRightPanel);
   const setRightPanelOpen = useAppStore((s) => s.setRightPanelOpen);
+  // 桌面壳桥：外链/新窗口 → workspace 新 web-browser 标签页 + 展开右栏
+  const [pendingWebUrl, setPendingWebUrl] = useState<string | null>(null);
+  useEffect(() => {
+    const bridge = (window as any).openmateDesktop;
+    if (!bridge?.onOpenWebTab) return;
+    const off = bridge.onOpenWebTab((url: string) => {
+      setPendingWebUrl(url);
+      setRightPanelOpen(true);
+    });
+    return typeof off === 'function' ? off : undefined;
+  }, [setRightPanelOpen]);
   const pageSidebar = useAppStore((s) => s.pageSidebar);
   const pageWorkspace = useAppStore((s) => s.pageWorkspace);
   const isMobile = useIsMobile();
@@ -540,7 +551,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           right: rightPanelOpen ? 0 : -rightPanelWidth,
         }}
       >
-        <WorkspacePanel sessionId={activeSessionIdFromStore || '__default__'} className="h-full" pendingFilePreview={pendingFilePreview} />
+        <WorkspacePanel sessionId={activeSessionIdFromStore || '__default__'} className="h-full" pendingFilePreview={pendingFilePreview} pendingWebUrl={pendingWebUrl} />
       </div>
       </div>
 

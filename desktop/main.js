@@ -60,20 +60,12 @@ function createWindow() {
     win.loadURL(html);
   });
 
-  // 外链=内置浏览器子窗口（app 内看网页，不再甩系统浏览器）
-  const openInternalBrowser = (url) => {
-    const b = new BrowserWindow({
-      width: 1100,
-      height: 780,
-      icon: path.join(__dirname, 'icon.png'),
-      backgroundColor: nativeTheme.shouldUseDarkColors ? '#0b0f14' : '#ffffff',
-      autoHideMenuBar: true,
-      webPreferences: { nodeIntegration: false, contextIsolation: true }, // 外部网页=纯沙箱
-    });
-    b.loadURL(url);
+  // 外链/新窗口 → workspace 新标签页（事件桥交渲染层开标签，不再弹独立窗口）
+  const toWorkspaceTab = (url) => {
+    if (/^https?:/i.test(url)) win.webContents.send('openmate-open-web-tab', url);
   };
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:/i.test(url)) openInternalBrowser(url);
+    if (/^https?:/i.test(url)) toWorkspaceTab(url);
     else shell.openExternal(url);
     return { action: 'deny' };
   });
@@ -84,7 +76,7 @@ function createWindow() {
       if (new URL(url).origin === APP_ORIGIN) return;
     } catch (err) { /* 非法 URL=拦 */ }
     e.preventDefault();
-    if (/^https?:/i.test(url)) openInternalBrowser(url);
+    toWorkspaceTab(url);
   });
   win.on('closed', () => { win = null; });
 }

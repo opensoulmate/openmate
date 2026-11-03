@@ -521,6 +521,7 @@ export function RightPanel({ open, onToggle }: RightPanelProps) {
     storeAddWorkspaceTab(sessionId, tab, true);
   }, [sessionId, storeAddWorkspaceTab]);
 
+
   const closeTab = useCallback((tabId: string) => {
     if (tabs.length === 1) {
       const fresh = createTab('new-tab');
