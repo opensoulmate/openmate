@@ -4,8 +4,8 @@
   "version": "0.1.0",
   "identifier": "com.openmate.app",
   "build": {
-    "frontendDist": "http://localhost:3002",
-    "devUrl": "http://localhost:3002",
+    "frontendDist": "http://100.76.2.155:3000",
+    "devUrl": "http://100.76.2.155:3000",
     "beforeDevCommand": "npm run dev -- --port 3002",
     "beforeBuildCommand": ""
   },

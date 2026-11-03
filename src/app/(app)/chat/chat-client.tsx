@@ -378,7 +378,18 @@ function useAcpWebSocket(params: {
     if (state.acpReady) await state.acpReady;
     const sid = state.acpSessionId;
     const ws = wsMapRef.current.get(sessionId) || state.ws;
-    if (!sid || !ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!sid || !ws || ws.readyState !== WebSocket.OPEN) {
+      // 发送失败必须可见——静默丢弃=用户看到永久转圈
+      console.error('[ACP] 发送失败：连接不可用', { hasSid: !!sid, wsState: ws?.readyState });
+      setLoading(false);
+      updateSessionMessages(sessionId, prev => [...prev, {
+        id: `err-${Date.now()}`,
+        role: 'agent',
+        parts: [{ type: 'text', text: '⚠️ 消息发送失败：连接不可用，请重试。' }],
+        timestamp: new Date(),
+      }]);
+      return;
+    }
     const id = ++state.rpcId;
     const messageId = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     // 记录 prompt RPC id，响应回来时知道是 prompt 完成
@@ -645,7 +656,10 @@ function useAcpWebSocket(params: {
           ? await sendRpcRequest(ws, 'session/load', { session_id: existingAcpSid, agent_id: agentId })
           : await sendRpcRequest(ws, 'session/new', { cwd: '/', mcpServers: [], agent_id: agentId, _meta: { session_id: sessionId } })
         ) as { session_id?: string; sessionId?: string };
-        const acpSid = result?.session_id || result?.sessionId;
+        // 根因修复（2026-11-03）：ACP v1.0 的 session/load 响应=空 LoadSessionResponse，
+        // 不回带 id（只有 session/new 回带）。此前只认响应里的 id → 老会话 acpSessionId
+        // 永远 null → sendAcpPrompt 静默丢消息 → 界面永远转圈。加载的 sid 本来就知道。
+        const acpSid = result?.session_id || result?.sessionId || existingAcpSid || undefined;
         if (acpSid) {
           state.acpSessionId = acpSid;
           // Migrate temp session ID to real session ID
