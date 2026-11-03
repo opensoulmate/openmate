@@ -69,6 +69,12 @@ export function BrowserAIControl({ initialUrl, onAIAction }: BrowserAIControlPro
     setLoading(true);
   }, []);
 
+  // initialUrl 变化即跳转（tab 切换/外部驱动的 URL 更新都要生效——防实例复用吃掉新地址）
+  useEffect(() => {
+    if (initialUrl && initialUrl !== url) navigate(initialUrl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialUrl]);
+
   // Extract page context from iframe
   const extractPageContext = useCallback(async (): Promise<PageContext | null> => {
     const iframe = iframeRef.current;

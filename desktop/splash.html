@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>OpenMate</title>
+<style>
+  /* 设计基调：非纯黑底、同色系分层、单主强调色、高对比文本（AA） */
+  :root {
+    --bg: #0b0f14;          /* 应用深底（非纯黑） */
+    --surface: #111820;     /* 同色系面板 */
+    --hairline: #1f2a36;
+    --text: #e6edf3;        /* AA ≥ 4.5:1 */
+    --dim: #8b949e;
+    --accent: hsl(205, 45%, 58%);   /* 低饱和主强调色 */
+    --accent-2: hsl(212, 50%, 70%); /* 进度渐变尾（同色系±10明度） */
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: radial-gradient(1100px 500px at 50% -10%, hsl(205, 30%, 14%), var(--bg) 70%);
+    color: var(--text);
+    font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    display: flex; align-items: center; justify-content: center;
+    -webkit-user-select: none; user-select: none; overflow: hidden;
+  }
+  .stage { width: 460px; padding: 0 8px; }
+  .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 28px; }
+  .logo {
+    width: 44px; height: 44px; border-radius: 12px;
+    background: linear-gradient(150deg, hsl(205, 45%, 46%), hsl(212, 50%, 64%));
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 22px; color: #fff;
+    box-shadow: 0 6px 24px hsla(205, 50%, 50%, .25);
+  }
+  .name { font-size: 21px; font-weight: 650; letter-spacing: .4px; }
+  .status {
+    display: inline-block; margin-top: 3px; padding: 2px 9px;
+    border: 1px solid var(--hairline); border-radius: 999px;
+    font-size: 11px; letter-spacing: 1.6px; color: var(--accent);
+  }
+  .status .dot {
+    display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent); margin-right: 6px;
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%, 100% { opacity: .35 } 50% { opacity: 1 } }
+
+  /* 打字机行（攀岩者网站同款手感：逐字+光标块） */
+  .type-line {
+    height: 24px; font-size: 14px; color: var(--dim);
+    font-variant-numeric: tabular-nums;
+  }
+  .type-line .hl { color: var(--text); }
+  .cursor {
+    display: inline-block; width: 7px; height: 15px;
+    background: var(--accent); vertical-align: -2px; margin-left: 2px;
+    animation: blink .85s steps(1) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0 } }
+
+  /* 进度条（细条+同色系渐变） */
+  .bar-wrap {
+    margin-top: 18px; height: 4px; border-radius: 999px;
+    background: var(--surface); border: 1px solid var(--hairline);
+    overflow: hidden;
+  }
+  .bar {
+    height: 100%; width: 0%;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    border-radius: 999px;
+    transition: width .45s cubic-bezier(.22, .61, .36, 1);
+  }
+  .meta {
+    display: flex; justify-content: space-between;
+    margin-top: 9px; font-size: 11px; color: var(--dim);
+  }
+  .pct { color: var(--accent); font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <div class="brand">
+      <div class="logo">O</div>
+      <div>
+        <div class="name">OpenMate</div>
+        <div class="status"><span class="dot"></span>CONNECTING</div>
+      </div>
+    </div>
+    <div class="type-line"><span id="typed" class="hl"></span><span class="cursor"></span></div>
+    <div class="bar-wrap"><div class="bar" id="bar"></div></div>
+    <div class="meta"><span id="step">初始化</span><span class="pct" id="pct">0%</span></div>
+  </div>
+
+<script>
+  // 壳主进程通过 window.setSplash(pct, stage) 驱动；进度平滑逼近目标
+  const LINES = [
+    '初始化桌面外壳 …',
+    'CONNECTING · 连接 OpenMate 服务 …',
+    '服务响应 · 渲染界面 …',
+    '就绪 · WELCOME',
+  ];
+  const STEPS = ['初始化', '连接服务', '渲染界面', '就绪'];
+  let target = 0, shown = 0, stage = 0, typing = null;
+
+  function typeText(text) {
+    clearInterval(typing);
+    const el = document.getElementById('typed');
+    el.textContent = '';
+    let i = 0;
+    typing = setInterval(() => {
+      el.textContent = text.slice(0, ++i);
+      if (i >= text.length) clearInterval(typing);
+    }, 46); // 逐字打字机
+  }
+
+  function setSplash(pct, st) {
+    target = Math.max(target, pct);
+    if (st !== undefined && st !== stage) {
+      stage = st;
+      typeText(LINES[stage] || LINES[LINES.length - 1]);
+      document.getElementById('step').textContent = STEPS[stage] || '就绪';
+    }
+  }
+  window.setSplash = setSplash;
+  typeText(LINES[0]);
+
+  // 进度平滑滚动（fake-approach：真实里程碑是目标，动画只负责手感）
+  (function tick() {
+    shown += (target - shown) * 0.12;
+    if (target - shown < 0.4) shown = target;
+    document.getElementById('bar').style.width = shown + '%';
+    document.getElementById('pct').textContent = Math.round(shown) + '%';
+    requestAnimationFrame(tick);
+  })();
+</script>
+</body>
+</html>

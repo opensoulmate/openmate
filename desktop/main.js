@@ -25,6 +25,32 @@ if (!gotLock) app.quit();
 
 let win = null;
 let tray = null;
+let splash = null;
+
+// 加载动画进度驱动（打字机 splash.html 的 window.setSplash(pct, stage)）
+function splashProgress(pct, stage) {
+  if (!splash || splash.isDestroyed()) return;
+  splash.webContents
+    .executeJavaScript(`window.setSplash && window.setSplash(${pct}, ${stage})`)
+    .catch(() => {});
+}
+
+function createSplash() {
+  splash = new BrowserWindow({
+    width: 560,
+    height: 360,
+    frame: false,
+    resizable: false,
+    backgroundColor: '#0b0f14',
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    icon: path.join(__dirname, 'icon.png'),
+  });
+  splash.loadFile(path.join(__dirname, 'splash.html'));
+  createSplash.startedAt = Date.now();
+  splash.webContents.once('did-finish-load', () => splashProgress(8, 0));
+  splash.on('closed', () => { splash = null; });
+}
 
 function createWindow() {
   win = new BrowserWindow({
@@ -41,6 +67,18 @@ function createWindow() {
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
     },
+    show: false, // 就绪前由 splash 顶着
+  });
+  win.webContents.on('did-start-loading', () => splashProgress(38, 1));
+  win.webContents.on('dom-ready', () => splashProgress(72, 2));
+  win.once('ready-to-show', () => {
+    splashProgress(100, 3);
+    const elapsed = Date.now() - (createSplash.startedAt || 0);
+    const wait = Math.max(360, 1400 - elapsed); // 动画最短 1.4s，完整演出
+    setTimeout(() => {
+      if (splash && !splash.isDestroyed()) splash.close();
+      if (win && !win.isDestroyed()) win.show();
+    }, wait);
   });
   win.loadURL(OPENMATE_URL);
 
@@ -139,6 +177,7 @@ app.on('second-instance', () => {
 });
 
 app.whenReady().then(() => {
+  createSplash();
   createWindow();
   createTray();
   initUpdater();
