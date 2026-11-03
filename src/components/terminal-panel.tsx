@@ -19,7 +19,7 @@ export function TerminalPanel({ apiBase, token }: TerminalPanelProps) {
   const fitAddonRef = useRef<any>(null);
 
   const initTerminal = useCallback(async () => {
-    if (!termRef.current || connected) return;
+    if (!termRef.current || wsRef.current) return; // 幂等守卫：已有连接不再建（connected 进依赖会触发自杀循环）
     const { Terminal } = await import('@xterm/xterm');
     const { FitAddon } = await import('@xterm/addon-fit');
     const { WebLinksAddon } = await import('@xterm/addon-web-links');
@@ -60,11 +60,11 @@ export function TerminalPanel({ apiBase, token }: TerminalPanelProps) {
     const onResize = () => fitAddon.fit();
     window.addEventListener('resize', onResize);
     return () => { window.removeEventListener('resize', onResize); ws.close(); term.dispose(); };
-  }, [token, connected, t]);
+  }, [token, t]); // 注意：绝不加 connected —— 连接成功改状态→重渲染→旧清理掐死新连接（实测 3 连接后停尸'断开连接'）
 
   useEffect(() => {
     if (open) initTerminal();
-    return () => { wsRef.current?.close(); };
+    return () => { wsRef.current?.close(); wsRef.current = null; };
   }, [open, initTerminal]);
 
   const handleRunCommand = useCallback(
