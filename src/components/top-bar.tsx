@@ -3,10 +3,9 @@
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import {
-  Bell, Search, Download, Settings, Minus, Square, X,
+  Bell, Search, Download, Settings,
   BarChart3, Gauge, Shield, Plug, Dna,
 } from "lucide-react";
-import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { HealthWidget } from "@/components/health-widget";
@@ -65,15 +64,8 @@ export function TopBar({ eventCount = 0 }: TopBarProps) {
     );
   };
 
-  // 桌面版窗口控制只在壳内渲染（浏览器版无此桥=不渲染，防 SSR 水合错位）
-  const [isDesktop, setIsDesktop] = useState(false);
-  useEffect(() => {
-    setIsDesktop(!!(window as any).openmateDesktop?.windowControls);
-  }, []);
-
   return (
     <OpenFaceTopBar
-      className="app-drag-bar"
       left={
         <Link href="/chat" className="flex items-center gap-1.5 shrink-0 px-3 hover:opacity-80 transition-opacity">
           <img src="/logo.svg" alt="OpenMate" className="w-7 h-7" />
@@ -98,7 +90,6 @@ export function TopBar({ eventCount = 0 }: TopBarProps) {
         </>
       }
       right={
-        <>
         <Link
           href="/settings"
           className={cn(
@@ -116,23 +107,6 @@ export function TopBar({ eventCount = 0 }: TopBarProps) {
             <Settings size={18} className={pathname.startsWith("/settings") ? "text-primary-foreground" : "text-muted-foreground"} />
           </SuperEllipse>
         </Link>
-        {isDesktop && (
-          <div className="flex items-center h-full">
-            <button onClick={() => (window as any).openmateDesktop.windowControls.minimize()}
-              className="flex h-full w-11 items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="最小化">
-              <Minus size={14} />
-            </button>
-            <button onClick={() => (window as any).openmateDesktop.windowControls.maximize()}
-              className="flex h-full w-11 items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="最大化/还原">
-              <Square size={11} />
-            </button>
-            <button onClick={() => (window as any).openmateDesktop.windowControls.close()}
-              className="flex h-full w-11 items-center justify-center text-muted-foreground hover:bg-red-500 hover:text-white transition-colors" title="关闭">
-              <X size={15} />
-            </button>
-          </div>
-        )}
-        </>
       }
     />
   );

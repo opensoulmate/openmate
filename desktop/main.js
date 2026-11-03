@@ -1,5 +1,5 @@
 // OpenMate Desktop — Electron 薄壳（对标 Hermes Desktop 架构：壳+同一后端，同步架构自带）
-const { app, BrowserWindow, Tray, Menu, shell, nativeImage, nativeTheme, ipcMain } = require('electron');
+const { app, BrowserWindow, Tray, Menu, shell, nativeImage, nativeTheme, ipcMain, dialog } = require('electron');
 const path = require('path');
 
 // 地址解析：环境变量 > 同目录 config.json > 本机默认（Windows 免环境变量，改 config.json 即可）
@@ -36,7 +36,6 @@ function createWindow() {
     icon: path.join(__dirname, 'icon.png'),
     backgroundColor: '#0b0f14',
     autoHideMenuBar: true,
-    titleBarStyle: 'hidden', // 原生标题条隐藏——窗口控制进 TopBar（与设置同区）
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -108,14 +107,33 @@ function createTray() {
   }
 }
 
-// 窗口控制（TopBar 三钮：最小化/最大化/关闭）
-ipcMain.on('win-minimize', (e) => BrowserWindow.fromWebContents(e.sender)?.minimize());
-ipcMain.on('win-maximize', (e) => {
-  const w = BrowserWindow.fromWebContents(e.sender);
-  if (!w) return;
-  w.isMaximized() ? w.unmaximize() : w.maximize();
-});
-ipcMain.on('win-close', (e) => BrowserWindow.fromWebContents(e.sender)?.close());
+// 在线更新：装一次，之后发版自动更（更新源=climbing.top/openmate-releases）
+function initUpdater() {
+  let autoUpdater;
+  try {
+    ({ autoUpdater } = require('electron-updater'));
+  } catch (e) {
+    console.error('[updater] electron-updater 不可用:', e.message);
+    return;
+  }
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true; // 不点重启也在退出时自动装
+  const check = () => autoUpdater.checkForUpdates().catch((e) => console.error('[updater]', e.message));
+  setTimeout(check, 10 * 1000); // 启动 10 秒后首查
+  setInterval(check, 4 * 60 * 60 * 1000); // 之后每 4 小时
+  autoUpdater.on('update-downloaded', (info) => {
+    const opts = {
+      type: 'info', buttons: ['立即重启', '稍后'], defaultId: 0, cancelId: 1,
+      title: 'OpenMate 更新就绪',
+      message: `新版本 ${info.version} 已下载完成`,
+      detail: '点"立即重启"完成更新；不重启的话，下次退出应用时会自动安装。',
+    };
+    const w = BrowserWindow.getAllWindows()[0];
+    (w ? dialog.showMessageBox(w, opts) : dialog.showMessageBox(opts)).then(({ response }) => {
+      if (response === 0) autoUpdater.quitAndInstall();
+    });
+  });
+}
 
 // 主题联动：OpenMate 切主题 → 系统标题栏/窗口底色跟着切
 ipcMain.on('openmate-theme-change', (e, mode) => {
@@ -131,6 +149,7 @@ app.on('second-instance', () => {
 app.whenReady().then(() => {
   createWindow();
   createTray();
+  initUpdater();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 

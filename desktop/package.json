@@ -2,11 +2,14 @@
   "name": "openmate-desktop",
   "productName": "OpenMate",
   "version": "1.0.0",
-  "description": "OpenMate Desktop — Electron 薄壳，加载 OpenMate Web（:3000），网页版/桌面版同源",
+  "description": "OpenMate Desktop — Electron 薄壳，加载 OpenMate Web（:3000），网页版/桌面版同源，支持在线更新",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build": "electron-builder --linux dir"
+    "build": "electron-builder --win nsis dir"
+  },
+  "dependencies": {
+    "electron-updater": "^6.6.2"
   },
   "devDependencies": {
     "electron": "45.1.0",
@@ -15,14 +18,29 @@
   "build": {
     "appId": "top.climbing.openmate",
     "productName": "OpenMate",
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://climbing.top/openmate-releases/"
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "dir"
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "shortcutName": "OpenMate",
+      "artifactName": "OpenMate-Setup-${version}.${ext}"
+    },
     "linux": {
       "target": [
         "dir"
       ],
       "category": "Network"
     }
-  },
-  "allowScripts": {
-    "electron@44.10.1": true
   }
 }

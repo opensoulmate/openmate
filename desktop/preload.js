@@ -2,9 +2,4 @@
 const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('openmateDesktop', {
   setTheme: (mode) => ipcRenderer.send('openmate-theme-change', mode === 'light' ? 'light' : 'dark'),
-  windowControls: {
-    minimize: () => ipcRenderer.send('win-minimize'),
-    maximize: () => ipcRenderer.send('win-maximize'),
-    close: () => ipcRenderer.send('win-close'),
-  },
 });

@@ -1044,10 +1044,3 @@ body {
 .markdown-content tbody tr:nth-child(even) { background: rgba(255,255,255,0.03); }
 .markdown-content tbody tr:hover { background: rgba(255,255,255,0.06); }
 
-/* ── 桌面版：TopBar 窗口拖拽区（原生标题条已隐藏）── */
-.app-drag-bar { -webkit-app-region: drag; }
-.app-drag-bar button,
-.app-drag-bar a,
-.app-drag-bar kbd,
-.app-drag-bar input,
-.app-drag-bar [role="button"] { -webkit-app-region: no-drag; }
