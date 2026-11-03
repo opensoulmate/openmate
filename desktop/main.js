@@ -61,10 +61,31 @@ function createWindow() {
     win.loadURL(html);
   });
 
-  // 外链用系统浏览器打开（别把应用窗口当浏览器标签用）
+  // 外链=内置浏览器子窗口（app 内看网页，不再甩系统浏览器）
+  const openInternalBrowser = (url) => {
+    const b = new BrowserWindow({
+      width: 1100,
+      height: 780,
+      icon: path.join(__dirname, 'icon.png'),
+      backgroundColor: nativeTheme.shouldUseDarkColors ? '#0b0f14' : '#ffffff',
+      autoHideMenuBar: true,
+      webPreferences: { nodeIntegration: false, contextIsolation: true }, // 外部网页=纯沙箱
+    });
+    b.loadURL(url);
+  };
   win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    if (/^https?:/i.test(url)) openInternalBrowser(url);
+    else shell.openExternal(url);
     return { action: 'deny' };
+  });
+  // 主窗口防漂移：普通外链不许把应用本身导航走
+  const APP_ORIGIN = new URL(OPENMATE_URL).origin;
+  win.webContents.on('will-navigate', (e, url) => {
+    try {
+      if (new URL(url).origin === APP_ORIGIN) return;
+    } catch (err) { /* 非法 URL=拦 */ }
+    e.preventDefault();
+    if (/^https?:/i.test(url)) openInternalBrowser(url);
   });
   win.on('closed', () => { win = null; });
 }
