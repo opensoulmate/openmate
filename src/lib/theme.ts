@@ -117,6 +117,10 @@ export function applyTheme(theme: ThemeId) {
   else {
     root.classList.add("dark");
   }
+
+  // 桌面版壳联动：标题栏明暗跟随主题（浏览器无此桥=静默跳过）
+  const isLight = theme === "light" || theme.endsWith("-light");
+  (window as any).openmateDesktop?.setTheme?.(isLight ? "light" : "dark");
 }
 
 /** 持久化主题到 localStorage 并立即应用 */

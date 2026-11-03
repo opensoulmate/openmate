@@ -14,7 +14,7 @@ import {
   Camera, Download, Tag, User, Bot, Droplets, Dna, Eye, Shield, Bone,
   Volume2, Layers, Link2, Home, MousePointer, Mic, ImageIcon, Smile,
   Stethoscope, Cpu, Bolt, Heart, Gauge, BarChart3, Package, ScrollText,
-  History, Store, Pill, LogOut, DollarSign,
+  History, Store, Pill, LogOut, DollarSign, Terminal,
 } from "lucide-react";
 import { fetchPluginNavItems, getCachedPluginNavItems, mergePluginNavItems, PluginNavItem } from "@/lib/plugin-nav";
 import { BottomBar as OpenFaceBottomBar } from "@opensoulmate/openface";
@@ -291,6 +291,17 @@ export function BottomNav({ totalUnread = 0, onOpenConversations }: BottomNavPro
             );
           })}
         </>
+      }
+      right={
+        <div className="relative w-12 h-full flex items-center justify-center">
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent('openmate-terminal-toggle'))}
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground transition-transform hover:scale-105"
+            title={t('terminal.title', '终端')}
+          >
+            <Terminal size={14} />
+          </button>
+        </div>
       }
       centerButton={
         <button

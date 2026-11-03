@@ -62,6 +62,13 @@ export function TerminalPanel({ apiBase, token }: TerminalPanelProps) {
     return () => { window.removeEventListener('resize', onResize); ws.close(); term.dispose(); };
   }, [token, t]); // 注意：绝不加 connected —— 连接成功改状态→重渲染→旧清理掐死新连接（实测 3 连接后停尸'断开连接'）
 
+  // 开关从 footbar 右侧按钮来（与左侧用户按钮对称）——事件桥，状态仍在本组件
+  useEffect(() => {
+    const onToggle = () => setOpen((o) => !o);
+    window.addEventListener('openmate-terminal-toggle', onToggle);
+    return () => window.removeEventListener('openmate-terminal-toggle', onToggle);
+  }, []);
+
   useEffect(() => {
     if (open) initTerminal();
     return () => { wsRef.current?.close(); wsRef.current = null; };
@@ -78,11 +85,6 @@ export function TerminalPanel({ apiBase, token }: TerminalPanelProps) {
 
   return (
     <>
-      {/* Toggle button */}
-      <button onClick={() => setOpen(!open)} className="fixed bottom-16 lg:bottom-4 right-4 z-50 w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center shadow-lg hover:bg-primary/90 transition-colors" title={t('terminal.title')}>
-        <TerminalIcon className="w-5 h-5" />
-      </button>
-
       {/* Terminal panel */}
       {open && (
         <div className={`fixed z-40 bg-[var(--color-background)] border border-border rounded-t-xl shadow-2xl transition-all ${maximized ? 'inset-0' : 'bottom-0 right-2 lg:right-14 w-[calc(100%-1rem)] lg:w-[700px] h-[50vh] lg:h-[400px]'}`}>
