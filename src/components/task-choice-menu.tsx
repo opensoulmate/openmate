@@ -84,7 +84,7 @@ function AskQuestionCard({
   const answeredCount = questions.filter(answered).length;
 
   return (
-    <div className="mt-2 rounded-xl border border-border bg-card/95 shadow-lg overflow-hidden" data-slot="clarify-card">
+    <div className="mt-2 overflow-hidden" data-slot="clarify-card">
       {/* 顶栏：已回答 x/y（Hermes 契约） */}
       <div className="flex items-center justify-between px-4 pt-3 pb-1">
         <span className="text-xs text-muted-foreground">
@@ -231,7 +231,7 @@ export function TaskChoiceMenu({
   };
 
   return (
-    <div className="mt-2 rounded-xl border border-border bg-card/95 shadow-lg overflow-hidden" data-slot="clarify-card">
+    <div className="mt-2 overflow-hidden" data-slot="clarify-card">
       {/* 题干 + 选一个（Hermes 契约） */}
       <div className="flex items-start gap-2 px-4 pt-3 pb-1">
         <span className="flex-1 whitespace-pre-wrap text-[0.95rem] font-medium text-foreground/95 leading-relaxed">{question}</span>

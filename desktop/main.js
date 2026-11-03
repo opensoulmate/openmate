@@ -152,17 +152,31 @@ function initUpdater() {
   setTimeout(check, 10 * 1000); // 启动 10 秒后首查
   setInterval(check, 4 * 60 * 60 * 1000); // 之后每 4 小时
   autoUpdater.on('update-downloaded', (info) => {
-    const opts = {
-      type: 'info', buttons: ['立即重启', '稍后'], defaultId: 0, cancelId: 1,
-      title: 'OpenMate 更新就绪',
-      message: `新版本 ${info.version} 已下载完成`,
-      detail: '点"立即重启"完成更新；不重启的话，下次退出应用时会自动安装。',
-    };
+    // 主题化弹窗：交给渲染层（与 app 同风格）；无渲染层才退回原生对话框
     const w = BrowserWindow.getAllWindows()[0];
-    (w ? dialog.showMessageBox(w, opts) : dialog.showMessageBox(opts)).then(({ response }) => {
-      if (response === 0) autoUpdater.quitAndInstall();
-    });
+    if (w && !w.isDestroyed()) {
+      w.webContents.send('openmate-update-ready', { version: info.version });
+    } else {
+      dialog.showMessageBox({
+        type: 'info', buttons: ['立即重启', '稍后'], defaultId: 0, cancelId: 1,
+        title: 'OpenMate 更新就绪',
+        message: `新版本 ${info.version} 已下载完成`,
+        detail: '点"立即重启"完成更新；不重启的话，下次退出应用时会自动安装。',
+      }).then(({ response }) => {
+        if (response === 0) autoUpdater.quitAndInstall();
+      });
+    }
   });
+  ipcMain.on('openmate-update-action', (e, action) => {
+    if (action === 'install') autoUpdater.quitAndInstall();
+  });
+  // 测试钩子：OPENMATE_FAKE_UPDATE=1 弹一次更新提示（验收/UI 调试）
+  if (process.env.OPENMATE_FAKE_UPDATE === '1') {
+    setTimeout(() => {
+      const w = BrowserWindow.getAllWindows()[0];
+      if (w && !w.isDestroyed()) w.webContents.send('openmate-update-ready', { version: '9.9.9' });
+    }, 3000);
+  }
 }
 
 // 主题联动：OpenMate 切主题 → 系统标题栏/窗口底色跟着切

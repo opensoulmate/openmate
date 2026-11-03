@@ -110,6 +110,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const setRightPanelOpen = useAppStore((s) => s.setRightPanelOpen);
   // 桌面壳桥：外链/新窗口 → workspace 新 web-browser 标签页 + 展开右栏
   const [pendingWebUrl, setPendingWebUrl] = useState<string | null>(null);
+  // 桌面壳：更新就绪 → 主题化弹窗（替代原生对话框，与 app 风格一致）
+  const [updateInfo, setUpdateInfo] = useState<{ version: string } | null>(null);
+  useEffect(() => {
+    const bridge = (window as any).openmateDesktop;
+    if (!bridge?.onUpdateReady) return;
+    const off = bridge.onUpdateReady((data: { version: string }) => setUpdateInfo(data));
+    return typeof off === 'function' ? off : undefined;
+  }, []);
   useEffect(() => {
     const bridge = (window as any).openmateDesktop;
     if (!bridge?.onOpenWebTab) return;
@@ -542,6 +550,31 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           onClick={() => setRightPanelOpen(false)}
           aria-hidden="true"
         />
+      )}
+      {/* 桌面壳：更新就绪提示（主题化） */}
+      {updateInfo && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="mx-4 w-full max-w-sm rounded-2xl border border-border bg-card p-5 shadow-2xl">
+            <h3 className="text-base font-semibold text-foreground">新版本 v{updateInfo.version} 已就绪</h3>
+            <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+              点"立即重启"完成更新；选"稍后"则下次退出应用时自动安装。
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => setUpdateInfo(null)}
+                className="rounded-lg px-3.5 py-1.5 text-sm text-muted-foreground hover:bg-muted/60 transition-colors"
+              >
+                稍后
+              </button>
+              <button
+                onClick={() => (window as any).openmateDesktop?.updateAction?.('install')}
+                className="rounded-lg bg-primary px-3.5 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 transition-opacity"
+              >
+                立即重启
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       {/* Container: absolute positioned, slides with right property */}
       <div

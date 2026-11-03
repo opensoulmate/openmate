@@ -1806,10 +1806,18 @@ export function ChatClient() {
                 name: a.name as string,
                 mime_type: a.mime_type as string,
               }));
+            // choice 消息在库里存的是 JSON 文本——历史还原必须与流式路径同解，否则切页回来提问卡消失
+            let choicePart: Message['parts'][number] | null = null;
+            try {
+              const p = JSON.parse(content);
+              if (p && p.type === 'choice' && (p.choices || p.questions)) {
+                choicePart = { type: 'choice', text: p.text, choices: p.choices, questions: p.questions };
+              }
+            } catch { /* 非 JSON=普通文本 */ }
             return {
               id: (m.id || Date.now()).toString(),
               role: isAgent ? 'agent' : 'user',
-              parts: [{ type: 'text', text: content }, ...attachmentParts],
+              parts: [choicePart ?? { type: 'text', text: content }, ...attachmentParts],
               timestamp: new Date((m.timestamp as string) || Date.now()),
               source: m.source as string,
               fileChanges: isAgent ? parseFileChanges(content) : undefined,

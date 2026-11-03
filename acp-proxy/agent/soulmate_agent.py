@@ -7133,6 +7133,17 @@ You can send files to the user natively: to deliver a file, write a brief confir
                     session_id=session_id,
                     update=acp.update_agent_message_text(json.dumps(payload)),
                 )
+            # 落库：提问卡此前只走流式推送——历史里没有它，切页回来提问卡消失。
+            # 存与流式完全相同的 JSON 文本，历史还原按 type==='choice' 同解渲染。
+            try:
+                self._save_message(
+                    session_id,
+                    "assistant",
+                    json.dumps(payload, ensure_ascii=False),
+                    metadata='{"kind":"choice_card"}',
+                )
+            except Exception as _e:
+                logger.warning(f"clarify 提问卡落库失败: {_e}")
             if "questions" in payload:
                 result = (f"已向用户展示提问卡: {payload['text']} "
                           f"(共{len(payload['questions'])}个问题，等待用户作答)")
