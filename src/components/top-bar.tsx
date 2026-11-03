@@ -118,7 +118,6 @@ export function TopBar({ eventCount = 0 }: TopBarProps) {
         </Link>
         {isDesktop && (
           <div className="flex items-center h-full">
-            <div className="w-px h-4 bg-border mx-1 shrink-0" />
             <button onClick={() => (window as any).openmateDesktop.windowControls.minimize()}
               className="flex h-full w-11 items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="最小化">
               <Minus size={14} />
