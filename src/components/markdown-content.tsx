@@ -6,7 +6,8 @@ import { Copy, Check, Pencil, Eye, EyeOff, FileText, Download } from 'lucide-rea
 import { useState, useCallback, lazy, Suspense, useMemo, memo, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { rehypeSecretMask } from '@/lib/rehype-secret-mask';
+import { rehypeSecretMask } from "@/lib/rehype-secret-mask";
+import { remarkAutolinkFix } from "@/lib/remark-autolink-fix";
 import { SecretAwareSpan } from '@/components/secret-pill';
 import { scanForSecrets, maskCodeInText } from '@/lib/secret-redaction';
 import { MermaidDiagram } from './mermaid-diagram';
@@ -342,7 +343,7 @@ const MarkdownContent = memo(function MarkdownContent({ content, onCodeApply }: 
           ) : s.text.trim() ? (
             <ReactMarkdown
               key={`md-${i}`}
-              remarkPlugins={[remarkGfm]}
+              remarkPlugins={[remarkGfm, remarkAutolinkFix]}
               rehypePlugins={[rehypeSecretMask]}
               components={components}
             >
@@ -357,7 +358,7 @@ const MarkdownContent = memo(function MarkdownContent({ content, onCodeApply }: 
   return (
     <div className="markdown-content">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkAutolinkFix]}
         rehypePlugins={[rehypeSecretMask]}
         components={components}
       >
