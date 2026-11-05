@@ -971,6 +971,49 @@ class SoulMateAgent:
             self._mcp_resource_servers = []
             return self._mcp_tools_cache or []
 
+    async def _db_query(self, func_args: dict) -> str:
+        """Phase D: query the OpenSoma /api/db/* read-only database face.
+
+        Configured via .env: SOMA_DB_ENDPOINT / SOMA_DB_TOKEN / SOMA_DB_DEFAULT.
+        The face enforces read-only itself (statement whitelist + READ ONLY
+        transaction); this wrapper just forwards and formats.
+        """
+        import httpx as _httpx
+
+        action = func_args.get("action", "query")
+        db = func_args.get("db") or os.getenv("SOMA_DB_DEFAULT", "oa")
+        endpoint = os.getenv("SOMA_DB_ENDPOINT", "").rstrip("/")
+        token = os.getenv("SOMA_DB_TOKEN", "")
+        if not endpoint or not token:
+            return "错误: 数据库未接入（缺 SOMA_DB_ENDPOINT/SOMA_DB_TOKEN 配置）"
+        headers = {"Authorization": f"Bearer {token}"}
+        try:
+            async with _httpx.AsyncClient(timeout=15) as client:
+                if action == "health":
+                    resp = await client.get(f"{endpoint}/api/db/health", headers=headers)
+                elif action == "schema":
+                    resp = await client.post(
+                        f"{endpoint}/api/db/schema", headers=headers, json={"db": db}
+                    )
+                else:
+                    sql = func_args.get("sql", "")
+                    if not sql or not sql.strip():
+                        return "错误: action=query 需要 sql 参数"
+                    resp = await client.post(
+                        f"{endpoint}/api/db/query",
+                        headers=headers,
+                        json={"db": db, "sql": sql},
+                    )
+            try:
+                data = resp.json()
+            except Exception:
+                data = {"error": resp.text[:300]}
+            if resp.status_code != 200:
+                return f"错误[{resp.status_code}]: {data.get('error', '未知错误')}"
+            return json.dumps(data, ensure_ascii=False)
+        except Exception as e:
+            return f"错误: 数据库查询失败: {e}"
+
     async def _call_mcp_tool(self, func_name: str, arguments: dict) -> str:
         """调用 MCP Client 的工具执行接口。
 
@@ -1351,6 +1394,8 @@ class SoulMateAgent:
         if not gate_result.allowed:
             return f"[被拦截:{gate_result.behavior}] {gate_result.blocked_reason}"
         try:
+            if func_name == "db_query":
+                return await self._db_query(func_args)
             if func_name == "read_file":
                 path = func_args.get("path", "")
                 offset = int(func_args.get("offset", 1) or 1)
@@ -2727,6 +2772,21 @@ You can send files to the user natively: to deliver a file, write a brief confir
                         "url": {"type": "string", "description": "要抓取的网页URL"},
                     },
                     "required": ["url"],
+                },
+            },
+        }, {
+            "type": "function",
+            "function": {
+                "name": "db_query",
+                "description": "查询已接入的业务数据库（只读）。动作：schema=获取表/列目录（写SQL前先看表结构）、query=执行只读SQL（仅SELECT/SHOW/DESCRIBE/EXPLAIN/WITH）、health=连通性。报表场景：先 schema 再 query 取数，配合 execute_code 生成 xlsx/图表。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": {"type": "string", "enum": ["query", "schema", "health"], "description": "query=执行SQL / schema=表列目录 / health=连通性"},
+                        "db": {"type": "string", "description": "数据库ID（默认 oa）"},
+                        "sql": {"type": "string", "description": "action=query 时必填：只读SQL语句"},
+                    },
+                    "required": ["action"],
                 },
             },
         }, {
@@ -4402,7 +4462,9 @@ You can send files to the user natively: to deliver a file, write a brief confir
                                 continue
 
                         # ── 基础工具执行 ───────────────────────────────
-                        if func_name == "read_file":
+                        if func_name == "db_query":
+                            result = await self._db_query(func_args)
+                        elif func_name == "read_file":
                             try:
                                 path = func_args.get("path", "")
                                 offset = func_args.get("offset", 1)
