@@ -197,6 +197,107 @@ def _create_discussion_task_db(
         db.close()
 
 
+_SUMMON_WORDS = ("大家", "各位", "谁能", "有人", "谁来", "同志们")
+_FREECHAT_MAX_REPLY_CHARS = 600
+
+
+def _match_repliers(content: str, agents: list) -> list:
+    """Pick who replies to a free-chat message.
+
+    - @name / @agent_id mentions → exactly those agents
+    - summon words (大家/各位/…) → every agent (cap 3)
+    - otherwise → nobody (the group stays quiet unless addressed)
+    """
+    import re
+
+    mentioned = set()
+    for token in re.findall(r"@([\w\u4e00-\u9fff·\-]{1,24})", content):
+        for agent in agents:
+            if (
+                token == agent.agent_id
+                or token == agent.name
+                or (token and (token in agent.name or agent.name in token))
+            ):
+                mentioned.add(agent.agent_id)
+    if mentioned:
+        return [a for a in agents if a.agent_id in mentioned]
+    if any(w in content for w in _SUMMON_WORDS):
+        return list(agents)[:3]
+    return []
+
+
+async def _agent_free_reply(
+    group_id: str,
+    content: str,
+    repliers: list,
+    broadcast_fn,
+    persist_fn,
+):
+    """Free-chat agent reply: one LLM answer per addressed agent.
+
+    Unlike the structured discussion engine this is plain group chat —
+    each addressed agent answers the user's message in their own voice,
+    seeing the recent group history so the answers reference each other.
+    """
+    from agent.llm_engine import LLMEngine
+
+    # recent history for context (best effort)
+    history_text = ""
+    try:
+        db = _get_db()
+        rows = db.execute(
+            "SELECT agent_name, content FROM discussion_messages "
+            "WHERE group_id = ? ORDER BY rowid DESC LIMIT 10",
+            (group_id,),
+        ).fetchall()
+        db.close()
+        history_text = "\n".join(
+            f"{r['agent_name'] or '成员'}: {(r['content'] or '')[:160]}" for r in reversed(rows)
+        )
+    except Exception:
+        pass
+
+    for agent in repliers:
+        system_prompt = (
+            f"你是 AI 群组「{group_id}」的成员 {agent.name}（角色：{agent.role}）。"
+            "在群聊里自然、简短地回应，像同事讨论一样，可以引用前面成员的话。"
+            f"回复控制在 {_FREECHAT_MAX_REPLY_CHARS} 字以内，不要客套开场白。"
+        )
+        user_msg = f"群聊近况：\n{history_text}\n\n新消息：{content}\n\n请以 {agent.name} 的身份回应。"
+        try:
+            engine = LLMEngine(model=agent.model or "", system_prompt=system_prompt)
+            reply = (await engine.chat([{"role": "user", "content": user_msg}])) or ""
+            reply = reply.strip()[:_FREECHAT_MAX_REPLY_CHARS]
+            if not reply or reply.startswith("[LLM错误"):
+                logger.warning(f"[ws_group] free reply empty for {agent.agent_id}")
+                continue
+        except Exception as exc:
+            logger.error(f"[ws_group] free reply failed for {agent.agent_id}: {exc}")
+            continue
+        msg_id = persist_fn(
+            group_id=group_id,
+            agent_id=agent.agent_id,
+            agent_name=agent.name,
+            content=reply,
+            intent="comment",
+            task_id="",
+            round_num=1,
+            metadata=None,
+        )
+        await broadcast_fn(group_id, {
+            "type": "agent_message",
+            "data": {
+                "id": msg_id,
+                "group_id": group_id,
+                "agent_id": agent.agent_id,
+                "agent_name": agent.name,
+                "content": reply,
+                "intent": "comment",
+                "timestamp": time.time(),
+            },
+        })
+
+
 def _persist_message(
     group_id: str,
     agent_id: str,
@@ -538,6 +639,7 @@ async def group_websocket(websocket: WebSocket, group_id: str):
                 continue
 
             msg_type = data.get("type", "message")
+            logger.info(f"[ws_group] recv msg_type={msg_type} keys={sorted(data.keys())}")
             content = data.get("content", "").strip()
             agent_id = data.get("agent_id", user_id_str)
             intent = data.get("intent", "comment")
@@ -583,7 +685,9 @@ async def group_websocket(websocket: WebSocket, group_id: str):
 
             elif msg_type == "start_discussion":
                 # 启动讨论流程 — 创建任务，加载Agent，后台执行编排
+                logger.info("[ws_group] start_discussion branch entered")
                 goal = data.get("goal", "").strip()
+                logger.info(f"[ws_group] goal={goal[:40]!r}")
                 if not goal:
                     await _safe_send(websocket, {
                         "type": "error",
@@ -592,7 +696,9 @@ async def group_websocket(websocket: WebSocket, group_id: str):
                     continue
 
                 # 从数据库加载群组 Agent
+                logger.info(f"[ws_group] loading agents for {group_id}")
                 agents = _load_group_agents(group_id)
+                logger.info(f"[ws_group] agents loaded: {len(agents)}")
                 if not agents:
                     await _safe_send(websocket, {
                         "type": "error",
@@ -742,6 +848,17 @@ async def group_websocket(websocket: WebSocket, group_id: str):
 
                 # 广播给所有客户端（包括发送者）
                 await _broadcast(group_id, broadcast_data)
+
+                # 群内自由对话：用户消息被 @ 或召唤词点到的 agent 接话
+                # （非结构化讨论——多 agent 群聊的自然对话面）
+                if not is_agent:
+                    repliers = _match_repliers(content, _load_group_agents(group_id))
+                    if repliers:
+                        asyncio.create_task(
+                            _agent_free_reply(
+                                group_id, content, repliers, _broadcast, _persist_message
+                            )
+                        )
 
                 # 回复发送者确认
                 await _safe_send(websocket, {
