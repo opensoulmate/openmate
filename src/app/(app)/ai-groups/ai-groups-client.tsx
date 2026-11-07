@@ -229,8 +229,9 @@ export default function AIGroupsClient() {
   return (
     <div className="flex flex-1 flex-col min-h-0 relative">
       {/* ===== 聊天头部：群组名称 + WS 连接状态 ===== */}
-      {/* topbar 通栏：面板顶边与其下边线同一水平 */}
-      <div className="flex flex-col shrink-0">
+      {/* topbar：随面板展开平移缩短（下边线同步），分类折叠钮随之居中 */}
+      <div className="flex shrink-0">
+      <div className="flex flex-1 flex-col min-w-0">
       <div className="h-12 border-b border-border flex items-center px-2 lg:px-4 justify-between shrink-0">
         <div className="flex items-center gap-2">
           {/* 侧边栏切换按钮 */}
@@ -307,8 +308,10 @@ export default function AIGroupsClient() {
         </button>
       </div>
       </div>
+      <div className={`overflow-hidden shrink-0 transition-[width] duration-200 ease-linear ${isMobile ? 'w-0' : (tasksPanelOpen || showGroupPanel) ? 'w-[340px]' : 'w-0'}`} />
+      </div>
 
-      {/* ===== 主区域：消息流 + 看板式侧栏（侧栏与顶栏顶对齐） ===== */}
+      {/* ===== 主区域：消息流 + 看板式侧栏（平移展开带动画） ===== */}
       <div className="flex flex-1 min-h-0">
       {/* 消息流列（顶栏/分类栏在此列内：分类宽度=对话框宽度） */}
       <div className={`flex flex-1 min-w-0 flex-col ${isMobile && (tasksPanelOpen || showGroupPanel) ? 'hidden' : ''}`}>
@@ -460,9 +463,10 @@ export default function AIGroupsClient() {
         </div>
       )}
       </div>
-      {/* ===== 任务看板常驻面板：桌面端消息流右侧常驻，移动端全屏 ===== */}
-      {tasksPanelOpen && selectedGroup && (
-        <aside className={`relative flex flex-col min-h-0 bg-card ${isMobile ? 'flex-1 w-full' : 'w-[340px] shrink-0 border-l border-border'}`}>
+      {/* ===== 任务看板面板：平移展开带动画（leftpanel 同款手感） ===== */}
+      {selectedGroup && (<>
+        <aside className={`relative flex flex-col min-h-0 overflow-hidden shrink-0 transition-[width] duration-200 ease-linear ${isMobile ? (tasksPanelOpen ? 'w-full' : 'w-0') : (tasksPanelOpen ? 'w-[340px]' : 'w-0')}`}>
+          <div className={`h-full flex flex-col bg-card border-l border-border ${isMobile ? 'w-full' : 'w-[340px]'}`}>
           <div className="flex items-center gap-1.5 px-3 h-12 border-b border-border shrink-0">
             <ListChecks className="w-3.5 h-3.5 text-primary" />
             <span className="text-xs font-medium">任务看板</span>
@@ -470,11 +474,11 @@ export default function AIGroupsClient() {
             <div className="flex-1" />
           </div>
           <AIGroupsTaskBoard />
+          </div>
         </aside>
-      )}
       {/* 群组管理面板（任务看板样式：右侧常驻 / 移动端全宽） */}
-      {showGroupPanel && selectedGroup && (
-        <aside className={`relative flex flex-col min-h-0 bg-card ${isMobile ? 'flex-1 w-full' : 'w-[340px] shrink-0 border-l border-border'}`}>
+        <aside className={`relative flex flex-col min-h-0 overflow-hidden shrink-0 transition-[width] duration-200 ease-linear ${isMobile ? (showGroupPanel ? 'w-full' : 'w-0') : (showGroupPanel ? 'w-[340px]' : 'w-0')}`}>
+          <div className={`h-full flex flex-col bg-card border-l border-border ${isMobile ? 'w-full' : 'w-[340px]'}`}>
           {/* 看板式标题行 */}
           <div className="flex items-center gap-1.5 px-3 h-12 border-b border-border shrink-0">
             <Settings className="w-3.5 h-3.5 text-primary" />
@@ -507,8 +511,9 @@ export default function AIGroupsClient() {
               onAdd={addAgent}
             />
           </div>
+          </div>
         </aside>
-      )}
+      </>)}
       </div>
 
     </div>

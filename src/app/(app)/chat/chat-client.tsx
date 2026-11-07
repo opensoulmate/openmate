@@ -1964,7 +1964,8 @@ export function ChatClient() {
 
   return (
     <>
-        <div className="flex flex-col shrink-0">
+      <div className="flex shrink-0">
+        <div className="flex flex-1 flex-col min-w-0">
           <div className="h-12 flex items-center gap-1.5 lg:gap-2 min-w-0 px-3 lg:px-4 border-b border-border">
             <button onClick={(e) => { e.stopPropagation(); toggleSidebar(); if (isMobile) { setRightPanelOpen(false); setShowCheckpoints(false); } }} className="shrink-0 p-2 hover:bg-muted/50 active:bg-muted transition-colors text-muted-foreground touch-manipulation" aria-label="Toggle Sidebar">
               <PanelLeft className="w-4 h-4" />
@@ -2020,6 +2021,8 @@ export function ChatClient() {
           </div>
           {/* Chat view toggle — 裙摆式分段视图（可折叠） */}
         </div>
+        <div className={`overflow-hidden shrink-0 transition-[width] duration-200 ease-linear ${isMobile ? 'w-0' : showCheckpoints ? 'w-[340px]' : 'w-0'}`} />
+      </div>
 
     <div className="flex flex-1 min-h-0 relative">
       {/* Chat Window */}
@@ -2362,8 +2365,8 @@ export function ChatClient() {
         </div>
       </div>
         {/* 检查点面板 — 任务看板式平移展开侧栏（内容被挤开，不弹出） */}
-        {showCheckpoints && (
-          <aside className={`relative flex flex-col min-h-0 bg-card ${isMobile ? 'flex-1 w-full' : 'w-[340px] shrink-0 border-l border-border'}`}>
+        <aside className={`relative flex flex-col min-h-0 overflow-hidden shrink-0 transition-[width] duration-200 ease-linear ${isMobile ? (showCheckpoints ? 'w-full' : 'w-0') : (showCheckpoints ? 'w-[340px]' : 'w-0')}`}>
+          <div className={`h-full flex flex-col bg-card border-l border-border ${isMobile ? 'w-full' : 'w-[340px]'}`}>
             {/* 看板式标题行（与任务看板同款） */}
             <div className="flex items-center gap-1.5 px-3 h-12 border-b border-border shrink-0">
               <Bookmark className="w-3.5 h-3.5 text-primary" />
@@ -2372,8 +2375,8 @@ export function ChatClient() {
               <div className="flex-1" />
             </div>
             {renderCheckpointList()}
-          </aside>
-        )}
+          </div>
+        </aside>
       {/* Delete Confirmation Dialog */}
       <Dialog
         open={!!deleteConfirm}
