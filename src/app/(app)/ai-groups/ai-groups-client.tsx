@@ -13,6 +13,7 @@ import {
   Plus, Trash2, Edit3, Check, XIcon, ChevronRight,
   StopCircle,
   Trophy, ArrowUp, ArrowDown, ArrowRight,
+  ChevronDown,
 } from 'lucide-react';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useAIGroupsStore, type AgentRole, type GroupMessage } from '@/stores/ai-groups-store';
@@ -120,6 +121,7 @@ export default function AIGroupsClient() {
   // 任务看板常驻面板（Paperclip 看板式）：桌面端消息流右侧常驻，移动端全屏切换
   const [tasksPanelOpen, setTasksPanelOpen] = useState(true);
   const [groupView, setGroupView] = useState('messages'); // 分类视图（与会话页共用）
+  const [showViewTabs, setShowViewTabs] = useState(false); // 分类栏折叠（与会话页一致）
   // 编辑 Agent 的临时状态
   const [editName, setEditName] = useState('');
   const [editRole, setEditRole] = useState('');
@@ -227,6 +229,10 @@ export default function AIGroupsClient() {
   return (
     <div className="flex flex-1 flex-col min-h-0 relative">
       {/* ===== 聊天头部：群组名称 + WS 连接状态 ===== */}
+      {/* ===== 主区域：消息流 + 看板式侧栏（侧栏与顶栏顶对齐） ===== */}
+      <div className="flex flex-1 min-h-0">
+      {/* 消息流列（顶栏/分类栏在此列内：分类宽度=对话框宽度） */}
+      <div className={`flex flex-1 min-w-0 flex-col ${isMobile && (tasksPanelOpen || showGroupPanel) ? 'hidden' : ''}`}>
       <div className="h-12 border-b border-border flex items-center px-2 lg:px-4 justify-between shrink-0">
         <div className="flex items-center gap-2">
           {/* 侧边栏切换按钮 */}
@@ -292,16 +298,20 @@ export default function AIGroupsClient() {
         </div>
       </div>
 
+      {/* 分类栏折叠按钮（与会话页一致：常显在顶栏底边线） */}
+      <div className="relative">
+        <button
+          onClick={() => setShowViewTabs(!showViewTabs)}
+          className="absolute left-1/2 -translate-x-1/2 -top-[9px] z-10 p-0.5 rounded-full bg-background border border-border hover:bg-muted/50 active:bg-muted transition-colors text-muted-foreground touch-manipulation"
+          title={showViewTabs ? '收起视图切换' : '展开视图切换'}
+        >
+          <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${showViewTabs ? 'rotate-180' : 'rotate-0'}`} />
+        </button>
+      </div>
       {/* 分类视图切换（与会话页共用 MessageViewTabs） */}
-      {selectedGroup && (
+      {showViewTabs && selectedGroup && (
         <MessageViewTabs view={groupView} onChange={setGroupView} data={groupViewData} />
       )}
-
-      {/* ===== 消息列表区域 ===== */}
-      {/* ===== 主区域：消息流 + 任务看板常驻（Paperclip 看板式） ===== */}
-      <div className="flex flex-1 min-h-0">
-      {/* 消息流列：移动端任务看板打开时隐藏 */}
-      <div className={`flex flex-1 min-w-0 flex-col ${isMobile && (tasksPanelOpen || showGroupPanel) ? 'hidden' : ''}`}>
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 lg:px-6 py-3 lg:py-4 space-y-3 lg:space-y-4">
         {groupView === 'messages' && (<>
         {/* 未选择群组时的空状态 */}

@@ -1965,7 +1965,7 @@ export function ChatClient() {
   return (
     <div className="flex flex-1 min-h-0 relative">
       {/* Chat Window */}
-      <div className="flex flex-1 flex-col min-w-0">
+      <div className={`flex flex-1 flex-col min-w-0 ${isMobile && showCheckpoints ? 'hidden' : ''}`}>
         {/* Chat header */}
         <div className="flex flex-col shrink-0">
           <div className="h-12 flex items-center gap-1.5 lg:gap-2 min-w-0 px-3 lg:px-4 border-b border-border">
@@ -2358,21 +2358,20 @@ export function ChatClient() {
             />
           </div>
         </div>
+        {/* 检查点面板 — 任务看板式平移展开侧栏（内容被挤开，不弹出） */}
+        {showCheckpoints && (
+          <aside className={`relative flex flex-col min-h-0 bg-card ${isMobile ? 'flex-1 w-full' : 'w-[340px] shrink-0 border-l border-border'}`}>
+            {/* 看板式标题行（与任务看板同款） */}
+            <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border shrink-0">
+              <Bookmark className="w-3.5 h-3.5 text-primary" />
+              <span className="text-xs font-medium">{t("chat.checkpoints", "检查点")}</span>
+              <span className="text-[10px] text-muted-foreground">{checkpoints.length} 个检查点</span>
+              <div className="flex-1" />
+            </div>
+            {renderCheckpointList()}
+          </aside>
+        )}
       </div>
-      {/* 检查点面板 — 任务看板样式（移动端全宽视图 / 桌面端右侧 340 面板） */}
-      {showCheckpoints && (
-        <div className={`absolute top-12 bottom-0 z-20 flex flex-col bg-card shadow-lg ${isMobile ? 'inset-x-0' : 'right-0 w-[340px] shrink-0 border-l border-border'}`}>
-          {/* 看板式标题行（与任务看板同款） */}
-          <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border shrink-0">
-            <Bookmark className="w-3.5 h-3.5 text-primary" />
-            <span className="text-xs font-medium">{t("chat.checkpoints", "检查点")}</span>
-            <span className="text-[10px] text-muted-foreground">{checkpoints.length} 个检查点</span>
-            <div className="flex-1" />
-          </div>
-          {renderCheckpointList()}
-        </div>
-      )}
-
       {/* Delete Confirmation Dialog */}
       <Dialog
         open={!!deleteConfirm}
