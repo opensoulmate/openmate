@@ -409,7 +409,6 @@ export default function AIGroupsClient() {
             sendDisabled={!wsConnected || (!sendReady && !editDraft.trim())}
             sendLoading={sendingMessage}
             statsText={messages.length > 0 ? `${messages.length}条` : undefined}
-            forwardText={editDraft.trim() || (messages.length > 0 ? messages[messages.length - 1].content : '')}
             onFieldsChange={(f) => setSendReady(!!(f.task || '').trim())}
             onSend={(assembled) => { if (!wsConnected) return; sendText(assembled); setEditDraft(''); setSendReady(false); }}
             isLoading={sendingMessage}

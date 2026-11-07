@@ -18,11 +18,9 @@ import {
   Settings2,
   Brain,
   Zap,
-  Forward,
 } from 'lucide-react';
 import { CodeMirrorEditor } from '@/components/codemirror-editor';
 import { ContextRing } from '@/components/context-ring';
-import { ForwardDialog } from '@/components/forward-dialog';
 
 /** 共用发送按钮（会话/群组同一份）：派发 smart-prompt-send 事件触发 SmartPrompt 发送 */
 export function SmartSendButton({ disabled, loading, title }: { disabled?: boolean; loading?: boolean; title?: string }) {
@@ -93,8 +91,6 @@ interface SmartPromptProps {
   sendTitle?: string;
   /** 统计文字（如 "12条 · $0.35"），显示在工具栏 */
   statsText?: string;
-  /** 转发内容（默认转发输入框文本/最后一条消息，由页面计算传入） */
-  forwardText?: string;
   /** 业务控制钮——按钮的代码全在本组件内，页面只传状态和回调 */
   controls?: PromptControls;
   /** Increment to force-load sessionFields into SmartPrompt (for edit/external updates) */
@@ -177,11 +173,9 @@ export function SmartPrompt({
   sendLoading,
   sendTitle,
   statsText,
-  forwardText,
   controls,
   loadFieldsTrigger,
 }: SmartPromptProps) {
-  const [fwdOpen, setFwdOpen] = useState(false); // 转发器开关
   const [fields, setFields] = useState<SmartPromptFields>({
     task: '',
     role: '',
@@ -552,15 +546,6 @@ export function SmartPrompt({
           <span className="text-[9px] text-muted-foreground/30 whitespace-nowrap">{statsText}</span>
         )}
         <SmartSendButton disabled={sendDisabled} loading={sendLoading} title={sendTitle} />
-        {/* 转发（转发即讨论：转到群组自动发起讨论） */}
-        <button
-          onClick={() => setFwdOpen(true)}
-          className="p-1.5 rounded hover:bg-muted/30 text-muted-foreground/40 hover:text-muted-foreground transition-colors"
-          title="转发"
-        >
-          <Forward className="w-4 h-4" />
-        </button>
-        <ForwardDialog open={fwdOpen} onClose={() => setFwdOpen(false)} text={forwardText || ''} />
       </div>
 
     </div>

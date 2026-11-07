@@ -2874,7 +2874,6 @@ export function ChatClient() {
               clearTrigger={clearTrigger}
               loadFieldsTrigger={loadFieldsTrigger}
               statsText={sessionStats.msgCount > 0 ? `${sessionStats.msgCount}条 · $${sessionStats.totalCost.toFixed(3)}` : undefined}
-              forwardText={smartTaskText.trim() || (messages.length > 0 ? getMessageText(messages[messages.length - 1]) : '')}
               sendDisabled={attachments.length === 0 && !smartTaskText.trim()}
               sendLoading={loading}
               sendTitle={loading ? "发送插话（任务间隙注入）" : "发送"}
