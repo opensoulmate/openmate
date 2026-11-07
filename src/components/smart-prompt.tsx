@@ -19,11 +19,11 @@ import {
   Brain,
   Zap,
   Bookmark,
-  StopCircle,
-  MessageSquare,
+  Forward,
 } from 'lucide-react';
 import { CodeMirrorEditor } from '@/components/codemirror-editor';
 import { ContextRing } from '@/components/context-ring';
+import { ForwardDialog } from '@/components/forward-dialog';
 
 /** 共用发送按钮（会话/群组同一份）：派发 smart-prompt-send 事件触发 SmartPrompt 发送 */
 export function SmartSendButton({ disabled, loading, title }: { disabled?: boolean; loading?: boolean; title?: string }) {
@@ -94,6 +94,8 @@ interface SmartPromptProps {
   sendTitle?: string;
   /** 统计文字（如 "12条 · $0.35"），显示在工具栏 */
   statsText?: string;
+  /** 转发内容（默认转发输入框文本/最后一条消息，由页面计算传入） */
+  forwardText?: string;
   /** 业务控制钮——按钮的代码全在本组件内，页面只传状态和回调 */
   controls?: PromptControls;
   /** Increment to force-load sessionFields into SmartPrompt (for edit/external updates) */
@@ -111,8 +113,6 @@ export interface PromptControls {
   thinking?: { show: boolean; onToggle: () => void };
   /** 历史/检查点面板开关 */
   history?: { show: boolean; count: number; onToggle: () => void };
-  /** 讨论（群组）：发起/取消 */
-  discussion?: { open: boolean; loading: boolean; onToggle: () => void; onCancel: () => void };
 }
 
 // ── Field Definitions ────────────────────────────────────────────
@@ -180,9 +180,11 @@ export function SmartPrompt({
   sendLoading,
   sendTitle,
   statsText,
+  forwardText,
   controls,
   loadFieldsTrigger,
 }: SmartPromptProps) {
+  const [fwdOpen, setFwdOpen] = useState(false); // 转发器开关
   const [fields, setFields] = useState<SmartPromptFields>({
     task: '',
     role: '',
@@ -559,21 +561,15 @@ export function SmartPrompt({
           <span className="text-[9px] text-muted-foreground/30 whitespace-nowrap">{statsText}</span>
         )}
         <SmartSendButton disabled={sendDisabled} loading={sendLoading} title={sendTitle} />
-        {controls?.discussion && (
-          controls.discussion.loading ? (
-            <button onClick={controls.discussion.onCancel}
-              className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium text-red-400 hover:bg-red-500/10 transition-colors touch-manipulation"
-              title="取消讨论">
-              <StopCircle className="w-4 h-4" />
-            </button>
-          ) : (
-            <button onClick={controls.discussion.onToggle}
-              className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors touch-manipulation ${controls.discussion.open ? 'text-amber-400 hover:bg-amber-500/10' : 'text-muted-foreground hover:bg-muted/80'}`}
-              title="发起讨论">
-              <MessageSquare className="w-4 h-4" />
-            </button>
-          )
-        )}
+        {/* 转发（转发即讨论：转到群组自动发起讨论） */}
+        <button
+          onClick={() => setFwdOpen(true)}
+          className="p-1.5 rounded hover:bg-muted/30 text-muted-foreground/40 hover:text-muted-foreground transition-colors"
+          title="转发"
+        >
+          <Forward className="w-4 h-4" />
+        </button>
+        <ForwardDialog open={fwdOpen} onClose={() => setFwdOpen(false)} text={forwardText || ''} />
       </div>
 
     </div>

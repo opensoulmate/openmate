@@ -41,11 +41,6 @@ function getAgentAvatarColor(index: number) {
 
 // 裙摆边缘钮路径（复刻 SkirtTabs genTabPath 几何：TOP_R=12 圆角 + SKIRT=10 下摆外翻）
 // 横向 tab 生成后旋转 -90° 贴到竖直面板边缘：圆角朝外、下摆沿边缘翻出
-const SKIRT_HANDLE_PATH = [
-  'M 12 0', 'Q 0 0 0 12', 'L 0 12', 'C 0 22 -18 22 -10 22',
-  'M 62 22', 'C 70 22 52 22 52 12', 'L 52 12', 'Q 52 0 40 0', 'L 12 0',
-].join(' ');
-
 function SkirtEdgeHandle({ onClick, dir, title }: { onClick: () => void; dir: 'collapse' | 'expand'; title: string }) {
   // 注意：类名必须字面量写出——Tailwind 按源码文本扫描生成 CSS，拼接字符串的变体类不会被生成（曾致按钮永远隐形）
   const hoverCls = dir === 'collapse'
@@ -55,25 +50,20 @@ function SkirtEdgeHandle({ onClick, dir, title }: { onClick: () => void; dir: 'c
     <button
       onClick={onClick}
       title={title}
-      className={`absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 z-20 transition-opacity duration-200 text-muted-foreground hover:text-foreground ${hoverCls}`}
+      aria-label={title}
+      className={`absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 z-20 transition-opacity duration-200 ${hoverCls}`}
     >
-      <svg width="30" height="78" viewBox="0 0 30 78" fill="none" className="drop-shadow-sm">
-        <g transform="translate(8, 66) rotate(-90)">
-          <path
-            d={SKIRT_HANDLE_PATH}
-            fill="var(--color-card, #1f1f23)"
-            stroke="var(--color-border, #3a3a40)"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-          />
-        </g>
-        {/* 折叠 › / 展开 ‹（同一裙摆形，仅箭头方向不同） */}
-        {dir === 'collapse' ? (
-          <path d="M 14 32 L 20 39 L 14 46" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-        ) : (
-          <path d="M 21 32 L 15 39 L 21 46" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-        )}
-      </svg>
+      {/* 小号贴边折叠钮：14×44 竖胶囊，正压左边框线上、垂直居中（修：旧裙摆 30×78 太大且形状画在顶部不对齐） */}
+      <span className="flex items-center justify-center w-3.5 h-11 rounded-full border border-border bg-card shadow-sm text-muted-foreground hover:text-foreground transition-colors">
+        {/* 折叠 › / 展开 ‹ */}
+        <svg width="7" height="10" viewBox="0 0 7 10" fill="none">
+          {dir === 'collapse' ? (
+            <path d="M 2 1 L 5 5 L 2 9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+          ) : (
+            <path d="M 5 1 L 2 5 L 5 9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+          )}
+        </svg>
+      </span>
     </button>
   );
 }
@@ -118,6 +108,35 @@ export default function AIGroupsClient() {
   const [sendReady, setSendReady] = useState(false); // 输入框是否有内容（发送钮可用态）
   const [replyMode, setReplyMode] = useState<'plan' | 'act'>('act'); // 接话模式：act=自动自由接话，plan=定点@接话（真后端 reply_mode）
   const [showThinking, setShowThinking] = useState(false); // 显示消息过程（溯源/行动报告）
+
+  // 讨论直达：会话页"讨论"钮带 ?group=&topic= 进来 → 选群、自动发话题、自动发起讨论
+  useEffect(() => {
+    const run = async () => {
+      if (typeof window === 'undefined') return;
+      const params = new URLSearchParams(window.location.search);
+      const topic = params.get('topic');
+      const gid = params.get('group');
+      if (!topic && !gid) return;
+      window.history.replaceState({}, '', '/ai-groups'); // 清参数防刷新重放
+      const s = useAIGroupsStore.getState();
+      if (!s.groups || s.groups.length === 0) await s.fetchGroups();
+      const list = useAIGroupsStore.getState().groups || [];
+      const g = gid ? list.find(x => x.id === gid) : list[0];
+      if (!g) return;
+      await (s.selectGroup as any)(g);
+      if (topic) {
+        // 等 WS 连上（selectGroup 内建连接），最多 5s
+        for (let i = 0; i < 25; i++) {
+          if (useAIGroupsStore.getState().wsConnected) break;
+          await new Promise(r => setTimeout(r, 200));
+        }
+        useAIGroupsStore.getState().sendGroupMessage(topic, 'comment'); // 自动把当前话题发布到群里
+        setTimeout(() => useAIGroupsStore.getState().startDiscussion(topic, []), 800); // 自动发起讨论
+      }
+    };
+    run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // 任务看板常驻面板（Paperclip 看板式）：桌面端消息流右侧常驻，移动端全屏切换
   const [tasksPanelOpen, setTasksPanelOpen] = useState(true);
   // 编辑 Agent 的临时状态
@@ -125,9 +144,6 @@ export default function AIGroupsClient() {
   const [editRole, setEditRole] = useState('');
   const [editModel, setEditModel] = useState('');
   // 讨论触发 UI 状态
-  const [showDiscussionForm, setShowDiscussionForm] = useState(false);   // 是否展开讨论表单
-  const [discussionGoal, setDiscussionGoal] = useState('');              // 讨论任务描述
-  const [discussionConstraints, setDiscussionConstraints] = useState(''); // 约束条件（逗号分隔）
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -166,21 +182,6 @@ export default function AIGroupsClient() {
   };
 
   /* ========== 发起讨论 ========== */
-  const handleStartDiscussion = () => {
-    const goal = discussionGoal.trim();
-    if (!goal || !wsConnected) return;
-    // 解析约束条件：按逗号分隔，去除空白
-    const constraints = discussionConstraints
-      .split(',')
-      .map(s => s.trim())
-      .filter(Boolean);
-    // 通过 WS 发送 start_discussion 消息
-    startDiscussion(goal, constraints);
-    // 关闭表单并清空输入
-    setShowDiscussionForm(false);
-    setDiscussionGoal('');
-    setDiscussionConstraints('');
-  };
 
   /* ========== 取消讨论 ========== */
   const handleCancelDiscussion = () => {
@@ -405,6 +406,11 @@ export default function AIGroupsClient() {
             <div className="bg-muted/70 rounded-xl px-3 lg:px-4 py-2.5 flex items-center gap-2">
               <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
               <span className="text-xs text-muted-foreground">Agent 正在思考讨论中...</span>
+              <button onClick={handleCancelDiscussion}
+                className="ml-1 px-2 py-0.5 rounded text-[11px] text-red-400 hover:bg-red-500/10 transition-colors"
+                title="停止讨论">
+                停止讨论
+              </button>
             </div>
           </div>
         )}
@@ -423,51 +429,13 @@ export default function AIGroupsClient() {
       {/* ===== 输入框区域 ===== */}
       {selectedGroup && (
         <div className="border-t border-border p-3 lg:p-4 shrink-0">
-          {/* ===== 讨论触发表单（展开/收起） ===== */}
-          {showDiscussionForm && (
-            <div className="mb-3 p-3 rounded-lg border border-amber-500/30 bg-amber-500/5 space-y-2">
-              {/* 任务描述输入框 */}
-              <textarea
-                value={discussionGoal}
-                onChange={e => setDiscussionGoal(e.target.value)}
-                placeholder="描述讨论任务，例如：分析这个方案的可行性并提出改进建议"
-                rows={2}
-                className="w-full resize-none rounded-lg border border-input bg-background px-3 py-2 text-xs lg:text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/30"
-              />
-              {/* 约束条件输入框（可选，逗号分隔） */}
-              <input
-                value={discussionConstraints}
-                onChange={e => setDiscussionConstraints(e.target.value)}
-                placeholder="约束条件（可选，逗号分隔），例如：预算不超过10万, 3天内完成"
-                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-xs lg:text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/30"
-              />
-              {/* 操作按钮 */}
-              <div className="flex gap-2 justify-end">
-                {/* 取消按钮 — 关闭表单 */}
-                <button
-                  onClick={() => { setShowDiscussionForm(false); setDiscussionGoal(''); setDiscussionConstraints(''); }}
-                  className="px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:bg-muted transition-colors"
-                >
-                  取消
-                </button>
-                {/* 开始讨论按钮 — 通过 WS 发送 start_discussion */}
-                <button
-                  onClick={handleStartDiscussion}
-                  disabled={!discussionGoal.trim() || !wsConnected}
-                  className="px-3 py-1.5 rounded-lg text-xs bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50 transition-colors font-medium"
-                >
-                  开始讨论
-                </button>
-              </div>
-            </div>
-          )}
-
           {/* ===== 输入框：共用会话页 SmartPrompt 组件（用户拍板：输入框必须共用） ===== */}
           <SmartPrompt
             initialTask={editDraft}
             sendDisabled={!wsConnected || (!sendReady && !editDraft.trim())}
             sendLoading={sendingMessage}
             statsText={messages.length > 0 ? `${messages.length}条` : undefined}
+            forwardText={editDraft.trim() || (messages.length > 0 ? messages[messages.length - 1].content : '')}
             onFieldsChange={(f) => setSendReady(!!(f.task || '').trim())}
             onSend={(assembled) => { if (!wsConnected) return; sendText(assembled); setEditDraft(''); setSendReady(false); }}
             isLoading={sendingMessage}
@@ -483,7 +451,6 @@ export default function AIGroupsClient() {
               },
               thinking: { show: showThinking, onToggle: () => setShowThinking(v => !v) },
               history: { show: tasksPanelOpen, count: tasks.length, onToggle: () => setTasksPanelOpen(v => !v) },
-              discussion: { open: showDiscussionForm, loading: discussionLoading, onToggle: () => setShowDiscussionForm(!showDiscussionForm), onCancel: handleCancelDiscussion },
             }}
           />
         </div>

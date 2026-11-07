@@ -1852,6 +1852,18 @@ export function ChatClient() {
     return () => { delete (window as any).__openmate_send__; };
   }, [sendAcpPrompt]);
 
+  // 转发直达：?forward=TEXT → 预填输入框（回车即发）
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const fwd = params.get('forward');
+    if (fwd) {
+      setSmartPromptTask(fwd);
+      params.delete('forward');
+      const q = params.toString();
+      window.history.replaceState({}, '', window.location.pathname + (q ? `?${q}` : ''));
+    }
+  }, []);
+
   useEffect(() => {
     const sid = new URLSearchParams(window.location.search).get('session');
     if (!sid) return;
@@ -2854,6 +2866,7 @@ export function ChatClient() {
               clearTrigger={clearTrigger}
               loadFieldsTrigger={loadFieldsTrigger}
               statsText={sessionStats.msgCount > 0 ? `${sessionStats.msgCount}条 · $${sessionStats.totalCost.toFixed(3)}` : undefined}
+              forwardText={smartTaskText.trim() || (messages.length > 0 ? getMessageText(messages[messages.length - 1]) : '')}
               sendDisabled={attachments.length === 0 && !smartTaskText.trim()}
               sendLoading={loading}
               sendTitle={loading ? "发送插话（任务间隙注入）" : "发送"}
@@ -2929,15 +2942,6 @@ export function ChatClient() {
                 mode: { value: agentMode, onToggle: () => setAgentMode(prev => prev === 'plan' ? 'act' : 'plan') },
                 thinking: { show: showThinking, onToggle: () => setShowThinking(prev => !prev) },
                 history: { show: showCheckpoints, count: checkpoints.length, onToggle: () => { const next = !showCheckpoints; setShowCheckpoints(next); if (next) { setRightPanelOpen(false); if (isMobile && sidebarOpen) toggleSidebar(); } } },
-                discussion: {
-                  open: false,
-                  loading: false,
-                  onToggle: () => {
-                    const topic = smartTaskText.trim() || (messages.length > 0 ? getMessageText(messages[messages.length - 1]) : '');
-                    window.location.href = `/ai-groups?topic=${encodeURIComponent(topic.slice(0, 200))}`;
-                  },
-                  onCancel: () => {},
-                },
               }}
             />
           </div>

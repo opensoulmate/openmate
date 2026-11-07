@@ -1,6 +1,7 @@
 import { Bot, User, Copy, Volume2, ThumbsUp, ThumbsDown, Share2, RefreshCw, Bookmark, MoreHorizontal, RotateCcw, X } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { getApiBaseUrl, getToken } from '@/lib/api-client';
+import { ForwardDialog } from '@/components/forward-dialog';
 
 // 注意：'Bearer ' 字面量会被写入链路的脱敏层替换掉导致语法错误——拼接生成
 const AUTH_HDR = () => ({ Authorization: ['Be' + 'earer', getToken()].join(' ') + 'x'.replace('x', '') });
@@ -56,14 +57,6 @@ function readAloud(text: string) {
   window.speechSynthesis.speak(u);
 }
 
-async function shareText(text: string) {
-  if (navigator.share) {
-    try { await navigator.share({ text }); } catch { /* user cancelled */ }
-  } else {
-    copyText(text);
-  }
-}
-
 /** 页面特有行为（两边都传，保证按钮全量且全有效） */
 export interface MessageActions {
   onRegenerate?: () => void;
@@ -103,6 +96,7 @@ export function MessageBubble({
   children: ReactNode;
 }) {
   const isUser = role === 'user';
+  const [fwdOpen, setFwdOpen] = useState(false);
   return (
     <div id={id} className={`flex gap-2 lg:gap-3 rounded-xl transition-all duration-300 ${isUser ? 'justify-end' : ''}`}>
       {!isUser && (
@@ -127,7 +121,7 @@ export function MessageBubble({
             <ActionButton onClick={() => readAloud(text)} title="朗读"><Volume2 className="w-3.5 h-3.5" /></ActionButton>
             <ActionButton onClick={() => id && sendFeedback(id, text, 'like')} title="喜欢" hover="hover:text-green-500"><ThumbsUp className="w-3.5 h-3.5" /></ActionButton>
             <ActionButton onClick={() => id && sendFeedback(id, text, 'dislike')} title="不喜欢" hover="hover:text-red-500"><ThumbsDown className="w-3.5 h-3.5" /></ActionButton>
-            <ActionButton onClick={() => shareText(text)} title="转发"><Share2 className="w-3.5 h-3.5" /></ActionButton>
+            <ActionButton onClick={() => setFwdOpen(true)} title="转发"><Share2 className="w-3.5 h-3.5" /></ActionButton>
             <ActionButton onClick={() => actions?.onRegenerate?.()} title="重新生成"><RefreshCw className="w-3.5 h-3.5" /></ActionButton>
             <ActionButton onClick={() => actions?.onCheckpoint?.()} title="保存检查点"><Bookmark className="w-3.5 h-3.5" /></ActionButton>
             <ActionButton onClick={() => {}} title="更多"><MoreHorizontal className="w-3.5 h-3.5" /></ActionButton>
@@ -136,7 +130,7 @@ export function MessageBubble({
         {isUser && (
           <div className="flex items-center gap-0.5 mt-1.5 -mb-1 justify-end">
             <ActionButton onClick={() => copyText(text)} title="复制"><Copy className="w-3.5 h-3.5" /></ActionButton>
-            <ActionButton onClick={() => shareText(text)} title="分享"><Share2 className="w-3.5 h-3.5" /></ActionButton>
+            <ActionButton onClick={() => setFwdOpen(true)} title="分享"><Share2 className="w-3.5 h-3.5" /></ActionButton>
             <ActionButton onClick={() => actions?.onEdit?.()} title="修改"><RotateCcw className="w-3.5 h-3.5" /></ActionButton>
             <ActionButton onClick={() => favoriteToKnowledge(text)} title="收藏" hover="hover:text-yellow-500"><Bookmark className="w-3.5 h-3.5" /></ActionButton>
             <ActionButton onClick={() => actions?.onDelete?.()} title="删除" hover="hover:text-red-500"><X className="w-3.5 h-3.5" /></ActionButton>
@@ -148,6 +142,7 @@ export function MessageBubble({
           <User className="w-4 h-4 text-primary-foreground" />
         </div>
       )}
+      <ForwardDialog open={fwdOpen} onClose={() => setFwdOpen(false)} text={text} />
     </div>
   );
 }
