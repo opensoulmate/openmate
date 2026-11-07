@@ -13,7 +13,7 @@ import {
   MessageCircle, Hand, FileText, Lightbulb,
   Target,
   PanelLeft, Settings, X,
-  Plus, Trash2, Edit3, Check, XIcon,
+  Plus, Trash2, Edit3, Check, XIcon, ChevronRight,
   StopCircle,
   Trophy, ArrowUp, ArrowDown, ArrowRight,
 } from 'lucide-react';
@@ -630,9 +630,9 @@ export default function AIGroupsPage() {
             <span className="text-xs font-medium">任务看板</span>
             <span className="text-[10px] text-muted-foreground">{tasks.length} 个任务</span>
             <div className="flex-1" />
-            <button onClick={() => setTasksPanelOpen(false)} title="收起任务看板"
+            <button onClick={() => setTasksPanelOpen(false)} title="折叠任务看板（点顶部'任务看板'按钮可再展开）"
               className="p-1 rounded hover:bg-muted text-muted-foreground transition-colors">
-              <XIcon className="w-3.5 h-3.5" />
+              <ChevronRight className="w-3.5 h-3.5" />
             </button>
           </div>
           <AIGroupsTaskBoard />

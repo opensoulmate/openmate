@@ -53,7 +53,7 @@ export function AIGroupsSidebar() {
       placeholder={t("aiGroups.searchPlaceholder") || "搜索群组..."}
       header={
         <div className="px-2 pb-2">
-          {showCreate && (
+          {(
             <div className="space-y-2 p-2 rounded-lg bg-muted/50 mb-2">
               <input value={newName} onChange={e => setNewName(e.target.value)} placeholder={t("aiGroups.groupNamePlaceholder")}
                 className="w-full px-2.5 py-1.5 bg-background border border-border rounded text-xs focus:outline-none focus:ring-1 focus:ring-primary/50" />
@@ -100,11 +100,7 @@ export function AIGroupsSidebar() {
               </div>
             </div>
           )}
-          <button onClick={() => { setShowCreate(!showCreate); if (!showCreate) fetchAvailableAgents(); }}
-            className="w-full flex items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
-            <Plus className="w-3.5 h-3.5" />
-            {t("aiGroups.createGroup") || "新建群组"}
-          </button>
+
         </div>
       }
       renderItem={(group) => (

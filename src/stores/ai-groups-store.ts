@@ -694,12 +694,19 @@ export const useAIGroupsStore = create<AIGroupsState>((set, get) => ({
       const data = await res.json();
       const rows = Array.isArray(data?.agents) ? data.agents : [];
       set({
-        availableAgents: rows.map((r: any) => ({
-          agent_id: r.agent_id || r.id,
-          name: r.name || r.agent_id || r.id,
-          role: r.role,
-          model: r.model,
-        })),
+        availableAgents: rows.map((r: any) => {
+          const aid = r.agent_id || r.id || '';
+          const DISPLAY_NAMES: Record<string, string> = {
+            hermes: 'Hermes',
+            soulmate: 'SoulMate',
+          };
+          return {
+            agent_id: aid,
+            name: r.name || DISPLAY_NAMES[aid] || aid,
+            role: r.role,
+            model: r.model,
+          };
+        }),
       });
     } catch (e) {
       console.error('Failed to fetch available agents:', e);
