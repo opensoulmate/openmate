@@ -13,7 +13,6 @@ import { SkirtTabs } from "@opensoulmate/openface";
 import { getApiBaseUrl, getToken, getUserId } from '@/lib/api-client';
 import { copyToClipboard } from '@/lib/clipboard';
 import { Dialog } from '@/components/ui/dialog';
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useSidebar } from '@/components/ui/sidebar';
 import { useTranslation } from 'react-i18next';
@@ -2955,37 +2954,18 @@ export function ChatClient() {
           </div>
         </div>
       </div>
-      {/* Checkpoints Panel — Sheet on mobile, inline overlay on desktop */}
-      {isMobile ? (
-        <Sheet open={showCheckpoints} onOpenChange={setShowCheckpoints}>
-          <SheetContent side="right" size="sm" showCloseButton={false}>
-            <SheetHeader className="border-b border-border pb-3">
-              <div className="flex items-center justify-between">
-                <SheetTitle className="flex items-center gap-2 text-sm">
-                  <RotateCcw className="w-4 h-4" />
-                  {t("chat.checkpoints", "Checkpoints")}
-                </SheetTitle>
-                <button onClick={() => setShowCheckpoints(false)} className="p-1 rounded hover:bg-muted">
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </SheetHeader>
-            {renderCheckpointList()}
-          </SheetContent>
-        </Sheet>
-      ) : (
-        showCheckpoints && (
-          <div className="absolute right-0 top-12 bottom-0 w-[340px] shrink-0 border-l border-border bg-card z-20 flex flex-col shadow-lg">
-            {/* 看板式标题行（与任务看板同款） */}
-            <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border shrink-0">
-              <Bookmark className="w-3.5 h-3.5 text-primary" />
-              <span className="text-xs font-medium">{t("chat.checkpoints", "检查点")}</span>
-              <span className="text-[10px] text-muted-foreground">{checkpoints.length} 个检查点</span>
-              <div className="flex-1" />
-            </div>
-            {renderCheckpointList()}
+      {/* 检查点面板 — 任务看板样式（移动端全宽视图 / 桌面端右侧 340 面板） */}
+      {showCheckpoints && (
+        <div className={`absolute top-12 bottom-0 z-20 flex flex-col bg-card shadow-lg ${isMobile ? 'inset-x-0' : 'right-0 w-[340px] shrink-0 border-l border-border'}`}>
+          {/* 看板式标题行（与任务看板同款） */}
+          <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border shrink-0">
+            <Bookmark className="w-3.5 h-3.5 text-primary" />
+            <span className="text-xs font-medium">{t("chat.checkpoints", "检查点")}</span>
+            <span className="text-[10px] text-muted-foreground">{checkpoints.length} 个检查点</span>
+            <div className="flex-1" />
           </div>
-        )
+          {renderCheckpointList()}
+        </div>
       )}
 
       {/* Delete Confirmation Dialog */}
