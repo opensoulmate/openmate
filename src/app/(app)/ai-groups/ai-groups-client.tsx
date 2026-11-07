@@ -148,14 +148,7 @@ export default function AIGroupsPage() {
       }
     }
 
-    // 本地添加用户消息到列表
-    const userMsg: GroupMessage = {
-      id: `msg-${Date.now()}`, role: 'user', content: text,
-      timestamp: new Date(), target,
-    };
-    setMessages(prev => [...prev, userMsg]);
-
-    // 通过 WS 发送给后端
+    // 不本地乐观添加——服务端回显 user_message 统一渲染（防重复显示）
     sendGroupMessage(text, 'comment');
 
     // 清空输入框

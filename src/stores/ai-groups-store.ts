@@ -524,6 +524,10 @@ export const useAIGroupsStore = create<AIGroupsState>((set, get) => ({
     const { wsGroup } = get();
     if (wsGroup) {
       console.log('[WS] 正在断开 WebSocket 连接');
+      // 先摘掉 handler 防止关闭中的幽灵连接继续渲染（重复消息源头之一）
+      wsGroup.onmessage = null;
+      wsGroup.onclose = null;
+      wsGroup.onopen = null;
       wsGroup.close(1000, '用户切换群组或离开页面');
     }
     set({ wsGroup: null, wsConnected: false, wsTypingUsers: [] });
@@ -597,7 +601,18 @@ export const useAIGroupsStore = create<AIGroupsState>((set, get) => ({
    * @param msg 要添加的消息对象
    */
   addMessage: (msg: GroupMessage) => {
-    set((s) => ({ messages: [...s.messages, msg] }));
+    set((s) => {
+      // 去重：同 id，或同角色+同内容 5 秒内（幽灵 WS 多连接会重复广播同一条）
+      const dup = s.messages.find(
+        (m) =>
+          (msg.id && m.id === msg.id) ||
+          (m.role === msg.role &&
+            m.content === msg.content &&
+            Math.abs(new Date(m.timestamp).getTime() - new Date(msg.timestamp).getTime()) < 5000)
+      );
+      if (dup) return s;
+      return { messages: [...s.messages, msg] };
+    });
   },
 
   // API actions
