@@ -689,57 +689,42 @@ export const useAIGroupsStore = create<AIGroupsState>((set, get) => ({
 
   /** 建组选成员：拉系统注册 agent 名册（未注册不进列表，一条真源） */
   fetchAvailableAgents: async () => {
-    // 双源合并：detect = 系统支持的全部 agent 目录（对话页同款真源），
-    // registry = 已注册真身执行器的（置顶）。此前只拉 registry 故只有 2 个。
+    // 铁律（用户拍板 2026-11-07）：只有已安装且连接成功的 agent 才能建群——
+    // 谁出现只认 /registry（探测即注册=握手+真开会话两级全过），未注册不进列表。
+    // detect 目录仅补显示名（注册表行没有 name 字段）。
     const DISPLAY_NAMES: Record<string, string> = {
       hermes: 'Hermes',
       soulmate: 'SoulMate',
     };
-    const map = new Map<string, { agent_id?: string; name: string; role?: string; model?: string }>();
+    let nameById: Record<string, string> = {};
     try {
       const dRes = await fetch(`${getApiBaseUrl()}/api/agents/detect`, { headers: authHeaders() });
       const dData = await dRes.json();
-      const detectRows: any[] = Array.isArray(dData?.agents) ? dData.agents : [];
-      detectRows
-        .sort((a, b) => (b.available ? 1 : 0) - (a.available ? 1 : 0))
-        .forEach((r) => {
-          const aid = r.id || r.agent_id || '';
-          if (!aid) return;
-          map.set(aid, {
-            agent_id: aid,
-            name: r.name || DISPLAY_NAMES[aid] || aid,
-            role: r.role,
-            model: r.model,
-          });
-        });
+      (Array.isArray(dData?.agents) ? dData.agents : []).forEach((r: any) => {
+        if (r.id) nameById[r.id] = r.name || r.id;
+      });
     } catch (e) {
-      console.error('Failed to fetch detect agents:', e);
+      console.error('Failed to fetch detect names:', e);
     }
     try {
       const res = await fetch(`${getApiBaseUrl()}/api/agents/registry`, { headers: authHeaders() });
       const data = await res.json();
       const rows = Array.isArray(data?.agents) ? data.agents : [];
-      const registered: any[] = rows.map((r: any) => {
-        const aid = r.agent_id || r.id || '';
-        return {
-          agent_id: aid,
-          name: r.name || DISPLAY_NAMES[aid] || aid,
-          role: r.role,
-          model: r.model,
-        };
-      });
-      // 真身注册的置顶（删掉 detect 中的同名条目后重插）
-      registered.reverse().forEach((a) => {
-        if (!a.agent_id) return;
-        map.delete(a.agent_id);
-      });
-      const merged = new Map<string, any>();
-      registered.filter((a) => a.agent_id).forEach((a) => merged.set(a.agent_id, a));
-      map.forEach((v, k) => merged.set(k, v));
-      set({ availableAgents: Array.from(merged.values()) });
+      const list = rows
+        .filter((r: any) => r.registered !== false)
+        .map((r: any) => {
+          const aid = r.agent_id || r.id || '';
+          return {
+            agent_id: aid,
+            name: nameById[aid] || DISPLAY_NAMES[aid] || aid,
+            role: r.role,
+            model: r.model,
+          };
+        })
+        .filter((a: any) => a.agent_id);
+      set({ availableAgents: list });
     } catch (e) {
       console.error('Failed to fetch available agents:', e);
-      set({ availableAgents: Array.from(map.values()) });
     }
   },
 

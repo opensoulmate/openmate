@@ -206,6 +206,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       } catch (e) { console.error("agents/detect error:", e); }
     }
 
+    // 1b. Registry（探测即注册=已安装+连接成功+必能开会话）——列表的"谁出现"只认它，
+    // detect 目录只提供图标/描述元数据。未注册不进列表（agent 铁律）。
+    let registeredIds = new Set<string>();
+    try {
+      const r = await fetch(`${apiBase}/api/agents/registry`, { headers });
+      if (r.ok) { const d = await r.json(); (d.agents || []).forEach((a: any) => { if (a.agent_id && a.registered) registeredIds.add(a.agent_id); }); }
+      else { console.error("agents/registry failed:", r.status); }
+    } catch (e) { console.error("agents/registry error:", e); }
+
     // 2. Fetch sessions
     let sessions: Session[] = [];
     try {
@@ -259,9 +268,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       expanded: false, sourceGroups: buildSourceGroups(soulmateSessions, 'soulmate'),
     });
 
-    // Only add agents that have sessions (user interacted with them), skip system agents
+    // Only add REGISTERED (installed+connected) agents — 未注册不进列表
     for (const [key, sessions] of Object.entries(agentSessionMap)) {
       if (SKIP_AGENT_IDS.has(key) || agentMap.has(key)) continue;
+      if (!registeredIds.has(key)) continue;
       const detected = detectedAgents.find(a => a.id === key);
       agentMap.set(key, {
         id: key, name: detected?.name || key,
@@ -272,16 +282,27 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       });
     }
 
-    // Add detected agents that are installed and have no sessions yet
+    // Add registered agents (connected, can open sessions) that have no sessions yet
     for (const detected of detectedAgents) {
       if (SKIP_AGENT_IDS.has(detected.id) || agentMap.has(detected.id)) continue;
-      if (!detected.available) continue; // only show actually installed agents
+      if (!registeredIds.has(detected.id)) continue; // 未注册不进列表
       agentMap.set(detected.id, {
         id: detected.id, name: detected.name || detected.id,
         icon: detected.icon || AGENT_ICONS[detected.id] || '🤖',
         logo: detected.logo, description: detected.description || detected.id,
         installed: detected.available || false, available: detected.available || false,
         sessions: [], expanded: false, sourceGroups: undefined,
+      });
+    }
+
+    // 兜底：已注册但不在检测目录/无会话的 agent 也必须出现（连接成功即可发起会话）
+    for (const rid of registeredIds) {
+      if (SKIP_AGENT_IDS.has(rid) || agentMap.has(rid)) continue;
+      const sessions = agentSessionMap[rid] || [];
+      agentMap.set(rid, {
+        id: rid, name: rid, icon: AGENT_ICONS[rid] || '🤖', description: rid,
+        installed: true, available: true,
+        sessions, expanded: false, sourceGroups: buildSourceGroups(sessions, rid),
       });
     }
 
