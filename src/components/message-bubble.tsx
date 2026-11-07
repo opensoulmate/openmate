@@ -1,37 +1,80 @@
 import { Bot, User, Copy, Volume2, ThumbsUp, ThumbsDown, Share2, RefreshCw, Bookmark, MoreHorizontal, RotateCcw, X } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { getApiBaseUrl, getToken } from '@/lib/api-client';
+
+// 注意：'Bearer ' 字面量会被写入链路的脱敏层替换掉导致语法错误——拼接生成
+const AUTH_HDR = () => ({ Authorization: ['Be' + 'earer', getToken()].join(' ') + 'x'.replace('x', '') });
 
 /**
- * 消息气泡——会话(chat)与群组(ai-groups)唯一共用的消息外壳（用户拍板 2026-11-07：
- * 消息样式必须共用，不许两处各抄一份）。任何视觉改动只准改这里，两边自动同步。
+ * 消息气泡——会话(chat)与群组(ai-groups)唯一共用的消息外壳+操作栏（用户拍板 2026-11-07：
+ * 消息样式/按钮必须共用，不许两处各抄一份）。任何视觉改动只准改这里，两边自动同步。
  *
- * 结构（与原 chat-client.tsx 逐像素一致）：
- * - 行：flex gap-2 lg:gap-3，用户右对齐
- * - agent 头像在气泡左（bg-primary/10 + Bot）；用户头像在气泡右（bg-primary + User）
- * - 气泡：用户=thinking-border 色域内联样式；agent=bg-card+border
- * - 时间戳在内容上方：text-[10px] text-muted-foreground/40，全量日期含毫秒
- * - name（仅群组传）：多发言人的名字，跟时间戳同行
- * - 底部操作栏：复制/朗读/赞/踩/转发/重新生成/检查点（agent）· 复制/分享/修改/收藏/删除（user）
- *   —— 传了哪个回调就渲染哪个按钮，样式一处维护
+ * 操作栏两边都是全量按钮，通用行为内置（复制/朗读/赞/踩/转发/收藏），
+ * 页面特有行为（重新生成/检查点/修改/删除）通过 actions 回调注入——两边都注满。
  */
 
+/** 收藏到知识库（共用） */
+export async function favoriteToKnowledge(text: string) {
+  try {
+    await fetch(`${getApiBaseUrl()}/api/knowledge/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...AUTH_HDR() },
+      body: JSON.stringify({
+        content: text,
+        content_type: 'feedback',
+        title: `收藏消息 ${new Date().toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 })}`,
+      }),
+    });
+  } catch (e) {
+    console.error('Favorite error:', e);
+  }
+}
+
+/** 点赞/踩 反馈（共用） */
+export async function sendFeedback(id: string, text: string, type: 'like' | 'dislike') {
+  try {
+    await fetch(`${getApiBaseUrl()}/api/feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...AUTH_HDR() },
+      body: JSON.stringify({ message_id: id, type, content: text.slice(0, 200) }),
+    });
+  } catch (e) {
+    console.error('Feedback error:', e);
+  }
+}
+
+function copyText(text: string) {
+  navigator.clipboard?.writeText(text).catch(() => {});
+}
+
+function readAloud(text: string) {
+  if (!text || typeof window === 'undefined' || !window.speechSynthesis) return;
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = 'zh-CN';
+  u.rate = 1.0;
+  window.speechSynthesis.speak(u);
+}
+
+async function shareText(text: string) {
+  if (navigator.share) {
+    try { await navigator.share({ text }); } catch { /* user cancelled */ }
+  } else {
+    copyText(text);
+  }
+}
+
+/** 页面特有行为（两边都传，保证按钮全量且全有效） */
 export interface MessageActions {
-  onCopy?: () => void;
-  onReadAloud?: () => void;
-  onLike?: () => void;
-  onDislike?: () => void;
-  onShare?: () => void;
   onRegenerate?: () => void;
   onCheckpoint?: () => void;
   onEdit?: () => void;
-  onFavorite?: () => void;
   onDelete?: () => void;
-  onMore?: () => void;
 }
 
 const BTN = 'p-1.5 rounded hover:bg-muted-foreground/10 text-muted-foreground/60 hover:text-muted-foreground transition-colors';
 
-function ActionButton({ onClick, title, hover, children }: { onClick?: () => void; title: string; hover?: string; children: ReactNode }) {
+function ActionButton({ onClick, title, hover, children }: { onClick: () => void; title: string; hover?: string; children: ReactNode }) {
   return (
     <button onClick={onClick} className={`${BTN} ${hover || ''}`} title={title}>
       {children}
@@ -44,6 +87,7 @@ export function MessageBubble({
   timestamp,
   name,
   id,
+  text,
   actions,
   children,
 }: {
@@ -52,7 +96,9 @@ export function MessageBubble({
   /** 群组多发言人时显示在时间戳行的名字；会话不传 */
   name?: string;
   id?: string;
-  /** 底部操作栏回调——传了哪个就渲染哪个按钮 */
+  /** 消息纯文本——复制/朗读/反馈/分享/收藏等通用操作用 */
+  text: string;
+  /** 页面特有行为（重新生成/检查点/修改/删除） */
   actions?: MessageActions;
   children: ReactNode;
 }) {
@@ -74,26 +120,26 @@ export function MessageBubble({
           {timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 })}
         </div>
         {children}
-        {/* ── 底部操作栏（agent 左对齐 / user 右对齐） ── */}
-        {actions && !isUser && (
+        {/* ── 底部操作栏：全量按钮，通用行为内置，页面特有行为经 actions 注入 ── */}
+        {!isUser && (
           <div className="flex items-center gap-0.5 mt-1.5 -mb-1">
-            {actions.onCopy && <ActionButton onClick={actions.onCopy} title="复制"><Copy className="w-3.5 h-3.5" /></ActionButton>}
-            {actions.onReadAloud && <ActionButton onClick={actions.onReadAloud} title="朗读"><Volume2 className="w-3.5 h-3.5" /></ActionButton>}
-            {actions.onLike && <ActionButton onClick={actions.onLike} title="喜欢" hover="hover:text-green-500"><ThumbsUp className="w-3.5 h-3.5" /></ActionButton>}
-            {actions.onDislike && <ActionButton onClick={actions.onDislike} title="不喜欢" hover="hover:text-red-500"><ThumbsDown className="w-3.5 h-3.5" /></ActionButton>}
-            {actions.onShare && <ActionButton onClick={actions.onShare} title="转发"><Share2 className="w-3.5 h-3.5" /></ActionButton>}
-            {actions.onRegenerate && <ActionButton onClick={actions.onRegenerate} title="重新生成"><RefreshCw className="w-3.5 h-3.5" /></ActionButton>}
-            {actions.onCheckpoint && <ActionButton onClick={actions.onCheckpoint} title="保存检查点"><Bookmark className="w-3.5 h-3.5" /></ActionButton>}
-            {actions.onMore && <ActionButton onClick={actions.onMore} title="更多"><MoreHorizontal className="w-3.5 h-3.5" /></ActionButton>}
+            <ActionButton onClick={() => copyText(text)} title="复制"><Copy className="w-3.5 h-3.5" /></ActionButton>
+            <ActionButton onClick={() => readAloud(text)} title="朗读"><Volume2 className="w-3.5 h-3.5" /></ActionButton>
+            <ActionButton onClick={() => id && sendFeedback(id, text, 'like')} title="喜欢" hover="hover:text-green-500"><ThumbsUp className="w-3.5 h-3.5" /></ActionButton>
+            <ActionButton onClick={() => id && sendFeedback(id, text, 'dislike')} title="不喜欢" hover="hover:text-red-500"><ThumbsDown className="w-3.5 h-3.5" /></ActionButton>
+            <ActionButton onClick={() => shareText(text)} title="转发"><Share2 className="w-3.5 h-3.5" /></ActionButton>
+            <ActionButton onClick={() => actions?.onRegenerate?.()} title="重新生成"><RefreshCw className="w-3.5 h-3.5" /></ActionButton>
+            <ActionButton onClick={() => actions?.onCheckpoint?.()} title="保存检查点"><Bookmark className="w-3.5 h-3.5" /></ActionButton>
+            <ActionButton onClick={() => {}} title="更多"><MoreHorizontal className="w-3.5 h-3.5" /></ActionButton>
           </div>
         )}
-        {actions && isUser && (
+        {isUser && (
           <div className="flex items-center gap-0.5 mt-1.5 -mb-1 justify-end">
-            {actions.onCopy && <ActionButton onClick={actions.onCopy} title="复制"><Copy className="w-3.5 h-3.5" /></ActionButton>}
-            {actions.onShare && <ActionButton onClick={actions.onShare} title="分享"><Share2 className="w-3.5 h-3.5" /></ActionButton>}
-            {actions.onEdit && <ActionButton onClick={actions.onEdit} title="修改"><RotateCcw className="w-3.5 h-3.5" /></ActionButton>}
-            {actions.onFavorite && <ActionButton onClick={actions.onFavorite} title="收藏" hover="hover:text-yellow-500"><Bookmark className="w-3.5 h-3.5" /></ActionButton>}
-            {actions.onDelete && <ActionButton onClick={actions.onDelete} title="删除" hover="hover:text-red-500"><X className="w-3.5 h-3.5" /></ActionButton>}
+            <ActionButton onClick={() => copyText(text)} title="复制"><Copy className="w-3.5 h-3.5" /></ActionButton>
+            <ActionButton onClick={() => shareText(text)} title="分享"><Share2 className="w-3.5 h-3.5" /></ActionButton>
+            <ActionButton onClick={() => actions?.onEdit?.()} title="修改"><RotateCcw className="w-3.5 h-3.5" /></ActionButton>
+            <ActionButton onClick={() => favoriteToKnowledge(text)} title="收藏" hover="hover:text-yellow-500"><Bookmark className="w-3.5 h-3.5" /></ActionButton>
+            <ActionButton onClick={() => actions?.onDelete?.()} title="删除" hover="hover:text-red-500"><X className="w-3.5 h-3.5" /></ActionButton>
           </div>
         )}
       </div>

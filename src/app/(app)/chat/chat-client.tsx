@@ -1641,47 +1641,9 @@ export function ChatClient() {
   }, []);
 
   // Copy message text to clipboard
-  const handleCopy = useCallback((msg: Message) => {
-    copyToClipboard(getMessageText(msg));
-  }, [getMessageText]);
 
-  // Read aloud using Web Speech API
-  const handleReadAloud = useCallback((msg: Message) => {
-    const text = getMessageText(msg);
-    if (!text) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'zh-CN';
-    utterance.rate = 1.0;
-    window.speechSynthesis.speak(utterance);
-  }, [getMessageText]);
 
-  // Like/dislike — send feedback to backend
-  const handleFeedback = useCallback(async (msg: Message, type: 'like' | 'dislike') => {
-    try {
-      await fetch(`${getApiUrl()}/api/feedback`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-        body: JSON.stringify({
-          message_id: msg.id,
-          session_id: selectedSession?.id,
-          type,
-          content: getMessageText(msg).slice(0, 200),
-          user_id: getUserId(),
-        }),
-      });
-    } catch (e) { console.error('Feedback error:', e); }
-  }, [selectedSession, getMessageText]);
 
-  // Share via Web Share API or copy
-  const handleShare = useCallback(async (msg: Message) => {
-    const text = getMessageText(msg);
-    if (navigator.share) {
-      try { await navigator.share({ text }); } catch { /* user cancelled */ }
-    } else {
-      copyToClipboard(text);
-    }
-  }, [getMessageText]);
 
   // Regenerate — re-send the last user message before this agent message
   const handleRegenerate = useCallback((agentMsgId: string) => {
@@ -1722,21 +1684,6 @@ export function ChatClient() {
     }
   }, [getMessageText]);
 
-  // Favorite message — save to store
-  const handleFavorite = useCallback(async (msg: Message) => {
-    try {
-      await fetch(`${getApiUrl()}/api/knowledge/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-        body: JSON.stringify({
-          content: getMessageText(msg),
-          content_type: 'feedback',
-          title: `收藏消息 ${new Date().toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' , fractionalSecondDigits: 3 })}`,
-          user_id: getUserId(),
-        }),
-      });
-    } catch (e) { console.error('Favorite error:', e); }
-  }, [getMessageText]);
 
   // Delete message
   const handleDeleteMessage = useCallback((msgId: string) => {
@@ -2695,21 +2642,13 @@ export function ChatClient() {
           )}
           {messages.map(msg => (
             <MessageBubble key={msg.id} id={`msg-${msg.id}`} role={msg.role} timestamp={msg.timestamp}
-              actions={{
-                onCopy: () => handleCopy(msg),
-                ...(msg.role === 'agent' ? {
-                  onReadAloud: () => handleReadAloud(msg),
-                  onLike: () => handleFeedback(msg, 'like'),
-                  onDislike: () => handleFeedback(msg, 'dislike'),
-                  onShare: () => handleShare(msg),
-                  onRegenerate: () => handleRegenerate(msg.id),
-                  onCheckpoint: () => saveCheckpoint(msg.id),
-                } : {
-                  onShare: () => handleShare(msg),
-                  onEdit: () => handleEditMessage(msg),
-                  onFavorite: () => handleFavorite(msg),
-                  onDelete: () => handleDeleteMessage(msg.id),
-                }),
+              text={getMessageText(msg)}
+              actions={msg.role === 'agent' ? {
+                onRegenerate: () => handleRegenerate(msg.id),
+                onCheckpoint: () => saveCheckpoint(msg.id),
+              } : {
+                onEdit: () => handleEditMessage(msg),
+                onDelete: () => handleDeleteMessage(msg.id),
               }}>
                 {/* ── 思考过程区块（仅 agent 消息，有 thinking 数据时渲染）── */}
                 {showThinking && msg.role === 'agent' && msg.thinking && msg.thinking.length > 0 && (

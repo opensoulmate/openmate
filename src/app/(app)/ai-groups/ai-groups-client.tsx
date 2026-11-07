@@ -18,7 +18,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useAIGroupsStore, type AgentRole, type GroupMessage } from '@/stores/ai-groups-store';
 import MarkdownContent from '@/components/markdown-content';
-import { MessageBubble } from '@/components/message-bubble';
+import { MessageBubble, favoriteToKnowledge } from '@/components/message-bubble';
 import { SmartPrompt } from '@/components/smart-prompt';
 
 /* ========== 角色配置 ========== */
@@ -92,8 +92,6 @@ export default function AIGroupsClient() {
   const messages = useAIGroupsStore((s) => s.messages);
   const tasks = useAIGroupsStore((s) => s.tasks);
   const sendingMessage = useAIGroupsStore((s) => s.sendingMessage);
-  const selectedTarget = useAIGroupsStore((s) => s.selectedTarget);
-  const setSelectedTarget = useAIGroupsStore((s) => s.setSelectedTarget);
   const setMessages = useAIGroupsStore((s) => s.setMessages);
   const setSendingMessage = useAIGroupsStore((s) => s.setSendingMessage);
   const selectGroup = useAIGroupsStore((s) => s.selectGroup);
@@ -116,6 +114,7 @@ export default function AIGroupsClient() {
 
   /* ========== 本地 UI 状态 ========== */
   const [showGroupPanel, setShowGroupPanel] = useState(false);
+  const [editDraft, setEditDraft] = useState(''); // 修改消息草稿（注入 SmartPrompt）
   // 任务看板常驻面板（Paperclip 看板式）：桌面端消息流右侧常驻，移动端全屏切换
   const [tasksPanelOpen, setTasksPanelOpen] = useState(true);
   // 编辑 Agent 的临时状态
@@ -161,7 +160,6 @@ export default function AIGroupsClient() {
     if (!text || !selectedGroup || !wsConnected) return;
     // 不本地乐观添加——服务端回显 user_message 统一渲染（防重复显示）
     sendGroupMessage(text, 'comment');
-    setSelectedTarget('all');
   };
 
   /* ========== 发起讨论 ========== */
@@ -259,12 +257,6 @@ export default function AIGroupsClient() {
           {selectedGroup && (
             <span className="text-xs text-muted-foreground px-1.5 py-0.5 rounded bg-muted">
               {selectedGroup.agents?.length || 0} Agent
-            </span>
-          )}
-          {/* @目标指示器 */}
-          {selectedTarget !== 'all' && selectedGroup && (
-            <span className="text-xs text-primary px-1.5 py-0.5 rounded bg-primary/10">
-              @{getAgentById(selectedTarget)?.name || selectedTarget}
             </span>
           )}
           {/* ===== WS 连接状态指示器 ===== */}
@@ -367,7 +359,18 @@ export default function AIGroupsClient() {
           const isUser = msg.role === 'user';
           return (
             <MessageBubble key={msg.id} id={`msg-${msg.id}`} role={isUser ? 'user' : 'agent'} timestamp={msg.timestamp} name={isUser ? undefined : (msg.agent_name || 'Agent')}
-              actions={{ onCopy: () => { navigator.clipboard?.writeText(msg.content).catch(() => {}); } }}>
+              text={msg.content}
+              actions={{
+                onRegenerate: () => sendText(`@${msg.agent_name || msg.agent_id} 请重新回答上面的问题`),
+                onCheckpoint: () => { favoriteToKnowledge(msg.content); },
+                onEdit: () => {
+                  setEditDraft(msg.content);
+                  useAIGroupsStore.getState().setMessages(prev => prev.filter(m => m.id !== msg.id));
+                },
+                onDelete: () => {
+                  useAIGroupsStore.getState().setMessages(prev => prev.filter(m => m.id !== msg.id));
+                },
+              }}>
               <MarkdownContent content={msg.content} onCodeApply={(code: string) => {
                 navigator.clipboard?.writeText(code).catch(() => {});
               }} />
@@ -410,24 +413,6 @@ export default function AIGroupsClient() {
       {/* ===== 输入框区域 ===== */}
       {selectedGroup && (
         <div className="border-t border-border p-3 lg:p-4 shrink-0">
-          {/* @目标选择器 */}
-          <div className="flex items-center gap-2 mb-2 flex-wrap">
-            <span className="text-[11px] text-muted-foreground">{t("aiGroups.sendTo")}:</span>
-            <button onClick={() => setSelectedTarget('all')}
-              className={`text-[11px] px-2 py-0.5 rounded-full transition-colors ${selectedTarget === 'all' ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80 text-muted-foreground'}`}>
-              @{t("aiGroups.allMembers")}
-            </button>
-            {(selectedGroup.agents || []).map((a, i) => {
-              const Icon = ROLE_ICONS[a.role] || Bot;
-              return (
-                <button key={a.agent_id} onClick={() => setSelectedTarget(a.agent_id)}
-                  className={`flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full transition-colors ${selectedTarget === a.agent_id ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80 text-muted-foreground'}`}>
-                  <Icon className="w-3 h-3" /> {a.name}
-                </button>
-              );
-            })}
-          </div>
-
           {/* ===== 讨论触发表单（展开/收起） ===== */}
           {showDiscussionForm && (
             <div className="mb-3 p-3 rounded-lg border border-amber-500/30 bg-amber-500/5 space-y-2">
@@ -469,15 +454,10 @@ export default function AIGroupsClient() {
 
           {/* ===== 输入框：共用会话页 SmartPrompt 组件（用户拍板：输入框必须共用） ===== */}
           <SmartPrompt
-            onSend={(assembled) => { if (!wsConnected) return; sendText(assembled); }}
+            initialTask={editDraft}
+            onSend={(assembled) => { if (!wsConnected) return; sendText(assembled); setEditDraft(''); }}
             isLoading={sendingMessage}
-            placeholder={
-              !wsConnected
-                ? '请等待 WebSocket 连接...'
-                : selectedTarget === 'all'
-                  ? t('aiGroups.inputPlaceholder')
-                  : `@${getAgentById(selectedTarget)?.name || 'Agent'} ...`
-            }
+            placeholder={!wsConnected ? '请等待 WebSocket 连接...' : t('aiGroups.inputPlaceholder')}
             footer={<>
               {/* 讨论按钮 — 讨论中显示取消，否则显示发起讨论 */}
               {discussionLoading ? (
