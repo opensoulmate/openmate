@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Users, Plus, Bot, Shield, Zap, User, Trash2, Check, Edit3,
@@ -22,6 +22,11 @@ function getAgentAvatarColor(index: number) {
 
 export function AIGroupsSidebar() {
   const { t } = useTranslation();
+
+  // 建组表单常驻后无人触发拉取——挂载即拉候选 agent（否则"接入的 Agent 加载中"卡死）
+  useEffect(() => {
+    useAIGroupsStore.getState().fetchAvailableAgents();
+  }, []);
 
   const groups = useAIGroupsStore((s) => s.groups);
   const selectedGroup = useAIGroupsStore((s) => s.selectedGroup);

@@ -55,12 +55,16 @@ const SKIRT_HANDLE_PATH = [
   'M 62 22', 'C 70 22 52 22 52 12', 'L 52 12', 'Q 52 0 40 0', 'L 12 0',
 ].join(' ');
 
-function SkirtEdgeHandle({ onClick, dir, title, hoverGroup }: { onClick: () => void; dir: 'collapse' | 'expand'; title: string; hoverGroup: string }) {
+function SkirtEdgeHandle({ onClick, dir, title }: { onClick: () => void; dir: 'collapse' | 'expand'; title: string }) {
+  // 注意：类名必须字面量写出——Tailwind 按源码文本扫描生成 CSS，拼接字符串的变体类不会被生成（曾致按钮永远隐形）
+  const hoverCls = dir === 'collapse'
+    ? 'opacity-0 pointer-events-none group-hover/taskboard:opacity-100 group-hover/taskboard:pointer-events-auto'
+    : 'opacity-0 pointer-events-none group-hover/expand:opacity-100 group-hover/expand:pointer-events-auto';
   return (
     <button
       onClick={onClick}
       title={title}
-      className={`absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 z-20 transition-opacity duration-200 text-muted-foreground hover:text-foreground opacity-0 pointer-events-none ${hoverGroup}:opacity-100 ${hoverGroup}:pointer-events-auto`}
+      className={`absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 z-20 transition-opacity duration-200 text-muted-foreground hover:text-foreground ${hoverCls}`}
     >
       <svg width="30" height="78" viewBox="0 0 30 78" fill="none" className="drop-shadow-sm">
         <g transform="translate(8, 66) rotate(-90)">
@@ -662,7 +666,7 @@ export default function AIGroupsClient() {
         <aside className={`group/taskboard relative flex flex-col min-h-0 bg-card ${isMobile ? 'flex-1 w-full' : 'w-[340px] shrink-0 border-l border-border'}`}>
           {/* 裙摆式折叠钮：面板左缘垂直居中，悬停浮现 */}
           {!isMobile && (
-            <SkirtEdgeHandle onClick={() => setTasksPanelOpen(false)} dir="collapse" title="折叠任务看板" hoverGroup="group-hover/taskboard" />
+            <SkirtEdgeHandle onClick={() => setTasksPanelOpen(false)} dir="collapse" title="折叠任务看板" />
           )}
           <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border shrink-0">
             <ListChecks className="w-3.5 h-3.5 text-primary" />
@@ -676,7 +680,7 @@ export default function AIGroupsClient() {
       {/* 折叠后：悬停右缘再唤出裙摆钮展开 */}
       {!tasksPanelOpen && selectedGroup && !isMobile && (
         <div className="group/expand relative w-6 shrink-0 self-stretch">
-          <SkirtEdgeHandle onClick={() => setTasksPanelOpen(true)} dir="expand" title="展开任务看板" hoverGroup="group-hover/expand" />
+          <SkirtEdgeHandle onClick={() => setTasksPanelOpen(true)} dir="expand" title="展开任务看板" />
         </div>
       )}
       </div>
