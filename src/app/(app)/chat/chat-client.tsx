@@ -2366,7 +2366,7 @@ export function ChatClient() {
       </div>
         {/* 检查点面板 — 任务看板式平移展开侧栏（内容被挤开，不弹出） */}
         <aside className={`relative flex flex-col min-h-0 overflow-hidden shrink-0 transition-[width] duration-200 ease-linear ${isMobile ? (showCheckpoints ? 'w-full' : 'w-0') : (showCheckpoints ? 'w-[340px]' : 'w-0')}`}>
-          <div className={`h-full flex flex-col bg-card border-l border-border ${isMobile ? 'w-full' : 'w-[340px]'}`}>
+          <div className={`h-full flex flex-col bg-card border-t border-l border-border ${isMobile ? 'w-full' : 'w-[340px]'}`}>
             {/* 看板式标题行（与任务看板同款） */}
             <div className="flex items-center gap-1.5 px-3 h-12 border-b border-border shrink-0">
               <Bookmark className="w-3.5 h-3.5 text-primary" />

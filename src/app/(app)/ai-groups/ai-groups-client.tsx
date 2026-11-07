@@ -119,7 +119,7 @@ export default function AIGroupsClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   // 任务看板常驻面板（Paperclip 看板式）：桌面端消息流右侧常驻，移动端全屏切换
-  const [tasksPanelOpen, setTasksPanelOpen] = useState(true);
+  const [tasksPanelOpen, setTasksPanelOpen] = useState(false);
   const [groupView, setGroupView] = useState('messages'); // 分类视图（与会话页共用）
   const [showViewTabs, setShowViewTabs] = useState(false); // 分类栏折叠（与会话页一致）
   // 编辑 Agent 的临时状态
@@ -466,7 +466,7 @@ export default function AIGroupsClient() {
       {/* ===== 任务看板面板：平移展开带动画（leftpanel 同款手感） ===== */}
       {selectedGroup && (<>
         <aside className={`relative flex flex-col min-h-0 overflow-hidden shrink-0 transition-[width] duration-200 ease-linear ${isMobile ? (tasksPanelOpen ? 'w-full' : 'w-0') : (tasksPanelOpen ? 'w-[340px]' : 'w-0')}`}>
-          <div className={`h-full flex flex-col bg-card border-l border-border ${isMobile ? 'w-full' : 'w-[340px]'}`}>
+          <div className={`h-full flex flex-col bg-card border-t border-l border-border ${isMobile ? 'w-full' : 'w-[340px]'}`}>
           <div className="flex items-center gap-1.5 px-3 h-12 border-b border-border shrink-0">
             <ListChecks className="w-3.5 h-3.5 text-primary" />
             <span className="text-xs font-medium">任务看板</span>
@@ -478,7 +478,7 @@ export default function AIGroupsClient() {
         </aside>
       {/* 群组管理面板（任务看板样式：右侧常驻 / 移动端全宽） */}
         <aside className={`relative flex flex-col min-h-0 overflow-hidden shrink-0 transition-[width] duration-200 ease-linear ${isMobile ? (showGroupPanel ? 'w-full' : 'w-0') : (showGroupPanel ? 'w-[340px]' : 'w-0')}`}>
-          <div className={`h-full flex flex-col bg-card border-l border-border ${isMobile ? 'w-full' : 'w-[340px]'}`}>
+          <div className={`h-full flex flex-col bg-card border-t border-l border-border ${isMobile ? 'w-full' : 'w-[340px]'}`}>
           {/* 看板式标题行 */}
           <div className="flex items-center gap-1.5 px-3 h-12 border-b border-border shrink-0">
             <Settings className="w-3.5 h-3.5 text-primary" />
