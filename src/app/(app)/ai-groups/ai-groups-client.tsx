@@ -229,10 +229,9 @@ export default function AIGroupsClient() {
   return (
     <div className="flex flex-1 flex-col min-h-0 relative">
       {/* ===== 聊天头部：群组名称 + WS 连接状态 ===== */}
-      {/* topbar：随面板展开平移缩短（下边线同步），分类折叠钮随之居中 */}
-      <div className="flex shrink-0">
-      <div className="flex flex-1 flex-col min-w-0">
-      <div className="h-12 border-b border-border flex items-center px-2 lg:px-4 justify-between shrink-0">
+      {/* topbar：内容恒宽（按钮点击位置不动）；下边线随面板缩短，分类折叠钮随线平移居中 */}
+      <div className="flex flex-col shrink-0">
+      <div className="h-12 flex items-center px-2 lg:px-4 justify-between shrink-0">
         <div className="flex items-center gap-2">
           {/* 侧边栏切换按钮 */}
           <button onClick={(e) => { e.stopPropagation(); toggleSidebar(); if (isMobile) { setRightPanelOpen(false); setShowGroupPanel(false); } }}
@@ -270,7 +269,7 @@ export default function AIGroupsClient() {
         <div className="flex items-center gap-2">
           {/* 任务看板开关（桌面端右侧常驻面板 / 移动端全屏任务视图） */}
           {selectedGroup && (
-            <button onClick={(e) => { e.stopPropagation(); const next = !tasksPanelOpen; setTasksPanelOpen(next); if (next) setShowGroupPanel(false); }}
+            <button onClick={(e) => { e.stopPropagation(); const next = !tasksPanelOpen; setTasksPanelOpen(next); if (next) { setShowGroupPanel(false); setRightPanelOpen(false); } }}
               className={`shrink-0 flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-muted/50 active:bg-muted transition-colors touch-manipulation ${tasksPanelOpen ? 'text-primary' : 'text-muted-foreground'}`}
               aria-label="Toggle Task Board"
               title="任务看板">
@@ -280,7 +279,7 @@ export default function AIGroupsClient() {
           )}
           {/* 群组管理按钮（任务看板同款：图标+计数+高亮） */}
           {selectedGroup && (
-            <button onClick={(e) => { e.stopPropagation(); const next = !showGroupPanel; setShowGroupPanel(next); if (next) setTasksPanelOpen(false); if (isMobile) setRightPanelOpen(false); }}
+            <button onClick={(e) => { e.stopPropagation(); const next = !showGroupPanel; setShowGroupPanel(next); if (next) { setTasksPanelOpen(false); setRightPanelOpen(false); } }}
               className={`shrink-0 flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-muted/50 active:bg-muted transition-colors touch-manipulation ${showGroupPanel ? 'text-primary' : 'text-muted-foreground'}`}
               aria-label="Group Settings"
               title="群组管理">
@@ -289,7 +288,7 @@ export default function AIGroupsClient() {
             </button>
           )}
           {/* 工作区面板切换 */}
-          <button onClick={(e) => { e.stopPropagation(); toggleRightPanel(); if (isMobile) setShowGroupPanel(false); }}
+          <button onClick={(e) => { e.stopPropagation(); toggleRightPanel(); setTasksPanelOpen(false); setShowGroupPanel(false); }}
             className="shrink-0 p-2 hover:bg-muted/50 active:bg-muted transition-colors text-muted-foreground touch-manipulation"
             aria-label="Toggle Workspace">
             <PanelLeft className="w-4 h-4 scale-x-[-1]" />
@@ -297,18 +296,19 @@ export default function AIGroupsClient() {
         </div>
       </div>
 
-      {/* 分类栏折叠按钮（与会话页一致：常显在顶栏底边线） */}
-      <div className="relative">
-        <button
-          onClick={() => setShowViewTabs(!showViewTabs)}
-          className="absolute left-1/2 -translate-x-1/2 -top-[9px] z-10 p-0.5 rounded-full bg-background border border-border hover:bg-muted/50 active:bg-muted transition-colors text-muted-foreground touch-manipulation"
-          title={showViewTabs ? '收起视图切换' : '展开视图切换'}
-        >
-          <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${showViewTabs ? 'rotate-180' : 'rotate-0'}`} />
-        </button>
+      {/* 缩短线：面板展开时 topbar 下边线只跨对话区；分类折叠钮随线平移居中 */}
+      <div className="flex shrink-0 -mt-px h-px">
+        <div className="flex-1 relative bg-border">
+          <button
+            onClick={() => setShowViewTabs(!showViewTabs)}
+            className="absolute left-1/2 -translate-x-1/2 -top-[9px] z-10 p-0.5 rounded-full bg-background border border-border hover:bg-muted/50 active:bg-muted transition-colors text-muted-foreground touch-manipulation"
+            title={showViewTabs ? '收起视图切换' : '展开视图切换'}
+          >
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${showViewTabs ? 'rotate-180' : 'rotate-0'}`} />
+          </button>
+        </div>
+        <div className={`overflow-hidden shrink-0 transition-[width] duration-200 ease-linear ${isMobile ? 'w-0' : (tasksPanelOpen || showGroupPanel) ? 'w-[340px]' : 'w-0'}`} />
       </div>
-      </div>
-      <div className={`overflow-hidden shrink-0 transition-[width] duration-200 ease-linear ${isMobile ? 'w-0' : (tasksPanelOpen || showGroupPanel) ? 'w-[340px]' : 'w-0'}`} />
       </div>
 
       {/* ===== 主区域：消息流 + 看板式侧栏（平移展开带动画） ===== */}
@@ -465,7 +465,7 @@ export default function AIGroupsClient() {
       </div>
       {/* ===== 任务看板面板：平移展开带动画（leftpanel 同款手感） ===== */}
       {selectedGroup && (<>
-        <aside className={`relative flex flex-col min-h-0 overflow-hidden shrink-0 transition-[width] duration-200 ease-linear ${isMobile ? (tasksPanelOpen ? 'w-full' : 'w-0') : (tasksPanelOpen ? 'w-[340px]' : 'w-0')}`}>
+        <aside className={`relative flex flex-col min-h-0 overflow-hidden shrink-0 -mt-px transition-[width] duration-200 ease-linear ${isMobile ? (tasksPanelOpen ? 'w-full' : 'w-0') : (tasksPanelOpen ? 'w-[340px]' : 'w-0')}`}>
           <div className={`h-full flex flex-col bg-card border-t border-l border-border ${isMobile ? 'w-full' : 'w-[340px]'}`}>
           <div className="flex items-center gap-1.5 px-3 h-12 border-b border-border shrink-0">
             <ListChecks className="w-3.5 h-3.5 text-primary" />
@@ -477,7 +477,7 @@ export default function AIGroupsClient() {
           </div>
         </aside>
       {/* 群组管理面板（任务看板样式：右侧常驻 / 移动端全宽） */}
-        <aside className={`relative flex flex-col min-h-0 overflow-hidden shrink-0 transition-[width] duration-200 ease-linear ${isMobile ? (showGroupPanel ? 'w-full' : 'w-0') : (showGroupPanel ? 'w-[340px]' : 'w-0')}`}>
+        <aside className={`relative flex flex-col min-h-0 overflow-hidden shrink-0 -mt-px transition-[width] duration-200 ease-linear ${isMobile ? (showGroupPanel ? 'w-full' : 'w-0') : (showGroupPanel ? 'w-[340px]' : 'w-0')}`}>
           <div className={`h-full flex flex-col bg-card border-t border-l border-border ${isMobile ? 'w-full' : 'w-[340px]'}`}>
           {/* 看板式标题行 */}
           <div className="flex items-center gap-1.5 px-3 h-12 border-b border-border shrink-0">
