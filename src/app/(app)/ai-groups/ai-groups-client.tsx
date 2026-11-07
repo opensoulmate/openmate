@@ -437,6 +437,10 @@ export default function AIGroupsClient() {
           {/* ===== 输入框：共用会话页 SmartPrompt 组件（用户拍板：输入框必须共用） ===== */}
           <SmartPrompt
             initialTask={editDraft}
+            mentions={[
+              { id: 'all', label: t('aiGroups.mentionAll', '所有人'), icon: <Users className="w-3.5 h-3.5 text-primary" /> },
+              ...(selectedGroup?.agents || []).map((a: any) => ({ id: a.agent_id, label: a.name, icon: <Bot className="w-3.5 h-3.5 text-muted-foreground" /> })),
+            ]}
             sendDisabled={!wsConnected || (!sendReady && !editDraft.trim())}
             sendLoading={sendingMessage}
             statsText={messages.length > 0 ? `${messages.length}条` : undefined}

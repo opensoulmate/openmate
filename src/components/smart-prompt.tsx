@@ -95,6 +95,8 @@ interface SmartPromptProps {
   controls?: PromptControls;
   /** Increment to force-load sessionFields into SmartPrompt (for edit/external updates) */
   loadFieldsTrigger?: number;
+  /** @提及补全清单（群组）：输入 @ 弹出成员清单（@all 打头），选中插入 @id */
+  mentions?: Array<{ id: string; label: string; icon?: React.ReactNode }>;
 }
 
 /**
@@ -175,6 +177,7 @@ export function SmartPrompt({
   statsText,
   controls,
   loadFieldsTrigger,
+  mentions,
 }: SmartPromptProps) {
   const [fields, setFields] = useState<SmartPromptFields>({
     task: '',
@@ -335,10 +338,31 @@ export function SmartPrompt({
     if (onFieldsChange) onFieldsChange(empty);
   };
 
+  // ── @提及补全（群组）：输入 @ 弹出成员清单，@all 打头 ──
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const [mentionDismissed, setMentionDismissed] = useState(false);
+  const mentionMatch = !mentionDismissed && mentions && mentions.length ? /@([\w\u4e00-\u9fff·\-]*)$/.exec(fields.task) : null;
+  const mentionQuery = mentionMatch ? mentionMatch[1].toLowerCase() : null;
+  const mentionItems = mentionQuery !== null && mentions
+    ? mentions.filter((m) => !mentionQuery || m.label.toLowerCase().includes(mentionQuery) || m.id.toLowerCase().includes(mentionQuery)).slice(0, 6)
+    : [];
+  const mentionOpen = mentionItems.length > 0;
+  const selectMention = (item: { id: string }) => {
+    updateField('task', fields.task.replace(/@([\w\u4e00-\u9fff·\-]*)$/, `@${item.id} `));
+    setMentionIndex(0);
+    setMentionDismissed(true);
+  };
+
   const sendKeyLabel = sendMode === 'enter' ? 'Enter 发送，Shift+Enter 换行' : 'Ctrl+Enter 发送，Enter 换行';
   const placeholderText = `输入任务，点 ✨ 展开字段（${sendKeyLabel}）`;
 
   const handleKeyDown = (e: KeyboardEvent, view: any) => {
+    if (mentionOpen) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setMentionIndex((i) => (i + 1) % mentionItems.length); return true; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); setMentionIndex((i) => (i - 1 + mentionItems.length) % mentionItems.length); return true; }
+      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); selectMention(mentionItems[Math.min(mentionIndex, mentionItems.length - 1)]); return true; }
+      if (e.key === 'Escape') { e.preventDefault(); setMentionDismissed(true); return true; }
+    }
     if (sendMode === 'enter' && e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
       e.preventDefault();
       handleSend();
@@ -379,11 +403,29 @@ export function SmartPrompt({
         }}>
           <CodeMirrorEditor
             value={fields.task}
-            onChange={(val: string) => updateField('task', val)}
+            onChange={(val: string) => { setMentionDismissed(false); updateField('task', val); }}
             onKeyDown={handleKeyDown}
             placeholder={placeholderText}
             readOnly={false /* P1插话：任务运行中输入框保持可编辑，消息作为插话排队注入 */}
           />
+          {/* @提及补全（群组：@all 或 @指定agent） */}
+          {mentionOpen && (
+            <div className="absolute left-0 bottom-full mb-1 w-64 max-w-full z-20 rounded-lg border border-border bg-card shadow-lg overflow-hidden">
+              {mentionItems.map((item, idx) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onMouseDown={(e) => { e.preventDefault(); selectMention(item); }}
+                  onMouseEnter={() => setMentionIndex(idx)}
+                  className={`w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-left transition-colors ${idx === Math.min(mentionIndex, mentionItems.length - 1) ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50'}`}
+                >
+                  {item.icon}
+                  <span className="truncate">{item.label}</span>
+                  <span className="ml-auto text-[10px] text-muted-foreground/60">@{item.id}</span>
+                </button>
+              ))}
+            </div>
+          )}
           {/* Generating indicator */}
           {generating && (
             <div className="absolute right-0 top-0 flex items-center gap-1 text-[10px] text-muted-foreground">
