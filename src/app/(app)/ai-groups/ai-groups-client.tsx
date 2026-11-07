@@ -15,7 +15,6 @@ import {
   Trophy, ArrowUp, ArrowDown, ArrowRight,
 } from 'lucide-react';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useAIGroupsStore, type AgentRole, type GroupMessage } from '@/stores/ai-groups-store';
 import MarkdownContent from '@/components/markdown-content';
 import { MessageBubble, favoriteToKnowledge } from '@/components/message-bubble';
@@ -265,12 +264,14 @@ export default function AIGroupsClient() {
               <span className="text-[10px] font-medium">{tasks.length}</span>
             </button>
           )}
-          {/* 群组管理按钮 */}
+          {/* 群组管理按钮（任务看板同款：图标+计数+高亮） */}
           {selectedGroup && (
-            <button onClick={(e) => { e.stopPropagation(); setShowGroupPanel(true); if (isMobile) setRightPanelOpen(false); }}
-              className="shrink-0 p-2 hover:bg-muted/50 active:bg-muted transition-colors text-muted-foreground touch-manipulation"
-              aria-label="Group Settings">
+            <button onClick={(e) => { e.stopPropagation(); setShowGroupPanel(v => !v); if (isMobile) setRightPanelOpen(false); }}
+              className={`shrink-0 flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-muted/50 active:bg-muted transition-colors touch-manipulation ${showGroupPanel ? 'text-primary' : 'text-muted-foreground'}`}
+              aria-label="Group Settings"
+              title="群组管理">
               <Settings className="w-4 h-4" />
+              <span className="text-[10px] font-medium">{selectedGroup.agents?.length || 0}</span>
             </button>
           )}
           {/* 工作区面板切换 */}
@@ -286,7 +287,7 @@ export default function AIGroupsClient() {
       {/* ===== 主区域：消息流 + 任务看板常驻（Paperclip 看板式） ===== */}
       <div className="flex flex-1 min-h-0">
       {/* 消息流列：移动端任务看板打开时隐藏 */}
-      <div className={`flex flex-1 min-w-0 flex-col ${isMobile && tasksPanelOpen ? 'hidden' : ''}`}>
+      <div className={`flex flex-1 min-w-0 flex-col ${isMobile && (tasksPanelOpen || showGroupPanel) ? 'hidden' : ''}`}>
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 lg:px-6 py-3 lg:py-4 space-y-3 lg:space-y-4">
         {/* 未选择群组时的空状态 */}
         {!selectedGroup && (
@@ -440,94 +441,47 @@ export default function AIGroupsClient() {
           <AIGroupsTaskBoard />
         </aside>
       )}
+      {/* 群组管理面板（任务看板样式：右侧常驻 / 移动端全宽） */}
+      {showGroupPanel && selectedGroup && (
+        <aside className={`relative flex flex-col min-h-0 bg-card ${isMobile ? 'flex-1 w-full' : 'w-[340px] shrink-0 border-l border-border'}`}>
+          {/* 看板式标题行 */}
+          <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border shrink-0">
+            <Settings className="w-3.5 h-3.5 text-primary" />
+            <span className="text-xs font-medium">{t("aiGroups.groupManagement", "群组管理")}</span>
+            <span className="text-[10px] text-muted-foreground">{selectedGroup.agents?.length || 0} 个成员</span>
+            <div className="flex-1" />
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {/* Agent 成员列表 */}
+            <AgentMemberList
+              agents={selectedGroup.agents || []}
+              editingAgent={editingAgent}
+              editName={editName}
+              editRole={editRole}
+              editModel={editModel}
+              setEditName={setEditName}
+              setEditRole={setEditRole}
+              setEditModel={setEditModel}
+              onStartEdit={startEditAgent}
+              onCancelEdit={cancelEditAgent}
+              onSaveEdit={saveEditAgent}
+              onDelete={deleteAgent}
+            />
+            {/* 添加 Agent 区域 */}
+            <AddAgentSection
+              show={showAddAgent}
+              onToggle={() => setShowAddAgent(!showAddAgent)}
+              agent={newAgent}
+              onChange={setNewAgent}
+              onAdd={addAgent}
+            />
+            {/* 工作区组件 */}
+            <AIGroupsWorkspace />
+          </div>
+        </aside>
+      )}
       </div>
 
-      {/* ===== Agent 成员管理面板 ===== */}
-      {isMobile ? (
-        /* --- 移动端：Sheet 抽屉 --- */
-        <Sheet open={showGroupPanel && !!selectedGroup} onOpenChange={setShowGroupPanel}>
-          <SheetContent side="right" size="sm" showCloseButton={false}>
-            <SheetHeader className="border-b border-border pb-3">
-              <div className="flex items-center">
-                <SheetTitle className="flex items-center gap-2 text-sm">
-                  <Settings className="w-4 h-4" />
-                  {t("aiGroups.groupManagement", "群组管理")}
-                </SheetTitle>
-              </div>
-            </SheetHeader>
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              {/* Agent 成员列表 */}
-              <AgentMemberList
-                agents={selectedGroup?.agents || []}
-                editingAgent={editingAgent}
-                editName={editName}
-                editRole={editRole}
-                editModel={editModel}
-                setEditName={setEditName}
-                setEditRole={setEditRole}
-                setEditModel={setEditModel}
-                onStartEdit={startEditAgent}
-                onCancelEdit={cancelEditAgent}
-                onSaveEdit={saveEditAgent}
-                onDelete={deleteAgent}
-              />
-              {/* 添加 Agent 区域 */}
-              <AddAgentSection
-                show={showAddAgent}
-                onToggle={() => setShowAddAgent(!showAddAgent)}
-                agent={newAgent}
-                onChange={setNewAgent}
-                onAdd={addAgent}
-              />
-              {/* 工作区组件 */}
-              <AIGroupsWorkspace />
-            </div>
-          </SheetContent>
-        </Sheet>
-      ) : (
-        /* --- 桌面端：模态弹窗 --- */
-        showGroupPanel && selectedGroup && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-            <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
-                <h3 className="text-sm font-semibold flex items-center gap-2">
-                  <Settings className="w-4 h-4" /> {t("aiGroups.groupManagement", "群组管理")}
-                </h3>
-                <button onClick={() => setShowGroupPanel(false)} className="p-1 rounded hover:bg-muted">
-                  <X className="w-4 h-4 text-muted-foreground" />
-                </button>
-              </div>
-              <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                {/* Agent 成员列表 */}
-                <AgentMemberList
-                  agents={selectedGroup.agents || []}
-                  editingAgent={editingAgent}
-                  editName={editName}
-                  editRole={editRole}
-                  editModel={editModel}
-                  setEditName={setEditName}
-                  setEditRole={setEditRole}
-                  setEditModel={setEditModel}
-                  onStartEdit={startEditAgent}
-                  onCancelEdit={cancelEditAgent}
-                  onSaveEdit={saveEditAgent}
-                  onDelete={deleteAgent}
-                />
-                {/* 添加 Agent 区域 */}
-                <AddAgentSection
-                  show={showAddAgent}
-                  onToggle={() => setShowAddAgent(!showAddAgent)}
-                  agent={newAgent}
-                  onChange={setNewAgent}
-                  onAdd={addAgent}
-                />
-                {/* 工作区组件 */}
-                <AIGroupsWorkspace />
-              </div>
-            </div>
-          </div>
-        )
-      )}
     </div>
   );
 }
