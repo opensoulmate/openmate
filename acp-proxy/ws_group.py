@@ -202,6 +202,37 @@ _SUMMON_WORDS = ("大家", "各位", "谁能", "有人", "谁来", "同志们", 
 _FREECHAT_MAX_REPLY_CHARS = 8000
 
 
+_REAL_AGENTS: dict = {}  # (group_id, agent_id) -> (SoulMateAgent实例, session_id)
+
+
+async def _real_agent_reply(group_id: str, agent_id: str, user_text: str) -> str:
+    """真身执行：走 SoulMateAgent 完整循环（真实身份/工具/会话持久），不是裸 LLM 分身。
+    用户拍板（2026-11-07）：群里 agent 必须是真身，分身=模拟没用。"""
+    key = (group_id, agent_id)
+    if key not in _REAL_AGENTS:
+        from agent.wakeup_executor import _get_headless_agent  # 含 LLM 配置的 headless 构造
+
+        real = _get_headless_agent()
+        ns = await real.new_session(cwd="/home/climbing")
+        sid = str(getattr(ns, "session_id", "") or getattr(ns, "sessionId", ""))
+        if not sid and isinstance(ns, dict):
+            sid = str(ns.get("session_id") or ns.get("sessionId") or "")
+        if not sid:
+            raise RuntimeError("真身会话创建失败")
+        _REAL_AGENTS[key] = (real, sid)
+    real, sid = _REAL_AGENTS[key]
+    before = real._load_messages_from_db(sid)
+    n_before = len(before)
+    await real.prompt([{"type": "text", "text": user_text}], sid)
+    after = real._load_messages_from_db(sid)
+    new_texts = [
+        (m.get("content") or "")
+        for m in after[n_before:]
+        if m.get("role") == "assistant" and (m.get("content") or "").strip()
+    ]
+    return "\n".join(new_texts).strip()
+
+
 def _match_repliers(content: str, agents: list) -> list:
     """Pick who replies to a free-chat message.
 
@@ -277,8 +308,8 @@ async def _agent_free_reply(
         )
         user_msg = f"群聊近况：\n{history_text}\n\n新消息：{content}\n\n请以 {agent.name} 的身份回应。"
         try:
-            engine = LLMEngine(model=agent.model or "", system_prompt=system_prompt)
-            reply = (await engine.chat([{"role": "user", "content": user_msg}])) or ""
+            # 真身执行（完整 SoulMateAgent：真实身份/工具/会话）——非裸 LLM 分身
+            reply = (await _real_agent_reply(group_id, agent.agent_id, user_msg)) or ""
             reply = reply.strip()[:_FREECHAT_MAX_REPLY_CHARS]
             if reply == "[SKIP]":
                 # agent 自主决定沉默——这是它的选择，不发群
