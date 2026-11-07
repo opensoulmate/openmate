@@ -16,6 +16,11 @@ import {
   Paperclip,
   Check,
   Settings2,
+  Brain,
+  Zap,
+  Bookmark,
+  StopCircle,
+  MessageSquare,
 } from 'lucide-react';
 import { CodeMirrorEditor } from '@/components/codemirror-editor';
 import { ContextRing } from '@/components/context-ring';
@@ -59,7 +64,6 @@ interface SmartPromptProps {
   /** Extra className */
   className?: string;
   /** Footer slot (e.g. action buttons) rendered inside the border */
-  footer?: React.ReactNode;
   /** Called when file attach button is clicked */
   onFileClick?: () => void;
   /** 语音输入（17.2）：点击麦克风开始/停止录音 */
@@ -90,8 +94,25 @@ interface SmartPromptProps {
   sendTitle?: string;
   /** 统计文字（如 "12条 · $0.35"），显示在工具栏 */
   statsText?: string;
+  /** 业务控制钮——按钮的代码全在本组件内，页面只传状态和回调 */
+  controls?: PromptControls;
   /** Increment to force-load sessionFields into SmartPrompt (for edit/external updates) */
   loadFieldsTrigger?: number;
+}
+
+/**
+ * 业务控制钮状态/回调（按钮渲染代码全部在 SmartPrompt 内部，页面只管传数据）。
+ * 渲染顺序固定：Plan/Act → 思考 → 清空 → 历史 → 上下文环 → 统计 → 发送 → 讨论。
+ */
+export interface PromptControls {
+  /** Plan/Act 模式切换 */
+  mode?: { value: 'plan' | 'act'; onToggle: () => void };
+  /** 思考过程显示开关 */
+  thinking?: { show: boolean; onToggle: () => void };
+  /** 历史/检查点面板开关 */
+  history?: { show: boolean; count: number; onToggle: () => void };
+  /** 讨论（群组）：发起/取消 */
+  discussion?: { open: boolean; loading: boolean; onToggle: () => void; onCancel: () => void };
 }
 
 // ── Field Definitions ────────────────────────────────────────────
@@ -142,7 +163,6 @@ export function SmartPrompt({
   placeholder = '输入任务直接发送，点 ✨ 自动生成扩展提示词（Enter 发送，Shift+Enter 换行）',
   context,
   className,
-  footer,
   onFileClick,
   onMicClick,
   isRecording = false,
@@ -160,6 +180,7 @@ export function SmartPrompt({
   sendLoading,
   sendTitle,
   statsText,
+  controls,
   loadFieldsTrigger,
 }: SmartPromptProps) {
   const [fields, setFields] = useState<SmartPromptFields>({
@@ -502,16 +523,57 @@ export function SmartPrompt({
           )}
         </div>
 
-        {/* ── 统一工具栏：输入框附属全部按钮的唯一代码源——通用钮内置，业务钮经 footer 传入 ── */}
+        {/* ── 输入框附属全部按钮的唯一代码源（顺序固定，与会话页原顺序一致） ── */}
+        {controls?.mode && (
+          <button
+            onClick={controls.mode.onToggle}
+            title={controls.mode.value === 'plan' ? '切换到执行模式' : '切换到计划模式'}
+            className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+              controls.mode.value === 'plan' ? 'text-blue-400 hover:bg-blue-500/10' : 'text-green-400 hover:bg-green-500/10'
+            }`}
+          >
+            {controls.mode.value === 'plan' ? <Brain className="w-4 h-4" /> : <Zap className="w-4 h-4" />}
+            <span className="hidden lg:inline">{controls.mode.value === 'plan' ? 'Plan' : 'Act'}</span>
+          </button>
+        )}
+        {controls?.thinking && (
+          <button
+            onClick={controls.thinking.onToggle}
+            className={`p-1.5 rounded transition-colors ${controls.thinking.show ? 'bg-muted/50 text-[var(--color-thinking-border)] hover:bg-muted/70' : 'text-muted-foreground/40 hover:bg-muted/30 hover:text-muted-foreground'}`}
+            title={controls.thinking.show ? '隐藏思考过程' : '显示思考过程'}
+          >
+            <Brain className="w-4 h-4" />
+          </button>
+        )}
         <button onClick={() => handleClear()} className="p-1.5 rounded hover:bg-muted/30 text-muted-foreground/40 hover:text-muted-foreground transition-colors" title="清空输入">
           <RotateCcw className="w-4 h-4" />
         </button>
+        {controls?.history && (
+          <button onClick={controls.history.onToggle} className="p-1.5 rounded hover:bg-muted/30 text-muted-foreground/40 hover:text-muted-foreground transition-colors relative" title="历史">
+            <Bookmark className="w-4 h-4" />
+            {controls.history.count > 0 && <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[9px] rounded-full w-3.5 h-3.5 flex items-center justify-center">{controls.history.count}</span>}
+          </button>
+        )}
         <ContextRing />
         {statsText && (
           <span className="text-[9px] text-muted-foreground/30 whitespace-nowrap">{statsText}</span>
         )}
         <SmartSendButton disabled={sendDisabled} loading={sendLoading} title={sendTitle} />
-        {footer}
+        {controls?.discussion && (
+          controls.discussion.loading ? (
+            <button onClick={controls.discussion.onCancel}
+              className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium text-red-400 hover:bg-red-500/10 transition-colors touch-manipulation"
+              title="取消讨论">
+              <StopCircle className="w-4 h-4" />
+            </button>
+          ) : (
+            <button onClick={controls.discussion.onToggle}
+              className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors touch-manipulation ${controls.discussion.open ? 'text-amber-400 hover:bg-amber-500/10' : 'text-muted-foreground hover:bg-muted/80'}`}
+              title="发起讨论">
+              <MessageSquare className="w-4 h-4" />
+            </button>
+          )
+        )}
       </div>
 
     </div>

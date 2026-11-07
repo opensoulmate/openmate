@@ -2925,29 +2925,11 @@ export function ChatClient() {
               isRecording={isRecording}
               recordingSeconds={recordingSeconds}
               onPaste={handlePaste}
-              footer={<>
-                  <button
-                    onClick={() => setAgentMode(prev => prev === 'plan' ? 'act' : 'plan')}
-                    title={agentMode === 'plan' ? '切换到执行模式' : '切换到计划模式'}
-                    className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                      agentMode === 'plan' ? 'text-blue-400 hover:bg-blue-500/10' : 'text-green-400 hover:bg-green-500/10'
-                    }`}
-                  >
-                    {agentMode === 'plan' ? <Brain className="w-4 h-4" /> : <Zap className="w-4 h-4" />}
-                    <span className="hidden lg:inline">{agentMode === 'plan' ? 'Plan' : 'Act'}</span>
-                  </button>
-                  <button
-                    onClick={() => setShowThinking(prev => !prev)}
-                    className={`p-1.5 rounded transition-colors ${showThinking ? 'bg-muted/50 text-[var(--color-thinking-border)] hover:bg-muted/70' : 'text-muted-foreground/40 hover:bg-muted/30 hover:text-muted-foreground'}`}
-                    title={showThinking ? '隐藏思考过程' : '显示思考过程'}
-                  >
-                    <Brain className="w-4 h-4" />
-                  </button>
-                  <button onClick={() => { const next = !showCheckpoints; setShowCheckpoints(next); if (next) { setRightPanelOpen(false); if (isMobile && sidebarOpen) toggleSidebar(); } }} className="p-1.5 rounded hover:bg-muted/30 text-muted-foreground/40 hover:text-muted-foreground transition-colors relative" title="历史">
-                    <Bookmark className="w-4 h-4" />
-                    {checkpoints.length > 0 && <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[9px] rounded-full w-3.5 h-3.5 flex items-center justify-center">{checkpoints.length}</span>}
-                  </button>
-              </>}
+              controls={{
+                mode: { value: agentMode, onToggle: () => setAgentMode(prev => prev === 'plan' ? 'act' : 'plan') },
+                thinking: { show: showThinking, onToggle: () => setShowThinking(prev => !prev) },
+                history: { show: showCheckpoints, count: checkpoints.length, onToggle: () => { const next = !showCheckpoints; setShowCheckpoints(next); if (next) { setRightPanelOpen(false); if (isMobile && sidebarOpen) toggleSidebar(); } } },
+              }}
             />
           </div>
         </div>

@@ -462,23 +462,9 @@ export default function AIGroupsClient() {
             onSend={(assembled) => { if (!wsConnected) return; sendText(assembled); setEditDraft(''); setSendReady(false); }}
             isLoading={sendingMessage}
             placeholder={!wsConnected ? '请等待 WebSocket 连接...' : t('aiGroups.inputPlaceholder')}
-            footer={<>
-              {/* 业务钮：讨论（通用钮已内置 SmartPrompt 工具栏） */}
-              {/* 讨论按钮 — 讨论中显示取消，否则显示发起讨论 */}
-              {discussionLoading ? (
-                <button onClick={handleCancelDiscussion}
-                  className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium text-red-400 hover:bg-red-500/10 transition-colors touch-manipulation"
-                  title="取消讨论">
-                  <StopCircle className="w-4 h-4" />
-                </button>
-              ) : (
-                <button onClick={() => setShowDiscussionForm(!showDiscussionForm)}
-                  className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors touch-manipulation ${showDiscussionForm ? 'text-amber-400 hover:bg-amber-500/10' : 'text-muted-foreground hover:bg-muted/80'}`}
-                  title="发起讨论">
-                  <MessageSquare className="w-4 h-4" />
-                </button>
-              )}
-            </>}
+            controls={{
+              discussion: { open: showDiscussionForm, loading: discussionLoading, onToggle: () => setShowDiscussionForm(!showDiscussionForm), onCancel: handleCancelDiscussion },
+            }}
           />
         </div>
       )}
