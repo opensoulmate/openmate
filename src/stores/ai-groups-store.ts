@@ -23,6 +23,8 @@ export interface GroupMessage {
   timestamp: Date;
   target?: string;
   intent?: 'claim' | 'suggest' | 'refer' | 'comment' | 'result' | 'score';
+  /** 溯源/过程（trigger_msg_id/trace_id/action_report） */
+  metadata?: Record<string, any>;
 }
 
 export interface AIGroup {
@@ -397,6 +399,7 @@ export const useAIGroupsStore = create<AIGroupsState>((set, get) => ({
               agent_name: data.agent_name || '用户',
               target: data.target || 'all',
               intent: data.intent as GroupMessage['intent'],
+              metadata: data.metadata || undefined,
             };
             get().addMessage(newMsg);
             break;
@@ -413,6 +416,7 @@ export const useAIGroupsStore = create<AIGroupsState>((set, get) => ({
               content: data.content || '',
               timestamp: new Date(data.timestamp || Date.now()),
               intent: data.intent as GroupMessage['intent'],
+              metadata: data.metadata || undefined,
             };
             get().addMessage(agentMsg);
             break;
@@ -658,6 +662,7 @@ export const useAIGroupsStore = create<AIGroupsState>((set, get) => ({
           content: m.content || '',
           timestamp: new Date(m.created_at || Date.now()),
           intent: m.intent,
+          metadata: m.metadata || undefined,
         }));
         set({ messages: msgs });
       } catch (e) {

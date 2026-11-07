@@ -116,6 +116,8 @@ export default function AIGroupsClient() {
   const [showGroupPanel, setShowGroupPanel] = useState(false);
   const [editDraft, setEditDraft] = useState(''); // 修改消息草稿（注入 SmartPrompt）
   const [sendReady, setSendReady] = useState(false); // 输入框是否有内容（发送钮可用态）
+  const [replyMode, setReplyMode] = useState<'plan' | 'act'>('act'); // 接话模式：act=自动自由接话，plan=定点@接话（真后端 reply_mode）
+  const [showThinking, setShowThinking] = useState(false); // 显示消息过程（溯源/行动报告）
   // 任务看板常驻面板（Paperclip 看板式）：桌面端消息流右侧常驻，移动端全屏切换
   const [tasksPanelOpen, setTasksPanelOpen] = useState(true);
   // 编辑 Agent 的临时状态
@@ -375,6 +377,13 @@ export default function AIGroupsClient() {
               <MarkdownContent content={msg.content} onCodeApply={(code: string) => {
                 navigator.clipboard?.writeText(code).catch(() => {});
               }} />
+              {showThinking && msg.metadata && Object.keys(msg.metadata).length > 0 && (
+                <div className="mt-1.5 text-[10px] text-muted-foreground/50 font-mono border-t border-border/40 pt-1 space-y-0.5">
+                  {msg.metadata.trigger_msg_id && <div>溯源 trigger: {String(msg.metadata.trigger_msg_id)}</div>}
+                  {msg.metadata.trace_id && <div>trace: {String(msg.metadata.trace_id)}</div>}
+                  {msg.metadata.action_report && <div>过程: {typeof msg.metadata.action_report === 'string' ? msg.metadata.action_report : JSON.stringify(msg.metadata.action_report)}</div>}
+                </div>
+              )}
             </MessageBubble>
           );
         })}
@@ -458,11 +467,22 @@ export default function AIGroupsClient() {
             initialTask={editDraft}
             sendDisabled={!wsConnected || (!sendReady && !editDraft.trim())}
             sendLoading={sendingMessage}
+            statsText={messages.length > 0 ? `${messages.length}条` : undefined}
             onFieldsChange={(f) => setSendReady(!!(f.task || '').trim())}
             onSend={(assembled) => { if (!wsConnected) return; sendText(assembled); setEditDraft(''); setSendReady(false); }}
             isLoading={sendingMessage}
             placeholder={!wsConnected ? '请等待 WebSocket 连接...' : t('aiGroups.inputPlaceholder')}
             controls={{
+              mode: {
+                value: replyMode,
+                onToggle: () => {
+                  const next = replyMode === 'plan' ? 'act' : 'plan';
+                  setReplyMode(next);
+                  sendText(`!reply_mode ${next === 'act' ? 'auto' : 'mentions'}`);
+                },
+              },
+              thinking: { show: showThinking, onToggle: () => setShowThinking(v => !v) },
+              history: { show: tasksPanelOpen, count: tasks.length, onToggle: () => setTasksPanelOpen(v => !v) },
               discussion: { open: showDiscussionForm, loading: discussionLoading, onToggle: () => setShowDiscussionForm(!showDiscussionForm), onCancel: handleCancelDiscussion },
             }}
           />

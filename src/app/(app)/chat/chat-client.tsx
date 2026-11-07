@@ -2929,6 +2929,15 @@ export function ChatClient() {
                 mode: { value: agentMode, onToggle: () => setAgentMode(prev => prev === 'plan' ? 'act' : 'plan') },
                 thinking: { show: showThinking, onToggle: () => setShowThinking(prev => !prev) },
                 history: { show: showCheckpoints, count: checkpoints.length, onToggle: () => { const next = !showCheckpoints; setShowCheckpoints(next); if (next) { setRightPanelOpen(false); if (isMobile && sidebarOpen) toggleSidebar(); } } },
+                discussion: {
+                  open: false,
+                  loading: false,
+                  onToggle: () => {
+                    const topic = smartTaskText.trim() || (messages.length > 0 ? getMessageText(messages[messages.length - 1]) : '');
+                    window.location.href = `/ai-groups?topic=${encodeURIComponent(topic.slice(0, 200))}`;
+                  },
+                  onCancel: () => {},
+                },
               }}
             />
           </div>
