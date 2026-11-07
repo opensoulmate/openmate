@@ -644,23 +644,25 @@ export const useAIGroupsStore = create<AIGroupsState>((set, get) => ({
         selectedGroup: updated,
         groups: s.groups.map(g => g.id === group.id ? updated : g),
       }));
-      // Generate demo messages from tasks
-      const msgs: GroupMessage[] = [];
-      (data.tasks || []).forEach((task: any, i: number) => {
-        msgs.push({
-          id: `task-${task.id || i}`, role: 'user', content: task.goal || '',
-          timestamp: new Date(task.created_at || Date.now()), target: 'all',
+      // 拉真实聊天历史（此前是从 tasks 造的 demo 假消息——重进页面历史全空的根因）
+      try {
+        const mRes = await fetch(`${getApiBaseUrl()}/api/ai-groups/${group.id}/messages?limit=200`, {
+          headers: authHeaders(),
         });
-        (task.subtasks || []).forEach((st: any, j: number) => {
-          const agent = (data.agents || []).find((a: AgentRole) => a.agent_id === st.assigned_agent_id);
-          msgs.push({
-            id: `st-${st.id || j}`, role: 'agent', agent_id: st.assigned_agent_id,
-            agent_name: agent?.name || st.assigned_agent_id, agent_role: agent?.role || 'executor',
-            content: st.result || st.goal || '', timestamp: new Date(),
-          });
-        });
-      });
-      set({ messages: msgs });
+        const mData = await mRes.json();
+        const msgs: GroupMessage[] = (mData.messages || []).map((m: any) => ({
+          id: m.id,
+          role: (m.role === 'user' ? 'user' : 'agent') as GroupMessage['role'],
+          agent_id: m.agent_id,
+          agent_name: m.agent_name || (m.role === 'user' ? '用户' : m.agent_id),
+          content: m.content || '',
+          timestamp: new Date(m.created_at || Date.now()),
+          intent: m.intent,
+        }));
+        set({ messages: msgs });
+      } catch (e) {
+        console.error('[历史消息] 加载失败:', e);
+      }
 
       // 建立该群组的 WebSocket 实时连接
       get().connectGroupWS(group.id);
