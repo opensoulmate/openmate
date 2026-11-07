@@ -198,7 +198,8 @@ def _create_discussion_task_db(
 
 
 _SUMMON_WORDS = ("大家", "各位", "谁能", "有人", "谁来", "同志们", "所有人", "全体", "@all", "@所有人")
-_FREECHAT_MAX_REPLY_CHARS = 600
+# 回复不硬切（600字硬截曾把长回复拦腰斩断、agent 互相看到半截话以为"断断续续"）
+_FREECHAT_MAX_REPLY_CHARS = 8000
 
 
 def _match_repliers(content: str, agents: list) -> list:
@@ -225,9 +226,8 @@ def _match_repliers(content: str, agents: list) -> list:
     if any(w in content for w in _SUMMON_WORDS):
         return list(agents)[:3]
     if agents:
-        # default: one responder, rotating by message content so it feels alive
-        pick = sum(content.encode()) % len(agents)
-        return [agents[pick]]
+        # 默认全员接话——群里 agent 都参与讨论（用户拍板：发一条大家都说话）
+        return list(agents)[:4]
     return []
 
 
@@ -257,7 +257,7 @@ async def _agent_free_reply(
         ).fetchall()
         db.close()
         history_text = "\n".join(
-            f"{r['agent_name'] or '成员'}: {(r['content'] or '')[:160]}" for r in reversed(rows)
+            f"{r['agent_name'] or '成员'}: {(r['content'] or '')[:2000]}" for r in reversed(rows)
         )
     except Exception:
         pass
@@ -265,8 +265,8 @@ async def _agent_free_reply(
     for agent in repliers:
         system_prompt = (
             f"你是 AI 群组「{group_id}」的成员 {agent.name}（角色：{agent.role}）。"
-            "在群聊里自然、简短地回应，像同事讨论一样，可以引用前面成员的话。"
-            f"回复控制在 {_FREECHAT_MAX_REPLY_CHARS} 字以内，不要客套开场白。"
+            "在群聊里自然地回应，像同事讨论一样，可以引用前面成员的话。"
+            "内容按需要写全（清单、方案等务必写完整），不要截断、不要客套开场白。"
         )
         user_msg = f"群聊近况：\n{history_text}\n\n新消息：{content}\n\n请以 {agent.name} 的身份回应。"
         try:
