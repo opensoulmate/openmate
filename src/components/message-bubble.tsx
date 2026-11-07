@@ -1,13 +1,21 @@
 import { Bot, User, Copy, Volume2, ThumbsUp, ThumbsDown, Share2, RefreshCw, Bookmark, MoreHorizontal, RotateCcw, X } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { useAppStore } from '@/stores/app-store';
+import { SOULMATE_LOGO } from '@/lib/agent-brand';
 
 // Agent 官方 logo 解析（唯一真源）——会话/群组同一函数同一 logo：
-// 注册表(设置→Agent管理)的 icon 优先，其次页面兜底，最后 AGENT_ICONS emoji 表
+// ①注册表(设置→Agent管理)的 logo 图（hermes=官方头像、soulmate=/soulmate.svg）
+// ②soulmate 品牌真源兜底 ③icon emoji ④AGENT_ICONS 表
 export function resolveAgentAvatar(key?: string | null, fallbackIcon?: string | null): string | undefined {
   const list = (useAppStore.getState().sidebarAgents as any[]) || [];
   const hit = key ? list.find((a: any) => a.id === key || a.name === key) : undefined;
-  return hit?.icon || fallbackIcon || (key ? AGENT_ICONS[key.toLowerCase()] : undefined) || undefined;
+  const k = (key || '').toLowerCase();
+  return hit?.logo
+    || (k === 'soulmate' ? SOULMATE_LOGO : undefined)
+    || hit?.icon
+    || fallbackIcon
+    || (key ? AGENT_ICONS[k] : undefined)
+    || undefined;
 }
 
 // Agent 官方头像 emoji 表（detect 兜底）

@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useRef } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getApiBaseUrl, getToken } from '@/lib/api-client';
 import { useSidebar } from '@/components/ui/sidebar';
@@ -18,6 +18,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { useAIGroupsStore, type AgentRole, type GroupMessage } from '@/stores/ai-groups-store';
 import MarkdownContent from '@/components/markdown-content';
 import { MessageBubble, favoriteToKnowledge, resolveAgentAvatar } from '@/components/message-bubble';
+import { extractViewData, MessageViewTabs, MessageViews } from '@/components/message-views';
 import { SmartPrompt } from '@/components/smart-prompt';
 
 /* ========== 角色配置 ========== */
@@ -52,6 +53,13 @@ export default function AIGroupsClient() {
   const groups = useAIGroupsStore((s) => s.groups);
   const selectedGroup = useAIGroupsStore((s) => s.selectedGroup);
   const messages = useAIGroupsStore((s) => s.messages);
+  const groupViewData = useMemo(() => extractViewData(messages.map((m: any, i: number) => ({
+    id: m.id || String(i),
+    role: (m.role === 'user' ? 'user' : 'agent') as 'user' | 'agent',
+    timestamp: m.timestamp instanceof Date ? m.timestamp : new Date(m.timestamp || Date.now()),
+    text: m.content,
+    parts: [{ type: 'text', text: m.content }],
+  }))), [messages]);
   const tasks = useAIGroupsStore((s) => s.tasks);
   const sendingMessage = useAIGroupsStore((s) => s.sendingMessage);
   const setMessages = useAIGroupsStore((s) => s.setMessages);
@@ -111,6 +119,7 @@ export default function AIGroupsClient() {
   }, []);
   // 任务看板常驻面板（Paperclip 看板式）：桌面端消息流右侧常驻，移动端全屏切换
   const [tasksPanelOpen, setTasksPanelOpen] = useState(true);
+  const [groupView, setGroupView] = useState('messages'); // 分类视图（与会话页共用）
   // 编辑 Agent 的临时状态
   const [editName, setEditName] = useState('');
   const [editRole, setEditRole] = useState('');
@@ -283,12 +292,18 @@ export default function AIGroupsClient() {
         </div>
       </div>
 
+      {/* 分类视图切换（与会话页共用 MessageViewTabs） */}
+      {selectedGroup && (
+        <MessageViewTabs view={groupView} onChange={setGroupView} data={groupViewData} />
+      )}
+
       {/* ===== 消息列表区域 ===== */}
       {/* ===== 主区域：消息流 + 任务看板常驻（Paperclip 看板式） ===== */}
       <div className="flex flex-1 min-h-0">
       {/* 消息流列：移动端任务看板打开时隐藏 */}
       <div className={`flex flex-1 min-w-0 flex-col ${isMobile && (tasksPanelOpen || showGroupPanel) ? 'hidden' : ''}`}>
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 lg:px-6 py-3 lg:py-4 space-y-3 lg:space-y-4">
+        {groupView === 'messages' && (<>
         {/* 未选择群组时的空状态 */}
         {!selectedGroup && (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
@@ -363,6 +378,8 @@ export default function AIGroupsClient() {
             </MessageBubble>
           );
         })}
+        </>)}
+        {groupView !== 'messages' && <MessageViews view={groupView} data={groupViewData} onViewChange={setGroupView} />}
 
         {/* 正在发送指示器 */}
         {sendingMessage && (
