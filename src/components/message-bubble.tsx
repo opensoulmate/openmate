@@ -1,5 +1,22 @@
 import { Bot, User, Copy, Volume2, ThumbsUp, ThumbsDown, Share2, RefreshCw, Bookmark, MoreHorizontal, RotateCcw, X } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
+import { useAppStore } from '@/stores/app-store';
+
+// Agent 官方 logo 解析（唯一真源）——会话/群组同一函数同一 logo：
+// 注册表(设置→Agent管理)的 icon 优先，其次页面兜底，最后 AGENT_ICONS emoji 表
+export function resolveAgentAvatar(key?: string | null, fallbackIcon?: string | null): string | undefined {
+  const list = (useAppStore.getState().sidebarAgents as any[]) || [];
+  const hit = key ? list.find((a: any) => a.id === key || a.name === key) : undefined;
+  return hit?.icon || fallbackIcon || (key ? AGENT_ICONS[key.toLowerCase()] : undefined) || undefined;
+}
+
+// Agent 官方头像 emoji 表（detect 兜底）
+export const AGENT_ICONS: Record<string, string> = {
+  hermes: '🏛️', claude: '🟣', codex: '🟢', gemini: '🔵', mimo: '📱',
+  opencode: '⚡', aider: '🤝', copilot: '🐙', cursor: '▶️', windsurf: '🏄',
+  cline: '🔧', continue: '🔄', deepseek: '🐋', qwen: '🟠', 'amazon-q': '☁️',
+  ollama: '🦙', wechat: '💬', telegram: '✈️', openclaw: '🦞',
+};
 import { getApiBaseUrl, getToken } from '@/lib/api-client';
 import { ForwardDialog } from '@/components/forward-dialog';
 
@@ -79,6 +96,7 @@ export function MessageBubble({
   role,
   timestamp,
   name,
+  avatar,
   id,
   text,
   actions,
@@ -88,6 +106,8 @@ export function MessageBubble({
   timestamp: Date;
   /** 群组多发言人时显示在时间戳行的名字；会话不传 */
   name?: string;
+  /** agent 官方头像（emoji 或图片 URL），缺省回落机器人图标 */
+  avatar?: string;
   id?: string;
   /** 消息纯文本——复制/朗读/反馈/分享/收藏等通用操作用 */
   text: string;
@@ -100,8 +120,14 @@ export function MessageBubble({
   return (
     <div id={id} className={`flex gap-2 lg:gap-3 rounded-xl transition-all duration-300 ${isUser ? 'justify-end' : ''}`}>
       {!isUser && (
-        <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-          <Bot className="w-4 h-4 text-primary" />
+        <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0 overflow-hidden">
+          {avatar ? (
+            avatar.startsWith('http') || avatar.startsWith('/') || avatar.startsWith('data:')
+              ? <img src={avatar} alt="" className="w-full h-full object-cover" />
+              : <span className="text-base leading-none">{avatar}</span>
+          ) : (
+            <Bot className="w-4 h-4 text-primary" />
+          )}
         </div>
       )}
       <div

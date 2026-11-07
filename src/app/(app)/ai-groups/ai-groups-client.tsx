@@ -17,7 +17,7 @@ import {
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useAIGroupsStore, type AgentRole, type GroupMessage } from '@/stores/ai-groups-store';
 import MarkdownContent from '@/components/markdown-content';
-import { MessageBubble, favoriteToKnowledge } from '@/components/message-bubble';
+import { MessageBubble, favoriteToKnowledge, resolveAgentAvatar } from '@/components/message-bubble';
 import { SmartPrompt } from '@/components/smart-prompt';
 
 /* ========== 角色配置 ========== */
@@ -337,6 +337,7 @@ export default function AIGroupsClient() {
           const isUser = msg.role === 'user';
           return (
             <MessageBubble key={msg.id} id={`msg-${msg.id}`} role={isUser ? 'user' : 'agent'} timestamp={msg.timestamp} name={isUser ? undefined : (msg.agent_name || 'Agent')}
+              avatar={isUser ? undefined : resolveAgentAvatar(msg.agent_name)}
               text={msg.content}
               actions={{
                 onRegenerate: () => sendText(`@${msg.agent_name || msg.agent_id} 请重新回答上面的问题`),

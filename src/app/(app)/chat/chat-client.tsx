@@ -1,6 +1,6 @@
 'use client';
 import MarkdownContent from "@/components/markdown-content";
-import { MessageBubble } from "@/components/message-bubble";
+import { MessageBubble, resolveAgentAvatar } from '@/components/message-bubble';
 import { SOULMATE_LOGO, SOULMATE_ICON } from "@/lib/agent-brand";
 import { SecretScanBadge } from "@/components/secret-scan-badge";
 import { MemoryMarkerBadge, type MemoryMarker } from "@/components/memory-marker-badge";
@@ -187,14 +187,6 @@ const SOURCE_META: Record<string, { labelKey: string; icon: string }> = {
   tool:   { labelKey: 'sessions.sourceTool', icon: '🔧' },
   subagent: { labelKey: 'sessions.sourceSubagent', icon: '🤖' },
   hermes: { labelKey: 'sessions.sourceAcp', icon: '🔗' },
-};
-
-// Known agent icons (fallback for detect API)
-const AGENT_ICONS: Record<string, string> = {
-  hermes: '🏛️', claude: '🟣', codex: '🟢', gemini: '🔵', mimo: '📱',
-  opencode: '⚡', aider: '🤝', copilot: '🐙', cursor: '▶️', windsurf: '🏄',
-  cline: '🔧', continue: '🔄', deepseek: '🐋', qwen: '🟠', 'amazon-q': '☁️',
-  ollama: '🦙', wechat: '💬', telegram: '✈️', openclaw: '🦞',
 };
 
 // Parse file changes from AI response content
@@ -2661,6 +2653,7 @@ export function ChatClient() {
           )}
           {messages.map(msg => (
             <MessageBubble key={msg.id} id={`msg-${msg.id}`} role={msg.role} timestamp={msg.timestamp}
+              avatar={msg.role === 'agent' ? resolveAgentAvatar(selectedAgent?.id || selectedAgent?.name, storeAgentIcon) : undefined}
               text={getMessageText(msg)}
               actions={msg.role === 'agent' ? {
                 onRegenerate: () => handleRegenerate(msg.id),
