@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { getApiBaseUrl, getToken } from '@/lib/api-client';
 import { useSidebar } from '@/components/ui/sidebar';
 import { useAppStore } from '@/stores/app-store';
-import { AIGroupsWorkspace, AIGroupsTaskBoard } from '@/components/ai-groups-workspace';
+import { AIGroupsTaskBoard } from '@/components/ai-groups-workspace';
 import {
   Users, Bot, Shield, Zap, User, Loader2,
   MessageSquare,
@@ -256,7 +256,7 @@ export default function AIGroupsClient() {
         <div className="flex items-center gap-2">
           {/* 任务看板开关（桌面端右侧常驻面板 / 移动端全屏任务视图） */}
           {selectedGroup && (
-            <button onClick={(e) => { e.stopPropagation(); setTasksPanelOpen(v => !v); if (isMobile) setShowGroupPanel(false); }}
+            <button onClick={(e) => { e.stopPropagation(); const next = !tasksPanelOpen; setTasksPanelOpen(next); if (next) setShowGroupPanel(false); }}
               className={`shrink-0 flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-muted/50 active:bg-muted transition-colors touch-manipulation ${tasksPanelOpen ? 'text-primary' : 'text-muted-foreground'}`}
               aria-label="Toggle Task Board"
               title="任务看板">
@@ -266,7 +266,7 @@ export default function AIGroupsClient() {
           )}
           {/* 群组管理按钮（任务看板同款：图标+计数+高亮） */}
           {selectedGroup && (
-            <button onClick={(e) => { e.stopPropagation(); setShowGroupPanel(v => !v); if (isMobile) setRightPanelOpen(false); }}
+            <button onClick={(e) => { e.stopPropagation(); const next = !showGroupPanel; setShowGroupPanel(next); if (next) setTasksPanelOpen(false); if (isMobile) setRightPanelOpen(false); }}
               className={`shrink-0 flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-muted/50 active:bg-muted transition-colors touch-manipulation ${showGroupPanel ? 'text-primary' : 'text-muted-foreground'}`}
               aria-label="Group Settings"
               title="群组管理">
@@ -474,8 +474,6 @@ export default function AIGroupsClient() {
               onChange={setNewAgent}
               onAdd={addAgent}
             />
-            {/* 工作区组件 */}
-            <AIGroupsWorkspace />
           </div>
         </aside>
       )}
