@@ -463,7 +463,7 @@ export default function AIGroupsClient() {
       {/* ===== 任务看板常驻面板：桌面端消息流右侧常驻，移动端全屏 ===== */}
       {tasksPanelOpen && selectedGroup && (
         <aside className={`relative flex flex-col min-h-0 bg-card ${isMobile ? 'flex-1 w-full' : 'w-[340px] shrink-0 border-l border-border'}`}>
-          <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border shrink-0">
+          <div className="flex items-center gap-1.5 px-3 h-12 border-b border-border shrink-0">
             <ListChecks className="w-3.5 h-3.5 text-primary" />
             <span className="text-xs font-medium">任务看板</span>
             <span className="text-[10px] text-muted-foreground">{tasks.length} 个任务</span>
@@ -476,7 +476,7 @@ export default function AIGroupsClient() {
       {showGroupPanel && selectedGroup && (
         <aside className={`relative flex flex-col min-h-0 bg-card ${isMobile ? 'flex-1 w-full' : 'w-[340px] shrink-0 border-l border-border'}`}>
           {/* 看板式标题行 */}
-          <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border shrink-0">
+          <div className="flex items-center gap-1.5 px-3 h-12 border-b border-border shrink-0">
             <Settings className="w-3.5 h-3.5 text-primary" />
             <span className="text-xs font-medium">{t("aiGroups.groupManagement", "群组管理")}</span>
             <span className="text-[10px] text-muted-foreground">{selectedGroup.agents?.length || 0} 个成员</span>

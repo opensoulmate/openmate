@@ -2365,7 +2365,7 @@ export function ChatClient() {
         {showCheckpoints && (
           <aside className={`relative flex flex-col min-h-0 bg-card ${isMobile ? 'flex-1 w-full' : 'w-[340px] shrink-0 border-l border-border'}`}>
             {/* 看板式标题行（与任务看板同款） */}
-            <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border shrink-0">
+            <div className="flex items-center gap-1.5 px-3 h-12 border-b border-border shrink-0">
               <Bookmark className="w-3.5 h-3.5 text-primary" />
               <span className="text-xs font-medium">{t("chat.checkpoints", "检查点")}</span>
               <span className="text-[10px] text-muted-foreground">{checkpoints.length} 个检查点</span>
