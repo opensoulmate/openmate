@@ -12,7 +12,6 @@ const PANEL_ROUTES = [
   "/dashboard",
   "/notifications",
   "/ai-groups",
-  "/agents",
   "/knowledge",
   "/learn",
   "/graph",

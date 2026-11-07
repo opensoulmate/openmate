@@ -7,6 +7,7 @@ import {
   RefreshCw, Download, Upload, Trash2, ExternalLink, Terminal,
   Wifi, FolderOpen, Gauge, RotateCcw, Zap, ChevronRight,
   CheckCircle2, AlertCircle, LogOut, User, Settings, Menu, Plus,
+  Server,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { type ThemeId, getThemes, getStoredTheme, persistTheme } from "@/lib/theme";
@@ -19,8 +20,11 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { PageLayout } from '@/components/page-layout';
 import { SettingCard, Toggle, SelectInput, ButtonGroup, Slider, TextInput } from "@opensoulmate/openface";
 import { LeftPanel } from '@/components/left-panel';
+import dynamic from 'next/dynamic';
+// Agent 管理（原独立 /agents 页，2026-11-07 移入设置）——ssr:false 与原路由同约束
+const AgentsManager = dynamic(() => import('@/components/agents-manager').then((m) => m.AgentsClient), { ssr: false });
 
-type SectionId = "appearance" | "agent" | "model" | "modelRouter" | "tools" | "storage" | "organs" | "account" | "about";
+type SectionId = "appearance" | "agent" | "agentManage" | "model" | "modelRouter" | "tools" | "storage" | "organs" | "account" | "about";
 
 /** 自定义主题的 9 个核心颜色及其 CSS 变量名、默认值 */
 const CUSTOM_COLOR_DEFS: { key: string; var: string; default: string }[] = [
@@ -278,6 +282,7 @@ export function SettingsClient() {
     { id: "model", label: t("settings.modelConfig"), icon: Cpu },
     { id: "modelRouter", label: t("settings.modelRouter"), icon: Route },
     { id: "agent", label: "Agent", icon: Bot },
+    { id: "agentManage", label: "Agent 管理", icon: Server },
     { id: "tools", label: t("settings.toolPermissions"), icon: Wrench },
     { id: "storage", label: t("settings.storage"), icon: HardDrive },
     { id: "organs", label: t("settings.organManagement"), icon: Zap },
@@ -296,10 +301,20 @@ export function SettingsClient() {
   const [active, setActive] = useState<SectionId>(() => {
     if (typeof window !== "undefined") {
       const hash = window.location.hash.replace("#", "") as SectionId;
-      if (["appearance","agent","model","modelRouter","tools","storage","account","about"].includes(hash)) return hash;
+      if (["appearance","agent","agentManage","model","modelRouter","tools","storage","account","about","organs"].includes(hash)) return hash;
     }
     return "appearance";
   });
+
+  // hash 变化即时切区（命令面板 push /settings#agentManage 时已在本页也要生效）
+  useEffect(() => {
+    const onHash = () => {
+      const h = window.location.hash.replace("#", "") as SectionId;
+      if (["appearance","agent","agentManage","model","modelRouter","tools","storage","account","about","organs"].includes(h)) setActive(h);
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
   const [saved, setSaved] = useState(false);
   const [testStatus, setTestStatus] = useState<"idle" | "testing" | "success" | "error">("idle");
   const [testedModels, setTestedModels] = useState<Set<string>>(new Set());
@@ -1508,6 +1523,8 @@ export function SettingsClient() {
           )}
 
           {/* ─── Tools ───────────────────────────────────────── */}
+          {active === "agentManage" && <AgentsManager />}
+
           {active === "tools" && (
             <>
               <div className="flex items-center gap-2.5 mb-2">

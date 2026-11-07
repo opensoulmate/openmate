@@ -63,7 +63,7 @@ export function CommandMenu() {
 
     // AI Collaboration
     { id: "nav-ai-groups", label: "AI群", labelEn: "AI Groups", labelJa: "AIグループ", icon: <Users size={16} />, action: () => router.push("/ai-groups"), keywords: ["ai", "群", "group", "swarm"], group: "AI协作", groupEn: "AI Collaboration", groupJa: "AI協力" },
-    { id: "nav-agents", label: "Agents", labelEn: "Agents", labelJa: "エージェント", icon: <Server size={16} />, action: () => router.push("/agents"), keywords: ["agent", "节点", "node"], group: "AI协作", groupEn: "AI Collaboration", groupJa: "AI協力" },
+    { id: "nav-agents", label: "Agent 管理", labelEn: "Agent Manager", labelJa: "エージェント管理", icon: <Server size={16} />, action: () => router.push("/settings#agentManage"), keywords: ["agent", "节点", "node", "管理", "settings"], group: "AI协作", groupEn: "AI Collaboration", groupJa: "AI協力" },
     { id: "nav-groups", label: "群组", labelEn: "Groups", labelJa: "グループ", icon: <Users size={16} />, action: () => router.push("/groups"), keywords: ["groups", "群组", "team"], group: "AI协作", groupEn: "AI Collaboration", groupJa: "AI協力" },
     { id: "nav-team", label: "团队", labelEn: "Team", labelJa: "チーム", icon: <Users size={16} />, action: () => router.push("/team"), keywords: ["team", "团队", "协作"], group: "AI协作", groupEn: "AI Collaboration", groupJa: "AI協力" },
 

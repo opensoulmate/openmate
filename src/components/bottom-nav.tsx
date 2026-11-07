@@ -42,7 +42,6 @@ const DEFAULT_ICON = FileText;
 const baseNavItems: BottomNavItem[] = [
   { href: "/chat", label: "nav.chat", icon: MessageSquare },
   { href: "/ai-groups", label: "nav.aiGroups", icon: Users },
-  { href: "/agents", label: "nav.agents", icon: Server },
   { href: "/knowledge", label: "nav.knowledge", icon: BookOpen },
   { href: "/learn", label: "nav.learn", icon: GraduationCap },
   { href: "/graph", label: "nav.graph", icon: Network },
