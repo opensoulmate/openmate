@@ -20,21 +20,13 @@ import {
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useAIGroupsStore, type AgentRole, type GroupMessage } from '@/stores/ai-groups-store';
+import MarkdownContent from '@/components/markdown-content';
 
 /* ========== 角色配置 ========== */
 const ROLE_ICONS: Record<string, any> = { advisor: Shield, executor: Zap, verifier: Bot, human: User };
 const ROLE_COLORS: Record<string, string> = { advisor: 'text-yellow-400', executor: 'text-blue-400', verifier: 'text-green-400', human: 'text-purple-400' };
 const ROLE_BG_COLORS: Record<string, string> = { advisor: 'bg-yellow-500/20', executor: 'bg-blue-500/20', verifier: 'bg-green-500/20', human: 'bg-purple-500/20' };
 
-/* ========== 意图配置 ========== */
-const INTENT_CONFIG: Record<string, { label: string; color: string; bg: string; icon: any }> = {
-  claim: { label: '认领', color: 'text-emerald-400', bg: 'bg-emerald-500/20', icon: Hand },
-  suggest: { label: '建议', color: 'text-sky-400', bg: 'bg-sky-500/20', icon: Lightbulb },
-  refer: { label: '推荐', color: 'text-amber-400', bg: 'bg-amber-500/20', icon: Target },
-  comment: { label: '评论', color: 'text-muted-foreground', bg: 'bg-muted/20', icon: MessageCircle },
-  result: { label: '结果', color: 'text-violet-400', bg: 'bg-violet-500/20', icon: FileText },
-  score: { label: '评分', color: 'text-orange-400', bg: 'bg-orange-500/20', icon: Star },
-};
 
 /* ========== Agent 头像颜色池 ========== */
 const AGENT_AVATAR_COLORS = [
@@ -429,9 +421,6 @@ export default function AIGroupsClient() {
 
         {/* ===== 消息列表渲染 ===== */}
         {messages.map(msg => {
-          const agent = msg.role === 'agent' ? getAgentById(msg.agent_id) : null;
-          const agentIndex = (selectedGroup?.agents || []).findIndex(a => a.agent_id === msg.agent_id);
-
           /* --- 系统消息：居中显示，灰色小字 --- */
           if (msg.role === 'system') {
             return (
@@ -443,64 +432,29 @@ export default function AIGroupsClient() {
             );
           }
 
-          /* --- 用户消息：靠右 + 背景色 --- */
-          if (msg.role === 'user') {
-            return (
-              <div key={msg.id} className="flex gap-3 justify-end">
-                <div className="max-w-[85%] lg:max-w-[70%]">
-                  <div className="rounded-xl px-2 lg:px-4 py-2.5 text-xs lg:text-sm bg-primary text-primary-foreground rounded-tr-sm">
-                    <p className="whitespace-pre-wrap break-words">{msg.content}</p>
-                    <div className="text-[10px] mt-1.5 opacity-60">
-                      {msg.timestamp.toLocaleTimeString('zh-CN', { fractionalSecondDigits: 3 })}
-                      {msg.target && msg.target !== 'all' && (
-                        <span className="ml-1.5">@{getAgentById(msg.target)?.name || msg.target}</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                {/* 用户头像 */}
-                <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center shrink-0">
-                  <User className="w-4 h-4 text-primary-foreground" />
-                </div>
-              </div>
-            );
-          }
-
-          /* --- Agent 消息：靠左 + 角色头像 --- */
+          /* --- 用户/Agent 消息：与对话页(chat-client)完全同款样式 ---
+             气泡配色/圆角/内距/时间戳位置与格式/Markdown 渲染逐项一致；
+             群里多发言人，仅在时间戳行保留名字以区分是谁说的。 */
+          const isUser = msg.role === 'user';
           return (
-            <div key={msg.id} className="flex gap-3">
-              {/* Agent 头像（角色颜色） */}
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${getAgentAvatarColor(agentIndex >= 0 ? agentIndex : 0)}`}>
-                {(() => { const Icon = ROLE_ICONS[msg.agent_role || 'executor'] || Bot; return <Icon className="w-4 h-4" />; })()}
-              </div>
-              <div className="max-w-[85%] lg:max-w-[70%]">
-                {/* Agent 名称 + 角色标签 + 意图标签 */}
-                <div className="flex items-center gap-1.5 mb-1 flex-wrap">
-                  <span className="text-xs font-medium">{msg.agent_name || 'Agent'}</span>
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded ${ROLE_BG_COLORS[msg.agent_role || 'executor']} ${ROLE_COLORS[msg.agent_role || 'executor']}`}>
-                    {msg.agent_role || 'executor'}
-                  </span>
-                  {msg.intent && INTENT_CONFIG[msg.intent] && (() => {
-                    const ic = INTENT_CONFIG[msg.intent];
-                    const IntentIcon = ic.icon;
-                    return (
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded flex items-center gap-0.5 ${ic.bg} ${ic.color}`}>
-                        <IntentIcon className="w-2.5 h-2.5" />
-                        {ic.label}
-                      </span>
-                    );
-                  })()}
-                  {msg.target && msg.target !== 'all' && (
-                    <span className="text-[10px] text-muted-foreground">{t("aiGroups.replyTo")} @{msg.target}</span>
-                  )}
+            <div key={msg.id} id={`msg-${msg.id}`} className={`flex gap-2 lg:gap-3 rounded-xl transition-all duration-300 ${isUser ? 'justify-end' : ''}`}>
+              {!isUser && (
+                <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                  <Bot className="w-4 h-4 text-primary" />
                 </div>
-                {/* Agent 消息气泡 */}
-                <div className="rounded-xl px-2 lg:px-4 py-2.5 text-xs lg:text-sm bg-muted rounded-tl-sm">
-                  <p className="whitespace-pre-wrap break-words">{msg.content}</p>
-                  <div className="text-[10px] mt-1.5 opacity-60">
-                    {msg.timestamp.toLocaleTimeString('zh-CN', { fractionalSecondDigits: 3 })}
-                  </div>
+              )}
+              <div
+                className={`max-w-[85%] lg:max-w-[70%] rounded-xl px-3 lg:px-4 py-2 lg:py-2.5 text-sm ${isUser ? 'text-foreground' : 'bg-card text-card-foreground border border-border'}`}
+                style={isUser ? { backgroundColor: 'color-mix(in srgb, var(--color-thinking-border) 15%, transparent)', borderColor: 'color-mix(in srgb, var(--color-thinking-border) 25%, transparent)', borderWidth: '1px', borderStyle: 'solid' } : undefined}
+              >
+                {/* ── 名字+时间戳（消息内容上方，与对话页时间戳同款字号/颜色/格式） ── */}
+                <div className="text-[10px] text-muted-foreground/40 mb-1">
+                  {!isUser && <><span className="text-muted-foreground/70">{msg.agent_name || 'Agent'}</span><span className="mx-1">·</span></>}
+                  {msg.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 })}
                 </div>
+                <MarkdownContent content={msg.content} onCodeApply={(code: string) => {
+                  navigator.clipboard?.writeText(code).catch(() => {});
+                }} />
               </div>
             </div>
           );
@@ -510,7 +464,7 @@ export default function AIGroupsClient() {
         {sendingMessage && (
           <div className="flex gap-3">
             <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center"><Bot className="w-4 h-4 text-primary" /></div>
-            <div className="bg-muted rounded-xl px-2 lg:px-4 py-2.5"><Loader2 className="w-4 h-4 animate-spin text-muted-foreground" /></div>
+            <div className="bg-card text-card-foreground border border-border rounded-xl px-3 lg:px-4 py-2 lg:py-2.5"><Loader2 className="w-4 h-4 animate-spin text-muted-foreground" /></div>
           </div>
         )}
 
