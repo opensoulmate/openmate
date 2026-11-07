@@ -48,7 +48,42 @@ function getAgentAvatarColor(index: number) {
   return AGENT_AVATAR_COLORS[index % AGENT_AVATAR_COLORS.length];
 }
 
-export default function AIGroupsPage() {
+// 裙摆边缘钮路径（复刻 SkirtTabs genTabPath 几何：TOP_R=12 圆角 + SKIRT=10 下摆外翻）
+// 横向 tab 生成后旋转 -90° 贴到竖直面板边缘：圆角朝外、下摆沿边缘翻出
+const SKIRT_HANDLE_PATH = [
+  'M 12 0', 'Q 0 0 0 12', 'L 0 12', 'C 0 22 -18 22 -10 22',
+  'M 62 22', 'C 70 22 52 22 52 12', 'L 52 12', 'Q 52 0 40 0', 'L 12 0',
+].join(' ');
+
+function SkirtEdgeHandle({ onClick, dir, title, hoverGroup }: { onClick: () => void; dir: 'collapse' | 'expand'; title: string; hoverGroup: string }) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      className={`absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 z-20 transition-opacity duration-200 text-muted-foreground hover:text-foreground opacity-0 pointer-events-none ${hoverGroup}:opacity-100 ${hoverGroup}:pointer-events-auto`}
+    >
+      <svg width="30" height="78" viewBox="0 0 30 78" fill="none" className="drop-shadow-sm">
+        <g transform="translate(8, 66) rotate(-90)">
+          <path
+            d={SKIRT_HANDLE_PATH}
+            fill="var(--color-card, #1f1f23)"
+            stroke="var(--color-border, #3a3a40)"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+          />
+        </g>
+        {/* 折叠 › / 展开 ‹（同一裙摆形，仅箭头方向不同） */}
+        {dir === 'collapse' ? (
+          <path d="M 14 32 L 20 39 L 14 46" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        ) : (
+          <path d="M 21 32 L 15 39 L 21 46" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        )}
+      </svg>
+    </button>
+  );
+}
+
+export default function AIGroupsClient() {
   const { t } = useTranslation();
   const { toggleSidebar, open: sidebarOpen } = useSidebar();
   const toggleRightPanel = useAppStore((s) => s.toggleRightPanel);
@@ -625,15 +660,9 @@ export default function AIGroupsPage() {
       {/* ===== 任务看板常驻面板：桌面端消息流右侧常驻，移动端全屏 ===== */}
       {tasksPanelOpen && selectedGroup && (
         <aside className={`group/taskboard relative flex flex-col min-h-0 bg-card ${isMobile ? 'flex-1 w-full' : 'w-[340px] shrink-0 border-l border-border'}`}>
-          {/* QQ 式折叠钮：面板左缘垂直居中，悬停浮现 */}
+          {/* 裙摆式折叠钮：面板左缘垂直居中，悬停浮现 */}
           {!isMobile && (
-            <button
-              onClick={() => setTasksPanelOpen(false)}
-              title="折叠任务看板"
-              className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 z-10 flex h-12 w-6 items-center justify-center rounded-l-md rounded-r-none border border-r-0 border-border bg-card/90 text-muted-foreground opacity-0 group-hover/taskboard:opacity-100 transition-opacity hover:text-foreground"
-            >
-              <ChevronRight className="w-3.5 h-3.5" />
-            </button>
+            <SkirtEdgeHandle onClick={() => setTasksPanelOpen(false)} dir="collapse" title="折叠任务看板" hoverGroup="group-hover/taskboard" />
           )}
           <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border shrink-0">
             <ListChecks className="w-3.5 h-3.5 text-primary" />
@@ -643,6 +672,12 @@ export default function AIGroupsPage() {
           </div>
           <AIGroupsTaskBoard />
         </aside>
+      )}
+      {/* 折叠后：悬停右缘再唤出裙摆钮展开 */}
+      {!tasksPanelOpen && selectedGroup && !isMobile && (
+        <div className="group/expand relative w-6 shrink-0 self-stretch">
+          <SkirtEdgeHandle onClick={() => setTasksPanelOpen(true)} dir="expand" title="展开任务看板" hoverGroup="group-hover/expand" />
+        </div>
       )}
       </div>
 
