@@ -818,8 +818,8 @@ async def group_websocket(websocket: WebSocket, group_id: str):
                     })
                     continue
 
-                # 判断是用户消息还是 Agent 消息
-                is_agent = agent_id != user_id_str
+                # 判断是用户消息还是 Agent 消息（'user'/'user_id' 是旧前端的人类标识约定）
+                is_agent = agent_id not in (user_id_str, "user", "user_id")
                 push_type = "agent_message" if is_agent else "user_message"
 
                 # 显示名：用户消息无 agent_name 时给干净 fallback（别落成 user_id/空）

@@ -549,7 +549,8 @@ export const useAIGroupsStore = create<AIGroupsState>((set, get) => ({
       type: 'message',
       content,
       intent: intent || 'comment',
-      agent_id: 'user',      // 标识消息来自人类用户
+      // 不带 agent_id —— 服务端按连接的 user_id 判定人类用户。
+      // （曾传 'user' 字符串，被服务端判成 agent 消息→气泡跑左边+显示名"user"）
     };
     console.log('[WS] 发送消息:', payload);
     wsGroup.send(JSON.stringify(payload));
