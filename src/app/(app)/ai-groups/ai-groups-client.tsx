@@ -6,12 +6,9 @@ import { useSidebar } from '@/components/ui/sidebar';
 import { useAppStore } from '@/stores/app-store';
 import { AIGroupsWorkspace, AIGroupsTaskBoard } from '@/components/ai-groups-workspace';
 import {
-  Users, Send, Bot, Shield, Zap, User, Loader2,
-  MessageSquare, AtSign,
+  Users, Bot, Shield, Zap, User, Loader2,
+  MessageSquare,
   ListChecks,
-  Star,
-  MessageCircle, Hand, FileText, Lightbulb,
-  Target,
   PanelLeft, Settings, X,
   Plus, Trash2, Edit3, Check, XIcon, ChevronRight,
   StopCircle,
@@ -22,6 +19,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { useAIGroupsStore, type AgentRole, type GroupMessage } from '@/stores/ai-groups-store';
 import MarkdownContent from '@/components/markdown-content';
 import { MessageBubble } from '@/components/message-bubble';
+import { SmartPrompt } from '@/components/smart-prompt';
 
 /* ========== 角色配置 ========== */
 const ROLE_ICONS: Record<string, any> = { advisor: Shield, executor: Zap, verifier: Bot, human: User };
@@ -120,10 +118,6 @@ export default function AIGroupsClient() {
   const [showGroupPanel, setShowGroupPanel] = useState(false);
   // 任务看板常驻面板（Paperclip 看板式）：桌面端消息流右侧常驻，移动端全屏切换
   const [tasksPanelOpen, setTasksPanelOpen] = useState(true);
-  const [input, setInput] = useState('');
-  const [showMention, setShowMention] = useState(false);
-  const [mentionFilter, setMentionFilter] = useState('');
-  const [mentionIndex, setMentionIndex] = useState(0);
   // 编辑 Agent 的临时状态
   const [editName, setEditName] = useState('');
   const [editRole, setEditRole] = useState('');
@@ -134,7 +128,6 @@ export default function AIGroupsClient() {
   const [discussionConstraints, setDiscussionConstraints] = useState(''); // 约束条件（逗号分隔）
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   /* ========== 副作用：移动端面板互斥 ========== */
   useEffect(() => {
@@ -162,29 +155,12 @@ export default function AIGroupsClient() {
   const getAgentById = (id?: string) => (selectedGroup?.agents || []).find(a => a.agent_id === id);
 
   /* ========== 发送消息（通过 WS） ========== */
-  const handleSend = () => {
-    const text = input.trim();
+  // 发送文本（SmartPrompt onSend 调用；@目标由上方目标选择器/消息前缀决定）
+  const sendText = (raw: string) => {
+    const text = raw.trim();
     if (!text || !selectedGroup || !wsConnected) return;
-
-    // 解析 @mention 目标
-    let target = selectedTarget;
-    const mentionMatch = text.match(/^@(\S+)\s/);
-    if (mentionMatch) {
-      const mention = mentionMatch[1];
-      if (mention === 'all') target = 'all';
-      else {
-        const agent = (selectedGroup.agents || []).find(
-          a => a.name.toLowerCase().includes(mention.toLowerCase()) || a.agent_id === mention
-        );
-        if (agent) target = agent.agent_id;
-      }
-    }
-
     // 不本地乐观添加——服务端回显 user_message 统一渲染（防重复显示）
     sendGroupMessage(text, 'comment');
-
-    // 清空输入框
-    setInput('');
     setSelectedTarget('all');
   };
 
@@ -211,52 +187,6 @@ export default function AIGroupsClient() {
     cancelDiscussion();
   };
 
-  /* ========== 输入框 @mention 逻辑 ========== */
-  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const val = e.target.value;
-    setInput(val);
-    const cursorPos = e.target.selectionStart;
-    const textBeforeCursor = val.slice(0, cursorPos);
-    const atMatch = textBeforeCursor.match(/@(\w*)$/);
-    if (atMatch) {
-      setShowMention(true);
-      setMentionFilter(atMatch[1].toLowerCase());
-      setMentionIndex(0);
-    } else {
-      setShowMention(false);
-    }
-  };
-
-  const filteredAgentsForMention = (selectedGroup?.agents || []).filter(a =>
-    a.name.toLowerCase().includes(mentionFilter) || a.agent_id.toLowerCase().includes(mentionFilter)
-  );
-
-  const insertMention = (agent: AgentRole | { name: string; agent_id: string }) => {
-    const cursorPos = inputRef.current?.selectionStart || input.length;
-    const textBeforeCursor = input.slice(0, cursorPos);
-    const atIndex = textBeforeCursor.lastIndexOf('@');
-    const before = input.slice(0, atIndex);
-    const after = input.slice(cursorPos);
-    setInput(`${before}@${agent.name} ${after}`);
-    setSelectedTarget(agent.agent_id);
-    setShowMention(false);
-    inputRef.current?.focus();
-  };
-
-  /* ========== 键盘事件：Enter 发送 / Shift+Enter 换行 / @mention 导航 ========== */
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    // @mention 下拉导航
-    if (showMention) {
-      const items = [{ name: 'all', agent_id: 'all' }, ...filteredAgentsForMention];
-      if (e.key === 'ArrowDown') { e.preventDefault(); setMentionIndex(i => (i + 1) % items.length); }
-      else if (e.key === 'ArrowUp') { e.preventDefault(); setMentionIndex(i => (i - 1 + items.length) % items.length); }
-      else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); insertMention(items[mentionIndex]); }
-      else if (e.key === 'Escape') { setShowMention(false); }
-      return;
-    }
-    // Enter 发送，Shift+Enter 换行
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
-  };
 
   /* ========== Agent 编辑操作 ========== */
   const startEditAgent = (agent: AgentRole) => {
@@ -388,7 +318,7 @@ export default function AIGroupsClient() {
       <div className="flex flex-1 min-h-0">
       {/* 消息流列：移动端任务看板打开时隐藏 */}
       <div className={`flex flex-1 min-w-0 flex-col ${isMobile && tasksPanelOpen ? 'hidden' : ''}`}>
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 lg:px-6 py-4 space-y-4">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 lg:px-6 py-3 lg:py-4 space-y-3 lg:space-y-4">
         {/* 未选择群组时的空状态 */}
         {!selectedGroup && (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
@@ -436,7 +366,8 @@ export default function AIGroupsClient() {
           /* --- 用户/Agent 消息：共用 MessageBubble 组件（与会话同一份样式代码，改动自动同步） --- */
           const isUser = msg.role === 'user';
           return (
-            <MessageBubble key={msg.id} id={`msg-${msg.id}`} role={isUser ? 'user' : 'agent'} timestamp={msg.timestamp} name={isUser ? undefined : (msg.agent_name || 'Agent')}>
+            <MessageBubble key={msg.id} id={`msg-${msg.id}`} role={isUser ? 'user' : 'agent'} timestamp={msg.timestamp} name={isUser ? undefined : (msg.agent_name || 'Agent')}
+              actions={{ onCopy: () => { navigator.clipboard?.writeText(msg.content).catch(() => {}); } }}>
               <MarkdownContent content={msg.content} onCodeApply={(code: string) => {
                 navigator.clipboard?.writeText(code).catch(() => {});
               }} />
@@ -448,7 +379,7 @@ export default function AIGroupsClient() {
         {sendingMessage && (
           <div className="flex gap-3">
             <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center"><Bot className="w-4 h-4 text-primary" /></div>
-            <div className="bg-card text-card-foreground border border-border rounded-xl px-3 lg:px-4 py-2 lg:py-2.5"><Loader2 className="w-4 h-4 animate-spin text-muted-foreground" /></div>
+            <div className="bg-muted rounded-xl px-4 py-2.5"><Loader2 className="w-4 h-4 animate-spin text-muted-foreground" /></div>
           </div>
         )}
 
@@ -536,66 +467,34 @@ export default function AIGroupsClient() {
             </div>
           )}
 
-          {/* 输入框 + 发送按钮 */}
-          <div className="flex gap-2 items-end relative">
-            <div className="flex-1 relative">
-              <textarea ref={inputRef} value={input} onChange={handleInputChange} onKeyDown={handleKeyDown}
-                placeholder={
-                  !wsConnected
-                    ? '请等待 WebSocket 连接...'
-                    : selectedTarget === 'all'
-                      ? t('aiGroups.inputPlaceholder')
-                      : `@${getAgentById(selectedTarget)?.name || 'Agent'} ...`
-                }
-                rows={1}
-                disabled={!wsConnected}
-                className="w-full resize-none rounded-lg border border-input bg-background px-3 py-2 text-xs lg:text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50" />
-
-              {/* @mention 下拉菜单 */}
-              {showMention && (
-                <div className="absolute bottom-full left-0 mb-1 w-56 bg-popover border border-border rounded-lg shadow-lg overflow-hidden z-50">
-                  <div className="p-1">
-                    <button onClick={() => insertMention({ name: 'all', agent_id: 'all' })}
-                      className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-xs lg:text-sm hover:bg-muted transition-colors ${mentionIndex === 0 ? 'bg-muted' : ''}`}>
-                      <AtSign className="w-3.5 h-3.5 text-muted-foreground" />
-                      <span>{t("aiGroups.everyone")}</span>
-                    </button>
-                    {filteredAgentsForMention.map((a, i) => {
-                      const Icon = ROLE_ICONS[a.role] || Bot;
-                      return (
-                        <button key={a.agent_id} onClick={() => insertMention(a)}
-                          className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-xs lg:text-sm hover:bg-muted transition-colors ${mentionIndex === i + 1 ? 'bg-muted' : ''}`}>
-                          <Icon className={`w-3.5 h-3.5 ${ROLE_COLORS[a.role]}`} />
-                          <span className="flex-1 text-left">{a.name}</span>
-                          <span className="text-[10px] text-muted-foreground">{a.role}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+          {/* ===== 输入框：共用会话页 SmartPrompt 组件（用户拍板：输入框必须共用） ===== */}
+          <SmartPrompt
+            onSend={(assembled) => { if (!wsConnected) return; sendText(assembled); }}
+            isLoading={sendingMessage}
+            placeholder={
+              !wsConnected
+                ? '请等待 WebSocket 连接...'
+                : selectedTarget === 'all'
+                  ? t('aiGroups.inputPlaceholder')
+                  : `@${getAgentById(selectedTarget)?.name || 'Agent'} ...`
+            }
+            footer={<>
+              {/* 讨论按钮 — 讨论中显示取消，否则显示发起讨论 */}
+              {discussionLoading ? (
+                <button onClick={handleCancelDiscussion}
+                  className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium text-red-400 hover:bg-red-500/10 transition-colors touch-manipulation"
+                  title="取消讨论">
+                  <StopCircle className="w-4 h-4" />
+                </button>
+              ) : (
+                <button onClick={() => setShowDiscussionForm(!showDiscussionForm)}
+                  className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors touch-manipulation ${showDiscussionForm ? 'text-amber-400 hover:bg-amber-500/10' : 'text-muted-foreground hover:bg-muted/80'}`}
+                  title="发起讨论">
+                  <MessageSquare className="w-4 h-4" />
+                </button>
               )}
-            </div>
-
-            {/* 发送按钮 */}
-            <button onClick={handleSend} disabled={sendingMessage || !input.trim() || !wsConnected}
-              className="px-3 lg:px-4 py-2.5 lg:py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 touch-manipulation">
-              <Send className="w-4 h-4" />
-            </button>
-            {/* 讨论按钮 — 讨论中显示取消，否则显示发起讨论 */}
-            {discussionLoading ? (
-              <button onClick={handleCancelDiscussion}
-                className="px-3 lg:px-4 py-2.5 lg:py-2 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors touch-manipulation"
-                title="取消讨论">
-                <StopCircle className="w-4 h-4" />
-              </button>
-            ) : (
-              <button onClick={() => setShowDiscussionForm(!showDiscussionForm)}
-                className={`px-3 lg:px-4 py-2.5 lg:py-2 rounded-lg transition-colors touch-manipulation ${showDiscussionForm ? 'bg-amber-500/20 text-amber-400' : 'bg-muted hover:bg-muted/80 text-muted-foreground'}`}
-                title="发起讨论">
-                <MessageSquare className="w-4 h-4" />
-              </button>
-            )}
-          </div>
+            </>}
+          />
         </div>
       )}
       </div>

@@ -2694,7 +2694,23 @@ export function ChatClient() {
             </div>
           )}
           {messages.map(msg => (
-            <MessageBubble key={msg.id} id={`msg-${msg.id}`} role={msg.role} timestamp={msg.timestamp}>
+            <MessageBubble key={msg.id} id={`msg-${msg.id}`} role={msg.role} timestamp={msg.timestamp}
+              actions={{
+                onCopy: () => handleCopy(msg),
+                ...(msg.role === 'agent' ? {
+                  onReadAloud: () => handleReadAloud(msg),
+                  onLike: () => handleFeedback(msg, 'like'),
+                  onDislike: () => handleFeedback(msg, 'dislike'),
+                  onShare: () => handleShare(msg),
+                  onRegenerate: () => handleRegenerate(msg.id),
+                  onCheckpoint: () => saveCheckpoint(msg.id),
+                } : {
+                  onShare: () => handleShare(msg),
+                  onEdit: () => handleEditMessage(msg),
+                  onFavorite: () => handleFavorite(msg),
+                  onDelete: () => handleDeleteMessage(msg.id),
+                }),
+              }}>
                 {/* ── 思考过程区块（仅 agent 消息，有 thinking 数据时渲染）── */}
                 {showThinking && msg.role === 'agent' && msg.thinking && msg.thinking.length > 0 && (
                   <ThinkingBlockComponent
@@ -2837,55 +2853,6 @@ export function ChatClient() {
                       console.log('Rejected all files');
                     }}
                   />
-                )}
-                {/* AI message action bar */}
-                {msg.role === 'agent' && (
-                  <div className="flex items-center gap-0.5 mt-1.5 -mb-1">
-                    <button onClick={() => handleCopy(msg)} className="p-1.5 rounded hover:bg-muted-foreground/10 text-muted-foreground/60 hover:text-muted-foreground transition-colors" title="复制">
-                      <Copy className="w-3.5 h-3.5" />
-                    </button>
-                    <button onClick={() => handleReadAloud(msg)} className="p-1.5 rounded hover:bg-muted-foreground/10 text-muted-foreground/60 hover:text-muted-foreground transition-colors" title="朗读">
-                      <Volume2 className="w-3.5 h-3.5" />
-                    </button>
-                    <button onClick={() => handleFeedback(msg, 'like')} className="p-1.5 rounded hover:bg-muted-foreground/10 text-muted-foreground/60 hover:text-green-500 transition-colors" title="喜欢">
-                      <ThumbsUp className="w-3.5 h-3.5" />
-                    </button>
-                    <button onClick={() => handleFeedback(msg, 'dislike')} className="p-1.5 rounded hover:bg-muted-foreground/10 text-muted-foreground/60 hover:text-red-500 transition-colors" title="不喜欢">
-                      <ThumbsDown className="w-3.5 h-3.5" />
-                    </button>
-                    <button onClick={() => handleShare(msg)} className="p-1.5 rounded hover:bg-muted-foreground/10 text-muted-foreground/60 hover:text-muted-foreground transition-colors" title="转发">
-                      <Share2 className="w-3.5 h-3.5" />
-                    </button>
-                    <button onClick={() => handleRegenerate(msg.id)} className="p-1.5 rounded hover:bg-muted-foreground/10 text-muted-foreground/60 hover:text-muted-foreground transition-colors" title="重新生成">
-                      <RefreshCw className="w-3.5 h-3.5" />
-                    </button>
-                    <button onClick={() => saveCheckpoint(msg.id)} className="p-1.5 rounded hover:bg-muted-foreground/10 text-muted-foreground/60 hover:text-muted-foreground transition-colors" title="保存检查点">
-                      <Bookmark className="w-3.5 h-3.5" />
-                    </button>
-                    <button className="p-1.5 rounded hover:bg-muted-foreground/10 text-muted-foreground/60 hover:text-muted-foreground transition-colors" title="更多">
-                      <MoreHorizontal className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                )}
-                {/* User message action bar */}
-                {msg.role === 'user' && (
-                  <div className="flex items-center gap-0.5 mt-1.5 -mb-1 justify-end">
-                    <button onClick={() => handleCopy(msg)} className="p-1.5 rounded hover:bg-muted-foreground/10 text-muted-foreground/60 hover:text-muted-foreground transition-colors" title="复制">
-                      <Copy className="w-3.5 h-3.5" />
-                    </button>
-                    <button onClick={() => handleShare(msg)} className="p-1.5 rounded hover:bg-muted-foreground/10 text-muted-foreground/60 hover:text-muted-foreground transition-colors" title="分享">
-                      <Share2 className="w-3.5 h-3.5" />
-                    </button>
-                    <button onClick={() => handleEditMessage(msg)} className="p-1.5 rounded hover:bg-muted-foreground/10 text-muted-foreground/60 hover:text-muted-foreground transition-colors" title="修改">
-                      <RotateCcw className="w-3.5 h-3.5" />
-                    </button>
-                    <button onClick={() => handleFavorite(msg)} className="p-1.5 rounded hover:bg-muted-foreground/10 text-muted-foreground/60 hover:text-yellow-500 transition-colors" title="收藏">
-                      <Bookmark className="w-3.5 h-3.5" />
-                    </button>
-                    <button onClick={() => handleDeleteMessage(msg.id)} className="p-1.5 rounded hover:bg-muted-foreground/10 text-muted-foreground/60 hover:text-red-500 transition-colors" title="删除">
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
                 )}
             </MessageBubble>
           ))}
