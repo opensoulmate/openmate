@@ -15,6 +15,7 @@ import {
   Trophy, ArrowUp, ArrowDown, ArrowRight,
   ChevronDown,
 } from 'lucide-react';
+import { BoardPanel, TopbarLine } from '@opensoulmate/openface';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useAIGroupsStore, type AgentRole, type GroupMessage } from '@/stores/ai-groups-store';
 import MarkdownContent from '@/components/markdown-content';
@@ -296,19 +297,14 @@ export default function AIGroupsClient() {
         </div>
       </div>
 
-      {/* 缩短线：面板展开时 topbar 下边线只跨对话区；分类折叠钮随线平移居中 */}
-      <div className="flex shrink-0 -mt-px h-px">
-        <div className="flex-1 relative bg-border">
-          <button
-            onClick={() => setShowViewTabs(!showViewTabs)}
-            className="absolute left-1/2 -translate-x-1/2 -top-[9px] z-10 p-0.5 rounded-full bg-background border border-border hover:bg-muted/50 active:bg-muted transition-colors text-muted-foreground touch-manipulation"
-            title={showViewTabs ? '收起视图切换' : '展开视图切换'}
-          >
-            <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${showViewTabs ? 'rotate-180' : 'rotate-0'}`} />
-          </button>
-        </div>
-        <div className={`overflow-hidden shrink-0 transition-[width] duration-200 ease-linear ${isMobile ? 'w-0' : (tasksPanelOpen || showGroupPanel) ? 'w-[340px]' : 'w-0'}`} />
-      </div>
+      {/* topbar 下边线（缩短行）：TopbarLine */}
+      <TopbarLine
+        panelOpen={tasksPanelOpen || showGroupPanel}
+        fullWidth={isMobile}
+        expanded={showViewTabs}
+        onToggleExpanded={() => setShowViewTabs(!showViewTabs)}
+        toggleTitle={showViewTabs ? '收起视图切换' : '展开视图切换'}
+      />
       </div>
 
       {/* ===== 主区域：消息流 + 看板式侧栏（平移展开带动画） ===== */}
@@ -463,29 +459,25 @@ export default function AIGroupsClient() {
         </div>
       )}
       </div>
-      {/* ===== 任务看板面板：平移展开带动画（leftpanel 同款手感） ===== */}
+      {/* ===== 任务看板面板：BoardPanel（openface 通用看板壳，平移展开带动画） ===== */}
       {selectedGroup && (<>
-        <aside className={`relative flex flex-col min-h-0 overflow-hidden shrink-0 -mt-px transition-[width] duration-200 ease-linear ${isMobile ? (tasksPanelOpen ? 'w-full' : 'w-0') : (tasksPanelOpen ? 'w-[340px]' : 'w-0')}`}>
-          <div className={`h-full flex flex-col bg-card border-t border-l border-border ${isMobile ? 'w-full' : 'w-[340px]'}`}>
-          <div className="flex items-center gap-1.5 px-3 h-12 border-b border-border shrink-0">
-            <ListChecks className="w-3.5 h-3.5 text-primary" />
-            <span className="text-xs font-medium">任务看板</span>
-            <span className="text-[10px] text-muted-foreground">{tasks.length} 个任务</span>
-            <div className="flex-1" />
-          </div>
+        <BoardPanel
+          open={tasksPanelOpen}
+          fullWidth={isMobile}
+          icon={<ListChecks className="w-3.5 h-3.5 text-primary" />}
+          title="任务看板"
+          count={`${tasks.length} 个任务`}
+        >
           <AIGroupsTaskBoard />
-          </div>
-        </aside>
+        </BoardPanel>
       {/* 群组管理面板（任务看板样式：右侧常驻 / 移动端全宽） */}
-        <aside className={`relative flex flex-col min-h-0 overflow-hidden shrink-0 -mt-px transition-[width] duration-200 ease-linear ${isMobile ? (showGroupPanel ? 'w-full' : 'w-0') : (showGroupPanel ? 'w-[340px]' : 'w-0')}`}>
-          <div className={`h-full flex flex-col bg-card border-t border-l border-border ${isMobile ? 'w-full' : 'w-[340px]'}`}>
-          {/* 看板式标题行 */}
-          <div className="flex items-center gap-1.5 px-3 h-12 border-b border-border shrink-0">
-            <Settings className="w-3.5 h-3.5 text-primary" />
-            <span className="text-xs font-medium">{t("aiGroups.groupManagement", "群组管理")}</span>
-            <span className="text-[10px] text-muted-foreground">{selectedGroup.agents?.length || 0} 个成员</span>
-            <div className="flex-1" />
-          </div>
+        <BoardPanel
+          open={showGroupPanel}
+          fullWidth={isMobile}
+          icon={<Settings className="w-3.5 h-3.5 text-primary" />}
+          title={t("aiGroups.groupManagement", "群组管理")}
+          count={`${selectedGroup.agents?.length || 0} 个成员`}
+        >
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             {/* Agent 成员列表 */}
             <AgentMemberList
@@ -511,8 +503,7 @@ export default function AIGroupsClient() {
               onAdd={addAgent}
             />
           </div>
-          </div>
-        </aside>
+        </BoardPanel>
       </>)}
       </div>
 

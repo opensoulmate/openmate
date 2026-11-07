@@ -4,6 +4,10 @@
 export { AppShell } from './components/app-shell';
 export type { AppShellProps, NavItem } from './components/app-shell';
 export { SkirtTabs } from './components/skirt-tabs';
+export { BoardPanel } from './components/board-panel';
+export type { BoardPanelProps } from './components/board-panel';
+export { TopbarLine } from './components/topbar-line';
+export type { TopbarLineProps } from './components/topbar-line';
 export type { SkirtTabsProps, SkirtTab } from './components/skirt-tabs';
 export { WorkspacePanel } from './components/workspace-panel';
 export type { WorkspacePanelProps } from './components/workspace-panel';
