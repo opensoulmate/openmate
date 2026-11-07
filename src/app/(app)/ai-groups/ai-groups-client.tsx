@@ -624,16 +624,22 @@ export default function AIGroupsPage() {
       </div>
       {/* ===== 任务看板常驻面板：桌面端消息流右侧常驻，移动端全屏 ===== */}
       {tasksPanelOpen && selectedGroup && (
-        <aside className={`flex flex-col min-h-0 bg-card ${isMobile ? 'flex-1 w-full' : 'w-[340px] shrink-0 border-l border-border'}`}>
+        <aside className={`group/taskboard relative flex flex-col min-h-0 bg-card ${isMobile ? 'flex-1 w-full' : 'w-[340px] shrink-0 border-l border-border'}`}>
+          {/* QQ 式折叠钮：面板左缘垂直居中，悬停浮现 */}
+          {!isMobile && (
+            <button
+              onClick={() => setTasksPanelOpen(false)}
+              title="折叠任务看板"
+              className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 z-10 flex h-12 w-6 items-center justify-center rounded-l-md rounded-r-none border border-r-0 border-border bg-card/90 text-muted-foreground opacity-0 group-hover/taskboard:opacity-100 transition-opacity hover:text-foreground"
+            >
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          )}
           <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border shrink-0">
             <ListChecks className="w-3.5 h-3.5 text-primary" />
             <span className="text-xs font-medium">任务看板</span>
             <span className="text-[10px] text-muted-foreground">{tasks.length} 个任务</span>
             <div className="flex-1" />
-            <button onClick={() => setTasksPanelOpen(false)} title="折叠任务看板（点顶部'任务看板'按钮可再展开）"
-              className="p-1 rounded hover:bg-muted text-muted-foreground transition-colors">
-              <ChevronRight className="w-3.5 h-3.5" />
-            </button>
           </div>
           <AIGroupsTaskBoard />
         </aside>
