@@ -18,7 +18,6 @@ import {
   Settings2,
   Brain,
   Zap,
-  Bookmark,
   Forward,
 } from 'lucide-react';
 import { CodeMirrorEditor } from '@/components/codemirror-editor';
@@ -111,8 +110,6 @@ export interface PromptControls {
   mode?: { value: 'plan' | 'act'; onToggle: () => void };
   /** 思考过程显示开关 */
   thinking?: { show: boolean; onToggle: () => void };
-  /** 历史/检查点面板开关 */
-  history?: { show: boolean; count: number; onToggle: () => void };
 }
 
 // ── Field Definitions ────────────────────────────────────────────
@@ -550,12 +547,6 @@ export function SmartPrompt({
         <button onClick={() => handleClear()} className="p-1.5 rounded hover:bg-muted/30 text-muted-foreground/40 hover:text-muted-foreground transition-colors" title="清空输入">
           <RotateCcw className="w-4 h-4" />
         </button>
-        {controls?.history && (
-          <button onClick={controls.history.onToggle} className="p-1.5 rounded hover:bg-muted/30 text-muted-foreground/40 hover:text-muted-foreground transition-colors relative" title="历史">
-            <Bookmark className="w-4 h-4" />
-            {controls.history.count > 0 && <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[9px] rounded-full w-3.5 h-3.5 flex items-center justify-center">{controls.history.count}</span>}
-          </button>
-        )}
         <ContextRing />
         {statsText && (
           <span className="text-[9px] text-muted-foreground/30 whitespace-nowrap">{statsText}</span>

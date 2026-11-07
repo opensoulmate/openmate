@@ -423,7 +423,6 @@ export default function AIGroupsClient() {
                 },
               },
               thinking: { show: showThinking, onToggle: () => setShowThinking(v => !v) },
-              history: { show: tasksPanelOpen, count: tasks.length, onToggle: () => setTasksPanelOpen(v => !v) },
             }}
           />
         </div>

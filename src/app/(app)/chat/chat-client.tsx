@@ -2212,6 +2212,15 @@ export function ChatClient() {
               )}
             </div>
             {(selectedAgent || storeAgentName) && <span className="text-[10px] lg:text-xs text-muted-foreground px-1 lg:px-1.5 py-0.5 rounded bg-muted shrink-0 truncate max-w-[80px] lg:max-w-none">{selectedAgent?.name || storeAgentName}</span>}
+            {/* 检查点开关（照任务看板样式：顶栏按钮+右侧面板） */}
+            <button
+              onClick={(e) => { e.stopPropagation(); const next = !showCheckpoints; setShowCheckpoints(next); if (next) { setRightPanelOpen(false); if (isMobile && sidebarOpen) toggleSidebar(); } }}
+              className={`shrink-0 flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-muted/50 active:bg-muted transition-colors touch-manipulation ${showCheckpoints ? 'text-primary' : 'text-muted-foreground'}`}
+              aria-label="Toggle Checkpoints"
+              title="检查点">
+              <Bookmark className="w-4 h-4" />
+              <span className="text-[10px] font-medium">{checkpoints.length}</span>
+            </button>
             <button onClick={(e) => { e.stopPropagation(); toggleRightPanel(); setShowCheckpoints(false); if (isMobile && sidebarOpen) toggleSidebar(); }} className="shrink-0 p-2 hover:bg-muted/50 active:bg-muted transition-colors text-muted-foreground touch-manipulation" aria-label="Toggle Workspace">
               <PanelLeft className="w-4 h-4 scale-x-[-1]" />
             </button>
@@ -2941,7 +2950,6 @@ export function ChatClient() {
               controls={{
                 mode: { value: agentMode, onToggle: () => setAgentMode(prev => prev === 'plan' ? 'act' : 'plan') },
                 thinking: { show: showThinking, onToggle: () => setShowThinking(prev => !prev) },
-                history: { show: showCheckpoints, count: checkpoints.length, onToggle: () => { const next = !showCheckpoints; setShowCheckpoints(next); if (next) { setRightPanelOpen(false); if (isMobile && sidebarOpen) toggleSidebar(); } } },
               }}
             />
           </div>
@@ -2967,15 +2975,13 @@ export function ChatClient() {
         </Sheet>
       ) : (
         showCheckpoints && (
-          <div className="absolute right-0 top-12 bottom-0 w-72 border-l border-border bg-card z-20 flex flex-col shadow-lg">
-            <div className="h-12 shrink-0 flex items-center justify-between px-3 border-b border-border">
-              <span className="text-sm font-semibold flex items-center gap-2">
-                <RotateCcw className="w-4 h-4" />
-                {t("chat.checkpoints", "Checkpoints")}
-              </span>
-              <button onClick={() => setShowCheckpoints(false)} className="p-1 rounded hover:bg-muted">
-                <X className="w-4 h-4" />
-              </button>
+          <div className="absolute right-0 top-12 bottom-0 w-[340px] shrink-0 border-l border-border bg-card z-20 flex flex-col shadow-lg">
+            {/* 看板式标题行（与任务看板同款） */}
+            <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border shrink-0">
+              <Bookmark className="w-3.5 h-3.5 text-primary" />
+              <span className="text-xs font-medium">{t("chat.checkpoints", "检查点")}</span>
+              <span className="text-[10px] text-muted-foreground">{checkpoints.length} 个检查点</span>
+              <div className="flex-1" />
             </div>
             {renderCheckpointList()}
           </div>
