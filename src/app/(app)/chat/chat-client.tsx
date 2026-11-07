@@ -18,7 +18,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useSidebar } from '@/components/ui/sidebar';
 import { useTranslation } from 'react-i18next';
-import { SmartPrompt } from '@/components/smart-prompt';
+import { SmartPrompt, SmartSendButton } from '@/components/smart-prompt';
 import { AcpApprovalModal, type AcpApprovalRequest } from '@/components/acp-approval-modal';
 import { NetworkWaitBanner } from '@/components/network-wait-banner';
 import { buildUserMessage } from './user-message';
@@ -2954,14 +2954,8 @@ export function ChatClient() {
                       {sessionStats.msgCount}条 · ${sessionStats.totalCost.toFixed(3)}
                     </span>
                   )}
-                  <button
-                    onClick={() => { window.dispatchEvent(new CustomEvent('smart-prompt-send')); }}
-                    disabled={attachments.length === 0 && !smartTaskText.trim() /* 附件与文字都为空时禁用，任一有内容可发送 */}
-                    className="flex items-center justify-center w-9 h-9 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 active:bg-primary/80 disabled:opacity-50 transition-colors"
-                    title={loading ? "发送插话（任务间隙注入）" : "发送"}
-                  >
-                    {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                  </button>
+                  <SmartSendButton disabled={attachments.length === 0 && !smartTaskText.trim() /* 附件与文字都为空时禁用，任一有内容可发送 */}
+                    loading={loading} title={loading ? "发送插话（任务间隙注入）" : "发送"} />
               </>}
             />
           </div>

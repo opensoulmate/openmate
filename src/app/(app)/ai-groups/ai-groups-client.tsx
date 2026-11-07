@@ -19,7 +19,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { useAIGroupsStore, type AgentRole, type GroupMessage } from '@/stores/ai-groups-store';
 import MarkdownContent from '@/components/markdown-content';
 import { MessageBubble, favoriteToKnowledge } from '@/components/message-bubble';
-import { SmartPrompt } from '@/components/smart-prompt';
+import { SmartPrompt, SmartSendButton } from '@/components/smart-prompt';
 
 /* ========== 角色配置 ========== */
 const ROLE_ICONS: Record<string, any> = { advisor: Shield, executor: Zap, verifier: Bot, human: User };
@@ -115,6 +115,7 @@ export default function AIGroupsClient() {
   /* ========== 本地 UI 状态 ========== */
   const [showGroupPanel, setShowGroupPanel] = useState(false);
   const [editDraft, setEditDraft] = useState(''); // 修改消息草稿（注入 SmartPrompt）
+  const [sendReady, setSendReady] = useState(false); // 输入框是否有内容（发送钮可用态）
   // 任务看板常驻面板（Paperclip 看板式）：桌面端消息流右侧常驻，移动端全屏切换
   const [tasksPanelOpen, setTasksPanelOpen] = useState(true);
   // 编辑 Agent 的临时状态
@@ -455,10 +456,13 @@ export default function AIGroupsClient() {
           {/* ===== 输入框：共用会话页 SmartPrompt 组件（用户拍板：输入框必须共用） ===== */}
           <SmartPrompt
             initialTask={editDraft}
-            onSend={(assembled) => { if (!wsConnected) return; sendText(assembled); setEditDraft(''); }}
+            onFieldsChange={(f) => setSendReady(!!(f.task || '').trim())}
+            onSend={(assembled) => { if (!wsConnected) return; sendText(assembled); setEditDraft(''); setSendReady(false); }}
             isLoading={sendingMessage}
             placeholder={!wsConnected ? '请等待 WebSocket 连接...' : t('aiGroups.inputPlaceholder')}
             footer={<>
+              {/* 发送按钮（共用 SmartSendButton） */}
+              <SmartSendButton disabled={!wsConnected || (!sendReady && !editDraft.trim())} loading={sendingMessage} />
               {/* 讨论按钮 — 讨论中显示取消，否则显示发起讨论 */}
               {discussionLoading ? (
                 <button onClick={handleCancelDiscussion}

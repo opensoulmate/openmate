@@ -19,6 +19,20 @@ import {
 } from 'lucide-react';
 import { CodeMirrorEditor } from '@/components/codemirror-editor';
 
+/** 共用发送按钮（会话/群组同一份）：派发 smart-prompt-send 事件触发 SmartPrompt 发送 */
+export function SmartSendButton({ disabled, loading, title }: { disabled?: boolean; loading?: boolean; title?: string }) {
+  return (
+    <button
+      onClick={() => { window.dispatchEvent(new CustomEvent('smart-prompt-send')); }}
+      disabled={disabled}
+      className="flex items-center justify-center w-9 h-9 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 active:bg-primary/80 disabled:opacity-50 transition-colors"
+      title={title || '发送'}
+    >
+      {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+    </button>
+  );
+}
+
 // ── Types ────────────────────────────────────────────────────────
 
 interface SmartPromptFields {
