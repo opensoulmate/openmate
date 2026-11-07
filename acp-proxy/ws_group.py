@@ -197,7 +197,7 @@ def _create_discussion_task_db(
         db.close()
 
 
-_SUMMON_WORDS = ("大家", "各位", "谁能", "有人", "谁来", "同志们")
+_SUMMON_WORDS = ("大家", "各位", "谁能", "有人", "谁来", "同志们", "所有人", "全体", "@all", "@所有人")
 _FREECHAT_MAX_REPLY_CHARS = 600
 
 
@@ -206,7 +206,8 @@ def _match_repliers(content: str, agents: list) -> list:
 
     - @name / @agent_id mentions → exactly those agents
     - summon words (大家/各位/…) → every agent (cap 3)
-    - otherwise → nobody (the group stays quiet unless addressed)
+    - otherwise → ONE agent answers (round-robin), so the group is alive:
+      nobody talks into a void. This is a chat group — silence reads as broken.
     """
     import re
 
@@ -223,6 +224,10 @@ def _match_repliers(content: str, agents: list) -> list:
         return [a for a in agents if a.agent_id in mentioned]
     if any(w in content for w in _SUMMON_WORDS):
         return list(agents)[:3]
+    if agents:
+        # default: one responder, rotating by message content so it feels alive
+        pick = sum(content.encode()) % len(agents)
+        return [agents[pick]]
     return []
 
 
