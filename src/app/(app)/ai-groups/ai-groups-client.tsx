@@ -21,6 +21,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useAIGroupsStore, type AgentRole, type GroupMessage } from '@/stores/ai-groups-store';
 import MarkdownContent from '@/components/markdown-content';
+import { MessageBubble } from '@/components/message-bubble';
 
 /* ========== 角色配置 ========== */
 const ROLE_ICONS: Record<string, any> = { advisor: Shield, executor: Zap, verifier: Bot, human: User };
@@ -432,31 +433,14 @@ export default function AIGroupsClient() {
             );
           }
 
-          /* --- 用户/Agent 消息：与对话页(chat-client)完全同款样式 ---
-             气泡配色/圆角/内距/时间戳位置与格式/Markdown 渲染逐项一致；
-             群里多发言人，仅在时间戳行保留名字以区分是谁说的。 */
+          /* --- 用户/Agent 消息：共用 MessageBubble 组件（与会话同一份样式代码，改动自动同步） --- */
           const isUser = msg.role === 'user';
           return (
-            <div key={msg.id} id={`msg-${msg.id}`} className={`flex gap-2 lg:gap-3 rounded-xl transition-all duration-300 ${isUser ? 'justify-end' : ''}`}>
-              {!isUser && (
-                <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                  <Bot className="w-4 h-4 text-primary" />
-                </div>
-              )}
-              <div
-                className={`max-w-[85%] lg:max-w-[70%] rounded-xl px-3 lg:px-4 py-2 lg:py-2.5 text-sm ${isUser ? 'text-foreground' : 'bg-card text-card-foreground border border-border'}`}
-                style={isUser ? { backgroundColor: 'color-mix(in srgb, var(--color-thinking-border) 15%, transparent)', borderColor: 'color-mix(in srgb, var(--color-thinking-border) 25%, transparent)', borderWidth: '1px', borderStyle: 'solid' } : undefined}
-              >
-                {/* ── 名字+时间戳（消息内容上方，与对话页时间戳同款字号/颜色/格式） ── */}
-                <div className="text-[10px] text-muted-foreground/40 mb-1">
-                  {!isUser && <><span className="text-muted-foreground/70">{msg.agent_name || 'Agent'}</span><span className="mx-1">·</span></>}
-                  {msg.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 })}
-                </div>
-                <MarkdownContent content={msg.content} onCodeApply={(code: string) => {
-                  navigator.clipboard?.writeText(code).catch(() => {});
-                }} />
-              </div>
-            </div>
+            <MessageBubble key={msg.id} id={`msg-${msg.id}`} role={isUser ? 'user' : 'agent'} timestamp={msg.timestamp} name={isUser ? undefined : (msg.agent_name || 'Agent')}>
+              <MarkdownContent content={msg.content} onCodeApply={(code: string) => {
+                navigator.clipboard?.writeText(code).catch(() => {});
+              }} />
+            </MessageBubble>
           );
         })}
 

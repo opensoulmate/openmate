@@ -1,5 +1,6 @@
 'use client';
 import MarkdownContent from "@/components/markdown-content";
+import { MessageBubble } from "@/components/message-bubble";
 import { SOULMATE_LOGO, SOULMATE_ICON } from "@/lib/agent-brand";
 import { SecretScanBadge } from "@/components/secret-scan-badge";
 import { MemoryMarkerBadge, type MemoryMarker } from "@/components/memory-marker-badge";
@@ -2693,20 +2694,7 @@ export function ChatClient() {
             </div>
           )}
           {messages.map(msg => (
-            <div key={msg.id} id={`msg-${msg.id}`} className={`flex gap-2 lg:gap-3 rounded-xl transition-all duration-300 ${msg.role === 'user' ? 'justify-end' : ''}`}>
-              {msg.role === 'agent' && (
-                <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                  <Bot className="w-4 h-4 text-primary" />
-                </div>
-              )}
-              <div
-                className={`max-w-[85%] lg:max-w-[70%] rounded-xl px-3 lg:px-4 py-2 lg:py-2.5 text-sm ${msg.role === 'user' ? 'text-foreground' : 'bg-card text-card-foreground border border-border'}`}
-                style={msg.role === 'user' ? { backgroundColor: 'color-mix(in srgb, var(--color-thinking-border) 15%, transparent)', borderColor: 'color-mix(in srgb, var(--color-thinking-border) 25%, transparent)', borderWidth: '1px', borderStyle: 'solid' } : undefined}
-              >
-                {/* ── 时间戳（消息内容上方）── */}
-                <div className="text-[10px] text-muted-foreground/40 mb-1">
-                  {msg.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 })}
-                </div>
+            <MessageBubble key={msg.id} id={`msg-${msg.id}`} role={msg.role} timestamp={msg.timestamp}>
                 {/* ── 思考过程区块（仅 agent 消息，有 thinking 数据时渲染）── */}
                 {showThinking && msg.role === 'agent' && msg.thinking && msg.thinking.length > 0 && (
                   <ThinkingBlockComponent
@@ -2899,13 +2887,7 @@ export function ChatClient() {
                     </button>
                   </div>
                 )}
-              </div>
-              {msg.role === 'user' && (
-                <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center shrink-0">
-                  <User className="w-4 h-4 text-primary-foreground" />
-                </div>
-              )}
-            </div>
+            </MessageBubble>
           ))}
           {loading && (
             <div className="flex gap-2 lg:gap-3">
