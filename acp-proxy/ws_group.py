@@ -226,8 +226,9 @@ def _match_repliers(content: str, agents: list) -> list:
     if any(w in content for w in _SUMMON_WORDS):
         return list(agents)[:3]
     if agents:
-        # 默认全员接话——群里 agent 都参与讨论（用户拍板：发一条大家都说话）
-        return list(agents)[:4]
+        # 用户拍板（2026-11-07）：谁说话由 agent 自己判断，规则不指派。
+        # 全员都是候选——每人都看消息，自主决定接话或沉默（prompt 里 [SKIP] 机制）。
+        return list(agents)[:6]
     return []
 
 
@@ -265,14 +266,20 @@ async def _agent_free_reply(
     for agent in repliers:
         system_prompt = (
             f"你是 AI 群组「{group_id}」的成员 {agent.name}（角色：{agent.role}）。"
-            "在群聊里自然地回应，像同事讨论一样，可以引用前面成员的话。"
-            "内容按需要写全（清单、方案等务必写完整），不要截断、不要客套开场白。"
+            "你像群里的同事一样自主交流：这条消息你想接就接（跟你的角色/专业相关、"
+            "被点名、或你有想补充的），觉得没必要说话就只回 [SKIP] 两个字——"
+            "不硬接话，不客套。接话时内容按需要写全（清单、方案等务必写完整），"
+            "可以引用前面成员的话。"
         )
         user_msg = f"群聊近况：\n{history_text}\n\n新消息：{content}\n\n请以 {agent.name} 的身份回应。"
         try:
             engine = LLMEngine(model=agent.model or "", system_prompt=system_prompt)
             reply = (await engine.chat([{"role": "user", "content": user_msg}])) or ""
             reply = reply.strip()[:_FREECHAT_MAX_REPLY_CHARS]
+            if reply == "[SKIP]":
+                # agent 自主决定沉默——这是它的选择，不发群
+                logger.info(f"[ws_group] {agent.agent_id} 自主选择不接话")
+                continue
             if not reply or reply.startswith("[LLM错误"):
                 logger.warning(f"[ws_group] free reply empty for {agent.agent_id}")
                 continue
