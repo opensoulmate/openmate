@@ -10,7 +10,6 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useAppStore } from '@/stores/app-store';
 import { Send, Bot, User, Loader2, Paperclip, X, Wifi, WifiOff, FileText, Image as ImageIcon, Info, ChevronDown, ChevronLeft, ChevronRight, Plus, Bookmark, RotateCcw, Zap, Brain, PanelLeft, Copy, ThumbsUp, ThumbsDown, Share2, RefreshCw, MoreHorizontal, Volume2, MessageSquare, FolderOpen, Video, Music, Link2, CalendarDays, LocateFixed, Mic, Square } from "lucide-react";
 import { SkirtTabs } from "@opensoulmate/openface";
-import { ContextRing } from "@/components/context-ring";
 import { getApiBaseUrl, getToken, getUserId } from '@/lib/api-client';
 import { copyToClipboard } from '@/lib/clipboard';
 import { Dialog } from '@/components/ui/dialog';
@@ -18,7 +17,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useSidebar } from '@/components/ui/sidebar';
 import { useTranslation } from 'react-i18next';
-import { SmartPrompt, SmartSendButton } from '@/components/smart-prompt';
+import { SmartPrompt } from '@/components/smart-prompt';
 import { AcpApprovalModal, type AcpApprovalRequest } from '@/components/acp-approval-modal';
 import { NetworkWaitBanner } from '@/components/network-wait-banner';
 import { buildUserMessage } from './user-message';
@@ -2854,6 +2853,10 @@ export function ChatClient() {
               sessionId={effectiveSessionId || undefined}
               clearTrigger={clearTrigger}
               loadFieldsTrigger={loadFieldsTrigger}
+              statsText={sessionStats.msgCount > 0 ? `${sessionStats.msgCount}条 · $${sessionStats.totalCost.toFixed(3)}` : undefined}
+              sendDisabled={attachments.length === 0 && !smartTaskText.trim()}
+              sendLoading={loading}
+              sendTitle={loading ? "发送插话（任务间隙注入）" : "发送"}
               onFieldsChange={(newFields) => {
                 setSmartTaskText(newFields.task || '');
                 const sid = useAppStore.getState().activeSessionId;
@@ -2940,22 +2943,10 @@ export function ChatClient() {
                   >
                     <Brain className="w-4 h-4" />
                   </button>
-                  <button onClick={() => setClearTrigger(n => n + 1)} className="p-1.5 rounded hover:bg-muted/30 text-muted-foreground/40 hover:text-muted-foreground transition-colors" title="清空输入">
-                    <RotateCcw className="w-4 h-4" />
-                  </button>
                   <button onClick={() => { const next = !showCheckpoints; setShowCheckpoints(next); if (next) { setRightPanelOpen(false); if (isMobile && sidebarOpen) toggleSidebar(); } }} className="p-1.5 rounded hover:bg-muted/30 text-muted-foreground/40 hover:text-muted-foreground transition-colors relative" title="历史">
                     <Bookmark className="w-4 h-4" />
                     {checkpoints.length > 0 && <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[9px] rounded-full w-3.5 h-3.5 flex items-center justify-center">{checkpoints.length}</span>}
                   </button>
-                  <ContextRing />
-                  {/* Session cumulative stats */}
-                  {sessionStats.msgCount > 0 && (
-                    <span className="text-[9px] text-muted-foreground/30 whitespace-nowrap">
-                      {sessionStats.msgCount}条 · ${sessionStats.totalCost.toFixed(3)}
-                    </span>
-                  )}
-                  <SmartSendButton disabled={attachments.length === 0 && !smartTaskText.trim() /* 附件与文字都为空时禁用，任一有内容可发送 */}
-                    loading={loading} title={loading ? "发送插话（任务间隙注入）" : "发送"} />
               </>}
             />
           </div>

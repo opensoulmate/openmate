@@ -18,6 +18,7 @@ import {
   Settings2,
 } from 'lucide-react';
 import { CodeMirrorEditor } from '@/components/codemirror-editor';
+import { ContextRing } from '@/components/context-ring';
 
 /** 共用发送按钮（会话/群组同一份）：派发 smart-prompt-send 事件触发 SmartPrompt 发送 */
 export function SmartSendButton({ disabled, loading, title }: { disabled?: boolean; loading?: boolean; title?: string }) {
@@ -81,6 +82,14 @@ interface SmartPromptProps {
   sessionId?: string;
   /** Increment to trigger full clear (all fields + expanded) */
   clearTrigger?: number;
+  /** 发送钮禁用态（无内容/断线时 true） */
+  sendDisabled?: boolean;
+  /** 发送钮加载态 */
+  sendLoading?: boolean;
+  /** 发送钮 title */
+  sendTitle?: string;
+  /** 统计文字（如 "12条 · $0.35"），显示在工具栏 */
+  statsText?: string;
   /** Increment to force-load sessionFields into SmartPrompt (for edit/external updates) */
   loadFieldsTrigger?: number;
 }
@@ -147,6 +156,10 @@ export function SmartPrompt({
   onClearInput,
   sessionId,
   clearTrigger,
+  sendDisabled,
+  sendLoading,
+  sendTitle,
+  statsText,
   loadFieldsTrigger,
 }: SmartPromptProps) {
   const [fields, setFields] = useState<SmartPromptFields>({
@@ -489,7 +502,15 @@ export function SmartPrompt({
           )}
         </div>
 
-        {/* Right — action buttons from chat-client */}
+        {/* ── 统一工具栏：输入框附属全部按钮的唯一代码源——通用钮内置，业务钮经 footer 传入 ── */}
+        <button onClick={() => handleClear()} className="p-1.5 rounded hover:bg-muted/30 text-muted-foreground/40 hover:text-muted-foreground transition-colors" title="清空输入">
+          <RotateCcw className="w-4 h-4" />
+        </button>
+        <ContextRing />
+        {statsText && (
+          <span className="text-[9px] text-muted-foreground/30 whitespace-nowrap">{statsText}</span>
+        )}
+        <SmartSendButton disabled={sendDisabled} loading={sendLoading} title={sendTitle} />
         {footer}
       </div>
 
