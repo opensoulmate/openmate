@@ -1963,10 +1963,7 @@ export function ChatClient() {
   );
 
   return (
-    <div className="flex flex-1 min-h-0 relative">
-      {/* Chat Window */}
-      <div className={`flex flex-1 flex-col min-w-0 ${isMobile && showCheckpoints ? 'hidden' : ''}`}>
-        {/* Chat header */}
+    <>
         <div className="flex flex-col shrink-0">
           <div className="h-12 flex items-center gap-1.5 lg:gap-2 min-w-0 px-3 lg:px-4 border-b border-border">
             <button onClick={(e) => { e.stopPropagation(); toggleSidebar(); if (isMobile) { setRightPanelOpen(false); setShowCheckpoints(false); } }} className="shrink-0 p-2 hover:bg-muted/50 active:bg-muted transition-colors text-muted-foreground touch-manipulation" aria-label="Toggle Sidebar">
@@ -2022,9 +2019,14 @@ export function ChatClient() {
             </button>
           </div>
           {/* Chat view toggle — 裙摆式分段视图（可折叠） */}
+        </div>
+
+    <div className="flex flex-1 min-h-0 relative">
+      {/* Chat Window */}
+      <div className={`flex flex-1 flex-col min-w-0 ${isMobile && showCheckpoints ? 'hidden' : ''}`}>
           {showViewTabs && <>
           <MessageViewTabs view={chatView} onChange={(id) => setChatView(id as any)} data={viewData} />          </>}
-        </div>
+        {/* Chat header */}
 
 
 
@@ -2358,6 +2360,7 @@ export function ChatClient() {
             />
           </div>
         </div>
+      </div>
         {/* 检查点面板 — 任务看板式平移展开侧栏（内容被挤开，不弹出） */}
         {showCheckpoints && (
           <aside className={`relative flex flex-col min-h-0 bg-card ${isMobile ? 'flex-1 w-full' : 'w-[340px] shrink-0 border-l border-border'}`}>
@@ -2371,7 +2374,6 @@ export function ChatClient() {
             {renderCheckpointList()}
           </aside>
         )}
-      </div>
       {/* Delete Confirmation Dialog */}
       <Dialog
         open={!!deleteConfirm}
@@ -2402,5 +2404,6 @@ export function ChatClient() {
         onClose={() => {/* 弹窗内部已通过sendApproval清理状态 */}}
       />
     </div>
+    </>
   );
 }
