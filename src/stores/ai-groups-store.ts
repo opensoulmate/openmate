@@ -394,7 +394,7 @@ export const useAIGroupsStore = create<AIGroupsState>((set, get) => ({
               content: data.content || '',
               timestamp: new Date(data.timestamp || Date.now()),
               agent_id: data.agent_id,
-              agent_name: data.agent_name || data.agent_id,
+              agent_name: data.agent_name || '用户',
               target: data.target || 'all',
               intent: data.intent as GroupMessage['intent'],
             };

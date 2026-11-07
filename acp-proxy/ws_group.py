@@ -822,11 +822,14 @@ async def group_websocket(websocket: WebSocket, group_id: str):
                 is_agent = agent_id != user_id_str
                 push_type = "agent_message" if is_agent else "user_message"
 
+                # 显示名：用户消息无 agent_name 时给干净 fallback（别落成 user_id/空）
+                display_name = data.get("agent_name", "") or ("用户" if not is_agent else agent_id)
+
                 # 持久化到 OpenSoul discussion_messages 表
                 msg_id = _persist_message(
                     group_id=group_id,
                     agent_id=agent_id,
-                    agent_name=data.get("agent_name", ""),
+                    agent_name=display_name,
                     content=content,
                     intent=intent,
                     task_id=data.get("task_id", ""),
@@ -841,7 +844,7 @@ async def group_websocket(websocket: WebSocket, group_id: str):
                         "id": msg_id,
                         "group_id": group_id,
                         "agent_id": agent_id,
-                        "agent_name": data.get("agent_name", ""),
+                        "agent_name": display_name,
                         "content": content,
                         "intent": intent,
                         "task_id": data.get("task_id", ""),
