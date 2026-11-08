@@ -18,6 +18,7 @@ import { Dialog } from '@/components/ui/dialog';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useSidebar } from '@/components/ui/sidebar';
 import { useTranslation } from 'react-i18next';
+import { MessageTimelineRail, deriveTimelineEntries, useTimelineActiveIndex, type TimelineMessage } from '@/components/message-timeline';
 import { SmartPrompt } from '@/components/smart-prompt';
 import { AcpApprovalModal, type AcpApprovalRequest } from '@/components/acp-approval-modal';
 import { NetworkWaitBanner } from '@/components/network-wait-banner';
@@ -1268,6 +1269,7 @@ export function ChatClient() {
   const storeAgentName = useAppStore((s) => s.activeAgentName);
   const storeSessionName = useAppStore((s) => s.activeSessionName);
   const scrollRef = useRef<HTMLDivElement>(null);
+
   const fileRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const selectedSessionRef = useRef<Session | null>(null);
@@ -1347,6 +1349,19 @@ export function ChatClient() {
   // 优先用 store 值，store 未更新时用 ref 兜底（onSend 里同步设置）
   const effectiveSessionId = activeSessionIdFromStore || pendingSessionIdRef.current;
   const messages = effectiveSessionId ? (sessionDataMap.get(effectiveSessionId)?.messages || []) : [];
+  /* -- 消息历史刻度轨（左=agent 回复，右=用户消息；共用 MessageTimeline） -- */
+  const timelineMsgs: TimelineMessage[] = useMemo(() => messages.map((m: Message) => ({
+    id: m.id,
+    role: m.role === 'user' ? 'user' : 'agent',
+    text: (m.parts || []).filter((p: MessagePart) => p.type === 'text').map((p: MessagePart) => p.text || '').join(' '),
+  })), [messages]);
+  const agentEntries = useMemo(() => deriveTimelineEntries(timelineMsgs, 'agent'), [timelineMsgs]);
+  const userEntries = useMemo(() => deriveTimelineEntries(timelineMsgs, 'user'), [timelineMsgs]);
+  const agentActive = useTimelineActiveIndex(scrollRef, agentEntries);
+  const userActive = useTimelineActiveIndex(scrollRef, userEntries);
+  const timelineJump = useCallback((id: string) => {
+    document.getElementById(`msg-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, []);
   // 视图分类数据（共用 message-views 真源）
   const viewData = useMemo(() => extractViewData(messages), [messages]);
 
@@ -2032,6 +2047,8 @@ export function ChatClient() {
 
 
         {/* Messages */}
+        <div className="flex flex-1 min-h-0">
+        <MessageTimelineRail entries={agentEntries} activeIndex={agentActive} onJump={timelineJump} side="left" />
         <div ref={scrollRef} onScroll={(e) => {
           const el = e.currentTarget;
           const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
@@ -2241,6 +2258,8 @@ export function ChatClient() {
           )}
           </>)} {/* End Messages view */}
 
+        </div>
+        <MessageTimelineRail entries={userEntries} activeIndex={userActive} onJump={timelineJump} side="right" />
         </div>
         <div className="px-3 lg:px-4 pt-3 pb-6 shrink-0">
           {readingCount > 0 && (

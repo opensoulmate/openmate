@@ -1,5 +1,5 @@
 'use client';
-import { useMemo, useState, useEffect, useRef } from 'react';
+import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getApiBaseUrl, getToken } from '@/lib/api-client';
 import { useSidebar } from '@/components/ui/sidebar';
@@ -21,6 +21,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { useAIGroupsStore, type AgentRole, type GroupMessage } from '@/stores/ai-groups-store';
 import MarkdownContent from '@/components/markdown-content';
 import { MessageBubble, favoriteToKnowledge, resolveAgentAvatar } from '@/components/message-bubble';
+import { MessageTimelineRail, deriveTimelineEntries, useTimelineActiveIndex, type TimelineMessage } from '@/components/message-timeline';
 import { extractViewData, MessageViewTabs, MessageViews } from '@/components/message-views';
 import { SmartPrompt } from '@/components/smart-prompt';
 
@@ -131,6 +132,19 @@ export default function AIGroupsClient() {
   // 讨论触发 UI 状态
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  /* -- 消息历史刻度轨（左=agent 回复，右=用户消息；与会话页共用 MessageTimeline） -- */
+  const timelineMsgs: TimelineMessage[] = useMemo(() => messages.map((m: any, i: number) => ({
+    id: m.id || String(i),
+    role: m.role === 'user' ? 'user' : 'agent',
+    text: String(m.content || ''),
+  })), [messages]);
+  const agentEntries = useMemo(() => deriveTimelineEntries(timelineMsgs, 'agent'), [timelineMsgs]);
+  const userEntries = useMemo(() => deriveTimelineEntries(timelineMsgs, 'user'), [timelineMsgs]);
+  const agentActive = useTimelineActiveIndex(scrollRef, agentEntries);
+  const userActive = useTimelineActiveIndex(scrollRef, userEntries);
+  const timelineJump = useCallback((id: string) => {
+    document.getElementById(`msg-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, []);
 
   /* ========== 副作用：移动端面板互斥 ========== */
   useEffect(() => {
@@ -316,7 +330,9 @@ export default function AIGroupsClient() {
       {showViewTabs && selectedGroup && (
         <MessageViewTabs view={groupView} onChange={setGroupView} data={groupViewData} />
       )}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 lg:px-6 py-3 lg:py-4 space-y-3 lg:space-y-4">
+      <div className="flex flex-1 min-h-0">
+      <MessageTimelineRail entries={agentEntries} activeIndex={agentActive} onJump={timelineJump} side="left" />
+      <div ref={scrollRef} className="flex-1 min-w-0 overflow-y-auto px-3 lg:px-6 py-3 lg:py-4 space-y-3 lg:space-y-4">
         {groupView === 'messages' && (<>
         {/* 未选择群组时的空状态 */}
         {!selectedGroup && (
@@ -430,6 +446,8 @@ export default function AIGroupsClient() {
             </div>
           </div>
         )}
+      </div>
+      <MessageTimelineRail entries={userEntries} activeIndex={userActive} onJump={timelineJump} side="right" />
       </div>
 
       {/* ===== 输入框区域 ===== */}
