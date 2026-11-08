@@ -112,7 +112,7 @@ export function MessageTimelineRail({ entries, activeIndex, onJump, side }: Mess
     const track = trackRef.current;
     if (!track) return;
     const tRect = track.getBoundingClientRect();
-    const idx = Math.max(0, Math.min(entries.length - 1, (e.clientY - tRect.top) / PITCH - 0.5));
+    const idx = Math.round(Math.max(0, Math.min(entries.length - 1, (e.clientY - tRect.top) / PITCH - 0.5)));
     setHover(idx);
     setTipY(e.clientY - e.currentTarget.getBoundingClientRect().top);
   };
@@ -138,7 +138,7 @@ export function MessageTimelineRail({ entries, activeIndex, onJump, side }: Mess
     >
       <div ref={trackRef} className="relative w-full" style={{ height: entries.length * PITCH }}>
         {entries.map((entry, index) => {
-          const w = timelineBarWidth(index, activeIndex, hover);
+          const w = index === hover ? BAR_BASE + BAR_SPAN : BAR_BASE;
           const isActive = index === activeIndex;
           return (
             <button
