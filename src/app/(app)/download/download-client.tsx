@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Download, Trash2, FolderOpen, ArrowDown, CheckCircle, XCircle, Loader2, Plus,
   Magnet, Video, Settings, Zap, Link, Pause, Play, ListChecks, Clock, X,
+  FileText, AppWindow, FileArchive, Film, AlertCircle, RefreshCw,
 } from 'lucide-react';
 import { getApiBaseUrl } from '@/lib/api-client';
 import { useTranslation } from 'react-i18next';
@@ -51,6 +52,13 @@ function formatEta(s: number): string {
   return `${Math.floor(s / 3600)}h${Math.floor((s % 3600) / 60)}m`;
 }
 
+function formatDate(ts: number): string {
+  if (!ts) return '';
+  const d = new Date(ts);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
 function detectUrlType(url: string): DownloadTask['type'] {
   if (url.startsWith('magnet:?')) return 'bt';
   if (url.startsWith('thunder://') || url.startsWith('flashget://') || url.startsWith('qqdl://')) return 'thunder';
@@ -58,14 +66,20 @@ function detectUrlType(url: string): DownloadTask['type'] {
   return 'http';
 }
 
-function TypeTag({ type }: { type: DownloadTask['type'] }) {
-  const styles: Record<string, string> = {
-    http: 'bg-blue-500/10 text-blue-400',
-    bt: 'bg-green-500/10 text-emerald-400',
-    video: 'bg-purple-500/10 text-purple-400',
-    thunder: 'bg-orange-500/10 text-orange-400',
-  };
-  return <span className={`text-[10px] px-1.5 py-0.5 rounded ${styles[type]}`}>{type.toUpperCase()}</span>;
+/** 文件类型图标块（参考图：彩色圆角方块，PDF 红/安装包 蓝/压缩包 黄/视频 紫/BT 绿） */
+function FileTile({ filename, type }: { filename: string; type: DownloadTask['type'] }) {
+  const ext = filename.split('.').pop()?.toLowerCase() || '';
+  let icon = FileText, color = 'text-muted-foreground', bg = 'bg-muted';
+  if (ext === 'pdf') { icon = FileText; color = 'text-red-500'; bg = 'bg-red-500/10'; }
+  else if (['exe', 'msi', 'dmg', 'pkg', 'deb', 'appimage'].includes(ext)) { icon = AppWindow; color = 'text-blue-500'; bg = 'bg-blue-500/10'; }
+  else if (['zip', 'rar', '7z', 'tar', 'gz', 'bz2'].includes(ext)) { icon = FileArchive; color = 'text-amber-500'; bg = 'bg-amber-500/10'; }
+  else if (type === 'video') { icon = Film; color = 'text-purple-500'; bg = 'bg-purple-500/10'; }
+  else if (type === 'bt') { icon = Magnet; color = 'text-green-500'; bg = 'bg-green-500/10'; }
+  return (
+    <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${bg}`}>
+      {(() => { const I = icon; return <I className={`w-5 h-5 ${color}`} />; })()}
+    </div>
+  );
 }
 
 /** 后端任务行（native to_dict / plugin_tasks 行）→ 前端统一结构 */
@@ -167,10 +181,22 @@ export function DownloadClient() {
     setLoading(false);
   };
 
-  /* ── 暂停/继续/删除：全部打真 API，不再假改本地状态 ── */
+  /* ── 暂停/继续/重试/删除：全部打真 API ── */
   const pauseResume = async (task: DownloadTask) => {
     try {
       await fetch(`${getApiBaseUrl()}/api/download/tasks/${encodeURIComponent(task.id)}/${task.status === 'paused' ? 'resume' : 'pause'}`, { method: 'POST' });
+      loadTasks();
+    } catch {}
+  };
+
+  const retryTask = async (task: DownloadTask) => {
+    try {
+      await fetch(`${getApiBaseUrl()}/api/download/download`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: task.url, resume: true }),
+      });
+      setView('downloading');
       loadTasks();
     } catch {}
   };
@@ -186,7 +212,6 @@ export function DownloadClient() {
   const doneTasks = tasks.filter(t => t.status === 'done');
   const urlType = detectUrlType(newUrl);
 
-  /* ── 左侧功能列表项（迅雷式） ── */
   const navItems: Array<{ key: View; icon: any; label: string; count?: number }> = [
     { key: 'all', icon: ListChecks, label: t('download.allTasks', '全部任务'), count: tasks.length },
     { key: 'downloading', icon: ArrowDown, label: t('download.downloading', '下载中'), count: activeTasks.length },
@@ -194,58 +219,75 @@ export function DownloadClient() {
     { key: 'settings', icon: Settings, label: t('download.settings', '设置') },
   ];
 
-  /* ── 任务行（迅雷式：图标｜名称+进度｜速度/大小｜操作） ── */
+  /* ── 任务行（参考图：图标块｜文件名+meta｜行尾图标按钮） ── */
   const TaskRow = ({ task }: { task: DownloadTask }) => (
-    <div className="px-3 py-2.5 flex items-center gap-3 border-b border-border/50 last:border-b-0 hover:bg-muted/40 transition-colors">
-      <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center shrink-0">
-        {task.status === 'downloading' && <Loader2 className="w-4 h-4 text-primary animate-spin" />}
-        {task.status === 'paused' && <Pause className="w-4 h-4 text-yellow-500" />}
-        {task.status === 'error' && <XCircle className="w-4 h-4 text-red-500" />}
-        {task.status === 'done' && <CheckCircle className="w-4 h-4 text-green-500" />}
-        {task.status === 'pending' && <Clock className="w-4 h-4 text-muted-foreground" />}
-      </div>
+    <div className="px-3 lg:px-4 py-3 flex items-center gap-3 hover:bg-muted/40 transition-colors border-b border-border/40 last:border-b-0">
+      <FileTile filename={task.filename} type={task.type} />
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="text-xs lg:text-sm font-medium truncate">{task.filename}</span>
-          <TypeTag type={task.type} />
-          {task.status === 'error' && task.error && (
-            <span className="text-[10px] text-red-400 truncate max-w-[200px]">{task.error}</span>
-          )}
+        <div className={`text-xs lg:text-sm font-medium truncate ${task.status === 'error' ? 'text-muted-foreground' : ''}`}>
+          {task.filename}
         </div>
-        {task.status !== 'done' ? (
-          <div className="flex items-center gap-2 mt-1.5">
-            <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all duration-500 ${task.status === 'paused' ? 'bg-yellow-500' : task.status === 'error' ? 'bg-red-500' : 'bg-primary'}`}
-                style={{ width: `${task.progress || 0}%` }}
-              />
-            </div>
-            <span className="text-[10px] text-muted-foreground w-10 text-right shrink-0">{task.progress || 0}%</span>
+        {task.status === 'done' ? (
+          /* 参考图 meta 行：共 1 项 › · 时间 · 大小 */
+          <div className="flex items-center gap-2 text-[11px] text-muted-foreground mt-1">
+            <span>共 1 项 ›</span>
+            <span>{formatDate(task.addedAt)}</span>
+            <span>{formatBytes(task.totalBytes || task.downloadedBytes)}</span>
+          </div>
+        ) : task.status === 'error' ? (
+          /* 参考图错误行：红色错误信息 */
+          <div className="flex items-center gap-1.5 text-[11px] text-red-500 mt-1">
+            <AlertCircle className="w-3 h-3 shrink-0" />
+            <span className="truncate">{task.error || t('download.failed', '下载失败')}</span>
           </div>
         ) : (
-          <p className="text-[10px] text-muted-foreground truncate mt-1" title={task.dest}>{task.dest || task.url}</p>
-        )}
-      </div>
-      <div className="text-right shrink-0 w-24 hidden sm:block">
-        {task.status === 'done' ? (
-          <span className="text-xs text-muted-foreground">{formatBytes(task.totalBytes || task.downloadedBytes)}</span>
-        ) : (
+          /* 进行中：进度条 + 速度/大小/ETA */
           <>
-            <div className="text-xs text-primary">{formatSpeed(task.speed)}</div>
-            <div className="text-[10px] text-muted-foreground">
-              {formatBytes(task.downloadedBytes)}{task.totalBytes > 0 ? ` / ${formatBytes(task.totalBytes)}` : ''} · {formatEta(task.eta)}
+            <div className="flex items-center gap-2 mt-1.5">
+              <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden max-w-md">
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${task.status === 'paused' ? 'bg-yellow-500' : 'bg-primary'}`}
+                  style={{ width: `${task.progress || 0}%` }}
+                />
+              </div>
+              <span className="text-[10px] text-muted-foreground shrink-0">{task.progress || 0}%</span>
+            </div>
+            <div className="flex items-center gap-2 text-[11px] text-muted-foreground mt-1">
+              {task.status === 'paused' && <span className="text-yellow-500 flex items-center gap-1"><Pause className="w-3 h-3" />{t('download.paused', '已暂停')}</span>}
+              {task.speed > 0 && <span className="flex items-center gap-1 text-primary"><ArrowDown className="w-3 h-3" />{formatSpeed(task.speed)}</span>}
+              <span>{formatBytes(task.downloadedBytes)}{task.totalBytes > 0 ? ` / ${formatBytes(task.totalBytes)}` : ''}</span>
+              {task.eta > 0 && <span>ETA {formatEta(task.eta)}</span>}
             </div>
           </>
         )}
       </div>
+      {/* 行尾图标按钮（参考图：↺/→/×） */}
       <div className="flex items-center gap-1 shrink-0">
+        {task.status === 'error' && (
+          <button
+            onClick={() => retryTask(task)}
+            title={t('download.retry', '重试')}
+            className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground"
+          >
+            <RefreshCw className="w-4 h-4" />
+          </button>
+        )}
+        {task.status === 'done' && (
+          <button
+            onClick={() => navigator.clipboard?.writeText(task.dest || task.url)}
+            title={t('download.copyPath', '复制文件路径')}
+            className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground"
+          >
+            <FolderOpen className="w-4 h-4" />
+          </button>
+        )}
         {task.status !== 'done' && task.status !== 'error' && (
           <button
             onClick={() => pauseResume(task)}
             title={task.status === 'paused' ? t('download.resume', '继续') : t('download.pause', '暂停')}
             className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground"
           >
-            {task.status === 'paused' ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
+            {task.status === 'paused' ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
           </button>
         )}
         <button
@@ -253,7 +295,7 @@ export function DownloadClient() {
           title={t('download.delete', '删除')}
           className="p-1.5 rounded-lg hover:bg-red-500/10 text-muted-foreground hover:text-red-500"
         >
-          <Trash2 className="w-3.5 h-3.5" />
+          <X className="w-4 h-4" />
         </button>
       </div>
     </div>
@@ -263,6 +305,27 @@ export function DownloadClient() {
     <div className="text-center py-12 text-muted-foreground">
       <Download className="w-10 h-10 mx-auto mb-2 opacity-30" />
       <p className="text-xs lg:text-sm">{hint}</p>
+    </div>
+  );
+
+  /* 参考图标签页：下载中 | 已下载（下划线切换） */
+  const Tabs = (
+    <div className="flex items-center gap-6 px-3 lg:px-4 pt-3 border-b border-border">
+      {([['downloading', t('download.downloading', '下载中'), activeTasks.length], ['done', t('download.done', '已下载'), doneTasks.length]] as const).map(([key, label, count]) => {
+        const active = view === key;
+        return (
+          <button
+            key={key}
+            onClick={() => setView(key)}
+            className={`flex items-center gap-1.5 pb-2.5 text-sm lg:text-base font-medium border-b-2 -mb-px transition-colors ${
+              active ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {label}
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${active ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>{count}</span>
+          </button>
+        );
+      })}
     </div>
   );
 
@@ -300,8 +363,8 @@ export function DownloadClient() {
           </nav>
         </aside>
 
-        {/* ── 右侧：下载详细列表 ── */}
-        <div className="flex-1 min-w-0 flex flex-col overflow-y-auto">
+        {/* ── 右侧：下载详细列表（参考图标签页式） ── */}
+        <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
           {/* 新建下载输入条 */}
           {adding && (
             <div className="p-3 border-b border-border bg-card/60">
@@ -315,7 +378,7 @@ export function DownloadClient() {
                     onKeyDown={e => e.key === 'Enter' && startDownload()}
                     autoFocus
                   />
-                  {newUrl && <span className="absolute right-2.5 top-1/2 -translate-y-1/2"><TypeTag type={urlType} /></span>}
+                  {newUrl && <span className="absolute right-2.5 top-1/2 -translate-y-1/2"><span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400">{urlType.toUpperCase()}</span></span>}
                 </div>
                 <div className="flex gap-2">
                   <button
@@ -345,7 +408,7 @@ export function DownloadClient() {
 
           {view === 'settings' ? (
             /* ── 设置 ── */
-            <div className="p-3 lg:p-6 space-y-5 max-w-xl">
+            <div className="p-3 lg:p-6 space-y-5 max-w-xl overflow-y-auto">
               <div>
                 <label className="text-xs lg:text-sm font-medium mb-1.5 block">{t('download.threads', '下载线程')} (1-32)</label>
                 <div className="flex items-center gap-3">
@@ -364,7 +427,7 @@ export function DownloadClient() {
                 <input
                   type="number" min={0} value={config.speed_limit}
                   onChange={e => setConfig(c => ({ ...c, speed_limit: parseInt(e.target.value) || 0 }))}
-                  onBlur={() => saveConfig('speed_limit', config.speed_limit.toString())}
+                  onBlur={() => saveConfig('speed-limit', config.speed_limit.toString())}
                   className="w-full px-3 py-2 rounded-lg bg-muted text-xs lg:text-sm outline-none border border-border focus:border-primary"
                 />
               </div>
@@ -392,39 +455,50 @@ export function DownloadClient() {
               </div>
             </div>
           ) : (
-            <>
-              {/* ── 下载中 ── */}
-              {view !== 'done' && (
-                <section>
-                  <div className="px-3 lg:px-4 py-2 flex items-center gap-2 text-xs font-medium text-muted-foreground bg-muted/40 border-b border-border sticky top-0 z-10">
-                    <ArrowDown className="w-3.5 h-3.5 text-primary" />
-                    {t('download.downloading', '下载中')}
-                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary">{activeTasks.length}</span>
-                  </div>
-                  {activeTasks.length === 0 ? (
-                    <EmptyBlock hint={t('download.noActive', '没有进行中的任务，点左上角「新建下载」开始')} />
-                  ) : (
-                    <div>{activeTasks.map(task => <TaskRow key={task.id} task={task} />)}</div>
-                  )}
-                </section>
+            <div className="flex-1 overflow-y-auto">
+              {Tabs}
+              {view === 'all' ? (
+                /* 全部任务：两组上下排（下载中/已下载） */
+                <>
+                  <section>
+                    <div className="px-3 lg:px-4 py-2 flex items-center gap-2 text-xs font-medium text-muted-foreground bg-muted/30">
+                      <ArrowDown className="w-3.5 h-3.5 text-primary" />
+                      {t('download.downloading', '下载中')}
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary">{activeTasks.length}</span>
+                    </div>
+                    {activeTasks.length === 0 ? (
+                      <EmptyBlock hint={t('download.noActive', '没有进行中的任务，点左上角「新建下载」开始')} />
+                    ) : (
+                      <div>{activeTasks.map(task => <TaskRow key={task.id} task={task} />)}</div>
+                    )}
+                  </section>
+                  <section>
+                    <div className="px-3 lg:px-4 py-2 flex items-center gap-2 text-xs font-medium text-muted-foreground bg-muted/30 border-t border-border">
+                      <CheckCircle className="w-3.5 h-3.5 text-green-500" />
+                      {t('download.done', '已下载')}
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-500/10 text-green-500">{doneTasks.length}</span>
+                    </div>
+                    {doneTasks.length === 0 ? (
+                      <EmptyBlock hint={t('download.noDone', '还没有完成的下载')} />
+                    ) : (
+                      <div>{doneTasks.map(task => <TaskRow key={task.id} task={task} />)}</div>
+                    )}
+                  </section>
+                </>
+              ) : view === 'downloading' ? (
+                activeTasks.length === 0 ? (
+                  <EmptyBlock hint={t('download.noActive', '没有进行中的任务，点左上角「新建下载」开始')} />
+                ) : (
+                  <div>{activeTasks.map(task => <TaskRow key={task.id} task={task} />)}</div>
+                )
+              ) : (
+                doneTasks.length === 0 ? (
+                  <EmptyBlock hint={t('download.noDone', '还没有完成的下载')} />
+                ) : (
+                  <div>{doneTasks.map(task => <TaskRow key={task.id} task={task} />)}</div>
+                )
               )}
-
-              {/* ── 已下载 ── */}
-              {view !== 'downloading' && (
-                <section>
-                  <div className="px-3 lg:px-4 py-2 flex items-center gap-2 text-xs font-medium text-muted-foreground bg-muted/40 border-b border-border sticky top-0 z-10">
-                    <CheckCircle className="w-3.5 h-3.5 text-green-500" />
-                    {t('download.done', '已下载')}
-                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-500/10 text-green-500">{doneTasks.length}</span>
-                  </div>
-                  {doneTasks.length === 0 ? (
-                    <EmptyBlock hint={t('download.noDone', '还没有完成的下载')} />
-                  ) : (
-                    <div>{doneTasks.map(task => <TaskRow key={task.id} task={task} />)}</div>
-                  )}
-                </section>
-              )}
-            </>
+            </div>
           )}
         </div>
       </div>
