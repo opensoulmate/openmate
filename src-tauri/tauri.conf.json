@@ -13,6 +13,7 @@
     "windows": [
       {
         "title": "OpenMate｜开放协同的AI智能伙伴",
+        "decorations": false,
         "width": 1200,
         "height": 800,
         "minWidth": 375,

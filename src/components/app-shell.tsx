@@ -9,6 +9,7 @@ import {
 import { TerminalPanel } from "@/components/terminal-panel";
 import { BottomNav } from "@/components/bottom-nav";
 import { TopBar } from "@/components/top-bar";
+import { ShellTitleBar } from "@/components/shell-title-bar";
 import { WorkspacePanel } from '@opensoulmate/openface';
 import { AIGroupsSidebar } from "@/components/ai-groups-sidebar";
 import { useAIGroupsStore } from "@/stores/ai-groups-store";
@@ -463,6 +464,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <GlobalWebSocket />
       <EChartsThemeProvider>
       {/* Top utility bar — full screen width */}
+      <ShellTitleBar />
       <div className="flex items-center">
         <div className="flex-1 min-w-0">
           <TopBar

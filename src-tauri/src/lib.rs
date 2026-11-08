@@ -93,22 +93,25 @@ fn set_page_title(window: tauri::Window, title: String) {
     let _ = window.set_title(&title);
 }
 
-const TITLE_SYNC_JS: &str = r#"(() => {
-  const sync = () => {
-    try {
-      if (document.title && window.__TAURI_INTERNALS__) {
-        window.__TAURI_INTERNALS__.invoke('set_page_title', { title: document.title });
-      }
-    } catch (e) {}
-  };
-  const attach = () => {
-    const el = document.querySelector('title');
-    if (el) new MutationObserver(sync).observe(el, { childList: true, characterData: true, subtree: true });
-    sync();
-  };
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', attach);
-  else attach();
-})()"#;
+#[tauri::command]
+fn minimize_window(window: tauri::Window) {
+    let _ = window.minimize();
+}
+
+#[tauri::command]
+fn toggle_maximize_window(window: tauri::Window) {
+    if window.is_maximized().unwrap_or(false) {
+        let _ = window.unmaximize();
+    } else {
+        let _ = window.maximize();
+    }
+}
+
+#[tauri::command]
+fn close_window(window: tauri::Window) {
+    // 关闭=收进托盘常驻（托盘菜单"退出"才真退出）
+    let _ = window.hide();
+}
 
 #[cfg(desktop)]
 fn show_main(app: &tauri::AppHandle) {
@@ -172,9 +175,6 @@ pub fn run() {
                         }
                     });
                 }
-                if let Some(win) = app.get_webview_window("main") {
-                    let _ = win.eval(TITLE_SYNC_JS);
-                }
             }
             Ok(())
         })
@@ -185,7 +185,10 @@ pub fn run() {
             read_local_file,
             write_local_file,
             list_directory,
-            set_page_title
+            set_page_title,
+            minimize_window,
+            toggle_maximize_window,
+            close_window
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
