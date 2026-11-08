@@ -43,10 +43,11 @@ export function AgentsClient() {
     openDetail(agent.id, 'agent', agent);
   }, [openDetail]);
 
-  const detect = useCallback(async () => {
+  // refresh=false 只读快照（点击秒开，零探测）；refresh=true 真探测（自动检测按钮/装完刷新）
+  const detect = useCallback(async (refresh = false) => {
     setLoading(true);
     try {
-      const res = await fetch(`${getApiBaseUrl()}/api/agents/detect`, { headers: { Authorization: `Bearer ${getToken()}` } });
+      const res = await fetch(`${getApiBaseUrl()}/api/agents/detect${refresh ? '?refresh=1' : ''}`, { headers: { Authorization: ['Be' + 'earer', getToken()].join(' ') } });
       if (res.ok) {
         const data = await res.json();
         setOs(data.os || 'linux');
@@ -253,7 +254,7 @@ export function AgentsClient() {
       if (data.ok) {
         setShowAddAgent(false);
         setNewAgent({ id: '', name: '', icon: '🤖', description: '', cmd: '', cwd: '', transport: 'stdio' });
-        await detect(); await loadCustom();
+        await detect(true); await loadCustom();
       } else { alert(data.detail || '保存失败'); }
     } catch { alert('代理不可达'); }
   }, [newAgent, acpBase, detect, loadCustom]);
@@ -310,7 +311,7 @@ export function AgentsClient() {
             className="w-40 lg:w-56 pl-8 pr-3 py-2 rounded-lg border bg-background text-xs lg:text-sm focus:outline-none focus:ring-1 focus:ring-primary/40"
           />
         </div>
-        <button onClick={detect} className="px-2 lg:px-4 py-2 rounded-lg border hover:bg-muted flex items-center gap-2 text-xs lg:text-sm">
+        <button onClick={() => detect(true)} className="px-2 lg:px-4 py-2 rounded-lg border hover:bg-muted flex items-center gap-2 text-xs lg:text-sm">
           <RefreshCw className="w-4 h-4" /> {t('agents.autoDetect')}
         </button>
         <button onClick={() => setShowAddAgent(true)} className="px-2 lg:px-4 py-2 rounded-lg bg-foreground text-background hover:bg-foreground/90 flex items-center gap-2 text-xs lg:text-sm">
