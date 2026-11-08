@@ -13,7 +13,10 @@ declare global {
 }
 
 const isTauri = () =>
-  typeof window !== 'undefined' && !!window.__TAURI_INTERNALS__;
+  typeof window !== 'undefined' &&
+  !!window.__TAURI_INTERNALS__ &&
+  // 移动端（Android/iOS 壳）不显示桌面标题栏
+  !/Android|iPhone|iPad/i.test(navigator.userAgent);
 
 export function ShellTitleBar() {
   const [mounted, setMounted] = useState(false);
