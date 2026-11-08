@@ -95,16 +95,24 @@ fn set_page_title(window: tauri::Window, title: String) {
 
 #[tauri::command]
 fn minimize_window(window: tauri::Window) {
+    #[cfg(desktop)]
     let _ = window.minimize();
+    #[cfg(not(desktop))]
+    let _ = window;
 }
 
 #[tauri::command]
 fn toggle_maximize_window(window: tauri::Window) {
-    if window.is_maximized().unwrap_or(false) {
-        let _ = window.unmaximize();
-    } else {
-        let _ = window.maximize();
+    #[cfg(desktop)]
+    {
+        if window.is_maximized().unwrap_or(false) {
+            let _ = window.unmaximize();
+        } else {
+            let _ = window.maximize();
+        }
     }
+    #[cfg(not(desktop))]
+    let _ = window;
 }
 
 #[tauri::command]
