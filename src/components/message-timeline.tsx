@@ -4,11 +4,14 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 /**
  * MessageTimeline —— 消息历史刻度轨（移植自 hermes desktop timeline）
  *
- * 视觉：右侧一列小横线（每条消息一根），悬停处横线加宽并弹出消息预览，
+ * 视觉：轨道一列小横线（每条消息一根），鼠标放到哪根横条上就显示对应消息预览，
  * 点击跳转到该消息。左侧轨预览 agent 回复，右侧轨预览用户消息。
  *
+ * 结构要点：外层定位壳（position:relative，不裁剪）> 内层滚动盒（overflow），
+ * 预览浮层挂在外层壳上——若挂在滚动盒内会被 overflow-x-hidden 裁掉（首版踩过）。
+ *
  * 设计参数（与 hermes 对齐）：pitch=7px（0.4375rem），横线高 1px（0.0625rem），
- * 基础宽 8px（0.5rem），高斯聚焦曲线加宽至 16px（1rem），
+ * 基础宽 8px（0.5rem），悬停加宽至 16px（1rem），
  * transition: width 180ms cubic-bezier(0.2, 0.8, 0.2, 1)。
  */
 
@@ -26,7 +29,7 @@ export interface TimelineMessage {
 const PREVIEW_MAX = 120;
 const PITCH = 7; // px — 0.4375rem
 const BAR_BASE = 8; // px — 0.5rem
-const BAR_SPAN = 8; // px — 聚焦最多再加 0.5rem = 1rem
+const BAR_SPAN = 8; // px — 悬停再加 0.5rem = 1rem
 
 /** 折叠空白、超长截断（hermes timelinePreview 同款） */
 export function timelinePreview(text: string, max: number = PREVIEW_MAX): string {
@@ -48,12 +51,6 @@ export function deriveTimelineEntries(
     entries.push({ id: m.id, preview: timelinePreview(text) });
   }
   return entries;
-}
-
-/** 高斯聚焦曲线（hermes timelineBarWidth 同款）：距离>3 归零，active 恒最大 */
-export function timelineBarWidth(index: number, activeIndex: number, hoverIndex: number | null): number {
-  const curve = (d: number) => (Math.abs(d) > 3 ? 0 : Math.exp(-(d ** 2) / 1.35));
-  return BAR_BASE + BAR_SPAN * Math.max(curve(index - activeIndex), hoverIndex === null ? 0 : curve(index - hoverIndex));
 }
 
 /**
@@ -107,16 +104,16 @@ export function MessageTimelineRail({ entries, activeIndex, onJump, side, classN
   const [hover, setHover] = useState<number | null>(null);
   const [tipY, setTipY] = useState(0);
   const trackRef = useRef<HTMLDivElement>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
 
-  if (entries.length === 0) return null;
-
-  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+  const moveFromY = (clientY: number) => {
     const track = trackRef.current;
-    if (!track) return;
+    const shell = shellRef.current;
+    if (!track || !shell) return;
     const tRect = track.getBoundingClientRect();
-    const idx = Math.round(Math.max(0, Math.min(entries.length - 1, (e.clientY - tRect.top) / PITCH - 0.5)));
+    const idx = Math.round(Math.max(0, Math.min(entries.length - 1, (clientY - tRect.top) / PITCH - 0.5)));
     setHover(idx);
-    setTipY(e.clientY - e.currentTarget.getBoundingClientRect().top);
+    setTipY(clientY - shell.getBoundingClientRect().top);
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -131,49 +128,52 @@ export function MessageTimelineRail({ entries, activeIndex, onJump, side, classN
 
   return (
     <div
-      className={`w-9 shrink-0 overflow-y-auto overflow-x-hidden flex flex-col [justify-content:safe_center] ${className}`}
-      style={{ position: 'relative', scrollbarWidth: 'none', ...style }}
-      onPointerMove={onPointerMove}
+      ref={shellRef}
+      className={`relative w-9 shrink-0 ${className}`}
+      style={style}
+      onPointerMove={e => moveFromY(e.clientY)}
       onPointerLeave={() => setHover(null)}
       onKeyDown={onKeyDown}
-      onMouseOut={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setHover(null); }}
     >
-      <div ref={trackRef} className="relative w-full" style={{ height: entries.length * PITCH }}>
-        {entries.map((entry, index) => {
-          const w = index === hover ? BAR_BASE + BAR_SPAN : BAR_BASE;
-          const isActive = index === activeIndex;
-          return (
-            <button
-              key={entry.id}
-              type="button"
-              aria-label={entry.preview}
-              aria-current={isActive ? 'location' : undefined}
-              onClick={() => onJump(entry.id)}
-              onMouseEnter={() => { setHover(index); setTipY((trackRef.current?.offsetTop ?? 0) + index * PITCH); }}
-              className={`absolute ${side === 'right' ? 'right-0 pr-1.5 justify-end' : 'left-0 pl-1.5 justify-start'} flex items-center w-full outline-none rounded-sm focus-visible:ring-1 focus-visible:ring-primary/50`}
-              style={{ top: index * PITCH, height: PITCH }}
-            >
-              {/* 动态宽度走内联样式（Tailwind 动态类名扫不到） */}
-              <span
-                aria-hidden
-                className={`block h-px rounded-full transition-[width] duration-[180ms] ease-[cubic-bezier(0.2,0.8,0.2,1)] ${
-                  isActive ? 'bg-primary opacity-100' : 'bg-muted-foreground/65'
-                }`}
-                style={{ width: w }}
-              />
-            </button>
-          );
-        })}
+      {/* 内层滚动盒：刻度排布（内容超高自动滚动；滚动条隐去） */}
+      <div className="h-full w-full overflow-y-auto overflow-x-hidden flex flex-col [justify-content:safe_center]" style={{ scrollbarWidth: 'none' }}>
+        <div ref={trackRef} className="relative w-full" style={{ height: entries.length * PITCH }}>
+          {entries.map((entry, index) => {
+            const w = index === hover ? BAR_BASE + BAR_SPAN : BAR_BASE;
+            const isActive = index === activeIndex;
+            return (
+              <button
+                key={entry.id}
+                type="button"
+                aria-label={entry.preview}
+                aria-current={isActive ? 'location' : undefined}
+                onClick={() => onJump(entry.id)}
+                onMouseEnter={() => moveFromY(trackRef.current!.getBoundingClientRect().top + index * PITCH + PITCH / 2)}
+                className={`absolute ${side === 'right' ? 'right-0 pr-1.5 justify-end' : 'left-0 pl-1.5 justify-start'} flex items-center w-full outline-none rounded-sm focus-visible:ring-1 focus-visible:ring-primary/50`}
+                style={{ top: index * PITCH, height: PITCH }}
+              >
+                {/* 动态宽度走内联样式（Tailwind 动态类名扫不到） */}
+                <span
+                  aria-hidden
+                  className={`block h-px rounded-full transition-[width] duration-[180ms] ease-[cubic-bezier(0.2,0.8,0.2,1)] ${
+                    isActive ? 'bg-primary opacity-100' : 'bg-muted-foreground/65'
+                  }`}
+                  style={{ width: w }}
+                />
+              </button>
+            );
+          })}
+        </div>
       </div>
 
-      {/* 悬停预览浮层（hermes Tip placement=right-rail 同款） */}
+      {/* 悬停预览浮层：挂外层壳（不被滚动盒裁剪）——鼠标放到哪根横条就显示哪条消息 */}
       {hover !== null && entries[hover] && (
         <div
           role="tooltip"
-          className={`pointer-events-none absolute z-20 max-w-[260px] px-2.5 py-1.5 rounded-lg bg-card border border-border shadow-lg text-xs leading-relaxed ${
+          className={`pointer-events-none absolute z-20 max-w-[260px] px-2.5 py-1.5 rounded-lg bg-card border border-border shadow-lg text-xs leading-relaxed whitespace-normal ${
             side === 'right' ? 'right-full mr-2 text-right' : 'left-full ml-2 text-left'
           }`}
-          style={{ top: Math.max(0, tipY - 18) }}
+          style={{ top: Math.max(0, Math.min(tipY - 18, (shellRef.current?.clientHeight ?? 320) - 40)) }}
         >
           {entries[hover].preview}
         </div>
