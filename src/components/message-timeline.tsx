@@ -105,8 +105,30 @@ export function MessageTimelineRail({ entries, activeIndex, onJump, side, classN
   const [tipY, setTipY] = useState(0);
   const trackRef = useRef<HTMLDivElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
+  const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const moveFromY = (clientY: number) => {
+  const clearHover = useCallback(() => {
+    if (dismissTimer.current) { clearTimeout(dismissTimer.current); dismissTimer.current = null; }
+    setHover(null);
+  }, []);
+
+  // 触屏 tap 后没有 pointerleave，必须兜底：2.5s 自动收起 + 点轨外/滚动立即收起
+  useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      if (shellRef.current && !shellRef.current.contains(e.target as Node)) clearHover();
+    };
+    const onScroll = () => clearHover();
+    document.addEventListener('pointerdown', onDown);
+    window.addEventListener('scroll', onScroll, { capture: true, passive: true });
+    return () => {
+      document.removeEventListener('pointerdown', onDown);
+      window.removeEventListener('scroll', onScroll, { capture: true });
+    };
+  }, [clearHover]);
+
+  useEffect(() => () => { if (dismissTimer.current) clearTimeout(dismissTimer.current); }, []);
+
+  const moveFromY = (clientY: number, pointerType: string = 'mouse') => {
     const track = trackRef.current;
     const shell = shellRef.current;
     if (!track || !shell) return;
@@ -114,6 +136,10 @@ export function MessageTimelineRail({ entries, activeIndex, onJump, side, classN
     const idx = Math.round(Math.max(0, Math.min(entries.length - 1, (clientY - tRect.top) / PITCH - 0.5)));
     setHover(idx);
     setTipY(clientY - shell.getBoundingClientRect().top);
+    if (dismissTimer.current) { clearTimeout(dismissTimer.current); dismissTimer.current = null; }
+    if (pointerType !== 'mouse') {
+      dismissTimer.current = setTimeout(() => setHover(null), 2500);
+    }
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -131,8 +157,8 @@ export function MessageTimelineRail({ entries, activeIndex, onJump, side, classN
       ref={shellRef}
       className={`relative w-9 shrink-0 ${className}`}
       style={style}
-      onPointerMove={e => moveFromY(e.clientY)}
-      onPointerLeave={() => setHover(null)}
+      onPointerMove={e => moveFromY(e.clientY, e.pointerType)}
+      onPointerLeave={clearHover}
       onKeyDown={onKeyDown}
     >
       {/* 内层滚动盒：刻度排布（内容超高自动滚动；滚动条隐去） */}
@@ -147,8 +173,8 @@ export function MessageTimelineRail({ entries, activeIndex, onJump, side, classN
                 type="button"
                 aria-label={entry.preview}
                 aria-current={isActive ? 'location' : undefined}
-                onClick={() => onJump(entry.id)}
-                onMouseEnter={() => moveFromY(trackRef.current!.getBoundingClientRect().top + index * PITCH + PITCH / 2)}
+                onClick={() => { clearHover(); onJump(entry.id); }}
+                onPointerEnter={e => moveFromY(trackRef.current!.getBoundingClientRect().top + index * PITCH + PITCH / 2, e.pointerType)}
                 className={`absolute ${side === 'right' ? 'right-0 pr-1.5 justify-end' : 'left-0 pl-1.5 justify-start'} flex items-center w-full outline-none rounded-sm focus-visible:ring-1 focus-visible:ring-primary/50`}
                 style={{ top: index * PITCH, height: PITCH }}
               >
