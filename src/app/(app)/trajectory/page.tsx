@@ -21,10 +21,10 @@ export default function TrajectoryPage() {
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
-            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition-colors ${
+            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg transition-colors ${
               tab === t.key
-                ? "border-primary text-primary"
-                : "border-transparent text-muted-foreground hover:text-foreground"
+                ? "bg-primary/10 text-primary"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
             }`}
           >
             <t.icon size={14} />

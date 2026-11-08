@@ -656,10 +656,10 @@ export function KnowledgeClient() {
             <button
               onClick={() => { setActiveTab('items'); setSelectedRequest(null); }}
               className={cn(
-                'px-3 py-2 text-xs font-medium border-b-2 transition-colors',
+                'px-3 py-2 text-xs font-medium rounded-lg transition-colors',
                 activeTab === 'items'
-                  ? 'border-violet-500 text-violet-500'
-                  : 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/30'
+                  ? 'bg-violet-500/10 text-violet-500'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
               )}
             >
               <BookOpen className="w-3.5 h-3.5 inline mr-1.5" />
@@ -668,10 +668,10 @@ export function KnowledgeClient() {
             <button
               onClick={() => { setActiveTab('requests'); setSelectedItem(null); }}
               className={cn(
-                'px-3 py-2 text-xs font-medium border-b-2 transition-colors relative',
+                'px-3 py-2 text-xs font-medium rounded-lg transition-colors relative',
                 activeTab === 'requests'
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/30'
+                  ? 'bg-primary/10 text-primary'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
               )}
             >
               <FileText className="w-3.5 h-3.5 inline mr-1.5" />
@@ -685,10 +685,10 @@ export function KnowledgeClient() {
             <button
               onClick={() => { setActiveTab('sharing'); setSelectedItem(null); setSelectedRequest(null); }}
               className={cn(
-                'px-3 py-2 text-xs font-medium border-b-2 transition-colors',
+                'px-3 py-2 text-xs font-medium rounded-lg transition-colors',
                 activeTab === 'sharing'
                   ? 'border-emerald-500 text-emerald-500'
-                  : 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/30'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
               )}
             >
               <Share2 className="w-3.5 h-3.5 inline mr-1.5" />

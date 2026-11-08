@@ -252,7 +252,7 @@ export function DiscoveryClient() {
       {/* Tabs */}
       <div className="flex gap-1 px-3 lg:px-6 pt-3 border-b border-border">
         {(["scan", "adapters"] as Tab[]).map(t => (
-          <button key={t} onClick={() => setTab(t)} className={cn("px-2 lg:px-4 py-2 text-xs lg:text-sm font-medium rounded-t-lg transition-colors border-b-2 touch-manipulation", tab === t ? "border-cyan-500 text-cyan-400 bg-card/50" : "border-transparent text-muted-foreground hover:text-foreground")}>
+          <button key={t} onClick={() => setTab(t)} className={cn("px-2 lg:px-4 py-2 text-xs lg:text-sm font-medium rounded-lg transition-colors touch-manipulation", tab === t ? "bg-cyan-500/10 text-cyan-400" : "text-muted-foreground hover:text-foreground hover:bg-muted/30")}>
             {t === "scan" ? <><Monitor className="w-4 h-4 inline mr-1.5" />System Scan</> : <><Plug className="w-4 h-4 inline mr-1.5" />Adapters</>}
           </button>
         ))}

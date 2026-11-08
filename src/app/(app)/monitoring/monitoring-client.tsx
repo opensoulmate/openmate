@@ -1415,10 +1415,10 @@ export function MonitoringClient() {
                   setSelectedEvent(null);
                 }}
                 className={cn(
-                  'px-3 py-2 text-xs font-medium border-b-2 transition-colors',
+                  'px-3 py-2 text-xs font-medium rounded-lg transition-colors',
                   activeTab === tab.id
                     ? `border-current ${tab.color}`
-                    : 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/30',
+                    : 'text-muted-foreground hover:bg-muted hover:text-foreground',
                 )}
               >
                 <tab.icon className="w-3.5 h-3.5 inline mr-1.5" />

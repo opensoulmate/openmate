@@ -258,10 +258,10 @@ export function TimelineClient() {
             key={tab}
             onClick={() => setActiveTab(tab)}
             className={cn(
-              "px-3 py-1.5 text-xs rounded-t-lg border-b-2 transition-colors",
+              "px-3 py-1.5 text-xs rounded-lg transition-colors",
               activeTab === tab
-                ? "border-primary text-primary font-medium bg-primary/5"
-                : "border-transparent text-muted-foreground hover:text-foreground"
+                ? "bg-primary/10 text-primary font-medium"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
             )}
           >
             {tab === "events" && <><Activity className="w-3.5 h-3.5 inline mr-1" />{t("timeline.eventsTab")}</>}

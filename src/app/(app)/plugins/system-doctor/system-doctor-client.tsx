@@ -202,10 +202,10 @@ export function SystemDoctorClient() {
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={cn(
-                'flex items-center gap-1.5 px-3 py-2.5 text-xs lg:text-sm transition-colors border-b-2',
+                'flex items-center gap-1.5 px-3 py-2.5 text-xs lg:text-sm transition-colors rounded-lg',
                 activeTab === tab.id
-                  ? 'border-rose-500 text-rose-500'
-                  : 'border-transparent text-muted-foreground hover:text-foreground'
+                  ? 'bg-rose-500/10 text-rose-500'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
               )}
             >
               <Icon size={14} />

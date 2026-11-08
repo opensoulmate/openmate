@@ -310,7 +310,7 @@ export function TrajectoryClient() {
           className={cn(
             "px-2.5 py-1.5 rounded-md text-xs flex items-center gap-1 transition-colors",
             view === "analytics"
-              ? "border border-primary text-primary bg-primary/10"
+              ? "border bg-primary/10 text-primary bg-primary/10"
               : "border border-border text-muted-foreground hover:bg-muted"
           )}
         >

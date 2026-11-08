@@ -706,10 +706,10 @@ export function VeinClient() {
             key={t.id}
             onClick={() => setTab(t.id)}
             className={cn(
-              "flex items-center gap-1.5 px-2 lg:px-4 py-2.5 text-xs lg:text-sm font-medium border-b-2 transition-colors",
+              "flex items-center gap-1.5 px-2 lg:px-4 py-2.5 text-xs lg:text-sm font-medium rounded-lg transition-colors",
               tab === t.id
-                ? "border-primary text-primary"
-                : "border-transparent text-muted-foreground hover:text-foreground"
+                ? "bg-primary/10 text-primary"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
             )}
           >
             <t.icon size={14} />

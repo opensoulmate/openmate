@@ -392,10 +392,10 @@ export function PluginsClient() {
                     key={tab}
                     onClick={() => setSidebarTab(tab)}
                     className={cn(
-                      "flex-1 py-2 text-xs font-medium transition-colors border-b-2",
+                      "flex-1 py-2 text-xs font-medium transition-colors rounded-lg",
                       sidebarTab === tab
-                        ? "border-primary text-primary"
-                        : "border-transparent text-muted-foreground hover:text-foreground"
+                        ? "bg-primary/10 text-primary"
+                        : "text-muted-foreground hover:bg-muted hover:text-foreground"
                     )}
                   >
                     {tab === "installed"

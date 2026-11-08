@@ -163,8 +163,8 @@ export function IntelligenceClient() {
             key={t_}
             onClick={() => setTab(t_)}
             className={cn(
-              "px-3 lg:px-4 py-2 text-xs lg:text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
-              tab === t_ ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+              "px-3 lg:px-4 py-2 text-xs lg:text-sm font-medium rounded-lg transition-colors whitespace-nowrap",
+              tab === t_ ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground"
             )}
           >
             {t(`intelligence.${t_}`) || t_.charAt(0).toUpperCase() + t_.slice(1)}

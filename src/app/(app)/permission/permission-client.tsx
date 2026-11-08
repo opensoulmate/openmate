@@ -176,10 +176,10 @@ export function PermissionClient() {
 
       {/* Tabs */}
       <div className="flex gap-1 border-b">
-        <button onClick={() => setActiveTab('policies')} className={`px-2 lg:px-4 py-2 text-xs lg:text-sm font-medium border-b-2 transition-colors ${activeTab === 'policies' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
+        <button onClick={() => setActiveTab('policies')} className={`px-2 lg:px-4 py-2 text-xs lg:text-sm font-medium rounded-lg transition-colors ${activeTab === 'policies' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}>
           <FileText className="w-4 h-4 inline mr-1.5" />{t('permission.policies', '访问策略')}
         </button>
-        <button onClick={() => setActiveTab('roles')} className={`px-2 lg:px-4 py-2 text-xs lg:text-sm font-medium border-b-2 transition-colors ${activeTab === 'roles' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
+        <button onClick={() => setActiveTab('roles')} className={`px-2 lg:px-4 py-2 text-xs lg:text-sm font-medium rounded-lg transition-colors ${activeTab === 'roles' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}>
           <Users className="w-4 h-4 inline mr-1.5" />{t('permission.roles', '角色管理')}
         </button>
       </div>

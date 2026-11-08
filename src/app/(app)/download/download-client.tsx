@@ -337,14 +337,14 @@ export function DownloadClient() {
   return (
     <PageLayout title={t('download.title', '下载')}>
       <div className="flex flex-col h-full overflow-hidden">
-        {/* ── 标签行（参考图：下载中 | 已下载 下划线切换；items-end 使按钮底线与容器边框叠压成一条） ── */}
-        <div className="flex items-end gap-6 px-3 lg:px-4 pt-3 border-b border-border shrink-0">
+        {/* ── 标签行（下载中 | 已下载 圆角高亮切换，选中项禁下划线） ── */}
+        <div className="flex items-center gap-1.5 px-3 lg:px-4 py-2 border-b border-border shrink-0">
           {([['downloading', t('download.downloading', '下载中'), activeTasks.length], ['done', t('download.done', '已下载'), doneTasks.length]] as const).map(([key, label, count]) => (
             <button
               key={key}
               onClick={() => { setTab(key); setShowSettings(false); }}
-              className={`flex items-center gap-1.5 pb-2.5 text-sm lg:text-base font-medium border-b-2 -mb-px transition-colors ${
-                !showSettings && tab === key ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-sm lg:text-base font-medium rounded-lg transition-colors ${
+                !showSettings && tab === key ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
               }`}
             >
               {label}
