@@ -173,9 +173,7 @@ pub fn run() {
                     });
                 }
                 if let Some(win) = app.get_webview_window("main") {
-                    win.on_page_load(|win, _| {
-                        let _ = win.eval(TITLE_SYNC_JS);
-                    });
+                    let _ = win.eval(TITLE_SYNC_JS);
                 }
             }
             Ok(())
