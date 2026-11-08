@@ -129,7 +129,7 @@ export function MessageTimelineRail({ entries, activeIndex, onJump, side }: Mess
 
   return (
     <div
-      className={`relative w-9 shrink-0 overflow-y-auto overflow-x-hidden flex flex-col [justify-content:safe_center] ${side === 'left' ? 'border-r' : 'border-l'} border-border/50`}
+      className="relative w-9 shrink-0 overflow-y-auto overflow-x-hidden flex flex-col [justify-content:safe_center]"
       style={{ scrollbarWidth: 'none' }}
       onPointerMove={onPointerMove}
       onPointerLeave={() => setHover(null)}
