@@ -170,7 +170,7 @@ export function MessageTimelineRail({ entries, activeIndex, onJump, side, classN
       {hover !== null && entries[hover] && (
         <div
           role="tooltip"
-          className={`pointer-events-none absolute z-20 max-w-[260px] px-2.5 py-1.5 rounded-lg bg-card border border-border shadow-lg text-xs leading-relaxed whitespace-normal ${
+          className={`pointer-events-none absolute z-20 w-max max-w-[260px] px-2.5 py-1.5 rounded-lg bg-card border border-border shadow-lg text-xs leading-relaxed whitespace-normal ${
             side === 'right' ? 'right-full mr-2 text-right' : 'left-full ml-2 text-left'
           }`}
           style={{ top: Math.max(0, Math.min(tipY - 18, (shellRef.current?.clientHeight ?? 320) - 40)) }}
