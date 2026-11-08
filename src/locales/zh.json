@@ -3,7 +3,8 @@
     "name": "Open-Soulmate",
     "slogan": "一个大脑，无限身体",
     "description": "开源AI知识伴侣平台",
-    "mayMakeMistakes": "OpenMate 可能会犯错，请核实重要信息。"
+    "mayMakeMistakes": "OpenMate 可能会犯错，请核实重要信息。",
+    "title": "OpenMate｜开放协同的AI智能伙伴"
   },
   "nav": {
     "dashboard": "仪表盘",

@@ -3,7 +3,8 @@
     "name": "Open-Soulmate",
     "slogan": "一つの脳、無限の身体",
     "description": "オープンソースAI知識コンパニオンプラットフォーム",
-    "mayMakeMistakes": "OpenMateは誤りを犯す可能性があります。重要な情報は確認してください。"
+    "mayMakeMistakes": "OpenMateは誤りを犯す可能性があります。重要な情報は確認してください。",
+    "title": "OpenMate｜開かれた協調的なAIパートナー"
   },
   "nav": {
     "dashboard": "ダッシュボード",

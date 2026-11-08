@@ -3,7 +3,8 @@
     "name": "Open-Soulmate",
     "slogan": "One Brain, Infinite Bodies",
     "description": "Open-source AI Knowledge Companion Platform",
-    "mayMakeMistakes": "OpenMate may make mistakes. Please verify important information."
+    "mayMakeMistakes": "OpenMate may make mistakes. Please verify important information.",
+    "title": "OpenMate | Open Collaborative AI Partner"
   },
   "nav": {
     "dashboard": "Dashboard",

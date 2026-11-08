@@ -23,6 +23,11 @@ i18n.use(initReactI18next).init({
   },
 });
 
+// 窗口标题跟随语言设置（含 Tauri 桌面壳标题栏同步）
+i18n.on("languageChanged", () => {
+  if (typeof document !== "undefined") document.title = i18n.t("app.title");
+});
+
 export function detectLanguage() {
   if (typeof window === "undefined") return;
   const saved = localStorage.getItem(STORAGE_KEY);

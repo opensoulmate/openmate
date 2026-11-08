@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "OpenMate",
+        "title": "OpenMate｜开放协同的AI智能伙伴",
         "width": 1200,
         "height": 800,
         "minWidth": 375,
@@ -41,31 +41,6 @@
     ]
   },
   "plugins": {
-    "dialog": {},
-    "fs": {
-      "scope": {
-        "allow": [
-          "$APPDATA",
-          "$DOWNLOAD",
-          "$HOME/**",
-          "**"
-        ]
-      }
-    },
-    "http": {
-      "scope": {
-        "allow": [
-          "http://**",
-          "https://**"
-        ]
-      }
-    },
-    "shell": {
-      "open": true,
-      "scope": {
-        "all": true
-      }
-    },
     "updater": {
       "endpoints": [
         "https://raw.githubusercontent.com/open-soulmate/openmate/main/updater.json"

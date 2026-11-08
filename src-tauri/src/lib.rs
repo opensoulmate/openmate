@@ -88,6 +88,37 @@ fn list_directory(path: String) -> Result<Vec<String>, String> {
     Ok(result)
 }
 
+#[tauri::command]
+fn set_page_title(window: tauri::Window, title: String) {
+    let _ = window.set_title(&title);
+}
+
+const TITLE_SYNC_JS: &str = r#"(() => {
+  const sync = () => {
+    try {
+      if (document.title && window.__TAURI_INTERNALS__) {
+        window.__TAURI_INTERNALS__.invoke('set_page_title', { title: document.title });
+      }
+    } catch (e) {}
+  };
+  const attach = () => {
+    const el = document.querySelector('title');
+    if (el) new MutationObserver(sync).observe(el, { childList: true, characterData: true, subtree: true });
+    sync();
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', attach);
+  else attach();
+})()"#;
+
+#[cfg(desktop)]
+fn show_main(app: &tauri::AppHandle) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.unminimize();
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -102,6 +133,51 @@ pub fn run() {
                 let window = app.get_webview_window("main").unwrap();
                 window.open_devtools();
             }
+            #[cfg(desktop)]
+            {
+                use tauri::menu::{Menu, MenuItem};
+                use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+                let show = MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>)?;
+                let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+                let menu = Menu::with_items(app, &[&show, &quit])?;
+                if let Some(icon) = app.default_window_icon().cloned() {
+                    TrayIconBuilder::with_id("main-tray")
+                        .icon(icon)
+                        .tooltip("OpenMate")
+                        .menu(&menu)
+                        .show_menu_on_left_click(false)
+                        .on_menu_event(|app, event| match event.id.as_ref() {
+                            "show" => show_main(app),
+                            "quit" => app.exit(0),
+                            _ => {}
+                        })
+                        .on_tray_icon_event(|tray, event| {
+                            if let TrayIconEvent::Click {
+                                button: MouseButton::Left,
+                                button_state: MouseButtonState::Up,
+                                ..
+                            } = event
+                            {
+                                show_main(tray.app_handle());
+                            }
+                        })
+                        .build(app)?;
+                }
+                if let Some(win) = app.get_webview_window("main") {
+                    let w = win.clone();
+                    win.on_window_event(move |event| {
+                        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                            api.prevent_close();
+                            let _ = w.hide();
+                        }
+                    });
+                }
+                if let Some(win) = app.get_webview_window("main") {
+                    win.on_page_load(|win, _| {
+                        let _ = win.eval(TITLE_SYNC_JS);
+                    });
+                }
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -110,7 +186,8 @@ pub fn run() {
             execute_command,
             read_local_file,
             write_local_file,
-            list_directory
+            list_directory,
+            set_page_title
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -12,7 +12,7 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   manifest: "/manifest.json",
-  title: "OpenMate — Your Knowledge Companion",
+  title: "OpenMate｜开放协同的AI智能伙伴",
   description: "An open AI companion platform with pluggable skill extensions",
   appleWebApp: {
     capable: true,
