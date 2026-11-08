@@ -104,14 +104,17 @@ interface MessageTimelineRailProps {
 export function MessageTimelineRail({ entries, activeIndex, onJump, side }: MessageTimelineRailProps) {
   const [hover, setHover] = useState<number | null>(null);
   const [tipY, setTipY] = useState(0);
+  const trackRef = useRef<HTMLDivElement>(null);
 
   if (entries.length === 0) return null;
 
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const idx = Math.max(0, Math.min(entries.length - 1, (e.clientY - rect.top + e.currentTarget.scrollTop) / PITCH - 0.5));
+    const track = trackRef.current;
+    if (!track) return;
+    const tRect = track.getBoundingClientRect();
+    const idx = Math.max(0, Math.min(entries.length - 1, (e.clientY - tRect.top) / PITCH - 0.5));
     setHover(idx);
-    setTipY(e.clientY - rect.top);
+    setTipY(e.clientY - e.currentTarget.getBoundingClientRect().top);
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -126,14 +129,14 @@ export function MessageTimelineRail({ entries, activeIndex, onJump, side }: Mess
 
   return (
     <div
-      className={`relative w-9 shrink-0 overflow-y-auto overflow-x-hidden ${side === 'left' ? 'border-r' : 'border-l'} border-border/50`}
+      className={`relative w-9 shrink-0 overflow-y-auto overflow-x-hidden flex flex-col [justify-content:safe_center] ${side === 'left' ? 'border-r' : 'border-l'} border-border/50`}
       style={{ scrollbarWidth: 'none' }}
       onPointerMove={onPointerMove}
       onPointerLeave={() => setHover(null)}
       onKeyDown={onKeyDown}
       onMouseOut={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setHover(null); }}
     >
-      <div className="relative w-full" style={{ height: entries.length * PITCH }}>
+      <div ref={trackRef} className="relative w-full" style={{ height: entries.length * PITCH }}>
         {entries.map((entry, index) => {
           const w = timelineBarWidth(index, activeIndex, hover);
           const isActive = index === activeIndex;
@@ -144,7 +147,7 @@ export function MessageTimelineRail({ entries, activeIndex, onJump, side }: Mess
               aria-label={entry.preview}
               aria-current={isActive ? 'location' : undefined}
               onClick={() => onJump(entry.id)}
-              onMouseEnter={() => { setHover(index); setTipY(index * PITCH); }}
+              onMouseEnter={() => { setHover(index); setTipY((trackRef.current?.offsetTop ?? 0) + index * PITCH); }}
               className={`absolute ${side === 'right' ? 'right-0 pr-1.5 justify-end' : 'left-0 pl-1.5 justify-start'} flex items-center w-full outline-none rounded-sm focus-visible:ring-1 focus-visible:ring-primary/50`}
               style={{ top: index * PITCH, height: PITCH }}
             >
