@@ -1,8 +1,8 @@
 'use client';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  Download, Trash2, FolderOpen, ArrowDown, CheckCircle, XCircle, Loader2, Plus,
-  Magnet, Video, Settings, Zap, Link, Pause, Play, ListChecks, Clock, X,
+  Download, FolderOpen, ArrowDown, CheckCircle, XCircle, Loader2, Plus,
+  Magnet, Video, Settings, Zap, Link, Pause, Play, Clock, X,
   FileText, AppWindow, FileArchive, Film, AlertCircle, RefreshCw,
 } from 'lucide-react';
 import { getApiBaseUrl } from '@/lib/api-client';
@@ -108,12 +108,11 @@ function normalizeTask(row: any): DownloadTask {
   };
 }
 
-type View = 'all' | 'downloading' | 'done' | 'settings';
-
 export function DownloadClient() {
   const { t } = useTranslation();
   const [tasks, setTasks] = useState<DownloadTask[]>([]);
-  const [view, setView] = useState<View>('all');
+  const [tab, setTab] = useState<'downloading' | 'done'>('downloading');
+  const [showSettings, setShowSettings] = useState(false);
   const [newUrl, setNewUrl] = useState('');
   const [adding, setAdding] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -174,7 +173,7 @@ export function DownloadClient() {
       if (res.ok) {
         setNewUrl('');
         setAdding(false);
-        setView('downloading');
+        setTab('downloading');
         loadTasks();
       }
     } catch {}
@@ -196,7 +195,7 @@ export function DownloadClient() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: task.url, resume: true }),
       });
-      setView('downloading');
+      setTab('downloading');
       loadTasks();
     } catch {}
   };
@@ -211,13 +210,7 @@ export function DownloadClient() {
   const activeTasks = tasks.filter(t => t.status !== 'done');
   const doneTasks = tasks.filter(t => t.status === 'done');
   const urlType = detectUrlType(newUrl);
-
-  const navItems: Array<{ key: View; icon: any; label: string; count?: number }> = [
-    { key: 'all', icon: ListChecks, label: t('download.allTasks', '全部任务'), count: tasks.length },
-    { key: 'downloading', icon: ArrowDown, label: t('download.downloading', '下载中'), count: activeTasks.length },
-    { key: 'done', icon: CheckCircle, label: t('download.done', '已下载'), count: doneTasks.length },
-    { key: 'settings', icon: Settings, label: t('download.settings', '设置') },
-  ];
+  const shown = tab === 'downloading' ? activeTasks : doneTasks;
 
   /* ── 任务行（参考图：图标块｜文件名+meta｜行尾图标按钮） ── */
   const TaskRow = ({ task }: { task: DownloadTask }) => (
@@ -301,114 +294,86 @@ export function DownloadClient() {
     </div>
   );
 
-  const EmptyBlock = ({ hint }: { hint: string }) => (
-    <div className="text-center py-12 text-muted-foreground">
-      <Download className="w-10 h-10 mx-auto mb-2 opacity-30" />
-      <p className="text-xs lg:text-sm">{hint}</p>
-    </div>
-  );
-
-  /* 参考图标签页：下载中 | 已下载（下划线切换） */
-  const Tabs = (
-    <div className="flex items-center gap-6 px-3 lg:px-4 pt-3 border-b border-border">
-      {([['downloading', t('download.downloading', '下载中'), activeTasks.length], ['done', t('download.done', '已下载'), doneTasks.length]] as const).map(([key, label, count]) => {
-        const active = view === key;
-        return (
-          <button
-            key={key}
-            onClick={() => setView(key)}
-            className={`flex items-center gap-1.5 pb-2.5 text-sm lg:text-base font-medium border-b-2 -mb-px transition-colors ${
-              active ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            {label}
-            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${active ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>{count}</span>
-          </button>
-        );
-      })}
-    </div>
-  );
-
   return (
     <PageLayout title={t('download.title', '下载')}>
-      <div className="flex h-full overflow-hidden">
-        {/* ── 左侧：下载功能列表 ── */}
-        <aside className="w-40 lg:w-48 shrink-0 border-r border-border flex flex-col bg-card/40">
-          <div className="p-3">
+      <div className="flex flex-col h-full overflow-hidden">
+        {/* ── 标签行（参考图：下载中 | 已下载 下划线切换，右侧新建/设置） ── */}
+        <div className="flex items-center gap-6 px-3 lg:px-4 pt-3 border-b border-border shrink-0">
+          {([['downloading', t('download.downloading', '下载中'), activeTasks.length], ['done', t('download.done', '已下载'), doneTasks.length]] as const).map(([key, label, count]) => (
             <button
-              onClick={() => { setAdding(true); setView('all'); }}
-              className="w-full px-3 py-2 rounded-lg bg-primary text-primary-foreground flex items-center justify-center gap-2 text-xs lg:text-sm hover:bg-primary/90"
+              key={key}
+              onClick={() => { setTab(key); setShowSettings(false); }}
+              className={`flex items-center gap-1.5 pb-2.5 text-sm lg:text-base font-medium border-b-2 -mb-px transition-colors ${
+                !showSettings && tab === key ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
             >
-              <Plus className="w-4 h-4" /> {t('download.newDownload', '新建下载')}
+              {label}
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${!showSettings && tab === key ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>{count}</span>
+            </button>
+          ))}
+          <div className="ml-auto flex items-center gap-2 pb-1.5">
+            <button
+              onClick={() => { setAdding(true); setShowSettings(false); }}
+              className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 flex items-center gap-1.5"
+            >
+              <Plus className="w-3.5 h-3.5" /> {t('download.newDownload', '新建下载')}
+            </button>
+            <button
+              onClick={() => setShowSettings(s => !s)}
+              title={t('download.settings', '设置')}
+              className={`p-1.5 rounded-lg border transition-colors ${showSettings ? 'bg-primary/10 text-primary border-primary/30' : 'text-muted-foreground hover:bg-muted'}`}
+            >
+              <Settings className="w-4 h-4" />
             </button>
           </div>
-          <nav className="flex-1 px-2 space-y-0.5 overflow-y-auto">
-            {navItems.map(item => (
-              <button
-                key={item.key}
-                onClick={() => { setView(item.key); if (item.key !== 'all') setAdding(false); }}
-                className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs lg:text-sm transition-colors ${
-                  view === item.key ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                }`}
-              >
-                <item.icon className="w-4 h-4 shrink-0" />
-                <span className="flex-1 text-left truncate">{item.label}</span>
-                {item.count !== undefined && item.count > 0 && (
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${view === item.key ? 'bg-primary/20 text-primary' : 'bg-muted text-muted-foreground'}`}>
-                    {item.count}
-                  </span>
-                )}
-              </button>
-            ))}
-          </nav>
-        </aside>
+        </div>
 
-        {/* ── 右侧：下载详细列表（参考图标签页式） ── */}
-        <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-          {/* 新建下载输入条 */}
-          {adding && (
-            <div className="p-3 border-b border-border bg-card/60">
-              <div className="flex flex-col sm:flex-row gap-2">
-                <div className="flex-1 relative">
-                  <input
-                    value={newUrl}
-                    onChange={e => setNewUrl(e.target.value)}
-                    placeholder={t('download.urlPlaceholder', '输入下载链接（HTTP/BT/磁力/视频）')}
-                    className="w-full px-3 py-2 pr-20 rounded-lg bg-muted text-xs lg:text-sm outline-none border border-border focus:border-primary"
-                    onKeyDown={e => e.key === 'Enter' && startDownload()}
-                    autoFocus
-                  />
-                  {newUrl && <span className="absolute right-2.5 top-1/2 -translate-y-1/2"><span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400">{urlType.toUpperCase()}</span></span>}
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={startDownload}
-                    disabled={loading || !newUrl.trim()}
-                    className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-xs lg:text-sm font-medium hover:bg-primary/90 disabled:opacity-50 flex items-center gap-1.5"
-                  >
-                    {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
-                    {t('download.download', '下载')}
-                  </button>
-                  <button
-                    onClick={() => { setAdding(false); setNewUrl(''); }}
-                    className="px-3 py-2 rounded-lg border text-xs lg:text-sm text-muted-foreground hover:bg-muted"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
+        {/* 新建下载输入条 */}
+        {adding && !showSettings && (
+          <div className="p-3 border-b border-border bg-card/60 shrink-0">
+            <div className="flex flex-col sm:flex-row gap-2">
+              <div className="flex-1 relative">
+                <input
+                  value={newUrl}
+                  onChange={e => setNewUrl(e.target.value)}
+                  placeholder={t('download.urlPlaceholder', '输入下载链接（HTTP/BT/磁力/视频）')}
+                  className="w-full px-3 py-2 pr-20 rounded-lg bg-muted text-xs lg:text-sm outline-none border border-border focus:border-primary"
+                  onKeyDown={e => e.key === 'Enter' && startDownload()}
+                  autoFocus
+                />
+                {newUrl && <span className="absolute right-2.5 top-1/2 -translate-y-1/2"><span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400">{urlType.toUpperCase()}</span></span>}
               </div>
-              <div className="flex items-center gap-3 mt-2 text-[10px] text-muted-foreground">
-                <span className="flex items-center gap-1"><Link className="w-3 h-3" /> HTTP/FTP</span>
-                <span className="flex items-center gap-1"><Magnet className="w-3 h-3" /> BT/磁力</span>
-                <span className="flex items-center gap-1"><Video className="w-3 h-3" /> YouTube/B站</span>
-                <span className="flex items-center gap-1"><Zap className="w-3 h-3" /> thunder://</span>
+              <div className="flex gap-2">
+                <button
+                  onClick={startDownload}
+                  disabled={loading || !newUrl.trim()}
+                  className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-xs lg:text-sm font-medium hover:bg-primary/90 disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+                  {t('download.download', '下载')}
+                </button>
+                <button
+                  onClick={() => { setAdding(false); setNewUrl(''); }}
+                  className="px-3 py-2 rounded-lg border text-xs lg:text-sm text-muted-foreground hover:bg-muted"
+                >
+                  <X className="w-4 h-4" />
+                </button>
               </div>
             </div>
-          )}
+            <div className="flex items-center gap-3 mt-2 text-[10px] text-muted-foreground">
+              <span className="flex items-center gap-1"><Link className="w-3 h-3" /> HTTP/FTP</span>
+              <span className="flex items-center gap-1"><Magnet className="w-3 h-3" /> BT/磁力</span>
+              <span className="flex items-center gap-1"><Video className="w-3 h-3" /> YouTube/B站</span>
+              <span className="flex items-center gap-1"><Zap className="w-3 h-3" /> thunder://</span>
+            </div>
+          </div>
+        )}
 
-          {view === 'settings' ? (
-            /* ── 设置 ── */
-            <div className="p-3 lg:p-6 space-y-5 max-w-xl overflow-y-auto">
+        {/* ── 内容区 ── */}
+        <div className="flex-1 overflow-y-auto">
+          {showSettings ? (
+            /* 设置 */
+            <div className="p-3 lg:p-6 space-y-5 max-w-xl">
               <div>
                 <label className="text-xs lg:text-sm font-medium mb-1.5 block">{t('download.threads', '下载线程')} (1-32)</label>
                 <div className="flex items-center gap-3">
@@ -454,51 +419,17 @@ export function DownloadClient() {
                 />
               </div>
             </div>
-          ) : (
-            <div className="flex-1 overflow-y-auto">
-              {Tabs}
-              {view === 'all' ? (
-                /* 全部任务：两组上下排（下载中/已下载） */
-                <>
-                  <section>
-                    <div className="px-3 lg:px-4 py-2 flex items-center gap-2 text-xs font-medium text-muted-foreground bg-muted/30">
-                      <ArrowDown className="w-3.5 h-3.5 text-primary" />
-                      {t('download.downloading', '下载中')}
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary">{activeTasks.length}</span>
-                    </div>
-                    {activeTasks.length === 0 ? (
-                      <EmptyBlock hint={t('download.noActive', '没有进行中的任务，点左上角「新建下载」开始')} />
-                    ) : (
-                      <div>{activeTasks.map(task => <TaskRow key={task.id} task={task} />)}</div>
-                    )}
-                  </section>
-                  <section>
-                    <div className="px-3 lg:px-4 py-2 flex items-center gap-2 text-xs font-medium text-muted-foreground bg-muted/30 border-t border-border">
-                      <CheckCircle className="w-3.5 h-3.5 text-green-500" />
-                      {t('download.done', '已下载')}
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-500/10 text-green-500">{doneTasks.length}</span>
-                    </div>
-                    {doneTasks.length === 0 ? (
-                      <EmptyBlock hint={t('download.noDone', '还没有完成的下载')} />
-                    ) : (
-                      <div>{doneTasks.map(task => <TaskRow key={task.id} task={task} />)}</div>
-                    )}
-                  </section>
-                </>
-              ) : view === 'downloading' ? (
-                activeTasks.length === 0 ? (
-                  <EmptyBlock hint={t('download.noActive', '没有进行中的任务，点左上角「新建下载」开始')} />
-                ) : (
-                  <div>{activeTasks.map(task => <TaskRow key={task.id} task={task} />)}</div>
-                )
-              ) : (
-                doneTasks.length === 0 ? (
-                  <EmptyBlock hint={t('download.noDone', '还没有完成的下载')} />
-                ) : (
-                  <div>{doneTasks.map(task => <TaskRow key={task.id} task={task} />)}</div>
-                )
-              )}
+          ) : shown.length === 0 ? (
+            <div className="text-center py-16 text-muted-foreground">
+              <Download className="w-12 h-12 mx-auto mb-3 opacity-30" />
+              <p className="text-sm">
+                {tab === 'downloading'
+                  ? t('download.noActive', '没有进行中的任务，点右上角「新建下载」开始')
+                  : t('download.noDone', '还没有完成的下载')}
+              </p>
             </div>
+          ) : (
+            shown.map(task => <TaskRow key={task.id} task={task} />)
           )}
         </div>
       </div>
