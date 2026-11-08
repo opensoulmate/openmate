@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useRef, useCallback, useMemo } from 'react';
-import { EditorView, keymap, lineNumbers, drawSelection, highlightActiveLine, highlightActiveLineGutter } from '@codemirror/view';
+import { EditorView, keymap, lineNumbers, drawSelection, highlightActiveLine, highlightActiveLineGutter, Decoration, DecorationSet, WidgetType, ViewPlugin, ViewUpdate } from '@codemirror/view';
 import { history, historyKeymap, defaultKeymap, undo, redo } from '@codemirror/commands';
-import { EditorState, StateField, Compartment } from '@codemirror/state';
+import { EditorState, StateField, Compartment, type Range } from '@codemirror/state';
 import { syntaxHighlighting, defaultHighlightStyle, bracketMatching, LanguageDescription, HighlightStyle } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
@@ -18,6 +18,53 @@ import { xml } from '@codemirror/lang-xml';
 import type { Extension } from '@codemirror/state';
 
 // No placeholder extension needed — React overlay handles it
+
+// ── @提及原子 chip（微信式）：命中 token 渲染为一个整体，光标跳过、退格一次整删 ──
+class MentionChipWidget extends WidgetType {
+  constructor(private readonly label: string) { super(); }
+  eq(other: MentionChipWidget) { return other.label === this.label; }
+  toDOM() {
+    const span = document.createElement('span');
+    span.className = 'cm-mention-chip';
+    span.textContent = `@${this.label}`;
+    return span;
+  }
+  ignoreEvent() { return true; }
+}
+
+// token 前需有边界（行首/空白/常见标点），避免把邮箱 a@b 当提及
+const MENTION_TOKEN_RE = /(^|[\s(（[｛{，。,.、;；:：!！?？"'`~])@([\w\u4e00-\u9fff·\-]+)/g;
+
+function mentionChipExtension(getMap: () => Map<string, string>) {
+  const build = (view: EditorView): DecorationSet => {
+    const map = getMap();
+    const text = view.state.doc.toString();
+    const decos: Range<Decoration>[] = [];
+    MENTION_TOKEN_RE.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = MENTION_TOKEN_RE.exec(text))) {
+      const from = m.index + m[1].length; // '@' 起点
+      const token = m[2];
+      const label = map.get(token.toLowerCase());
+      if (!label) continue;
+      // 尾随空格并入 chip：退格一次整删（微信手感）
+      const tokenEnd = from + 1 + token.length;
+      const to = text[tokenEnd] === ' ' ? tokenEnd + 1 : tokenEnd;
+      decos.push(Decoration.replace({ widget: new MentionChipWidget(label), atomic: true }).range(from, to));
+    }
+    return Decoration.set(decos, true);
+  };
+  const factory = (view: EditorView) => {
+    const plugin = {
+      decorations: build(view),
+      update(u: ViewUpdate) {
+        if (u.docChanged || u.selectionSet) plugin.decorations = build(u.view);
+      },
+    };
+    return plugin;
+  };
+  return ViewPlugin.define(factory, { decorations: (p) => p.decorations });
+}
 
 // Code languages for markdown code blocks
 const codeLanguages = [
@@ -65,6 +112,8 @@ interface CodeMirrorEditorProps {
   placeholder?: string;
   readOnly?: boolean;
   className?: string;
+  /** @提及原子 chip 词表：id/label → 显示名（微信式整体删除+着色） */
+  mentionMap?: Record<string, string>;
 }
 
 export function CodeMirrorEditor({
@@ -74,10 +123,22 @@ export function CodeMirrorEditor({
   placeholder = '',
   readOnly = false,
   className = '',
+  mentionMap,
 }: CodeMirrorEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
+  const mentionMapRef = useRef<Record<string, string>>({});
+  mentionMapRef.current = mentionMap || {};
+  const mentionExt = useMemo(() => mentionChipExtension(() => {
+    const src = mentionMapRef.current;
+    const m = new Map<string, string>();
+    for (const k in src) {
+      m.set(k.toLowerCase(), src[k]);
+      m.set(String(src[k]).toLowerCase(), src[k]);
+    }
+    return m;
+  }), []);
   const onKeyDownRef = useRef(onKeyDown);
   // Track whether the last doc change was from user typing (so we skip the value sync)
   const userEditingRef = useRef(false);
@@ -138,10 +199,20 @@ export function CodeMirrorEditor({
     '.cm-panel': { display: 'none !important' },
     '.cm-searchMatch': { backgroundColor: 'hsl(var(--primary) / 0.2)' },
     '.cm-searchMatch.cm-searchMatch-selected': { backgroundColor: 'hsl(var(--primary) / 0.35)' },
+    '.cm-mention-chip': {
+      color: 'hsl(var(--primary))',
+      backgroundColor: 'hsl(var(--primary) / 0.12)',
+      borderRadius: '4px',
+      padding: '0 3px',
+      margin: '0 1px',
+      fontWeight: '500',
+      whiteSpace: 'nowrap',
+    },
   }), []);
 
   const extensions = useMemo(() => {
     const exts: Extension[] = [
+      mentionExt,
       lineNumbers(),
       highlightActiveLineGutter(),
       highlightActiveLine(),

@@ -16,6 +16,7 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import { BoardPanel, TopbarLine } from '@opensoulmate/openface';
+import { SuperAvatar } from '@/components/ui/super-ellipse';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useAIGroupsStore, type AgentRole, type GroupMessage } from '@/stores/ai-groups-store';
 import MarkdownContent from '@/components/markdown-content';
@@ -397,7 +398,7 @@ export default function AIGroupsClient() {
         {/* 正在发送指示器 */}
         {sendingMessage && (
           <div className="flex gap-3">
-            <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center"><Bot className="w-4 h-4 text-primary" /></div>
+            <SuperAvatar size={32} bg="bg-primary/10" fallback={<Bot className="w-4 h-4 text-primary" />} />
             <div className="bg-muted rounded-xl px-4 py-2.5"><Loader2 className="w-4 h-4 animate-spin text-muted-foreground" /></div>
           </div>
         )}
@@ -423,7 +424,7 @@ export default function AIGroupsClient() {
         {/* 正在输入指示器（来自其他用户） */}
         {wsTypingUsers.length > 0 && (
           <div className="flex gap-3">
-            <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center"><Bot className="w-4 h-4 text-primary" /></div>
+            <SuperAvatar size={32} bg="bg-primary/10" fallback={<Bot className="w-4 h-4 text-primary" />} />
             <div className="bg-muted/50 rounded-xl px-3 py-2">
               <p className="text-xs text-muted-foreground">{wsTypingUsers.join(', ')} 正在输入...</p>
             </div>

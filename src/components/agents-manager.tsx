@@ -1,10 +1,11 @@
 'use client';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Bot, CheckCircle, XCircle, Loader2, Download, RefreshCw, Play, Pause, Trash2, ArrowUpCircle, Terminal, Monitor, Apple, ChevronDown, ChevronRight, Square, CheckSquare, RotateCcw } from 'lucide-react';
+import { Bot, CheckCircle, XCircle, Loader2, Download, RefreshCw, Play, Pause, Trash2, ArrowUpCircle, Terminal, Monitor, Apple, ChevronDown, ChevronRight, Square, CheckSquare, RotateCcw, Search } from 'lucide-react';
 import { getApiBaseUrl, getToken } from '@/lib/api-client';
 import { useTranslation } from 'react-i18next';
 import { PageLayout } from '@/components/page-layout';
 import { DetailPanel, useDetailPanel } from '@/components/detail-panel';
+import { SuperAvatar } from '@/components/ui/super-ellipse';
 
 interface AgentInfo {
   id: string; name: string; binary: string; description: string; icon: string;
@@ -32,6 +33,7 @@ export function AgentsClient() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [batchAction, setBatchAction] = useState<string | null>(null);
   const [configuringAgent, setConfiguringAgent] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
   const [agentConfigs, setAgentConfigs] = useState<Record<string, {provider: string; model: string; custom?: boolean}>>({});
   const [providers, setProviders] = useState<Array<{name: string; base_url: string; models: Record<string, string>}>>([]);
   const eventSources = useRef<Record<string, EventSource>>({});
@@ -190,6 +192,11 @@ export function AgentsClient() {
   const filtered = agents.filter(a => {
     const matchCategory = category === "all" || (a as any).category === category;
     if (!matchCategory) return false;
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      const hay = `${a.name} ${a.id} ${a.description || ''}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
     if (filter === 'available') return a.available;
     if (filter === 'unavailable') return !a.available;
     return true;
@@ -262,7 +269,7 @@ export function AgentsClient() {
     <DetailPanel
       title={detailItem.data.name}
       subtitle={detailItem.data.description}
-      icon={<span className="text-lg">{detailItem.data.icon}</span>}
+      icon={<SuperAvatar src={(detailItem.data as any).logo || detailItem.data.icon} size={28} fallback={<span className="text-lg">{detailItem.data.icon}</span>} />}
       badge={detailItem.data.available ? '可用' : '不可用'}
       onClose={closeDetail}
       sections={[
@@ -294,10 +301,19 @@ export function AgentsClient() {
       workspace={workspaceContent}
       headerActions={
         <>
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t('agents.searchPlaceholder', '搜索 Agent...')}
+            className="w-40 lg:w-56 pl-8 pr-3 py-2 rounded-lg border bg-background text-xs lg:text-sm focus:outline-none focus:ring-1 focus:ring-primary/40"
+          />
+        </div>
         <button onClick={detect} className="px-2 lg:px-4 py-2 rounded-lg border hover:bg-muted flex items-center gap-2 text-xs lg:text-sm">
           <RefreshCw className="w-4 h-4" /> {t('agents.autoDetect')}
         </button>
-        <button onClick={() => setShowAddAgent(true)} className="px-2 lg:px-4 py-2 rounded-lg border hover:bg-muted flex items-center gap-2 text-xs lg:text-sm">
+        <button onClick={() => setShowAddAgent(true)} className="px-2 lg:px-4 py-2 rounded-lg bg-foreground text-background hover:bg-foreground/90 flex items-center gap-2 text-xs lg:text-sm">
           ＋ {t('agents.addAgent')}
         </button>
         </>
@@ -362,11 +378,7 @@ export function AgentsClient() {
                 <button onClick={(e) => { e.stopPropagation(); toggleSelect(agent.id); }} className="shrink-0 touch-manipulation">
                   {isSelected ? <CheckSquare size={15} className="text-primary" /> : <Square size={15} className="text-muted-foreground" />}
                 </button>
-                {(agent as any).logo ? (
-                  <img src={(agent as any).logo} alt={agent.name} className="w-9 h-9 rounded-lg object-contain bg-muted shrink-0" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                ) : (
-                  <span className="w-9 h-9 rounded-lg bg-muted flex items-center justify-center text-lg shrink-0">{agent.icon}</span>
-                )}
+                <SuperAvatar src={(agent as any).logo || agent.icon} alt={agent.name} size={36} fallback={<span className="text-lg">{agent.icon}</span>} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <h3 className="font-medium truncate text-sm">{agent.name}</h3>

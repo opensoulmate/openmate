@@ -9,7 +9,7 @@ import {
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { HealthWidget } from "@/components/health-widget";
-import { SuperEllipse } from "@/components/ui/super-ellipse";
+import { SuperEllipse, SuperAvatar } from "@/components/ui/super-ellipse";
 import { TopBar as OpenFaceTopBar } from "@opensoulmate/openface";
 
 interface TopBarProps {
@@ -68,7 +68,7 @@ export function TopBar({ eventCount = 0 }: TopBarProps) {
     <OpenFaceTopBar
       left={
         <Link href="/chat" className="flex items-center gap-1.5 shrink-0 px-3 hover:opacity-80 transition-opacity">
-          <img src="/logo.svg" alt="OpenMate" className="w-7 h-7" />
+          <SuperAvatar src="/logo.svg" alt="OpenMate" size={28} bg="bg-transparent" />
           <span className="text-sm font-semibold text-foreground hidden sm:inline">OpenMate</span>
         </Link>
       }

@@ -3,6 +3,7 @@ import MarkdownContent from "@/components/markdown-content";
 import { MessageBubble, resolveAgentAvatar } from '@/components/message-bubble';
 import { extractViewData, MessageViewTabs, MessageViews, renderAttachmentActions } from '@/components/message-views';
 import { SOULMATE_LOGO, SOULMATE_ICON } from "@/lib/agent-brand";
+import { SuperAvatar } from "@/components/ui/super-ellipse";
 import { SecretScanBadge } from "@/components/secret-scan-badge";
 import { MemoryMarkerBadge, type MemoryMarker } from "@/components/memory-marker-badge";
 import { MultiFileDiff, type FileChange } from "@/components/multi-file-diff";
@@ -1970,9 +1971,12 @@ export function ChatClient() {
               <PanelLeft className="w-4 h-4" />
             </button>
             {(selectedAgent || storeAgentIcon) && (
-              (selectedAgent?.logo || (!selectedAgent && SOULMATE_LOGO))
-                ? <img src={selectedAgent?.logo || SOULMATE_LOGO} alt={selectedAgent?.name || 'SoulMate'} className="w-5 h-5 rounded object-contain shrink-0" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                : <span className="text-sm shrink-0">{selectedAgent?.icon || storeAgentIcon}</span>
+              <SuperAvatar
+                src={selectedAgent?.logo || (!selectedAgent ? SOULMATE_LOGO : undefined) || selectedAgent?.icon || storeAgentIcon}
+                alt={selectedAgent?.name || 'SoulMate'}
+                size={20}
+                fallback={<span className="text-sm">{selectedAgent?.icon || storeAgentIcon}</span>}
+              />
             )}
             <div className="min-w-0 flex-1">
               {editingTitle ? (

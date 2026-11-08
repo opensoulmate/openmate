@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import { MessageSquare, ChevronDown, ChevronRight, Plus, Trash2, Loader2 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { SuperAvatar } from "@/components/ui/super-ellipse";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -150,10 +151,7 @@ export function ConversationTree({
                 {agent.expanded
                   ? <ChevronDown className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                   : <ChevronRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" />}
-                {agent.logo
-                  ? <img src={agent.logo} alt={agent.name} className="w-5 h-5 rounded object-contain" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-                  : null}
-                <span className={cn("text-sm", agent.logo ? "hidden" : "")}>{agent.icon}</span>
+                <SuperAvatar src={agent.logo || agent.icon} alt={agent.name} size={20} fallback={<span className="text-sm">{agent.icon}</span>} />
                 <span className="text-sm font-medium truncate">{agent.name}</span>
               </button>
               {(() => {

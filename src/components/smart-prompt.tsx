@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import {
   Send,
@@ -338,6 +338,16 @@ export function SmartPrompt({
     if (onFieldsChange) onFieldsChange(empty);
   };
 
+  // ── @提及 chip 词表（原子整体删除+着色走 CodeMirror 扩展） ──
+  const mentionTokenMap = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const it of mentions || []) {
+      m[it.id.toLowerCase()] = it.label;
+      m[it.label.toLowerCase()] = it.label;
+    }
+    return m;
+  }, [mentions]);
+
   // ── @提及补全（群组）：输入 @ 弹出成员清单，@all 打头 ──
   const [mentionIndex, setMentionIndex] = useState(0);
   const [mentionDismissed, setMentionDismissed] = useState(false);
@@ -403,6 +413,7 @@ export function SmartPrompt({
         }}>
           <CodeMirrorEditor
             value={fields.task}
+            mentionMap={mentionTokenMap}
             onChange={(val: string) => { setMentionDismissed(false); updateField('task', val); }}
             onKeyDown={handleKeyDown}
             placeholder={placeholderText}

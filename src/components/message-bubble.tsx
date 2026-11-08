@@ -2,6 +2,7 @@ import { Bot, User, Copy, Volume2, ThumbsUp, ThumbsDown, Share2, RefreshCw, Book
 import { useState, type ReactNode } from 'react';
 import { useAppStore } from '@/stores/app-store';
 import { SOULMATE_LOGO } from '@/lib/agent-brand';
+import { SuperAvatar } from '@/components/ui/super-ellipse';
 
 // Agent 官方 logo 解析（唯一真源）——会话/群组同一函数同一 logo：
 // ①注册表(设置→Agent管理)的 logo 图（hermes=官方头像、soulmate=/soulmate.svg）
@@ -128,15 +129,7 @@ export function MessageBubble({
   return (
     <div id={id} className={`flex gap-2 lg:gap-3 rounded-xl transition-all duration-300 ${isUser ? 'justify-end' : ''}`}>
       {!isUser && (
-        <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0 overflow-hidden">
-          {avatar ? (
-            avatar.startsWith('http') || avatar.startsWith('/') || avatar.startsWith('data:')
-              ? <img src={avatar} alt="" className="w-full h-full object-cover" />
-              : <span className="text-base leading-none">{avatar}</span>
-          ) : (
-            <Bot className="w-4 h-4 text-primary" />
-          )}
-        </div>
+        <SuperAvatar src={avatar} size={32} bg="bg-primary/10" fallback={<Bot className="w-4 h-4 text-primary" />} />
       )}
       <div
         className={`max-w-[85%] lg:max-w-[70%] rounded-xl px-3 lg:px-4 py-2 lg:py-2.5 text-sm ${isUser ? 'text-foreground' : 'bg-card text-card-foreground border border-border'}`}
@@ -172,9 +165,7 @@ export function MessageBubble({
         )}
       </div>
       {isUser && (
-        <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center shrink-0">
-          <User className="w-4 h-4 text-primary-foreground" />
-        </div>
+        <SuperAvatar size={32} bg="bg-primary" fallback={<User className="w-4 h-4 text-primary-foreground" />} />
       )}
       <ForwardDialog open={fwdOpen} onClose={() => setFwdOpen(false)} text={text} />
     </div>
