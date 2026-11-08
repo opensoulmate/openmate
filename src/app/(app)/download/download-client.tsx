@@ -3,11 +3,13 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Download, FolderOpen, ArrowDown, CheckCircle, XCircle, Loader2, Plus,
   Magnet, Video, Settings, Zap, Link, Pause, Play, Clock, X,
-  FileText, AppWindow, FileArchive, Film, AlertCircle, RefreshCw,
+  FileText, AppWindow, FileArchive, Film, AlertCircle, RefreshCw, ListChecks,
 } from 'lucide-react';
 import { getApiBaseUrl } from '@/lib/api-client';
 import { useTranslation } from 'react-i18next';
 import { PageLayout } from '@/components/page-layout';
+import { LeftPanel } from '@/components/left-panel';
+import { useAppStore } from '@/stores/app-store';
 
 interface DownloadTask {
   id: string;
@@ -110,6 +112,7 @@ function normalizeTask(row: any): DownloadTask {
 
 export function DownloadClient() {
   const { t } = useTranslation();
+  const setPageSidebar = useAppStore((s) => s.setPageSidebar);
   const [tasks, setTasks] = useState<DownloadTask[]>([]);
   const [tab, setTab] = useState<'downloading' | 'done'>('downloading');
   const [showSettings, setShowSettings] = useState(false);
@@ -139,6 +142,43 @@ export function DownloadClient() {
     pollRef.current = setInterval(loadTasks, 2000);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [loadTasks]);
+
+  /* ── 左侧功能列表（迅雷左列样式）：注册进 openface LeftPanel 槽 ── */
+  useEffect(() => {
+    setPageSidebar(
+      <div className="flex flex-col h-full">
+        <div className="p-3">
+          <button
+            onClick={() => { setAdding(true); setShowSettings(false); }}
+            className="w-full px-3 py-2 rounded-lg bg-primary text-primary-foreground flex items-center justify-center gap-2 text-xs lg:text-sm hover:bg-primary/90"
+          >
+            <Plus className="w-4 h-4" /> {t('download.newDownload', '新建下载')}
+          </button>
+        </div>
+        <nav className="px-2 space-y-0.5">
+          {[
+            { key: 'all', icon: ListChecks, label: t('download.allTasks', '全部任务'), count: tasks.length, selected: !showSettings, onClick: () => setShowSettings(false) },
+            { key: 'settings', icon: Settings, label: t('download.settings', '设置'), count: 0, selected: showSettings, onClick: () => setShowSettings(true) },
+          ].map(item => (
+            <button
+              key={item.key}
+              onClick={item.onClick}
+              className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs lg:text-sm transition-colors ${
+                item.selected ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+              }`}
+            >
+              <item.icon className="w-4 h-4 shrink-0" />
+              <span className="flex-1 text-left truncate">{item.label}</span>
+              {item.count > 0 && (
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${item.selected ? 'bg-primary/20 text-primary' : 'bg-muted text-muted-foreground'}`}>{item.count}</span>
+              )}
+            </button>
+          ))}
+        </nav>
+      </div>
+    );
+    return () => setPageSidebar(null);
+  }, [showSettings, tasks.length, setPageSidebar, t]);
 
   const loadConfig = useCallback(async () => {
     try {
@@ -297,8 +337,8 @@ export function DownloadClient() {
   return (
     <PageLayout title={t('download.title', '下载')}>
       <div className="flex flex-col h-full overflow-hidden">
-        {/* ── 标签行（参考图：下载中 | 已下载 下划线切换，右侧新建/设置） ── */}
-        <div className="flex items-center gap-6 px-3 lg:px-4 pt-3 border-b border-border shrink-0">
+        {/* ── 标签行（参考图：下载中 | 已下载 下划线切换；items-end 使按钮底线与容器边框叠压成一条） ── */}
+        <div className="flex items-end gap-6 px-3 lg:px-4 pt-3 border-b border-border shrink-0">
           {([['downloading', t('download.downloading', '下载中'), activeTasks.length], ['done', t('download.done', '已下载'), doneTasks.length]] as const).map(([key, label, count]) => (
             <button
               key={key}
