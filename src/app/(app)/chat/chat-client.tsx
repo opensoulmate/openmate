@@ -2047,13 +2047,13 @@ export function ChatClient() {
 
 
         {/* Messages */}
-        <div className="flex flex-1 min-h-0">
+        <div className="relative flex flex-1 min-h-0">
         <MessageTimelineRail entries={agentEntries} activeIndex={agentActive} onJump={timelineJump} side="left" />
         <div ref={scrollRef} onScroll={(e) => {
           const el = e.currentTarget;
           const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
           setShowScrollDown(!atBottom);
-        }} className="flex-1 overflow-y-auto px-3 lg:px-6 py-3 lg:py-4 space-y-3 lg:space-y-4 chat-scrollbar relative">
+        }} className="flex-1 min-w-0 overflow-y-auto pl-3 pr-11 lg:pl-6 lg:pr-12 py-3 lg:py-4 space-y-3 lg:space-y-4 chat-scrollbar relative">
           {chatView !== 'messages' && <MessageViews view={chatView} data={viewData} onViewChange={(id) => setChatView(id as any)} />}
           {chatView === 'messages' && (<>
           {messages.length === 0 && urlSessionError && (
@@ -2259,7 +2259,7 @@ export function ChatClient() {
           </>)} {/* End Messages view */}
 
         </div>
-        <MessageTimelineRail entries={userEntries} activeIndex={userActive} onJump={timelineJump} side="right" />
+        <MessageTimelineRail entries={userEntries} activeIndex={userActive} onJump={timelineJump} side="right" className="absolute top-0 bottom-0 z-10" style={{ position: 'absolute', right: 6 }} />
         </div>
         <div className="px-3 lg:px-4 pt-3 pb-6 shrink-0">
           {readingCount > 0 && (

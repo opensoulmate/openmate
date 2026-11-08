@@ -99,9 +99,11 @@ interface MessageTimelineRailProps {
   onJump: (id: string) => void;
   /** 悬停预览浮层出现的一侧：right 轨浮层在左（贴对话区），left 轨浮层在右 */
   side: 'left' | 'right';
+  className?: string;
+  style?: React.CSSProperties;
 }
 
-export function MessageTimelineRail({ entries, activeIndex, onJump, side }: MessageTimelineRailProps) {
+export function MessageTimelineRail({ entries, activeIndex, onJump, side, className = '', style }: MessageTimelineRailProps) {
   const [hover, setHover] = useState<number | null>(null);
   const [tipY, setTipY] = useState(0);
   const trackRef = useRef<HTMLDivElement>(null);
@@ -129,8 +131,8 @@ export function MessageTimelineRail({ entries, activeIndex, onJump, side }: Mess
 
   return (
     <div
-      className="relative w-9 shrink-0 overflow-y-auto overflow-x-hidden flex flex-col [justify-content:safe_center]"
-      style={{ scrollbarWidth: 'none' }}
+      className={`w-9 shrink-0 overflow-y-auto overflow-x-hidden flex flex-col [justify-content:safe_center] ${className}`}
+      style={{ position: 'relative', scrollbarWidth: 'none', ...style }}
       onPointerMove={onPointerMove}
       onPointerLeave={() => setHover(null)}
       onKeyDown={onKeyDown}

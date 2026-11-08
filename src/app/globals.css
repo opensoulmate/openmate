@@ -154,9 +154,17 @@ body {
   background: rgba(255, 255, 255, 0.3);
 }
 
-/* Chat 消息区保留 scrollbar-gutter 防止布局抖动 */
+/* Chat 消息区保留 scrollbar-gutter 防止布局抖动；滚动条定宽 6px（历史刻度轨贴其内侧） */
 .chat-scrollbar {
   scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+.chat-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+.chat-scrollbar::-webkit-scrollbar-thumb {
+  background: color-mix(in oklab, var(--color-muted-foreground, #888) 35%, transparent);
+  border-radius: 999px;
 }
 
 /* ═══════════════════════════════════════════════════════════════

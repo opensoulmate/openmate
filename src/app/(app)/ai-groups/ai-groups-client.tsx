@@ -330,9 +330,9 @@ export default function AIGroupsClient() {
       {showViewTabs && selectedGroup && (
         <MessageViewTabs view={groupView} onChange={setGroupView} data={groupViewData} />
       )}
-      <div className="flex flex-1 min-h-0">
+      <div className="relative flex flex-1 min-h-0">
       <MessageTimelineRail entries={agentEntries} activeIndex={agentActive} onJump={timelineJump} side="left" />
-      <div ref={scrollRef} className="flex-1 min-w-0 overflow-y-auto px-3 lg:px-6 py-3 lg:py-4 space-y-3 lg:space-y-4">
+      <div ref={scrollRef} className="flex-1 min-w-0 overflow-y-auto pl-3 pr-11 lg:pl-6 lg:pr-12 py-3 lg:py-4 space-y-3 lg:space-y-4">
         {groupView === 'messages' && (<>
         {/* 未选择群组时的空状态 */}
         {!selectedGroup && (
@@ -447,7 +447,7 @@ export default function AIGroupsClient() {
           </div>
         )}
       </div>
-      <MessageTimelineRail entries={userEntries} activeIndex={userActive} onJump={timelineJump} side="right" />
+      <MessageTimelineRail entries={userEntries} activeIndex={userActive} onJump={timelineJump} side="right" className="absolute top-0 bottom-0 z-10" style={{ position: 'absolute', right: 6 }} />
       </div>
 
       {/* ===== 输入框区域 ===== */}
