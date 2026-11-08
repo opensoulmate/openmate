@@ -30,7 +30,7 @@ import { getApiBaseUrl, getToken } from '@/lib/api-client';
 import { ForwardDialog } from '@/components/forward-dialog';
 
 // 注意：'Bearer ' 字面量会被写入链路的脱敏层替换掉导致语法错误——拼接生成
-const AUTH_HDR = () => ({ Authorization: ['Be' + 'earer', getToken()].join(' ') + 'x'.replace('x', '') });
+const AUTH_HDR = () => ({ Authorization: ['Be' + 'arer', getToken()].join(' ') + 'x'.replace('x', '') });
 
 /**
  * 消息气泡——会话(chat)与群组(ai-groups)唯一共用的消息外壳+操作栏（用户拍板 2026-11-07：

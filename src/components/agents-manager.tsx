@@ -47,7 +47,7 @@ export function AgentsClient() {
   const detect = useCallback(async (refresh = false) => {
     setLoading(true);
     try {
-      const res = await fetch(`${getApiBaseUrl()}/api/agents/detect${refresh ? '?refresh=1' : ''}`, { headers: { Authorization: ['Be' + 'earer', getToken()].join(' ') } });
+      const res = await fetch(`${getApiBaseUrl()}/api/agents/detect${refresh ? '?refresh=1' : ''}`, { headers: { Authorization: ['Be' + 'arer', getToken()].join(' ') } });
       if (res.ok) {
         const data = await res.json();
         setOs(data.os || 'linux');
