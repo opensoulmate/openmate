@@ -13,7 +13,9 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import sys
+from pathlib import Path
 import time
 from uuid import UUID
 
@@ -67,6 +69,34 @@ AGENT_ROUTES = {
 
 # 默认路由
 DEFAULT_ROUTE = {"cmd": [sys.executable, "-m", "agent.start", "--stdio"], "cwd": _ACPPROXY_DIR}
+
+
+_OPSOUL_DB = str(Path.home() / "opensoul" / "data" / "opensoul.db")
+
+
+def _load_agent_binding(user_id: str) -> dict | None:
+    """读 opensoul 的用户↔agent 绑定（跨进程 SQLite 只读，同源单一真源）。
+
+    返回 None=未绑定（自由选择）；读失败放行并告警（主闸在 opensoul，本处为第二道门）。
+    """
+    try:
+        conn = sqlite3.connect(_OPSOUL_DB, timeout=3)
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(
+                "SELECT * FROM user_agent_bindings WHERE user_id = ?", (user_id,)
+            ).fetchone()
+            role_row = conn.execute("SELECT role FROM users WHERE id = ?", (user_id,)).fetchone()
+        finally:
+            conn.close()
+        if row is None:
+            return None
+        d = dict(row)
+        d["_admin"] = bool(role_row and role_row["role"] == "admin")
+        return d
+    except Exception as bind_err:
+        logger.warning(f"[ACP] 绑定表读取失败（放行，主闸在 opensoul）: {bind_err}")
+        return None
 
 
 def decode_token(token: str) -> str | None:
@@ -209,6 +239,16 @@ async def ws_acp_endpoint(client_ws: WebSocket):
     # 服务端绝不顶替身份——铁律"每个agent都应该是独立的"）
     meta = params.get("_meta") or {}
     agent_id = params.get("agent_id") or params.get("agentId") or meta.get("agent_id")
+
+    # ── 绑定路由（Ekko 式"只能访问指定 profile"）：非 admin 只能用被分配的 agent ──
+    if agent_id:
+        _bind = _load_agent_binding(str(user_id))
+        if _bind and not _bind.get("_admin") and _bind.get("agent_id") != agent_id:
+            _bmsg = f"你的账号已分配 agent：{_bind['agent_id']}，如需更换请联系管理员"
+            logger.warning(f"[ACP] 绑定拦截: user={user_id} agent={agent_id} 绑定={_bind['agent_id']}")
+            await _send_acp(client_ws, {"jsonrpc": "2.0", "id": session_msg.get("id"), "error": {"code": -32600, "message": _bmsg}})
+            await client_ws.close()
+            return
     if not agent_id:
         logger.error(f"[ACP] {session_msg.get('method') or 'session/new'} 缺少 agent_id——拒绝创建，禁止默认顶替")
         await _send_acp(client_ws, {"jsonrpc": "2.0", "id": session_msg.get("id"), "error": {"code": -32602, "message": "session/new requires agent_id (no implicit default)"}})
