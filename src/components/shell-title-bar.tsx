@@ -25,6 +25,17 @@ export function ShellTitleBar() {
   useEffect(() => {
     if (!isTauri()) return;
     setMounted(true);
+    // 窗口圆角：html 标记 tauri-shell（globals.css 裁圆角），最大化时恢复直角
+    const root = document.documentElement;
+    root.classList.add('tauri-shell');
+    const syncMax = () => {
+      window.__TAURI_INTERNALS__
+        ?.invoke('is_maximized_window')
+        .then((max: unknown) => root.classList.toggle('tauri-maximized', !!max))
+        .catch(() => {});
+    };
+    syncMax();
+    window.addEventListener('resize', syncMax);
     const sync = () => {
       const t = document.title || 'OpenMate';
       setTitle(t);
@@ -37,7 +48,11 @@ export function ShellTitleBar() {
       ? new MutationObserver(sync)
       : null;
     if (el && obs) obs.observe(el, { childList: true, characterData: true, subtree: true });
-    return () => obs?.disconnect();
+    return () => {
+      obs?.disconnect();
+      window.removeEventListener('resize', syncMax);
+      root.classList.remove('tauri-shell');
+    };
   }, []);
 
   if (!mounted) return null;

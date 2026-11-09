@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>OpenMate</title>
+<style>
+  /* 精确匹配参考图：#0e1014 深底 · 居中青字 · 超宽字距 · 打字机 */
+  :root {
+    --bg: #0e1014;            /* 参考图四角采样 rgb(14,16,20) */
+    --cyan: #55b9dc;          /* 文字青色均值 rgb(85,185,220) */
+    --cyan-hi: #60d2fa;       /* 高光 rgb(96,210,250) */
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    font-family: "Arial Narrow", "Roboto Condensed", "Helvetica Neue", sans-serif; /* 参考图=窄字形（块宽/字高0.69） */
+    -webkit-user-select: none; user-select: none; overflow: hidden;
+    cursor: default;
+  }
+
+  /* 主文字行：大写 + 超宽字距（参考图 8.6% 图高 ≈ 44px @360高） */
+  .word {
+    font-size: 41px;                  /* cap高31px=8.6%窗高，与参考同比 */
+    font-weight: 700;                 /* 墨水密度配平到参考 30.6% */
+    letter-spacing: 0.49em;           /* 实测配平：间隙/字高 0.79（空隙>字母，参考特征） */
+    text-indent: 0.49em;              /* 字距补偿，保证视觉真居中 */
+    color: var(--cyan-hi);            /* 笔画核心色（实测与参考一致） */
+    text-shadow: none;                /* 参考图边缘锐利，无阴影发虚 */
+    white-space: nowrap;
+    line-height: 1;
+    min-height: 46px;
+  }
+  .word .cursor {
+    display: inline-block;
+    width: 3px; height: 38px;
+    background: var(--cyan-hi);
+    vertical-align: -4px; margin-left: 2px;
+    animation: blink .9s steps(1) infinite;
+    box-shadow: 0 0 12px rgba(96, 210, 250, .5);
+  }
+  @keyframes blink { 50% { opacity: 0 } }
+
+  /* 进度条（细，青色渐变） */
+  .bar-wrap {
+    margin-top: 34px;
+    width: 320px; height: 3px;
+    background: rgba(85, 185, 220, .12);
+    border-radius: 999px; overflow: hidden;
+  }
+  .bar {
+    height: 100%; width: 0%;
+    background: linear-gradient(90deg, var(--cyan), var(--cyan-hi));
+    border-radius: 999px;
+    transition: width .5s cubic-bezier(.22, .61, .36, 1);
+    box-shadow: 0 0 10px rgba(96, 210, 250, .45);
+  }
+  .pct {
+    margin-top: 12px;
+    font-size: 11px; letter-spacing: .32em; text-indent: .32em;
+    color: rgba(85, 185, 220, .62);
+    font-variant-numeric: tabular-nums;
+  }
+</style>
+</head>
+<body>
+  <div class="word"><span id="typed"></span><span class="cursor"></span></div>
+  <div class="bar-wrap"><div class="bar" id="bar"></div></div>
+  <div class="pct" id="pct">0%</div>
+
+<script>
+  // 壳主进程通过 window.setSplash(pct, stage) 驱动
+  const WORDS = ['CONNECTING', 'LOADING', 'RENDERING', 'READY'];
+  let target = 0, shown = 0, stage = 0, typing = null;
+
+  function typeText(text) {
+    clearInterval(typing);
+    const el = document.getElementById('typed');
+    el.textContent = '';
+    let i = 0;
+    typing = setInterval(() => {
+      el.textContent = text.slice(0, ++i);
+      if (i >= text.length) clearInterval(typing);
+    }, 55); // 打字机逐字
+  }
+
+  function setSplash(pct, st) {
+    target = Math.max(target, pct);
+    if (st !== undefined && st !== stage) {
+      stage = st;
+      typeText(WORDS[stage] || WORDS[WORDS.length - 1]);
+    }
+  }
+  window.setSplash = setSplash;
+  typeText(WORDS[0]);
+
+  // 进度平滑逼近
+  (function tick() {
+    shown += (target - shown) * 0.12;
+    if (target - shown < 0.4) shown = target;
+    document.getElementById('bar').style.width = shown + '%';
+    document.getElementById('pct').textContent = Math.round(shown) + '%';
+    requestAnimationFrame(tick);
+  })();
+</script>
+</body>
+</html>

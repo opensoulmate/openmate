@@ -116,6 +116,18 @@ fn toggle_maximize_window(window: tauri::Window) {
 }
 
 #[tauri::command]
+fn is_maximized_window(window: tauri::Window) -> bool {
+    #[cfg(desktop)]
+    let v = window.is_maximized().unwrap_or(false);
+    #[cfg(not(desktop))]
+    let v = {
+        let _ = &window;
+        false
+    };
+    v
+}
+
+#[tauri::command]
 fn close_window(window: tauri::Window) {
     // 关闭=收进托盘常驻（托盘菜单"退出"才真退出）
     let _ = window.hide();
@@ -146,6 +158,83 @@ pub fn run() {
             }
             #[cfg(desktop)]
             {
+                // ── 启动 splash：Electron 版同款打字机加载动画（splash.html 像素校准稿原样复用）──
+                use std::sync::atomic::{AtomicBool, Ordering};
+                use std::sync::Arc;
+                use std::time::{Duration, Instant};
+                fn splash_prog(w: &tauri::WebviewWindow, pct: u32, stage: u32) {
+                    let _ = w.eval(&format!("window.setSplash && window.setSplash({pct},{stage})"));
+                }
+                let splash_start = Instant::now();
+                let splash_win = tauri::WebviewWindowBuilder::new(
+                    app,
+                    "splash",
+                    tauri::WebviewUrl::App("splash.html".into()),
+                )
+                .title("OpenMate")
+                .inner_size(560.0, 360.0)
+                .resizable(false)
+                .decorations(false)
+                .always_on_top(true)
+                .skip_taskbar(true)
+                .center()
+                .build()?;
+                splash_prog(&splash_win, 8, 0);
+                let splash_done = Arc::new(AtomicBool::new(false));
+                let handoff = {
+                    let app = app.handle().clone();
+                    let done = splash_done.clone();
+                    let sw = splash_win.clone();
+                    move || {
+                        if done.swap(true, Ordering::SeqCst) {
+                            return;
+                        }
+                        let app2 = app.clone();
+                        let sw2 = sw.clone();
+                        std::thread::spawn(move || {
+                            std::thread::sleep(Duration::from_millis(360));
+                            let wait_min =
+                                Duration::from_millis(1400).saturating_sub(splash_start.elapsed());
+                            if !wait_min.is_zero() {
+                                std::thread::sleep(wait_min);
+                            }
+                            if let Some(main) = app2.get_webview_window("main") {
+                                let _ = main.show();
+                                let _ = main.set_focus();
+                            }
+                            let _ = sw2.close();
+                        });
+                    }
+                };
+                {
+                    // 页面加载完成 → 72%(RENDERING) → 100%(READY) → 交接（动画最短 1.4s 完整演出）
+                    let sw = splash_win.clone();
+                    let handoff = handoff.clone();
+                    if let Some(main_win) = app.get_webview_window("main") {
+                        main_win.on_page_load(move |_w, payload| {
+                            if payload.event == tauri::webview::PageLoadEvent::Finished {
+                                splash_prog(&sw, 72, 2);
+                                let sw2 = sw.clone();
+                                let handoff2 = handoff.clone();
+                                std::thread::spawn(move || {
+                                    std::thread::sleep(Duration::from_millis(400));
+                                    splash_prog(&sw2, 100, 3);
+                                    handoff2();
+                                });
+                            }
+                        });
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(150));
+                splash_prog(&splash_win, 38, 1);
+                {
+                    // 页面 12s 未就绪也强制交接（splash 不能永久遮屏）
+                    let handoff = handoff.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(Duration::from_secs(12));
+                        handoff();
+                    });
+                }
                 use tauri::menu::{Menu, MenuItem};
                 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
                 let show = MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>)?;
@@ -198,6 +287,7 @@ pub fn run() {
             set_page_title,
             minimize_window,
             toggle_maximize_window,
+            is_maximized_window,
             close_window
         ])
         .run(tauri::generate_context!())

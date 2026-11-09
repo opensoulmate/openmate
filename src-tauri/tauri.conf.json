@@ -14,6 +14,8 @@
       {
         "title": "OpenMate｜开放协同的AI智能伙伴",
         "decorations": false,
+        "transparent": true,
+        "visible": false,
         "width": 1440,
         "height": 900,
         "minWidth": 375,
