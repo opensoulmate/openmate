@@ -36,6 +36,8 @@ export function ShellTitleBar() {
     };
     syncMax();
     window.addEventListener('resize', syncMax);
+    // 启动 splash 报到：React 已挂载=RENDERING 完成，Rust 侧走完打字机动画后交接主窗口
+    window.__TAURI_INTERNALS__?.invoke('splash_ready').catch(() => {});
     const sync = () => {
       const t = document.title || 'OpenMate';
       setTitle(t);

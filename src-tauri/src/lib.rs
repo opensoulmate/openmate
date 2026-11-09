@@ -115,6 +115,54 @@ fn toggle_maximize_window(window: tauri::Window) {
     let _ = window;
 }
 
+struct SplashState {
+    done: std::sync::atomic::AtomicBool,
+    start: std::time::Instant,
+}
+
+#[cfg(desktop)]
+fn handoff_splash(app: &tauri::AppHandle) {
+    use std::sync::atomic::Ordering;
+    let st = app.state::<SplashState>();
+    if st.done.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let wait_min = std::time::Duration::from_millis(1400).saturating_sub(st.start.elapsed());
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(360) + wait_min);
+        if let Some(main) = app.get_webview_window("main") {
+            let _ = main.show();
+            let _ = main.set_focus();
+        }
+        if let Some(sw) = app.get_webview_window("splash") {
+            let _ = sw.close();
+        }
+    });
+}
+
+/// 前端 React 挂载完成后报到（shell-title-bar 挂载即调）：
+/// 72%(RENDERING)→100%(READY)→交接主窗口。tauri 2.11 的 on_page_load 只能
+/// 构造期挂（Builder 链式吃 self），已建的 conf 主窗挂不上——前端报到语义更准。
+#[tauri::command]
+fn splash_ready(app: tauri::AppHandle) {
+    #[cfg(desktop)]
+    {
+        if let Some(sw) = app.get_webview_window("splash") {
+            let _ = sw.eval("window.setSplash && window.setSplash(72,2)");
+        }
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            if let Some(sw) = app.get_webview_window("splash") {
+                let _ = sw.eval("window.setSplash && window.setSplash(100,3)");
+            }
+            handoff_splash(&app);
+        });
+    }
+    #[cfg(not(desktop))]
+    let _ = app;
+}
+
 #[tauri::command]
 fn is_maximized_window(window: tauri::Window) -> bool {
     #[cfg(desktop)]
@@ -159,8 +207,7 @@ pub fn run() {
             #[cfg(desktop)]
             {
                 // ── 启动 splash：Electron 版同款打字机加载动画（splash.html 像素校准稿原样复用）──
-                use std::sync::atomic::{AtomicBool, Ordering};
-                use std::sync::Arc;
+                use std::sync::atomic::AtomicBool;
                 use std::time::{Duration, Instant};
                 fn splash_prog(w: &tauri::WebviewWindow, pct: u32, stage: u32) {
                     let _ = w.eval(&format!("window.setSplash && window.setSplash({pct},{stage})"));
@@ -180,59 +227,21 @@ pub fn run() {
                 .center()
                 .build()?;
                 splash_prog(&splash_win, 8, 0);
-                let splash_done = Arc::new(AtomicBool::new(false));
-                let handoff = {
-                    let app = app.handle().clone();
-                    let done = splash_done.clone();
-                    let sw = splash_win.clone();
-                    move || {
-                        if done.swap(true, Ordering::SeqCst) {
-                            return;
-                        }
-                        let app2 = app.clone();
-                        let sw2 = sw.clone();
-                        std::thread::spawn(move || {
-                            std::thread::sleep(Duration::from_millis(360));
-                            let wait_min =
-                                Duration::from_millis(1400).saturating_sub(splash_start.elapsed());
-                            if !wait_min.is_zero() {
-                                std::thread::sleep(wait_min);
-                            }
-                            if let Some(main) = app2.get_webview_window("main") {
-                                let _ = main.show();
-                                let _ = main.set_focus();
-                            }
-                            let _ = sw2.close();
-                        });
-                    }
-                };
-                {
-                    // 页面加载完成 → 72%(RENDERING) → 100%(READY) → 交接（动画最短 1.4s 完整演出）
-                    let sw = splash_win.clone();
-                    let handoff = handoff.clone();
-                    if let Some(main_win) = app.get_webview_window("main") {
-                        main_win.on_page_load(move |_w, payload| {
-                            if payload.event == tauri::webview::PageLoadEvent::Finished {
-                                splash_prog(&sw, 72, 2);
-                                let sw2 = sw.clone();
-                                let handoff2 = handoff.clone();
-                                std::thread::spawn(move || {
-                                    std::thread::sleep(Duration::from_millis(400));
-                                    splash_prog(&sw2, 100, 3);
-                                    handoff2();
-                                });
-                            }
-                        });
-                    }
-                }
+                app.manage(SplashState {
+                    done: AtomicBool::new(false),
+                    start: splash_start,
+                });
                 std::thread::sleep(Duration::from_millis(150));
                 splash_prog(&splash_win, 38, 1);
                 {
                     // 页面 12s 未就绪也强制交接（splash 不能永久遮屏）
-                    let handoff = handoff.clone();
+                    let app = app.handle().clone();
                     std::thread::spawn(move || {
                         std::thread::sleep(Duration::from_secs(12));
-                        handoff();
+                        if let Some(sw) = app.get_webview_window("splash") {
+                            splash_prog(&sw, 100, 3);
+                        }
+                        handoff_splash(&app);
                     });
                 }
                 use tauri::menu::{Menu, MenuItem};
@@ -288,6 +297,7 @@ pub fn run() {
             minimize_window,
             toggle_maximize_window,
             is_maximized_window,
+            splash_ready,
             close_window
         ])
         .run(tauri::generate_context!())
