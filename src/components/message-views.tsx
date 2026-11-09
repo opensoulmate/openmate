@@ -302,7 +302,7 @@ export function MessageViewTabs({ view, onChange, data }: { view: string; onChan
   );
 }
 
-export function MessageViews({ view, data, onViewChange }: { view: string; data: ViewData; onViewChange: (id: string) => void; }) {
+export function MessageViews({ view, data, onViewChange, fallbackTime }: { view: string; data: ViewData; onViewChange: (id: string) => void; fallbackTime?: string | null; }) {
   const { t } = useTranslation();
   const { imageAttachments, videoAttachments, audioAttachments, docAttachments, otherAttachments, linkItems, dateGroups } = data;
   const [calMonth, setCalMonth] = useState<Date>(() => new Date()); // 日期日历当前查看月份
@@ -328,7 +328,7 @@ export function MessageViews({ view, data, onViewChange }: { view: string; data:
                     <div className="max-w-[85%] lg:max-w-[70%] rounded-xl border border-border/60 bg-background/80 backdrop-blur-sm overflow-hidden">
                       <div className="px-3 py-1.5 border-b border-border/30 bg-muted/20">
                         <span className="text-[10px] text-muted-foreground/60">
-                          {f.timestamp && !isNaN(f.timestamp.getTime()) ? f.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '时间未记录'}
+                          {f.timestamp && !isNaN(f.timestamp.getTime()) ? f.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : (fallbackTime ?? '时间未记录')}
                         </span>
                       </div>
                       <div className="px-3 py-2.5 flex items-center gap-2">
@@ -368,7 +368,7 @@ export function MessageViews({ view, data, onViewChange }: { view: string; data:
                     <div className="max-w-[85%] lg:max-w-[70%] rounded-xl border border-border/60 bg-background/80 backdrop-blur-sm overflow-hidden">
                       <div className="px-3 py-1.5 border-b border-border/30 bg-muted/20">
                         <span className="text-[10px] text-muted-foreground/60">
-                          {f.timestamp && !isNaN(f.timestamp.getTime()) ? f.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '时间未记录'}
+                          {f.timestamp && !isNaN(f.timestamp.getTime()) ? f.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : (fallbackTime ?? '时间未记录')}
                         </span>
                       </div>
                       <div className="px-3 py-2.5 flex items-center gap-2">
@@ -408,7 +408,7 @@ export function MessageViews({ view, data, onViewChange }: { view: string; data:
                       {/* 时间在上 */}
                       <div className="px-3 py-1.5 border-b border-border/30 bg-muted/20">
                         <span className="text-[10px] text-muted-foreground/60">
-                          {f.timestamp && !isNaN(f.timestamp.getTime()) ? f.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '时间未记录'}
+                          {f.timestamp && !isNaN(f.timestamp.getTime()) ? f.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : (fallbackTime ?? '时间未记录')}
                         </span>
                       </div>
                       {/* 图片内容（点击预览） */}
@@ -466,7 +466,7 @@ export function MessageViews({ view, data, onViewChange }: { view: string; data:
                     <div className="max-w-[85%] lg:max-w-[70%] rounded-xl border border-border/60 bg-background/80 backdrop-blur-sm overflow-hidden">
                       <div className="px-3 py-1.5 border-b border-border/30 bg-muted/20">
                         <span className="text-[10px] text-muted-foreground/60">
-                          {f.timestamp && !isNaN(f.timestamp.getTime()) ? f.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '时间未记录'}
+                          {f.timestamp && !isNaN(f.timestamp.getTime()) ? f.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : (fallbackTime ?? '时间未记录')}
                         </span>
                       </div>
                       <div className="px-3 py-2.5 flex items-center gap-2">
@@ -510,7 +510,7 @@ export function MessageViews({ view, data, onViewChange }: { view: string; data:
                     <div className="max-w-[85%] lg:max-w-[70%] rounded-xl border border-border/60 bg-background/80 backdrop-blur-sm overflow-hidden">
                       <div className="px-3 py-1.5 border-b border-border/30 bg-muted/20">
                         <span className="text-[10px] text-muted-foreground/60">
-                          {f.timestamp && !isNaN(f.timestamp.getTime()) ? f.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '时间未记录'}
+                          {f.timestamp && !isNaN(f.timestamp.getTime()) ? f.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : (fallbackTime ?? '时间未记录')}
                         </span>
                       </div>
                       <div className="px-3 py-2.5 flex items-center gap-2">
@@ -556,7 +556,7 @@ export function MessageViews({ view, data, onViewChange }: { view: string; data:
                     <div className="max-w-[85%] lg:max-w-[70%] rounded-xl border border-border/60 bg-background/80 backdrop-blur-sm overflow-hidden">
                       <div className="px-3 py-1.5 border-b border-border/30 bg-muted/20">
                         <span className="text-[10px] text-muted-foreground/60">
-                          {link.timestamp && !isNaN(link.timestamp.getTime()) ? link.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '时间未记录'}
+                          {link.timestamp && !isNaN(link.timestamp.getTime()) ? link.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : (fallbackTime ?? '时间未记录')}
                         </span>
                       </div>
                       <div className="px-3 py-2.5 flex items-center gap-2">

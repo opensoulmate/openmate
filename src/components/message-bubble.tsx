@@ -7,6 +7,17 @@ import { SuperAvatar } from '@/components/ui/super-ellipse';
 // Agent 官方 logo 解析（唯一真源）——会话/群组同一函数同一 logo：
 // ①注册表(设置→Agent管理)的 logo 图（hermes=官方头像、soulmate=/soulmate.svg）
 // ②soulmate 品牌真源兜底 ③icon emoji ④AGENT_ICONS 表
+/** B案（用户拍板）：老消息无记录时间→降级显示会话创建日期（真实数据，不编造每条时间） */
+export function sessionTimeLabel(sessionId?: string | null, createdAt?: string | null): string | null {
+  const d = createdAt ? new Date(createdAt) : null;
+  if (d && !isNaN(d.getTime())) {
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} 会话`;
+  }
+  const m = /^(\d{4})(\d{2})(\d{2})_/.exec(sessionId || "");
+  return m ? `${m[1]}-${m[2]}-${m[3]} 会话` : null;
+}
+
 export function resolveAgentAvatar(key?: string | null, fallbackIcon?: string | null): string | undefined {
   const list = (useAppStore.getState().sidebarAgents as any[]) || [];
   const hit = key ? list.find((a: any) => a.id === key || a.name === key) : undefined;
@@ -104,6 +115,7 @@ function ActionButton({ onClick, title, hover, children }: { onClick: () => void
 export function MessageBubble({
   role,
   timestamp,
+  fallbackTime,
   name,
   avatar,
   id,
@@ -113,6 +125,8 @@ export function MessageBubble({
 }: {
   role: string;
   timestamp: Date | null;
+  /** B案：无记录时间的老消息降级显示的会话创建日期（null→"时间未记录"） */
+  fallbackTime?: string | null;
   /** 群组多发言人时显示在时间戳行的名字；会话不传 */
   name?: string;
   /** agent 官方头像（emoji 或图片 URL），缺省回落机器人图标 */
@@ -138,7 +152,7 @@ export function MessageBubble({
         {/* ── 时间戳（消息内容上方） ── */}
         <div className="text-[10px] text-muted-foreground/40 mb-1">
           {name && <><span className="text-muted-foreground/70">{name}</span><span className="mx-1">·</span></>}
-          {timestamp && !isNaN(timestamp.getTime()) ? timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 }) : '时间未记录'}
+          {timestamp && !isNaN(timestamp.getTime()) ? timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 }) : (fallbackTime ?? '时间未记录')}
         </div>
         {children}
         {/* ── 底部操作栏：全量按钮，通用行为内置，页面特有行为经 actions 注入 ── */}

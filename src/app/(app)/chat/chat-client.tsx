@@ -1,6 +1,6 @@
 'use client';
 import MarkdownContent from "@/components/markdown-content";
-import { MessageBubble, resolveAgentAvatar } from '@/components/message-bubble';
+import { MessageBubble, resolveAgentAvatar, sessionTimeLabel } from '@/components/message-bubble';
 import { extractViewData, MessageViewTabs, MessageViews, renderAttachmentActions } from '@/components/message-views';
 import { SOULMATE_LOGO, SOULMATE_ICON } from "@/lib/agent-brand";
 import { SuperAvatar } from "@/components/ui/super-ellipse";
@@ -1348,6 +1348,8 @@ export function ChatClient() {
   const activeSessionIdFromStore = useAppStore((s) => s.activeSessionId);
   // 优先用 store 值，store 未更新时用 ref 兜底（onSend 里同步设置）
   const effectiveSessionId = activeSessionIdFromStore || pendingSessionIdRef.current;
+  // B案：老消息无记录时间→降级显示会话创建日期（真实数据）
+  const timeFallback = sessionTimeLabel(effectiveSessionId, selectedSession?.created_at) ?? '时间未记录';
   const messages = effectiveSessionId ? (sessionDataMap.get(effectiveSessionId)?.messages || []) : [];
   /* -- 消息历史刻度轨（左=agent 回复，右=用户消息；共用 MessageTimeline） -- */
   const timelineMsgs: TimelineMessage[] = useMemo(() => messages.map((m: Message) => ({
@@ -2054,7 +2056,7 @@ export function ChatClient() {
           const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
           setShowScrollDown(!atBottom);
         }} className="flex-1 min-w-0 overflow-y-auto pl-2 pr-7 lg:pl-6 lg:pr-12 py-3 lg:py-4 space-y-3 lg:space-y-4 chat-scrollbar relative">
-          {chatView !== 'messages' && <MessageViews view={chatView} data={viewData} onViewChange={(id) => setChatView(id as any)} />}
+          {chatView !== 'messages' && <MessageViews view={chatView} data={viewData} fallbackTime={timeFallback} onViewChange={(id) => setChatView(id as any)} />}
           {chatView === 'messages' && (<>
           {messages.length === 0 && urlSessionError && (
             <div className="flex flex-col items-center [justify-content:safe_center] min-h-full">
@@ -2085,7 +2087,7 @@ export function ChatClient() {
             </div>
           )}
           {messages.map(msg => (
-            <MessageBubble key={msg.id} id={`msg-${msg.id}`} role={msg.role} timestamp={msg.timestamp}
+            <MessageBubble key={msg.id} id={`msg-${msg.id}`} role={msg.role} timestamp={msg.timestamp} fallbackTime={timeFallback}
               avatar={msg.role === 'agent' ? resolveAgentAvatar(selectedAgent?.id || selectedAgent?.name, storeAgentIcon) : undefined}
               text={getMessageText(msg)}
               actions={msg.role === 'agent' ? {
@@ -2121,7 +2123,7 @@ export function ChatClient() {
                         {/* 日期在上（与文件视图音频卡片同布局，3e 统一布局铁律） */}
                         <div className="px-3 py-1.5 border-b border-border/30 bg-muted/20">
                           <span className="text-[10px] text-muted-foreground/60">
-                            {msg.timestamp && !isNaN(msg.timestamp.getTime()) ? msg.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '时间未记录'}
+                            {msg.timestamp && !isNaN(msg.timestamp.getTime()) ? msg.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : (timeFallback ?? '时间未记录')}
                           </span>
                         </div>
                         {/* 音频信息 */}
@@ -2171,7 +2173,7 @@ export function ChatClient() {
                       {/* 日期在上 */}
                       <div className="px-3 py-1.5 border-b border-border/30 bg-muted/20">
                         <span className="text-[10px] text-muted-foreground/60">
-                          {msg.timestamp && !isNaN(msg.timestamp.getTime()) ? msg.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '时间未记录'}
+                          {msg.timestamp && !isNaN(msg.timestamp.getTime()) ? msg.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : (timeFallback ?? '时间未记录')}
                         </span>
                       </div>
                       {/* 文件信息 */}

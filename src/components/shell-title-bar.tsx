@@ -50,7 +50,6 @@ export function ShellTitleBar() {
   return (
     <div
       data-tauri-drag-region
-      onDoubleClick={() => invoke('toggle_maximize_window')}
       className="flex h-8 shrink-0 select-none items-center justify-between border-b border-border/40 bg-background text-foreground"
     >
       <div data-tauri-drag-region className="flex min-w-0 items-baseline gap-2 pl-3 text-xs">
