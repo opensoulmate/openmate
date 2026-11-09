@@ -2048,7 +2048,7 @@ export function ChatClient() {
 
         {/* Messages */}
         <div className="relative flex flex-1 min-h-0">
-        <MessageTimelineRail entries={agentEntries} activeIndex={agentActive} onJump={timelineJump} side="left" />
+        <MessageTimelineRail entries={agentEntries} activeIndex={agentActive} onJump={timelineJump} side="left" className="relative" />
         <div ref={scrollRef} onScroll={(e) => {
           const el = e.currentTarget;
           const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
@@ -2259,7 +2259,7 @@ export function ChatClient() {
           </>)} {/* End Messages view */}
 
         </div>
-        <MessageTimelineRail entries={userEntries} activeIndex={userActive} onJump={timelineJump} side="right" className="absolute top-0 bottom-0 z-10" style={{ position: 'absolute', right: 6 }} />
+        <MessageTimelineRail entries={userEntries} activeIndex={userActive} onJump={timelineJump} side="right" className="absolute top-0 bottom-0 z-10 right-0 lg:right-1.5" />
         </div>
         <div className="px-3 lg:px-4 pt-3 pb-6 shrink-0">
           {readingCount > 0 && (

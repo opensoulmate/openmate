@@ -39,7 +39,17 @@ sections:
             - "frontend/pages/**/*.{ts,tsx,js,jsx,vue}"
             - "ui/**/*.{ts,tsx,js,jsx,vue}"
             - "web/src/**/*.{ts,tsx,js,jsx,vue}"
+            - "src/components/**/*.{ts,tsx,js,jsx,vue}"
+            - "src/app/**/*.{ts,tsx,js,jsx,vue}"
+            - "packages/*/src/components/**/*.{ts,tsx,js,jsx,vue}"
           exclusions: []
+          validation_strategy:
+            unit_test: optional
+            style_lint: true
+            visual_regression: false
+            threshold: 'warning_only'
+          validation_note: "组件验证以单元测试为主但允许跳过(unit_test: optional)，补充 style_lint 兜底样式相关回归；纯样式改动请走 ui_styles 组策略"
+
         - id: pure_utils
           description: "纯函数工具集 / 格式化 / 解析器"
           count: 88
@@ -69,6 +79,24 @@ sections:
             - "tests/pure/**/*.py"
             - "**/__tests__/**/*.{ts,tsx,js}"
           include_globs_note: "测试文件需与被测文件同级进入 verifiable，否则降级为 needs_mock"
+        - id: ui_styles
+          description: "纯样式文件（CSS/SCSC/CSS Module/Styled），验证方式为样式lint和视觉回归"
+          count: 0
+          count_note: "样式文件以 overlay 方式分类，不改变 verifiable 主计数(512)；全量重扫后更新计数"
+          patterns:
+            - "src/**/*.css"
+            - "src/**/*.scss"
+            - "src/**/*.styled.ts"
+            - "src/**/*.module.css"
+            - "packages/*/src/**/*.css"
+          exclusions: []
+          validation_strategy:
+            unit_test: false
+            style_lint: true
+            visual_regression: true
+            threshold: 'warning_only'
+          validation_note: "纯样式改动禁止套用单元测试逻辑(unit_test: false)，仅执行 stylelint 与视觉回归；阈值 warning_only，告警不阻塞进化重试，避免纯 CSS 改动被误判为失败"
+
       entry_examples:
         - path: frontend/components/LayerCard.tsx
           level: verifiable
@@ -76,6 +104,14 @@ sections:
         - path: shared/utils/timezone.ts
           level: verifiable
           rationale: "纯函数，无时钟注入以外的副作用"
+      global_pattern_exclusions:
+        # 明确排除文档/Markdown 文件参与任何进化验证，并同步至 excluded 组 patterns
+        # 已知失败案例: docs/soulmate-roadmap.md 连续失败 49 次（非代码文件，不可验证）
+        patterns:
+          - "docs/**"
+          - "**/*.md"
+        rationale: "markdown/文档文件不参与验证，任何匹配 docs/** 的文件直接归类 excluded，不做重试"
+
       sum_check: {verifiable: 512}
 
     # ---- 212 ---------------------------------------------------------

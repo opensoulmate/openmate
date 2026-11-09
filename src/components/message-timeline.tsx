@@ -155,7 +155,7 @@ export function MessageTimelineRail({ entries, activeIndex, onJump, side, classN
   return (
     <div
       ref={shellRef}
-      className={`relative w-5 lg:w-9 shrink-0 ${className}`}
+      className={`w-5 lg:w-9 shrink-0 ${className}`}
       style={style}
       onPointerMove={e => moveFromY(e.clientY, e.pointerType)}
       onPointerLeave={e => { if (e.pointerType === 'mouse') clearHover(); }}
