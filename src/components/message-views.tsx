@@ -15,9 +15,9 @@ import {
   Award, LocateFixed, Copy, MessageSquare, Video, Music, Link2, CalendarDays, Paperclip,
 } from 'lucide-react';
 
-export interface ViewMsg { id: string; role: 'user' | 'agent'; timestamp: Date; text?: string; parts?: any[]; }
-export interface ViewFile { name: string; filePath?: string; mimeType?: string; data?: string; messageId: string; role: 'user' | 'agent'; timestamp: Date; }
-export interface ViewLink { url: string; title?: string; messageId: string; role: 'user' | 'agent'; timestamp: Date; }
+export interface ViewMsg { id: string; role: 'user' | 'agent'; timestamp: Date | null; text?: string; parts?: any[]; }
+export interface ViewFile { name: string; filePath?: string; mimeType?: string; data?: string; messageId: string; role: 'user' | 'agent'; timestamp: Date | null; }
+export interface ViewLink { url: string; title?: string; messageId: string; role: 'user' | 'agent'; timestamp: Date | null; }
 export interface ViewDateGroup { date: string; label: string; count: number; messages: ViewMsg[]; }
 export interface ViewData {
   fileAttachments: ViewFile[];
@@ -141,7 +141,7 @@ async function fetchFileDataUrl(filePath: string, mimeType?: string): Promise<st
 export function extractViewData(messages: ViewMsg[]): ViewData {
   // 从消息收集全部文件附件（文件视图）
   const fileAttachments = (() => {
-    const files: { name: string; filePath?: string; mimeType?: string; data?: string; messageId: string; role: 'user' | 'agent'; timestamp: Date }[] = [];
+    const files: { name: string; filePath?: string; mimeType?: string; data?: string; messageId: string; role: 'user' | 'agent'; timestamp: Date | null }[] = [];
     for (const msg of messages) {
       // Extract file/image parts
       for (const p of (msg.parts || [])) {
@@ -201,7 +201,7 @@ export function extractViewData(messages: ViewMsg[]): ViewData {
 
   // 链接提取：从消息文本中提取URL
   const linkItems = (() => {
-    const links: { url: string; title?: string; messageId: string; role: 'user' | 'agent'; timestamp: Date }[] = [];
+    const links: { url: string; title?: string; messageId: string; role: 'user' | 'agent'; timestamp: Date | null }[] = [];
     const urlRegex = /https?:\/\/[^\s<>"')\]]+/g;
     for (const msg of messages) {
       for (const p of (msg.parts || [])) {
@@ -227,7 +227,7 @@ export function extractViewData(messages: ViewMsg[]): ViewData {
     const groups: { date: string; label: string; count: number; messages: ViewMsg[] }[] = [];
     const map = new Map<string, ViewMsg[]>();
     for (const msg of messages) {
-      const d = msg.timestamp.toISOString().slice(0, 10);
+      const d = msg.timestamp && !isNaN(msg.timestamp.getTime()) ? msg.timestamp.toISOString().slice(0, 10) : '未知日期';
       if (!map.has(d)) map.set(d, []);
       map.get(d)!.push(msg);
     }
@@ -328,7 +328,7 @@ export function MessageViews({ view, data, onViewChange }: { view: string; data:
                     <div className="max-w-[85%] lg:max-w-[70%] rounded-xl border border-border/60 bg-background/80 backdrop-blur-sm overflow-hidden">
                       <div className="px-3 py-1.5 border-b border-border/30 bg-muted/20">
                         <span className="text-[10px] text-muted-foreground/60">
-                          {f.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                          {f.timestamp && !isNaN(f.timestamp.getTime()) ? f.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '时间未记录'}
                         </span>
                       </div>
                       <div className="px-3 py-2.5 flex items-center gap-2">
@@ -368,7 +368,7 @@ export function MessageViews({ view, data, onViewChange }: { view: string; data:
                     <div className="max-w-[85%] lg:max-w-[70%] rounded-xl border border-border/60 bg-background/80 backdrop-blur-sm overflow-hidden">
                       <div className="px-3 py-1.5 border-b border-border/30 bg-muted/20">
                         <span className="text-[10px] text-muted-foreground/60">
-                          {f.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                          {f.timestamp && !isNaN(f.timestamp.getTime()) ? f.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '时间未记录'}
                         </span>
                       </div>
                       <div className="px-3 py-2.5 flex items-center gap-2">
@@ -408,7 +408,7 @@ export function MessageViews({ view, data, onViewChange }: { view: string; data:
                       {/* 时间在上 */}
                       <div className="px-3 py-1.5 border-b border-border/30 bg-muted/20">
                         <span className="text-[10px] text-muted-foreground/60">
-                          {f.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                          {f.timestamp && !isNaN(f.timestamp.getTime()) ? f.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '时间未记录'}
                         </span>
                       </div>
                       {/* 图片内容（点击预览） */}
@@ -466,7 +466,7 @@ export function MessageViews({ view, data, onViewChange }: { view: string; data:
                     <div className="max-w-[85%] lg:max-w-[70%] rounded-xl border border-border/60 bg-background/80 backdrop-blur-sm overflow-hidden">
                       <div className="px-3 py-1.5 border-b border-border/30 bg-muted/20">
                         <span className="text-[10px] text-muted-foreground/60">
-                          {f.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                          {f.timestamp && !isNaN(f.timestamp.getTime()) ? f.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '时间未记录'}
                         </span>
                       </div>
                       <div className="px-3 py-2.5 flex items-center gap-2">
@@ -510,7 +510,7 @@ export function MessageViews({ view, data, onViewChange }: { view: string; data:
                     <div className="max-w-[85%] lg:max-w-[70%] rounded-xl border border-border/60 bg-background/80 backdrop-blur-sm overflow-hidden">
                       <div className="px-3 py-1.5 border-b border-border/30 bg-muted/20">
                         <span className="text-[10px] text-muted-foreground/60">
-                          {f.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                          {f.timestamp && !isNaN(f.timestamp.getTime()) ? f.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '时间未记录'}
                         </span>
                       </div>
                       <div className="px-3 py-2.5 flex items-center gap-2">
@@ -556,7 +556,7 @@ export function MessageViews({ view, data, onViewChange }: { view: string; data:
                     <div className="max-w-[85%] lg:max-w-[70%] rounded-xl border border-border/60 bg-background/80 backdrop-blur-sm overflow-hidden">
                       <div className="px-3 py-1.5 border-b border-border/30 bg-muted/20">
                         <span className="text-[10px] text-muted-foreground/60">
-                          {link.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                          {link.timestamp && !isNaN(link.timestamp.getTime()) ? link.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '时间未记录'}
                         </span>
                       </div>
                       <div className="px-3 py-2.5 flex items-center gap-2">

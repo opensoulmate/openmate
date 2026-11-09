@@ -102,7 +102,7 @@ interface Message {
   id: string;
   role: 'user' | 'agent';
   parts: MessagePart[];
-  timestamp: Date;
+  timestamp: Date | null;
   source?: string;
   fileChanges?: FileChange[];
   tokenUsage?: TokenUsage;
@@ -1567,7 +1567,7 @@ export function ChatClient() {
               id: (m.id || Date.now()).toString(),
               role: isAgent ? 'agent' : 'user',
               parts: [choicePart ?? { type: 'text', text: content }, ...attachmentParts],
-              timestamp: new Date((m.timestamp as string) || Date.now()),
+              timestamp: m.timestamp ? new Date(m.timestamp as string) : null,
               source: m.source as string,
               fileChanges: isAgent ? parseFileChanges(content) : undefined,
               memoryMarker: (m.memory_marker as MemoryMarker | null) || null,
@@ -2121,7 +2121,7 @@ export function ChatClient() {
                         {/* 日期在上（与文件视图音频卡片同布局，3e 统一布局铁律） */}
                         <div className="px-3 py-1.5 border-b border-border/30 bg-muted/20">
                           <span className="text-[10px] text-muted-foreground/60">
-                            {msg.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                            {msg.timestamp && !isNaN(msg.timestamp.getTime()) ? msg.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '时间未记录'}
                           </span>
                         </div>
                         {/* 音频信息 */}
@@ -2171,7 +2171,7 @@ export function ChatClient() {
                       {/* 日期在上 */}
                       <div className="px-3 py-1.5 border-b border-border/30 bg-muted/20">
                         <span className="text-[10px] text-muted-foreground/60">
-                          {msg.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                          {msg.timestamp && !isNaN(msg.timestamp.getTime()) ? msg.timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '时间未记录'}
                         </span>
                       </div>
                       {/* 文件信息 */}

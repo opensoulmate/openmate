@@ -112,7 +112,7 @@ export function MessageBubble({
   children,
 }: {
   role: string;
-  timestamp: Date;
+  timestamp: Date | null;
   /** 群组多发言人时显示在时间戳行的名字；会话不传 */
   name?: string;
   /** agent 官方头像（emoji 或图片 URL），缺省回落机器人图标 */
@@ -138,7 +138,7 @@ export function MessageBubble({
         {/* ── 时间戳（消息内容上方） ── */}
         <div className="text-[10px] text-muted-foreground/40 mb-1">
           {name && <><span className="text-muted-foreground/70">{name}</span><span className="mx-1">·</span></>}
-          {timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 })}
+          {timestamp && !isNaN(timestamp.getTime()) ? timestamp.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 }) : '时间未记录'}
         </div>
         {children}
         {/* ── 底部操作栏：全量按钮，通用行为内置，页面特有行为经 actions 注入 ── */}

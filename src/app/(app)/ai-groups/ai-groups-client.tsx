@@ -60,7 +60,7 @@ export default function AIGroupsClient() {
   const groupViewData = useMemo(() => extractViewData(messages.map((m: any, i: number) => ({
     id: m.id || String(i),
     role: (m.role === 'user' ? 'user' : 'agent') as 'user' | 'agent',
-    timestamp: m.timestamp instanceof Date ? m.timestamp : new Date(m.timestamp || Date.now()),
+    timestamp: m.timestamp instanceof Date ? m.timestamp : (m.timestamp ? new Date(m.timestamp) : null),
     text: m.content,
     parts: [{ type: 'text', text: m.content }],
   }))), [messages]);
