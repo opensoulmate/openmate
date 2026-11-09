@@ -2259,7 +2259,7 @@ export function ChatClient() {
           </>)} {/* End Messages view */}
 
         </div>
-        <MessageTimelineRail entries={userEntries} activeIndex={userActive} onJump={timelineJump} side="right" className="absolute top-0 bottom-0 z-10 right-0 lg:right-1.5" />
+        <MessageTimelineRail entries={userEntries} activeIndex={userActive} onJump={timelineJump} side="right" className="absolute top-0 bottom-0 z-10 right-1.5" />
         </div>
         <div className="px-3 lg:px-4 pt-3 pb-6 shrink-0">
           {readingCount > 0 && (
