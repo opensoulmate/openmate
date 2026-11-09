@@ -38,7 +38,8 @@ export function TopBar({ left, middle, right, className }: TopBarProps) {
   return (
     <div
       className={cn(
-        "flex h-12 shrink-0 items-center border-b border-border bg-background safe-area-top",
+        // min-h-12（非 h-12）：safe-area-top 的让位会撑高行盒，不把内容挤出行底被下方盖住
+        "flex min-h-12 shrink-0 items-center border-b border-border bg-background safe-area-top",
         className
       )}
     >
