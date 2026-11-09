@@ -155,7 +155,7 @@ export function MessageTimelineRail({ entries, activeIndex, onJump, side, classN
   return (
     <div
       ref={shellRef}
-      className={`relative w-9 shrink-0 ${className}`}
+      className={`relative w-5 lg:w-9 shrink-0 ${className}`}
       style={style}
       onPointerMove={e => moveFromY(e.clientY, e.pointerType)}
       onPointerLeave={e => { if (e.pointerType === 'mouse') clearHover(); }}
@@ -175,7 +175,7 @@ export function MessageTimelineRail({ entries, activeIndex, onJump, side, classN
                 aria-current={isActive ? 'location' : undefined}
                 onClick={() => { clearHover(); onJump(entry.id); }}
                 onPointerEnter={e => moveFromY(trackRef.current!.getBoundingClientRect().top + index * PITCH + PITCH / 2, e.pointerType)}
-                className={`absolute ${side === 'right' ? 'right-0 pr-1.5 justify-end' : 'left-0 pl-1.5 justify-start'} flex items-center w-full outline-none rounded-sm focus-visible:ring-1 focus-visible:ring-primary/50`}
+                className={`absolute ${side === 'right' ? 'right-0 pr-1 lg:pr-1.5 justify-end' : 'left-0 pl-1 lg:pl-1.5 justify-start'} flex items-center w-full outline-none rounded-sm focus-visible:ring-1 focus-visible:ring-primary/50`}
                 style={{ top: index * PITCH, height: PITCH }}
               >
                 {/* 动态宽度走内联样式（Tailwind 动态类名扫不到） */}

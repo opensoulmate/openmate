@@ -2053,7 +2053,7 @@ export function ChatClient() {
           const el = e.currentTarget;
           const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
           setShowScrollDown(!atBottom);
-        }} className="flex-1 min-w-0 overflow-y-auto pl-3 pr-11 lg:pl-6 lg:pr-12 py-3 lg:py-4 space-y-3 lg:space-y-4 chat-scrollbar relative">
+        }} className="flex-1 min-w-0 overflow-y-auto pl-2 pr-7 lg:pl-6 lg:pr-12 py-3 lg:py-4 space-y-3 lg:space-y-4 chat-scrollbar relative">
           {chatView !== 'messages' && <MessageViews view={chatView} data={viewData} onViewChange={(id) => setChatView(id as any)} />}
           {chatView === 'messages' && (<>
           {messages.length === 0 && urlSessionError && (
