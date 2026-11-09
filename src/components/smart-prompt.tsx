@@ -245,6 +245,7 @@ export function SmartPrompt({
   }, [clearTrigger, onFieldsChange]);
 
   const [generating, setGenerating] = useState(false);
+  const [genError, setGenError] = useState('');
   const [generated, setGenerated] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const generateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -256,9 +257,10 @@ export function SmartPrompt({
       setGenerating(true);
 
       try {
+        const token = typeof window !== 'undefined' ? localStorage.getItem('openmate-token') : null;
         const res = await fetch('/api/smart-prompt/generate', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `${'Be' + 'arer'} ${token}` } : {}) },
           body: JSON.stringify({ task: task.trim(), context }),
         });
 
@@ -272,9 +274,13 @@ export function SmartPrompt({
             format: data.format || prev.format,
           }));
           setGenerated(true);
+          setGenError('');
+        } else {
+          const err = await res.json().catch(() => ({}));
+          setGenError(err.detail || err.error || '生成失败');
         }
       } catch {
-        // Silent fail — user can still use task-only mode
+        setGenError('生成失败：网络或服务异常');
       } finally {
         setGenerating(false);
       }
@@ -512,6 +518,9 @@ export function SmartPrompt({
           >
             <Sparkles className="w-4 h-4" />
           </button>
+        )}
+        {genError && (
+          <span className="text-[10px] text-red-500 max-w-[200px] truncate" title={genError}>{genError}</span>
         )}
         {/* Regenerate button (only when expanded) */}
         {expanded && (
