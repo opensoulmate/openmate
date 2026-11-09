@@ -1,0 +1,488 @@
+# =====================================================================
+# acp-proxy/evolution_config.yaml
+# 进化目标分级配置 (schema: evolution/tiers/v1)
+# 用途: 将 831 个模块按"可验证性"分为 verifiable / needs_mock / excluded
+#       三级，并定义每级验证策略与重试策略。
+# =====================================================================
+
+schema_version: "1.0"
+config_id: evolution-tiers-v1
+config_path: acp-proxy/evolution_config.yaml
+generated_at: "2025-01-01T00:00:00Z"
+total_modules: 831
+classification_granularity: file
+checksum_required: true
+
+sections:
+
+  # -------------------------------------------------------------------
+  # 1. file_classification —— 文件 → 等级映射
+  #    verifiable = 512, needs_mock = 212, excluded = 107  => 831
+  # -------------------------------------------------------------------
+  file_classification:
+
+    level_semantics:
+      verifiable: "无外部依赖耦合，可独立执行验证命令，失败可归因为模块自身"
+      needs_mock: "与 ws_acp.py、agent-proxy 路由、外部服务存在耦合，必须注入 mock 才可验证"
+      excluded:   "非代码文件 / 生成物 / 已废弃模块，不参与进化验证"
+
+    # ---- 512 ---------------------------------------------------------
+    verifiable:
+      level: verifiable
+      module_count: 512
+      groups:
+        - id: frontend_components
+          description: "纯前端组件（UI 渲染、状态、样式），无 I/O 副作用"
+          count: 286
+          patterns:
+            - "frontend/components/**/*.{ts,tsx,js,jsx,vue}"
+            - "frontend/pages/**/*.{ts,tsx,js,jsx,vue}"
+            - "ui/**/*.{ts,tsx,js,jsx,vue}"
+            - "web/src/**/*.{ts,tsx,js,jsx,vue}"
+          exclusions: []
+        - id: pure_utils
+          description: "纯函数工具集 / 格式化 / 解析器"
+          count: 88
+          patterns:
+            - "frontend/utils/**/*.{ts,js}"
+            - "shared/utils/**/*.{ts,js,py}"
+            - "lib/pure/**/*.{ts,js,py}"
+        - id: pure_python_logic
+          description: "无 I/O、无网络、无进程调用的纯 Python 逻辑"
+          count: 62
+          patterns:
+            - "core/pure/**/*.py"
+            - "acp-proxy/pure_logic/**/*.py"
+            - "services/transform/**/*.py"
+        - id: schema_and_models
+          description: "数据模型 / schema / 常量定义"
+          count: 44
+          patterns:
+            - "**/schemas/**/*.py"
+            - "**/models/**/*.py"
+            - "**/*.schema.ts"
+            - "**/constants/**/*.{ts,py}"
+        - id: pure_tests
+          description: "自带断言、无外部 fixture 的纯测试用例"
+          count: 32
+          patterns:
+            - "tests/pure/**/*.py"
+            - "**/__tests__/**/*.{ts,tsx,js}"
+          include_globs_note: "测试文件需与被测文件同级进入 verifiable，否则降级为 needs_mock"
+      entry_examples:
+        - path: frontend/components/LayerCard.tsx
+          level: verifiable
+          rationale: "纯渲染组件，props 进 / JSX 出"
+        - path: shared/utils/timezone.ts
+          level: verifiable
+          rationale: "纯函数，无时钟注入以外的副作用"
+      sum_check: {verifiable: 512}
+
+    # ---- 212 ---------------------------------------------------------
+    needs_mock:
+      level: needs_mock
+      module_count: 212
+      mandatory_mock_targets:
+        - acp-proxy/ws_acp.py
+        - acp-proxy/agent_proxy/router/**
+        - acp-proxy/agent_proxy/registry.py
+        - acp-proxy/agent_proxy/dispatch.py
+      groups:
+        - id: ws_acp_and_websocket
+          description: "ws_acp.py 及 WebSocket / ACP 会话通道"
+          count: 18
+          patterns:
+            - "acp-proxy/ws_acp.py"
+            - "acp-proxy/ws_*.py"
+            - "**/websocket/**/*.{ts,js,py}"
+            - "**/acp/**/*session*.{ts,js,py}"
+          mock_plan: "mock_acp_session"
+        - id: agent_proxy_routing
+          description: "agent-proxy 路由、注册、分发、转发层"
+          count: 26
+          patterns:
+            - "acp-proxy/agent_proxy/router/**"
+            - "acp-proxy/agent_proxy/routes/**"
+            - "**/proxy/**/route*.{ts,js,py}"
+            - "**/agent-proxy/**/*.{ts,js,py}"
+          mock_plan: "mock_agent_router"
+        - id: external_api_clients
+          description: "外部 API 客户端 / SDK 适配器 / 三方 webhook"
+          count: 74
+          patterns:
+            - "**/clients/**/*.{ts,js,py}"
+            - "**/adapters/**/*.{ts,js,py}"
+            - "**/integrations/**/*.{ts,js,py}"
+          mock_plan: "mock_http_contract"
+        - id: persistence_layer
+          description: "数据库 / 缓存 / 文件系统持久化"
+          count: 51
+          patterns:
+            - "**/db/**/*.{ts,js,py}"
+            - "**/repositories/**/*.{ts,js,py}"
+            - "**/storage/**/*.{ts,js,py}"
+            - "**/cache/**/*.{ts,js,py}"
+          mock_plan: "mock_persistence"
+        - id: auth_and_secrets
+          description: "鉴权 / OAuth / 密钥读取"
+          count: 22
+          patterns:
+            - "**/auth/**/*.{ts,js,py}"
+            - "**/secrets/**/*.{ts,js,py}"
+            - "**/*oauth*.{ts,js,py}"
+          mock_plan: "mock_credentials"
+        - id: os_and_process
+          description: "os / subprocess / 系统调用 / 定时器耦合"
+          count: 21
+          patterns:
+            - "**/system/**/*.{ts,js,py}"
+            - "**/jobs/**/*.{ts,js,py}"
+            - "**/*worker*.{ts,js,py}"
+          mock_plan: "mock_os_env"
+      entry_examples:
+        - path: acp-proxy/ws_acp.py
+          level: needs_mock
+          rationale: "WebSocket 长连接 + ACP 协议握手，强外部依赖耦合"
+          required_mocks: ["acp.session", "ws.transport", "clock"]
+        - path: acp-proxy/agent_proxy/router/dispatch.py
+          level: needs_mock
+          rationale: "依赖 agent-proxy 路由表与远端 agent 注册中心"
+          required_mocks: ["agent_registry", "route_table", "http_forward"]
+      sum_check: {needs_mock: 212}
+
+    # ---- 107 ---------------------------------------------------------
+    excluded:
+      level: excluded
+      module_count: 107
+      groups:
+        - id: docs_markdown
+          description: "docs/*.md 等非代码文档文件"
+          count: 71
+          patterns:
+            - "docs/**/*.md"
+            - "**/*.md"
+            - "**/README*.md"
+            - "**/CHANGELOG*.md"
+          exclusion_reason: "non_code_asset"
+        - id: config_templates_assets
+          description: "配置模板 / 静态资源 / 图片 / 字体"
+          count: 19
+          patterns:
+            - "**/*.{yaml,yml,toml,json5}"
+            - "**/*.{png,jpg,svg,woff2}"
+            - "**/templates/**"
+          exclusion_reason: "non_executable"
+        - id: generated_and_vendored
+          description: "生成代码 / 第三方 vendored 代码"
+          count: 11
+          patterns:
+            - "**/generated/**"
+            - "**/vendor/**"
+            - "**/*.min.{js,css}"
+          exclusion_reason: "not_authored_here"
+        - id: legacy_deprecated
+          description: "已废弃 / 只读历史模块"
+          count: 6
+          patterns:
+            - "**/legacy/**"
+            - "**/deprecated/**"
+            - "**/*_deprecated.*"
+          exclusion_reason: "deprecated_readonly"
+      sum_check: {excluded: 107}
+
+    # ---- 显式标记：历史失败最多的两个文件 ---------------------------
+    explicit_overrides:
+      - path: docs/soulmate-roadmap.md
+        level: excluded
+        explicit: true
+        historical_failures: 49
+        historical_failure_rank: 1
+        exclusion_reason: "non_code_asset_with_churn"
+        permanent_quarantine: true
+        note: "历史失败 49 次，全库最高；已永久隔离，不再进入进化验证队列"
+        handling: "仅允许 front-matter / 链接完整性检查，禁止写入或重构"
+      - path: acp-proxy/evolution_v2.py
+        level: needs_mock
+        explicit: true
+        historical_failures: 6
+        historical_failure_rank: 2
+        required_mocks: ["evolution.runner", "fs_snapshot", "clock", "process_env"]
+        note: "历史失败 6 次；进化执行器自身，与 fs/process 强耦合，必须 mock 后验证"
+        handling: "进入进化验证队列，但固定走 mock_plan=mock_evolution_runner"
+
+    totals:
+      verifiable: 512
+      needs_mock: 212
+      excluded: 107
+      sum: 831
+      expected_total: 831
+      validation: "totals.sum == total_modules"
+
+  # -------------------------------------------------------------------
+  # 2. verification_strategy —— 每级验证命令模板
+  #    模板占位符: {{path}} {{level}} {{attempt}} {{mock_plan}} {{report}}
+  # -------------------------------------------------------------------
+  verification_strategy:
+
+    template_placeholders:
+      "{{path}}": "待验证文件相对路径（POSIX 分隔符）"
+      "{{level}}": "tier 等级"
+      "{{attempt}}": "当前尝试序号，从 1 开始"
+      "{{mock_plan}}": "needs_mock 级使用的 mock 方案名"
+      "{{report}}": "验证产物 JSON 输出路径"
+
+    global:
+      timeout_seconds: 600
+      shell: "bash -euo pipefail"
+      artifact_dir: "acp-proxy/evolution_artifacts/{{level}}/{{attempt}}"
+      report_format: json
+      fail_fast: false
+
+    by_level:
+
+      verifiable:
+        level: verifiable
+        intent: "直接执行，无 mock；失败即模块自身缺陷"
+        timeout_seconds: 300
+        pipeline:
+          - step: static_type_check
+            template: "npx tsc --noEmit --pretty false {{path}}"
+            required: true
+          - step: lint
+            template: "npx eslint --format json --output-file {{report}}.lint.json {{path}}"
+            required: true
+          - step: unit_test
+            template: "npx vitest run --reporter=json --outputFile={{report}}.test.json {{path}}"
+            required: true
+          - step: snapshot_assert
+            template: "python -m pytest tests/pure --snapshot-update=false -k '{{path}}'"
+            required: false```yaml
+            exit_criteria: "static_type_check && lint && unit_test"
+            verdict_logic: "all_required_pass = PASS; any_required_fail = FAIL"
+
+      needs_mock:
+        level: needs_mock
+        intent: "注入 mock 后验证；mock 注入失败归类为 infra_error，不计为模块失败"
+        timeout_seconds: 420
+        mock_registry:
+          mock_acp_session:
+            adapter: "adapters/mock_acp_session.py"
+            fixtures:
+              - "fixtures/acp/handshake.json"
+              - "fixtures/acp/message_stream.jsonl"
+            stubs: ["acp.session", "ws.transport", "clock"]
+            notes: "冻结时钟，注入确定性握手响应与消息序列"
+          mock_agent_router:
+            adapter: "adapters/mock_agent_router.py"
+            fixtures:
+              - "fixtures/agent_router/route_table.json"
+              - "fixtures/agent_registry/peers.json"
+            stubs: ["agent_registry", "route_table", "http_forward"]
+            notes: "本地路由表 + 假 peer 注册中心，禁用真实转发"
+          mock_http_contract:
+            adapter: "adapters/mock_http_contract.py"
+            fixtures:
+              - "fixtures/http/openapi_contracts/*.yaml"
+            stubs: ["http_client", "retry_policy_client", "clock"]
+            notes: "基于 contract schema 生成确定性响应，断言请求符合契约"
+          mock_persistence:
+            adapter: "adapters/mock_persistence.py"
+            fixtures:
+              - "fixtures/db/schema.sql"
+              - "fixtures/db/seed/*.json"
+            stubs: ["db_connection", "cache_client", "fs_write"]
+            notes: "内存 SQLite + 内存 cache，fs 写入重定向到 tmpfs"
+          mock_credentials:
+            adapter: "adapters/mock_credentials.py"
+            fixtures:
+              - "fixtures/secrets/dummy_tokens.json"
+            stubs: ["secret_reader", "oauth_client", "env"]
+            notes: "注入假凭据，禁止读取真实 secrets/env"
+          mock_os_env:
+            adapter: "adapters/mock_os_env.py"
+            fixtures:
+              - "fixtures/os/sandbox.json"
+            stubs: ["os.environ", "subprocess", "time.time", "random"]
+            notes: "沙箱化系统调用，固定种子，固定时钟"
+          mock_evolution_runner:
+            adapter: "adapters/mock_evolution_runner.py"
+            fixtures:
+              - "fixtures/evolution/runner_state.json"
+            stubs: ["evolution.runner", "fs_snapshot", "clock", "process_env"]
+            notes: "为 evolution_v2.py 专用；快照化 fs 读写，固定进程环境"
+        pipeline:
+          - step: mock_injection
+            template: "python -m evolution.mock_inject --plan {{mock_plan}} --target {{path}} --attempt {{attempt}}"
+            required: true
+            on_fail: "infra_error"
+          - step: static_type_check
+            template: "python -m mypy --ignore-missing-imports --no-error-summary {{path}}"
+            required: true
+          - step: lint
+            template: "python -m ruff check --format json --output-file {{report}}.lint.json {{path}}"
+            required: true
+          - step: unit_test
+            template: "python -m pytest {{path}} --json-report --json-report-file={{report}}.test.json -q"
+            required: true
+            env:
+              EVOLUTION_MOCK_ACTIVE: "1"
+              EVOLUTION_MOCK_PLAN: "{{mock_plan}}"
+          - step: isolation_assert
+            template: "python -m evolution.isolation_check --target {{path}} --forbid-network --forbid-real-fs"
+            required: true
+            notes: "确保被测模块未绕过 mock 直连外部资源"
+            verdict_logic: "all_required_pass = PASS; mock_injection_fail = INFRA_ERROR; any_other_fail = FAIL"
+
+      excluded:
+        level: excluded
+        intent: "不执行代码级验证；仅做非代码完整性 / 元数据检查"
+        timeout_seconds: 60
+        pipeline:
+          - step: exists_check
+            template: "test -f {{path}}"
+            required: true
+          - step: encoding_check
+            template: "file --mime-encoding {{path}} | grep -q 'us-ascii\\|utf-8'"
+            required: true
+          - step: markdown_lint
+            template: "npx markdownlint --json --output {{report}}.md.json {{path}}"
+            required: false
+            applies_to: ["docs_markdown"]
+          - step: link_integrity
+            template: "python -m evolution.link_check {{path}}"
+            required: false
+            applies_to: ["docs_markdown"]
+          - step: quarantine_probe
+            template: "python -m evolution.quarantine_probe --target {{path}} --expect 'excluded'"
+            required: true
+            applies_to: ["docs/soulmate-roadmap.md"]
+            notes: "soulmate-roadmap.md 专属：断言其被永久隔离，不得被进化写入"
+            verdict_logic: "all_required_pass = PASS; any_required_fail = FAIL"
+
+    verdict_definitions:
+      PASS: "所有 required 步骤退出码为 0"
+      FAIL: "任一 required 步骤退出码非 0，且非 mock 注入步骤"
+      INFRA_ERROR: "mock 注入或环境准备步骤失败，与被测模块无关"
+      TIMEOUT: "单步骤或整体超时"
+      QUARANTINED: "命中永久隔离规则，直接终态，不进入重试"
+
+  # -------------------------------------------------------------------
+  # 3. retry_policy —— 最大重试数 / 退避因子 / 冷却窗口
+  # -------------------------------------------------------------------
+  retry_policy:
+
+    global_defaults:
+      max_retries: 3
+      backoff_factor: 2.0
+      cooldown_seconds: 30
+      jitter: "full"
+      jitter_seed: null
+      timeout_cap_seconds: 600
+      total_wall_clock_budget_seconds: 3600
+      circuit_breaker:
+        enabled: true
+        failure_threshold: 5
+        window_seconds: 600
+        open_state_seconds: 900
+        half_open_probes: 2
+
+    backoff_formula: "delay_n = min(cooldown_seconds * (backoff_factor ** (n-1)) + jitter_n, timeout_cap_seconds)"
+
+    by_level:
+
+      verifiable:
+        max_retries: 2
+        backoff_factor: 1.5
+        cooldown_seconds: 15
+        retry_on: [FAIL, TIMEOUT]
+        no_retry_on: [PASS, QUARANTINED]
+        notes: "纯模块，确定性高，重试预算收紧"
+
+      needs_mock:
+        max_retries: 4
+        backoff_factor: 2.5
+        cooldown_seconds: 45
+        retry_on: [FAIL, TIMEOUT, INFRA_ERROR]
+        no_retry_on: [PASS, QUARANTINED]
+        infra_error_budget: 2
+        infra_error_budget_note: "INFRA_ERROR 不计入模块失败，但同一文件最多允许 2 次，超出则标记 infra_unstable"
+        mock_plan_failover:
+          enabled: true
+          on_repeated_mock_failure: "escalate_to_manual_review"
+          escalate_threshold: 3
+
+      excluded:
+        max_retries: 1
+        backoff_factor: 1.0
+        cooldown_seconds: 5
+        retry_on: [TIMEOUT]
+        no_retry_on: [PASS, FAIL, QUARANTINED]
+        notes: "仅元数据检查，失败基本无意义，重试一次即可"
+
+    per_file_overrides:
+      - path: docs/soulmate-roadmap.md
+        max_retries: 0
+        backoff_factor: 1.0
+        cooldown_seconds: 0
+        permanent_quarantine: true
+        quarantine_reason: "historical_failures_49"
+        historical_failures: 49
+        action_on_detected: "skip_and_log"
+        log_level: WARNING
+        notes: "历史失败 49 次；永久隔离，重试数强制为 0，检测到即跳过并记录"
+      - path: acp-proxy/evolution_v2.py
+        max_retries: 5
+        backoff_factor: 3.0
+        cooldown_seconds: 60
+        retry_on: [FAIL, TIMEOUT, INFRA_ERROR]
+        historical_failures: 6
+        pin_mock_plan: "mock_evolution_runner"
+        require_snapshot_fs: true
+        manual_review_on_exhaust: true
+        notes: "历史失败 6 次；进化执行器自身，放宽重试但必须固定 mock 方案并使用 fs 快照；重试耗尽后强制人工评审"
+
+    escalation:
+      max_auto_retries_global: 5
+      on_exhaustion: "manual_review"
+      manual_review_queue: "acp-proxy/evolution_artifacts/manual_review.jsonl"
+      notification:
+        channel: "evolution-alerts"
+        severity_map:
+          FAIL: "warning"
+          INFRA_ERROR: "info"
+          QUARANTINED: "debug"
+          REPEAT_EXHAUSTION: "critical"
+
+    metrics:
+      emit_prometheus: true
+      counters:
+        - "evolution_retries_total{level,path}"
+        - "evolution_infra_errors_total{mock_plan}"
+        - "evolution_quarantine_hits_total{path}"
+        - "evolution_manual_reviews_total{reason}"
+      histograms:
+        - "evolution_backoff_delay_seconds{level}"
+        - "evolution_verdict_latency_seconds{level}"
+
+# -------------------------------------------------------------------
+# 顶层一致性校验（由加载器执行，任何一条不通过则拒绝启动）
+# -------------------------------------------------------------------
+invariants:
+  - id: totals_match
+    assert: "sections.file_classification.totals.sum == total_modules"
+  - id: tier_disjoint
+    assert: "verifiable ∩ needs_mock == ∅ and verifiable ∩ excluded == ∅ and needs_mock ∩ excluded == ∅"
+  - id: all_patterns_covers_totals
+    assert: "count(matching_paths(verifiable)) == 512 and count(matching_paths(needs_mock)) == 212 and count(matching_paths(excluded)) == 107"
+  - id: explicit_overrides_respected
+    assert: "overrides['docs/soulmate-roadmap.md'].level == 'excluded' and overrides['acp-proxy/evolution_v2.py'].level == 'needs_mock'"
+  - id: no_retry_on_quarantined
+    assert: "per_file_overrides['docs/soulmate-roadmap.md'].max_retries == 0"
+  - id: ws_acp_marked_needs_mock
+    assert: "'acp-proxy/ws_acp.py' ∈ file_classification.needs_mock.mandatory_mock_targets"
+  - id: docs_markdown_excluded
+    assert: "file_classification.excluded.groups['docs_markdown'].patterns includes 'docs/**/*.md'"
+
+checksum:
+  algorithm: sha256
+  value: null   # 由生成器填充；加载时校验

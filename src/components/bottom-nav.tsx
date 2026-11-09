@@ -266,7 +266,7 @@ export function BottomNav({ totalUnread = 0, onOpenConversations }: BottomNavPro
                     </span>
                   )}
                 </div>
-                <span className="truncate max-w-[42px] leading-tight">{t(item.label)}</span>
+                <span className="truncate max-w-[56px] leading-tight">{t(item.label)}</span>
               </button>
             ) : (
               <Link
@@ -288,7 +288,7 @@ export function BottomNav({ totalUnread = 0, onOpenConversations }: BottomNavPro
                     </span>
                   )}
                 </div>
-                <span className="truncate max-w-[42px] leading-tight">{t(item.label)}</span>
+                <span className="truncate max-w-[56px] leading-tight">{t(item.label)}</span>
               </Link>
             );
           })}

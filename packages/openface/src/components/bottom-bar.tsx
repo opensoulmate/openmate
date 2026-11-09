@@ -57,7 +57,7 @@ export function BottomBar({
   return (
     <nav
       className={cn(
-        "relative z-20 shrink-0 h-12 bg-background border-t border-border safe-area-bottom",
+        "relative z-20 shrink-0 min-h-12 bg-background border-t border-border safe-area-bottom",
         showBump && "nav-wave",
         className
       )}
