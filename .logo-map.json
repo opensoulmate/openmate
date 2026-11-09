@@ -1,0 +1,246 @@
+{
+  "hermes": {
+    "logo": "https://hermes-agent.nousresearch.com/icon.png",
+    "source": "Hermes Agent 官方形象：hermes-agent.nousresearch.com 站点 icon（黑白少女插画＝用户所述\"女孩形象\"），与 web-assets.nousresearch.com 官方 CDN 的 hermes-agent/icon.png 同哈希；不是 avatars.githubusercontent.com/u/143723048（该图被用户判定为错误 logo）。已验证 200 image/png。"
+  },
+  "claude": {
+    "logo": "https://github.com/anthropics.png?size=64",
+    "source": "Anthropic（Claude 出品方）官方 GitHub 组织头像。已验证 200 image/png。"
+  },
+  "codex": {
+    "logo": "https://github.com/openai.png?size=64",
+    "source": "OpenAI 官方 GitHub 组织头像（codex 为 openai/openai-codex 官方项目，与任务示例一致）。已验证 200 image/png。"
+  },
+  "mimo": {
+    "logo": "https://github.com/XiaomiMiMo.png?size=64",
+    "source": "Xiaomi MiMo 官方 GitHub 组织头像（小米 MiMo 团队，MiMo-Code/MiMo 出品组织）。已验证 200 image/jpeg。"
+  },
+  "opencode": {
+    "logo": "https://opencode.ai/apple-touch-icon-v3.png",
+    "source": "opencode.ai 官网品牌图标（opencode 产品标）。仓库现属 anomalyco 组织（原 sst/opencode），组织头像是 anomalyco 公司字标（视觉核对为 A 字笔刷标）而非 opencode 产品标，故用官网图标。已验证 200 image/png。"
+  },
+  "aider": {
+    "logo": "https://github.com/Aider-AI.png?size=64",
+    "source": "Aider 官方 GitHub 组织 Aider-AI 头像。已验证 200 image/png。"
+  },
+  "gemini": {
+    "logo": "https://github.com/google-gemini.png?size=64",
+    "source": "Google Gemini 官方 GitHub 组织 google-gemini 头像（gemini-cli 出品组织）。已验证 200 image/jpeg。"
+  },
+  "copilot": {
+    "logo": "https://github.com/github.png?size=64",
+    "source": "GitHub Copilot 所属公司 GitHub 的官方组织头像（按规则 1 取 GitHub 组织头像）。已验证 200 image/png。"
+  },
+  "amazon-q": {
+    "logo": "https://AmazonWebServices.gallerycdn.vsassets.io/extensions/amazonwebservices/amazon-q-vscode/2.9.0/1793290073675/Microsoft.VisualStudio.Services.Icons.Default",
+    "source": "AWS 在 VS Code Marketplace 官方发布的 Amazon Q Developer 扩展图标（渐变六边形白 Q 标，视觉核对确认为 Amazon Q logo）；aws.amazon.com 页面未提供独立产品 logo 静态资源，Marketplace 为 AWS 官方发布渠道。已验证 200 image/png。"
+  },
+  "qwen": {
+    "logo": "https://github.com/QwenLM.png?size=64",
+    "source": "Qwen 官方 GitHub 组织 QwenLM 头像。已验证 200 image/png。"
+  },
+  "deepseek": {
+    "logo": "https://github.com/deepseek-ai.png?size=64",
+    "source": "DeepSeek 官方 GitHub 组织 deepseek-ai 头像。已验证 200 image/png。"
+  },
+  "devin": {
+    "logo": "https://devin.ai/icon.png",
+    "source": "Devin 官网 devin.ai 站点品牌图标（站点 manifest icon）。已验证 200 image/png。"
+  },
+  "open-interpreter": {
+    "logo": "https://github.com/OpenInterpreter.png?size=64",
+    "source": "Open Interpreter 官方 GitHub 组织 OpenInterpreter 头像。已验证 200 image/png。"
+  },
+  "gptme": {
+    "logo": "https://github.com/gptme.png?size=64",
+    "source": "gptme 官方 GitHub 组织头像（\"Your agent in your terminal\"，gptme/gptme 出品组织）。已验证 200 image/png。"
+  },
+  "mentat": {
+    "logo": "https://github.com/AbanteAI.png?size=64",
+    "source": "Mentat 官方 GitHub 组织 AbanteAI 头像（AbanteAI/mentat 出品组织）。已验证 200 image/png。"
+  },
+  "sweep": {
+    "logo": "https://github.com/sweepai.png?size=64",
+    "source": "Sweep 官方 GitHub 组织 sweepai 头像（sweepai/sweep 出品组织）。已验证 200 image/png。"
+  },
+  "cursor-agent": {
+    "logo": "https://github.com/getcursor.png?size=64",
+    "source": "Cursor 官方 GitHub 组织 getcursor 头像（\"The Open Source AI Code Editor\"）。已验证 200 image/jpeg。"
+  },
+  "windsurf": {
+    "logo": "https://windsurf.com/favicon.svg",
+    "source": "windsurf.com 官方 favicon（黑色风帆 W 标）；与 Simple Icons \"Windsurf\" 字形并排视觉核对为同一 logo。windsurf.com 主站已并入 Cognition/Devin（跳转 devin.ai/desktop），但该域静态 favicon 仍是 Windsurf 品牌图形。已验证 200 image/svg+xml。"
+  },
+  "kiro": {
+    "logo": "https://kiro.dev/apple-icon.png",
+    "source": "Kiro 官网 kiro.dev 官方应用图标（AWS Kiro IDE 官方站）。已验证 200 image/png。"
+  },
+  "cline": {
+    "logo": "https://github.com/cline.png?size=64",
+    "source": "Cline 官方 GitHub 组织头像（cline/cline 出品组织）。已验证 200 image/png。"
+  },
+  "roo": {
+    "logo": "https://github.com/RooCodeInc.png?size=64",
+    "source": "Roo Code 官方 GitHub 组织 RooCodeInc 头像。已验证 200 image/png。"
+  },
+  "kilo": {
+    "logo": "https://github.com/Kilo-Org.png?size=64",
+    "source": "Kilo Code 官方 GitHub 组织 Kilo-Org 头像。已验证 200 image/png。"
+  },
+  "continue": {
+    "logo": "https://github.com/continuedev.png?size=64",
+    "source": "Continue 官方 GitHub 组织 continuedev 头像。已验证 200 image/png。"
+  },
+  "tabby": {
+    "logo": "https://github.com/TabbyML.png?size=64",
+    "source": "Tabby 官方 GitHub 组织 TabbyML 头像。已验证 200 image/png。"
+  },
+  "supermaven": {
+    "logo": "https://supermaven.com/apple-touch-icon.png",
+    "source": "SuperMaven 官网 supermaven.com 官方应用图标（GitHub 无官方组织，supermaven/supermaven-ai 均 404）。已验证 200 image/png。"
+  },
+  "codeium": {
+    "logo": "https://github.com/Codeium.png?size=64",
+    "source": "Codeium 官方 GitHub 组织头像（组织名 codeium）。已验证 200 image/png。"
+  },
+  "codium": {
+    "logo": "https://github.com/Codium-ai.png?size=64",
+    "source": "CodiumAI（现 Qodo）官方 GitHub 组织 Codium-ai 头像（组织显示名 Qodo，Codium-ai/cover-agent 出品组织）。已验证 200 image/png。"
+  },
+  "ollama": {
+    "logo": "https://github.com/ollama.png?size=64",
+    "source": "Ollama 官方 GitHub 组织头像。已验证 200 image/png。"
+  },
+  "lmstudio": {
+    "logo": "https://lmstudio.ai/assets/marketing/logo-192x192.png",
+    "source": "LM Studio 官网 lmstudio.ai 官方 logo 静态资源（assets/marketing/logo-192x192.png）。已验证 200 image/png。"
+  },
+  "jan": {
+    "logo": "https://github.com/janhq.png?size=64",
+    "source": "Jan 官方 GitHub 组织 janhq 头像（janhq/jan 出品组织）。已验证 200 image/png。"
+  },
+  "open-webui": {
+    "logo": "https://github.com/open-webui.png?size=64",
+    "source": "Open WebUI 官方 GitHub 组织头像。已验证 200 image/png。"
+  },
+  "chatbox": {
+    "logo": "https://github.com/chatboxai.png?size=64",
+    "source": "Chatbox 官方 GitHub 组织 chatboxai 头像（chatboxai/chatbox，42k stars，\"Powerful AI Client\"）；chatboxai.io 域名在本网络 DNS 不可解析，故取官方 GitHub 组织头像。已验证 200 image/png。"
+  },
+  "lobechat": {
+    "logo": "https://github.com/lobehub.png?size=64",
+    "source": "LobeChat 官方 GitHub 组织 lobehub 头像（lobehub/lobe-chat 出品组织）。已验证 200 image/png。"
+  },
+  "dify": {
+    "logo": "https://github.com/langgenius.png?size=64",
+    "source": "Dify 官方 GitHub 组织 langgenius 头像（langgenius/dify 出品组织）。已验证 200 image/png。"
+  },
+  "flowise": {
+    "logo": "https://github.com/FlowiseAI.png?size=64",
+    "source": "Flowise 官方 GitHub 组织 FlowiseAI 头像。已验证 200 image/png。"
+  },
+  "n8n-ai": {
+    "logo": "https://github.com/n8n-io.png?size=64",
+    "source": "n8n 官方 GitHub 组织 n8n-io 头像。已验证 200 image/jpeg。"
+  },
+  "perplexity": {
+    "logo": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/f6/9c/f8/f69cf8b0-95fb-1a4c-0053-1302d8479a69/AppIcon-0-0-1x_U007epad-0-0-0-1-0-85-220.png/512x512bb.jpg",
+    "source": "Perplexity 官方 iOS 应用图标（App Store 记录 id 1668000334，发布者 Perplexity AI Inc.）；与 Perplexity 官方 logo 几何并排核对一致。perplexity.ai 域名在本网络 DNS 被屏蔽无法 curl，改用 Apple 官方应用渠道。已验证 200 image/jpeg。"
+  },
+  "phind": {
+    "logo": "https://phind.gallerycdn.vsassets.io/extensions/phind/phind/0.25.4/1725388473639/Microsoft.VisualStudio.Services.Icons.Default",
+    "source": "Phind 在 VS Code Marketplace 官方发布的扩展图标（发布者 phind）；phind.com 被 Cloudflare 403 无法 curl，且 GitHub \"phind\" 组织实为 phind.org（非该公司）故不用。已验证 200 image/png。"
+  },
+  "you-cli": {
+    "logo": "https://github.com/portpowered.png?size=64",
+    "source": "you-cli 即 YOU agent factory 的 `you` CLI（github.com/portpowered/you-agent-factory，官网 youagentfactory.com：\"YOU is a cross-platform single binary CLI\"），logo 为该 GitHub 组织头像。备注：另有同名 `you` CLI 产品 you.md（其 CLI 仅为附属工具），若你指的是它请改用 https://you.md/icon.svg；npm \"you-cli\" 是 2018 年无关占位包（仓库已删）。已验证 200 image/png。"
+  },
+  "autogpt": {
+    "logo": "https://github.com/Significant-Gravitas.png?size=64",
+    "source": "AutoGPT 官方 GitHub 组织 Significant-Gravitas 头像。已验证 200 image/png。"
+  },
+  "crewai": {
+    "logo": "https://github.com/crewAIInc.png?size=64",
+    "source": "CrewAI 官方 GitHub 组织 crewAIInc 头像。已验证 200 image/png。"
+  },
+  "autogen": {
+    "logo": "https://github.com/microsoft.png?size=64",
+    "source": "AutoGen 为微软官方项目（microsoft/autogen），取 microsoft 组织头像。已验证 200 image/png。"
+  },
+  "langchain": {
+    "logo": "https://github.com/langchain-ai.png?size=64",
+    "source": "LangChain 官方 GitHub 组织 langchain-ai 头像。已验证 200 image/png。"
+  },
+  "llamaindex": {
+    "logo": "https://github.com/run-llama.png?size=64",
+    "source": "LlamaIndex 官方 GitHub 组织 run-llama 头像。已验证 200 image/png。"
+  },
+  "semantic-kernel": {
+    "logo": "https://github.com/microsoft.png?size=64",
+    "source": "Semantic Kernel 为微软官方项目（microsoft/semantic-kernel），取 microsoft 组织头像。已验证 200 image/png。"
+  },
+  "haystack": {
+    "logo": "https://github.com/deepset-ai.png?size=64",
+    "source": "Haystack 官方 GitHub 组织 deepset-ai 头像（deepset-ai/haystack 出品组织）。已验证 200 image/png。"
+  },
+  "k9s": {
+    "logo": "https://github.com/derailed.png?size=64",
+    "source": "k9s 官方仓库 derailed/k9s 所属 GitHub 账号头像（按规则 1 取项目所有者 GitHub 头像）。已验证 200 image/jpeg。"
+  },
+  "lazydocker": {
+    "logo": "https://github.com/jesseduffield.png?size=64",
+    "source": "lazydocker 官方仓库 jesseduffield/lazydocker 所属 GitHub 账号头像（按规则 1 取项目所有者 GitHub 头像）。已验证 200 image/jpeg。"
+  },
+  "terraform": {
+    "logo": "https://github.com/hashicorp.png?size=64",
+    "source": "Terraform 所属 HashiCorp 官方 GitHub 组织头像。已验证 200 image/png。"
+  },
+  "ansible": {
+    "logo": "https://github.com/ansible.png?size=64",
+    "source": "Ansible 官方 GitHub 组织头像（ansible/ansible 出品组织）。已验证 200 image/png。"
+  },
+  "openclaw": {
+    "logo": "https://github.com/openclaw.png?size=64",
+    "source": "OpenClaw 官方 GitHub 组织头像（openclaw/openclaw，OpenClaw Foundation 项目）。已验证 200 image/jpeg。"
+  },
+  "pi-agent": {
+    "logo": "https://pi.dev/logo-auto.svg",
+    "source": "Pi agent harness 官网 pi.dev 官方 logo（三色 π 图形）；OpenMate 内部亦以 π 标识该 agent（app-shell.tsx AGENT_ICONS），docs/agent-architecture* 的 pi.md 研究对象即 earendil-works/pi（原 mariozechner/pi-mono）。已验证 200 image/svg+xml。"
+  },
+  "openai-agents": {
+    "logo": "https://github.com/openai.png?size=64",
+    "source": "OpenAI Agents SDK 为 openai 官方项目（openai/openai-agents-python），取 openai 组织头像。已验证 200 image/png。"
+  },
+  "smolagents": {
+    "logo": "https://github.com/huggingface.png?size=64",
+    "source": "smolagents 为 Hugging Face 官方项目（huggingface/smolagents），取 huggingface 组织头像。已验证 200 image/png。"
+  },
+  "pydantic-ai": {
+    "logo": "https://github.com/pydantic.png?size=64",
+    "source": "Pydantic AI 官方 GitHub 组织 pydantic 头像（pydantic/pydantic-ai 出品组织）。已验证 200 image/png。"
+  },
+  "letta": {
+    "logo": "https://github.com/letta-ai.png?size=64",
+    "source": "Letta 官方 GitHub 组织 letta-ai 头像。已验证 200 image/png。"
+  },
+  "browser-use": {
+    "logo": "https://github.com/browser-use.png?size=64",
+    "source": "Browser Use 官方 GitHub 组织头像。已验证 200 image/png。"
+  },
+  "mastra": {
+    "logo": "https://github.com/mastra-ai.png?size=64",
+    "source": "Mastra 官方 GitHub 组织 mastra-ai 头像。已验证 200 image/png。"
+  },
+  "composio": {
+    "logo": "https://github.com/ComposioHQ.png?size=64",
+    "source": "Composio 官方 GitHub 组织 ComposioHQ 头像。已验证 200 image/png。"
+  },
+  "agentstack": {
+    "logo": "https://github.com/agentstack-ai.png?size=64",
+    "source": "AgentStack 官方 GitHub 组织 agentstack-ai 头像（agentstack-ai/AgentStack 出品组织）。已验证 200 image/png。"
+  },
+  "phidata": {
+    "logo": "https://github.com/phidatahq.png?size=64",
+    "source": "Phidata 官方 GitHub 组织 phidatahq 头像（后更名 agno，组织头像仍为 phidata 品牌）。已验证 200 image/png。"
+  }
+}

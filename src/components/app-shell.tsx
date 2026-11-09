@@ -465,7 +465,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <EChartsThemeProvider>
       {/* Top utility bar — full screen width */}
       <ShellTitleBar />
-      <div className="flex items-center">
+      {/* shrink-0：整行永不被 flex 压矮，防止图标溢出后被下方内容区背景盖住 */}
+      <div className="flex shrink-0 items-center">
         <div className="flex-1 min-w-0">
           <TopBar
             eventCount={eventCount}

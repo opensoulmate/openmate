@@ -1,0 +1,269 @@
+<section style="margin:0 auto;max-width:690px;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;color:#1f2937;font-size:16px;line-height:1.9;"><section style="margin:0 0 1.5em;border-radius:16px;overflow:hidden;position:relative;">
+<div style="background:linear-gradient(180deg,#b0c4de 0%,#c8d6e5 35%,#dfe6ed 65%,#ecf0f5 100%);padding:2.5em 1.5em 2em;text-align:center;position:relative;min-height:140px;">
+<p style="margin:0 0 0.8em;font-size:14px;color:#2c3e50;font-weight:600;text-align:center;text-indent:0;letter-spacing:0.5px;position:relative;z-index:2;">👆 点击上方蓝字关注我，获取更多干货</p>
+<div style="position:absolute;top:20px;left:8%;width:90px;height:32px;background:rgba(255,255,255,0.6);border-radius:20px;z-index:0;"></div>
+<div style="position:absolute;top:14px;left:15%;width:60px;height:25px;background:rgba(255,255,255,0.45);border-radius:20px;z-index:0;"></div>
+<div style="position:absolute;top:45px;right:8%;width:80px;height:30px;background:rgba(255,255,255,0.5);border-radius:20px;z-index:0;"></div>
+<div style="position:absolute;top:40px;right:15%;width:55px;height:22px;background:rgba(255,255,255,0.35);border-radius:20px;z-index:0;"></div>
+<div style="margin:0 auto 10px;position:relative;z-index:1;"><span style="font-size:40px;line-height:1;">⛅</span></div>
+<p style="margin:0.3em 0 0;font-size:14px;color:#34495e;text-indent:0;position:relative;z-index:1;">沈阳 · 阴天 · 3°C ~ 16°C</p>
+<p style="margin:0.2em 0 0;font-size:11px;color:#5d6d7e;text-indent:0;position:relative;z-index:1;">⛅ 多云转晴，心情正好</p>
+</div></section><section style="margin:0 0 1.5em;border-radius:16px;overflow:hidden;
+    box-shadow:0 8px 32px rgba(147,112,219,0.2),0 0 16px rgba(147,112,219,0.2);">
+<div style="background:linear-gradient(135deg,#9370db,#ba55d3,#dda0dd);padding:1.2em 1.5em;">
+<p style="margin:0;font-size:14px;color:rgba(255,255,255,0.95);letter-spacing:1px;text-indent:0;">📋 文章概览</p>
+<p style="margin:0.3em 0 0;font-size:20px;color:#fff;font-weight:700;letter-spacing:0.5px;text-indent:0;">44.Semantic路由架构分析</p>
+</div>
+<div style="padding:1.2em 1.5em;background:linear-gradient(135deg,rgba(240,244,255,0.9),rgba(230,238,255,0.95)) padding-box,linear-gradient(90deg,#9370db,#ba55d3,#dda0dd) border-box;border:2px solid transparent;border-left:3px solid #9370db;border-right:3px solid #ba55d3;">
+<div style="display:flex;align-items:flex-start;margin:0.5em 0;">
+<span style="display:inline-flex;align-items:center;justify-content:center;
+                min-width:22px;height:22px;border-radius:50%;background:#ff6b6b;
+                color:#fff;font-size:12px;font-weight:700;margin-right:10px;flex-shrink:0;">1</span>
+<span style="line-height:1.6;color:#2d3748;">Stars: 3,893 | License: MIT | 语言: Python | 版本: 0.1.2</span>
+</div>
+<div style="display:flex;align-items:flex-start;margin:0.5em 0;">
+<span style="display:inline-flex;align-items:center;justify-content:center;
+                min-width:22px;height:22px;border-radius:50%;background:#ffd93d;
+                color:#fff;font-size:12px;font-weight:700;margin-right:10px;flex-shrink:0;">2</span>
+<span style="line-height:1.6;color:#2d3748;">，通过向量空间的语义相似度替代 LLM 推理来做出路由决策</span>
+</div>
+<div style="display:flex;align-items:flex-start;margin:0.5em 0;">
+<span style="display:inline-flex;align-items:center;justify-content:center;
+                min-width:22px;height:22px;border-radius:50%;background:#6bcb77;
+                color:#fff;font-size:12px;font-weight:700;margin-right:10px;flex-shrink:0;">3</span>
+<span style="line-height:1.6;color:#2d3748;">其核心理念是：与其等待缓慢的 LLM 生成来决定调用哪个工具，不如用语义向量的余弦相似度在毫秒级完成决策</span>
+</div>
+<div style="display:flex;align-items:flex-start;margin:0.5em 0;">
+<span style="display:inline-flex;align-items:center;justify-content:center;
+                min-width:22px;height:22px;border-radius:50%;background:#4d96ff;
+                color:#fff;font-size:12px;font-weight:700;margin-right:10px;flex-shrink:0;">4</span>
+<span style="line-height:1.6;color:#2d3748;">项目采用清晰的四层分层架构：</span>
+</div>
+<div style="display:flex;align-items:flex-start;margin:0.5em 0;">
+<span style="display:inline-flex;align-items:center;justify-content:center;
+                min-width:22px;height:22px;border-radius:50%;background:#ff6b6b;
+                color:#fff;font-size:12px;font-weight:700;margin-right:10px;flex-shrink:0;">5</span>
+<span style="line-height:1.6;color:#2d3748;">├── schema.py         # 核心数据结构（Message、SparseEmbedding、Metric、Utterance 等）</span>
+</div>
+</div>
+<div style="display:flex;justify-content:space-between;padding:0.8em 1.5em;
+        background:linear-gradient(135deg,rgba(230,238,255,0.95),rgba(240,244,255,0.98)) padding-box,linear-gradient(90deg,#ba55d3,#dda0dd) border-box;border-top:2px solid transparent;font-size:13px;color:#6b7280;">
+<span>📝 7501 字</span>
+<span>⏱ 约 18 分钟阅读</span>
+<span>📑 深度长文</span>
+</div>
+</section>
+<blockquote style="margin:1.2em 0;padding:1.2em 1.5em;background:#f5f8ff;border:2px solid #3b6dd8;border-radius:12px;color:#1f2937;line-height:1.8;box-shadow:0 4px 16px rgba(59,109,216,0.15);">
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;">项目：<a href="https://github.com/aurelio-labs/semantic-router" style="color:#1f57c3;text-decoration:underline;word-break:break-all;" target="_blank">aurelio-labs/semantic-router</a><br/>
+Stars: 3,893 | License: MIT | 语言: Python | 版本: 0.1.2</p>
+</blockquote>
+<p style="margin:1em 0;padding:0.75em 0.9em;background:#f8fafc;border:1px solid #edf2f7;border-radius:6px;line-height:1.9;font-size:16px;color:#243044;text-indent:2em;">Semantic Router 是一个<strong style="font-weight:700;color:#1f2937;">超高速语义决策层</strong>，通过向量空间的语义相似度替代 LLM 推理来做出路由决策。其核心理念是：与其等待缓慢的 LLM 生成来决定调用哪个工具，不如用语义向量的余弦相似度在毫秒级完成决策。</p>
+<h2 style="margin:50px 0 32px;padding:0;text-indent:0;background:transparent;border:none;border-radius:0;box-shadow:none;"><div style="display:flex;align-items:center;gap:16px;margin-bottom:8px;"><span style="font-size:11px;font-weight:400;letter-spacing:3px;text-transform:uppercase;color:#8464c5;white-space:nowrap;">CHAPTER</span><span style="flex:1;height:1px;background:rgba(147,112,219,0.4);"></span></div><div style="display:flex;align-items:stretch;gap:16px;margin-bottom:4px;flex-wrap:nowrap;"><span style="font-size:48px;font-weight:900;line-height:1;color:rgba(147,112,219,0.4);font-style:italic;min-width:50px;">01</span><div style="display:flex;flex-direction:column;justify-content:center;min-width:0;flex:1;"><span style="font-size:22px;font-weight:700;color:#7a5cc0;line-height:1.4;">整体架构与模块划分</span><span style="font-size:11px;font-weight:400;color:rgba(147,112,219,0.5);letter-spacing:1px;margin-top:4px;">CHAPTER · 章节内容</span></div></div></h2><div style="margin:1em 0;padding:0.8em 1em;background:linear-gradient(135deg,rgba(240,244,255,0.9),rgba(230,238,255,0.95)) padding-box,linear-gradient(90deg,#9370db,#ba55d3,#dda0dd) border-box;border:2px solid transparent;border-left:4px solid #9370db;border-radius:12px;box-shadow:0 4px 20px rgba(147,112,219,0.2),0 0 10px #9370db40;">
+<div style="font-size:13px;color:#9370db;margin-bottom:0.5em;font-weight:700;">📌 本节要点</div>
+<div style="line-height:2;"><span style="display:inline-block;margin:2px 4px;padding:3px 10px;color:#333333;font-size:13px;">✦ ├── encoders/          编码…</span><span style="display:inline-block;margin:2px 4px;padding:3px 10px;color:#333333;font-size:13px;">✦ 项目采用清晰的四层分层架构：</span><span style="display:inline-block;margin:2px 4px;padding:3px 10px;color:#333333;font-size:13px;">✦ ├── routers/           路由…</span></div>
+</div>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;">项目采用清晰的四层分层架构：</p>
+<section style="margin:1.2em 0;border-radius:12px;overflow:hidden;background:#1e1e1e;border:2px solid #333;box-shadow:0 4px 16px rgba(0,0,0,0.2);"><section style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:#2d2d2d;border-bottom:1px solid #404040;"><span style="font-size:13px;color:#a0a0a0;font-family:Menlo,Monaco,'Courier New',monospace;letter-spacing:0.5px;">Code</span><span style="display:inline-flex;gap:6px;"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ff5f56;"></span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ffbd2e;"></span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#27c93f;"></span></span></section><section style="margin:0;padding:16px 18px;background:#1e1e1e;overflow-x:auto;white-space:pre;border-left:4px solid #00bfff;"><p style="margin:0;font-family:Menlo,Monaco,'Courier New','Source Code Pro',monospace;font-size:13px;line-height:1.8;color:#e0e0e0;background:transparent;white-space:pre;"><span style="display:block;">semantic_router/</span><span style="display:block;">├── route.py          # Route 模型定义</span><span style="display:block;">├── schema.py         # 核心数据结构（Message、SparseEmbedding、Metric、Utterance 等）</span><span style="display:block;">├── linear.py         # 底层向量相似度计算（纯 numpy）</span><span style="display:block;">├── routers/          # 路由器层（核心决策引擎）</span><span style="display:block;">│   ├── base.py       # BaseRouter — 所有路由器的基类</span><span style="display:block;">│   ├── semantic.py   # SemanticRouter — 纯密集向量路由</span><span style="display:block;">│   └── hybrid.py     # HybridRouter — 稠密+稀疏混合路由</span><span style="display:block;">├── encoders/         # 编码器层（22+ 种实现）</span><span style="display:block;">│   ├── base.py       # DenseEncoder / SparseEncoder 基类</span><span style="display:block;">│   ├── openai.py, cohere.py, huggingface.py, clip.py, vit.py ...</span><span style="display:block;">│   └── bm25.py, tfidf.py, fastembed.py ...</span><span style="display:block;">├── index/            # 索引存储层（向量数据库适配）</span><span style="display:block;">│   ├── base.py       # BaseIndex 接口</span><span style="display:block;">│   ├── local.py      # LocalIndex — 内存 numpy 索引</span><span style="display:block;">│   ├── hybrid_local.py # HybridLocalIndex — 混合本地索引</span><span style="display:block;">│   ├── pinecone.py   # PineconeIndex</span><span style="display:block;">│   ├── qdrant.py     # QdrantIndex</span><span style="display:block;">│   └── postgres.py   # PostgresIndex（pgvector）</span><span style="display:block;">├── llms/             # LLM 层（用于动态路由）</span><span style="display:block;">│   ├── base.py       # BaseLLM</span><span style="display:block;">│   ├── openai.py, cohere.py, llamacpp.py, mistral.py ...</span><span style="display:block;">│   └── openrouter.py, zure.py</span><span style="display:block;">└── utils/            # 工具函数</span><span style="display:block;">    ├── defaults.py   # 默认编码器配置</span><span style="display:block;">    ├── function_call.py # 函数调用工具</span><span style="display:block;">    └── logger.py     # 日志</span></p></section></section>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;">这种分层设计的核心思想是<strong style="font-weight:700;color:#1f2937;">策略模式</strong>：路由器（Router）是不变的决策框架，编码器（Encoder）、索引（Index）、LLM 是可替换的策略组件。</p>
+<h2 style="margin:50px 0 32px;padding:0;text-indent:0;background:transparent;border:none;border-radius:0;box-shadow:none;"><div style="display:flex;align-items:center;gap:16px;margin-bottom:8px;"><span style="font-size:11px;font-weight:400;letter-spacing:3px;text-transform:uppercase;color:#8464c5;white-space:nowrap;">CHAPTER</span><span style="flex:1;height:1px;background:rgba(147,112,219,0.4);"></span></div><div style="display:flex;align-items:stretch;gap:16px;margin-bottom:4px;flex-wrap:nowrap;"><span style="font-size:48px;font-weight:900;line-height:1;color:rgba(147,112,219,0.4);font-style:italic;min-width:50px;">02</span><div style="display:flex;flex-direction:column;justify-content:center;min-width:0;flex:1;"><span style="font-size:22px;font-weight:700;color:#7a5cc0;line-height:1.4;">Route 模型设计</span><span style="font-size:11px;font-weight:400;color:rgba(147,112,219,0.5);letter-spacing:1px;margin-top:4px;">CHAPTER · 章节内容</span></div></div></h2><div style="margin:1em 0;padding:0.8em 1em;background:linear-gradient(135deg,rgba(240,244,255,0.9),rgba(230,238,255,0.95)) padding-box,linear-gradient(90deg,#9370db,#ba55d3,#dda0dd) border-box;border:2px solid transparent;border-left:4px solid #dda0dd;border-radius:12px;box-shadow:0 4px 20px rgba(147,112,219,0.2),0 0 10px #dda0dd40;">
+<div style="font-size:13px;color:#dda0dd;margin-bottom:0.5em;font-weight:700;">📌 本节要点</div>
+<div style="line-height:2;"><span style="display:inline-block;margin:2px 4px;padding:3px 10px;color:#333333;font-size:13px;">✦ Route 是语义路由的基本决策单元，代表一条"意…</span><span style="display:inline-block;margin:2px 4px;padding:3px 10px;color:#333333;font-size:13px;">✦ class RouteBaseModel:</span></div>
+</div>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;"><code>Route</code> 是语义路由的基本决策单元，代表一条"意图路径"：</p>
+<section style="margin:1.2em 0;border-radius:12px;overflow:hidden;background:#1e1e1e;border:2px solid #333;box-shadow:0 4px 16px rgba(0,0,0,0.2);"><section style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:#2d2d2d;border-bottom:1px solid #404040;"><span style="font-size:13px;color:#a0a0a0;font-family:Menlo,Monaco,'Courier New',monospace;letter-spacing:0.5px;">Python</span><span style="display:inline-flex;gap:6px;"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ff5f56;"></span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ffbd2e;"></span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#27c93f;"></span></span></section><section style="margin:0;padding:16px 18px;background:#1e1e1e;overflow-x:auto;white-space:pre;border-left:4px solid #00bfff;"><p style="margin:0;font-family:Menlo,Monaco,'Courier New','Source Code Pro',monospace;font-size:13px;line-height:1.8;color:#e0e0e0;background:transparent;white-space:pre;"><span style="display:block;">class Route(BaseModel):</span><span style="display:block;">    name: str                              # 路由名称，如 "politics"、"chitchat"</span><span style="display:block;">    utterances: List[str]                  # 示例语句列表，用于构建语义空间</span><span style="display:block;">    description: Optional[str] = None      # 路由描述</span><span style="display:block;">    function_schemas: Optional[List[Dict]] # 关联的函数 schema（用于动态路由）</span><span style="display:block;">    llm: Optional[BaseLLM] = None          # 可选的 LLM（用于动态路由参数提取）</span><span style="display:block;">    score_threshold: Optional[float] = None # 匹配阈值</span><span style="display:block;">    metadata: Optional[Dict[str, Any]] = None # 附加元数据</span></p></section></section>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;">关键设计点：<br/>
+- <strong style="font-weight:700;color:#1f2937;">utterances 是路由的"灵魂"</strong>：每条路由通过一组示例语句定义其语义边界，这些语句被编码为向量后构成该路由在语义空间中的"领地"<br/>
+- <strong style="font-weight:700;color:#1f2937;">静态路由 vs 动态路由</strong>：普通路由只返回路由名；动态路由（带 <code>function_schemas</code> 和 <code>llm</code>）还能提取参数并执行函数调用<br/>
+- <strong style="font-weight:700;color:#1f2937;">score_threshold</strong> 是路由级别的阈值控制，允许不同路由有不同的匹配严格度</p>
+<h2 style="margin:50px 0 32px;padding:0;text-indent:0;background:transparent;border:none;border-radius:0;box-shadow:none;"><div style="display:flex;align-items:center;gap:16px;margin-bottom:8px;"><span style="font-size:11px;font-weight:400;letter-spacing:3px;text-transform:uppercase;color:#8464c5;white-space:nowrap;">CHAPTER</span><span style="flex:1;height:1px;background:rgba(147,112,219,0.4);"></span></div><div style="display:flex;align-items:stretch;gap:16px;margin-bottom:4px;flex-wrap:nowrap;"><span style="font-size:48px;font-weight:900;line-height:1;color:rgba(147,112,219,0.4);font-style:italic;min-width:50px;">03</span><div style="display:flex;flex-direction:column;justify-content:center;min-width:0;flex:1;"><span style="font-size:22px;font-weight:700;color:#7a5cc0;line-height:1.4;">路由器核心 — BaseRouter</span><span style="font-size:11px;font-weight:400;color:rgba(147,112,219,0.5);letter-spacing:1px;margin-top:4px;">CHAPTER · 章节内容</span></div></div></h2><div style="margin:1em 0;padding:0.8em 1em;background:linear-gradient(135deg,rgba(240,244,255,0.9),rgba(230,238,255,0.95)) padding-box,linear-gradient(90deg,#9370db,#ba55d3,#dda0dd) border-box;border:2px solid transparent;border-left:4px solid #9370db;border-radius:12px;box-shadow:0 4px 20px rgba(147,112,219,0.2),0 0 10px #9370db40;">
+<div style="font-size:13px;color:#9370db;margin-bottom:0.5em;font-weight:700;">📌 本节要点</div>
+<div style="line-height:2;"><span style="display:inline-block;margin:2px 4px;padding:3px 10px;color:#333333;font-size:13px;">✦ 3. 按路由名聚合分数支持 mean/max/su…</span><span style="display:inline-block;margin:2px 4px;padding:3px 10px;color:#333333;font-size:13px;">✦ 1. 接收 encoder、routes、inde…</span><span style="display:inline-block;margin:2px 4px;padding:3px 10px;color:#333333;font-size:13px;">✦ 2. 验证路由唯一性去重检查</span></div>
+</div>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;"><code>BaseRouter</code> 是整个框架的核心引擎，约 800+ 行代码，承担以下职责：</p>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;"><strong style="font-weight:700;color:#1f2937;">初始化流程：</strong><br/>
+1. 接收 encoder、routes、index、llm 等组件<br/>
+2. 验证路由唯一性（去重检查）<br/>
+3. 将 routes 编码为向量并写入 index<br/>
+4. 通过 hash 机制同步本地与远程状态</p>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;"><strong style="font-weight:700;color:#1f2937;">核心 <code>__call__</code> 决策流程：</strong><br/>
+1. 将用户输入文本通过 encoder 编码为向量<br/>
+2. 在 index 中执行 top-k 近邻搜索<br/>
+3. 按路由名聚合分数（支持 mean/max/sum 等策略）<br/>
+4. 应用 score_threshold 过滤<br/>
+5. 返回匹配的 <code>RouteChoice</code>（含路由名和分数），无匹配返回 <code>None</code></p>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;"><strong style="font-weight:700;color:#1f2937;">同步机制（auto_sync）：</strong><br/>
+- 通过 <code>_get_hash()</code> 计算本地路由配置的哈希值<br/>
+- 与 index 中存储的远程哈希对比<br/>
+- 支持 "local"（本地覆盖远程）、"remote"（远程覆盖本地）、"error"（冲突报错）三种策略<br/>
+- 使用 <code>UtteranceDiff</code> 计算本地与远程的差异，执行精确的增量同步</p>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;"><strong style="font-weight:700;color:#1f2937;">阈值优化（fit 方法）：</strong><br/>
+- 通过随机搜索优化每个路由的 score_threshold<br/>
+- 使用 <code>threshold_random_search</code> 在搜索空间中迭代寻找最优阈值<br/>
+- 内置 <code>evaluate</code> 方法评估准确率</p>
+<h2 style="margin:50px 0 32px;padding:0;text-indent:0;background:transparent;border:none;border-radius:0;box-shadow:none;"><div style="display:flex;align-items:center;gap:16px;margin-bottom:8px;"><span style="font-size:11px;font-weight:400;letter-spacing:3px;text-transform:uppercase;color:#8464c5;white-space:nowrap;">CHAPTER</span><span style="flex:1;height:1px;background:rgba(147,112,219,0.4);"></span></div><div style="display:flex;align-items:stretch;gap:16px;margin-bottom:4px;flex-wrap:nowrap;"><span style="font-size:48px;font-weight:900;line-height:1;color:rgba(147,112,219,0.4);font-style:italic;min-width:50px;">04</span><div style="display:flex;flex-direction:column;justify-content:center;min-width:0;flex:1;"><span style="font-size:22px;font-weight:700;color:#7a5cc0;line-height:1.4;">SemanticRouter — 纯密集向量路由</span><span style="font-size:11px;font-weight:400;color:rgba(147,112,219,0.5);letter-spacing:1px;margin-top:4px;">CHAPTER · 章节内容</span></div></div></h2><div style="margin:1em 0;padding:0.8em 1em;background:linear-gradient(135deg,rgba(240,244,255,0.9),rgba(230,238,255,0.95)) padding-box,linear-gradient(90deg,#9370db,#ba55d3,#dda0dd) border-box;border:2px solid transparent;border-left:4px solid #ba55d3;border-radius:12px;box-shadow:0 4px 20px rgba(147,112,219,0.2),0 0 10px #ba55d340;">
+<div style="font-size:13px;color:#ba55d3;margin-bottom:0.5em;font-weight:700;">📌 本节要点</div>
+<div style="line-height:2;"><span style="display:inline-block;margin:2px 4px;padding:3px 10px;color:#333333;font-size:13px;">✦ class SemanticRouterBaseR…</span><span style="display:inline-block;margin:2px 4px;padding:3px 10px;color:#333333;font-size:13px;">✦ match input_type:</span><span style="display:inline-block;margin:2px 4px;padding:3px 10px;color:#333333;font-size:13px;">✦ case "queries":</span></div>
+</div>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;"><code>SemanticRouter</code> 是最基础的路由器实现，仅使用 DenseEncoder：</p>
+<section style="margin:1.2em 0;border-radius:12px;overflow:hidden;background:#1e1e1e;border:2px solid #333;box-shadow:0 4px 16px rgba(0,0,0,0.2);"><section style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:#2d2d2d;border-bottom:1px solid #404040;"><span style="font-size:13px;color:#a0a0a0;font-family:Menlo,Monaco,'Courier New',monospace;letter-spacing:0.5px;">Python</span><span style="display:inline-flex;gap:6px;"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ff5f56;"></span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ffbd2e;"></span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#27c93f;"></span></span></section><section style="margin:0;padding:16px 18px;background:#1e1e1e;overflow-x:auto;white-space:pre;border-left:4px solid #00bfff;"><p style="margin:0;font-family:Menlo,Monaco,'Courier New','Source Code Pro',monospace;font-size:13px;line-height:1.8;color:#e0e0e0;background:transparent;white-space:pre;"><span style="display:block;">class SemanticRouter(BaseRouter):</span><span style="display:block;">    def _encode(self, text: list[str], input_type: EncodeInputType) -&gt; np.ndarray:</span><span style="display:block;">        match input_type:</span><span style="display:block;">            case "queries":</span><span style="display:block;">                xq = np.array(self.encoder(text))</span><span style="display:block;">            case "documents":</span><span style="display:block;">                xq = np.array(self.encoder(text))</span><span style="display:block;">        return xq</span></p></section></section>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;">核心特性：<br/>
+- 支持 <strong style="font-weight:700;color:#1f2937;">非对称编码</strong>（AsymmetricDenseMixin）：查询和文档使用不同的编码策略，如 Cohere embed-v3 的 search_query vs search_document 模式<br/>
+- 提供同步和异步两条编码路径（<code>_encode</code> / <code>_async_encode</code>）<br/>
+- add 方法将路由 utterances 编码后写入 index，同时维护本地路由列表</p>
+<h2 style="margin:50px 0 32px;padding:0;text-indent:0;background:transparent;border:none;border-radius:0;box-shadow:none;"><div style="display:flex;align-items:center;gap:16px;margin-bottom:8px;"><span style="font-size:11px;font-weight:400;letter-spacing:3px;text-transform:uppercase;color:#8464c5;white-space:nowrap;">CHAPTER</span><span style="flex:1;height:1px;background:rgba(147,112,219,0.4);"></span></div><div style="display:flex;align-items:stretch;gap:16px;margin-bottom:4px;flex-wrap:nowrap;"><span style="font-size:48px;font-weight:900;line-height:1;color:rgba(147,112,219,0.4);font-style:italic;min-width:50px;">05</span><div style="display:flex;flex-direction:column;justify-content:center;min-width:0;flex:1;"><span style="font-size:22px;font-weight:700;color:#7a5cc0;line-height:1.4;">HybridRouter — 混合路由</span><span style="font-size:11px;font-weight:400;color:rgba(147,112,219,0.5);letter-spacing:1px;margin-top:4px;">CHAPTER · 章节内容</span></div></div></h2><div style="margin:1em 0;padding:0.8em 1em;background:linear-gradient(135deg,rgba(240,244,255,0.9),rgba(230,238,255,0.95)) padding-box,linear-gradient(90deg,#9370db,#ba55d3,#dda0dd) border-box;border:2px solid transparent;border-left:4px solid #9370db;border-radius:12px;box-shadow:0 4px 20px rgba(147,112,219,0.2),0 0 10px #9370db40;">
+<div style="font-size:13px;color:#9370db;margin-bottom:0.5em;font-weight:700;">📌 本节要点</div>
+<div style="line-height:2;"><span style="display:inline-block;margin:2px 4px;padding:3px 10px;color:#333333;font-size:13px;">✦ - 稀疏编码器如 BM25、TF-IDF需要在路由…</span><span style="display:inline-block;margin:2px 4px;padding:3px 10px;color:#333333;font-size:13px;">✦ 核心机制 — Alpha 混合：</span><span style="display:inline-block;margin:2px 4px;padding:3px 10px;color:#333333;font-size:13px;">✦ FittableMixin：</span></div>
+</div>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;"><code>HybridRouter</code> 同时使用 DenseEncoder 和 SparseEncoder（如 BM25），是框架中最复杂的路由器：</p>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;"><strong style="font-weight:700;color:#1f2937;">核心机制 — Alpha 混合：</strong></p>
+<section style="margin:1.2em 0;border-radius:12px;overflow:hidden;background:#1e1e1e;border:2px solid #333;box-shadow:0 4px 16px rgba(0,0,0,0.2);"><section style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:#2d2d2d;border-bottom:1px solid #404040;"><span style="font-size:13px;color:#a0a0a0;font-family:Menlo,Monaco,'Courier New',monospace;letter-spacing:0.5px;">Python</span><span style="display:inline-flex;gap:6px;"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ff5f56;"></span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ffbd2e;"></span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#27c93f;"></span></span></section><section style="margin:0;padding:16px 18px;background:#1e1e1e;overflow-x:auto;white-space:pre;border-left:4px solid #00bfff;"><p style="margin:0;font-family:Menlo,Monaco,'Courier New','Source Code Pro',monospace;font-size:13px;line-height:1.8;color:#e0e0e0;background:transparent;white-space:pre;"><span style="display:block;">dense_emb = dense_emb * (1 - self.alpha)  # 默认 alpha=0.3，密集权重 70%</span><span style="display:block;">sparse_emb = sparse_emb * self.alpha       # 稀疏权重 30%</span></p></section></section>
+<ul style="margin:0.95em 0;padding:0.75em 0.95em 0.75em 1.55em;line-height:1.8;color:#2f3441;background:#f8fafc;border-radius:6px;border:1px solid #edf2f7;list-style-position:outside;list-style-type:disc;"><li style="margin:0.28em 0;font-size:16px;line-height:1.82;text-indent:0;"><code>alpha</code> 参数控制稀疏 vs 密集的权重比例</li><li style="margin:0.28em 0;font-size:16px;line-height:1.82;text-indent:0;">默认 alpha=0.3，意味着密集向量权重更大（适合语义理解），稀疏向量作为关键词匹配的补充</li><li style="margin:0.28em 0;font-size:16px;line-height:1.82;text-indent:0;">HybridRouter 的 score_threshold 自动按 alpha 缩放：<code>threshold = encoder.threshold * alpha</code></li></ul>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;"><strong style="font-weight:700;color:#1f2937;">FittableMixin：</strong><br/>
+- 稀疏编码器（如 BM25、TF-IDF）需要在路由数据上 <code>fit</code> 后才能使用<br/>
+- 每次添加新路由后自动重新 fit<br/>
+- 这是密集编码器（预训练模型）和稀疏编码器（统计模型）的本质区别</p>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;"><strong style="font-weight:700;color:#1f2937;">评估体系：</strong><br/>
+- <code>_vec_evaluate</code> 方法批量评估准确率<br/>
+- <code>evaluate</code> 接口支持 batch_size 参数处理大数据集<br/>
+- 阈值优化同样支持混合向量</p>
+<h2 style="margin:50px 0 32px;padding:0;text-indent:0;background:transparent;border:none;border-radius:0;box-shadow:none;"><div style="display:flex;align-items:center;gap:16px;margin-bottom:8px;"><span style="font-size:11px;font-weight:400;letter-spacing:3px;text-transform:uppercase;color:#8464c5;white-space:nowrap;">CHAPTER</span><span style="flex:1;height:1px;background:rgba(147,112,219,0.4);"></span></div><div style="display:flex;align-items:stretch;gap:16px;margin-bottom:4px;flex-wrap:nowrap;"><span style="font-size:48px;font-weight:900;line-height:1;color:rgba(147,112,219,0.4);font-style:italic;min-width:50px;">06</span><div style="display:flex;flex-direction:column;justify-content:center;min-width:0;flex:1;"><span style="font-size:22px;font-weight:700;color:#7a5cc0;line-height:1.4;">编码器体系（Encoders）</span><span style="font-size:11px;font-weight:400;color:rgba(147,112,219,0.5);letter-spacing:1px;margin-top:4px;">CHAPTER · 章节内容</span></div></div></h2><div style="margin:1em 0;padding:0.8em 1em;background:linear-gradient(135deg,rgba(240,244,255,0.9),rgba(230,238,255,0.95)) padding-box,linear-gradient(90deg,#9370db,#ba55d3,#dda0dd) border-box;border:2px solid transparent;border-left:4px solid #9370db;border-radius:12px;box-shadow:0 4px 20px rgba(147,112,219,0.2),0 0 10px #9370db40;">
+<div style="font-size:13px;color:#9370db;margin-bottom:0.5em;font-weight:700;">📌 本节要点</div>
+<div style="line-height:2;"><span style="display:inline-block;margin:2px 4px;padding:3px 10px;color:#333333;font-size:13px;">✦ 编码器层是框架的"感知层"，支持 22+ 种编码器…</span><span style="display:inline-block;margin:2px 4px;padding:3px 10px;color:#333333;font-size:13px;">✦ | BM25Encoder | 经典 BM25 算…</span><span style="display:inline-block;margin:2px 4px;padding:3px 10px;color:#333333;font-size:13px;">✦ - FittableMixin：需要在数据上拟合的…</span></div>
+</div>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;">编码器层是框架的"感知层"，支持 <strong style="font-weight:700;color:#1f2937;">22+ 种编码器</strong>，覆盖文本、图像、多模态：</p>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;"><strong style="font-weight:700;color:#1f2937;">密集编码器（DenseEncoder 子类）：</strong><br/>
+| 编码器 | 说明 |<br/>
+|--------|------|<br/>
+| OpenAIEncoder | OpenAI text-embedding-3 系列 |<br/>
+| CohereEncoder | Cohere embed-v3，支持非对称编码 |<br/>
+| HuggingFaceEncoder | 本地 HuggingFace 模型 |<br/>
+| GoogleEncoder | Google Vertex AI 嵌入 |<br/>
+| BedrockEncoder | AWS Bedrock 嵌入 |<br/>
+| MistralEncoder | Mistral AI 嵌入 |<br/>
+| JinaEncoder | Jina AI 嵌入 |<br/>
+| VoyageEncoder | Voyage AI 嵌入 |<br/>
+| OllamaEncoder | 本地 Ollama 模型 |<br/>
+| LiteLLMEncoder | 通过 LiteLLM 统一接口 |<br/>
+| NvidiaNimEncoder | NVIDIA NIM 嵌入 |</p>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;"><strong style="font-weight:700;color:#1f2937;">稀疏编码器（SparseEncoder 子类）：</strong><br/>
+| 编码器 | 说明 |<br/>
+|--------|------|<br/>
+| BM25Encoder | 经典 BM25 算法 |<br/>
+| TFIDFEncoder | TF-IDF 算法 |<br/>
+| FastEmbedEncoder | FastEmbed 稀疏嵌入 |<br/>
+| AurelioSparseEncoder | Aurelio 自研稀疏编码 |</p>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;"><strong style="font-weight:700;color:#1f2937;">多模态编码器：</strong><br/>
+| 编码器 | 说明 |<br/>
+|--------|------|<br/>
+| CLIPEncoder | OpenAI CLIP 图文双模态 |<br/>
+| ViTEncoder | Vision Transformer 图像编码 |</p>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;"><strong style="font-weight:700;color:#1f2937;">关键设计模式：</strong><br/>
+- <code>AsymmetricDenseMixin</code>：支持查询/文档非对称编码（encode_queries vs encode_documents）<br/>
+- <code>AsymmetricSparseMixin</code>：稀疏编码器的非对称版本<br/>
+- <code>FittableMixin</code>：需要在数据上拟合的编码器接口<br/>
+- 所有编码器都支持同步 <code>__call__</code> 和异步 <code>acall</code></p>
+<h2 style="margin:50px 0 32px;padding:0;text-indent:0;background:transparent;border:none;border-radius:0;box-shadow:none;"><div style="display:flex;align-items:center;gap:16px;margin-bottom:8px;"><span style="font-size:11px;font-weight:400;letter-spacing:3px;text-transform:uppercase;color:#8464c5;white-space:nowrap;">CHAPTER</span><span style="flex:1;height:1px;background:rgba(147,112,219,0.4);"></span></div><div style="display:flex;align-items:stretch;gap:16px;margin-bottom:4px;flex-wrap:nowrap;"><span style="font-size:48px;font-weight:900;line-height:1;color:rgba(147,112,219,0.4);font-style:italic;min-width:50px;">07</span><div style="display:flex;flex-direction:column;justify-content:center;min-width:0;flex:1;"><span style="font-size:22px;font-weight:700;color:#7a5cc0;line-height:1.4;">索引存储层（Index）</span><span style="font-size:11px;font-weight:400;color:rgba(147,112,219,0.5);letter-spacing:1px;margin-top:4px;">CHAPTER · 章节内容</span></div></div></h2><div style="margin:1em 0;padding:0.8em 1em;background:linear-gradient(135deg,rgba(240,244,255,0.9),rgba(230,238,255,0.95)) padding-box,linear-gradient(90deg,#9370db,#ba55d3,#dda0dd) border-box;border:2px solid transparent;border-left:4px solid #ba55d3;border-radius:12px;box-shadow:0 4px 20px rgba(147,112,219,0.2),0 0 10px #ba55d340;">
+<div style="font-size:13px;color:#ba55d3;margin-bottom:0.5em;font-weight:700;">📌 本节要点</div>
+<div style="line-height:2;"><span style="display:inline-block;margin:2px 4px;padding:3px 10px;color:#333333;font-size:13px;">✦ 索引层抽象了向量存储和检索，支持本地和远程两种模式…</span><span style="display:inline-block;margin:2px 4px;padding:3px 10px;color:#333333;font-size:13px;">✦ BaseIndex 核心接口：</span><span style="display:inline-block;margin:2px 4px;padding:3px 10px;color:#333333;font-size:13px;">✦ | 索引类型 | 说明 | 适用场景 |</span></div>
+</div>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;">索引层抽象了向量存储和检索，支持本地和远程两种模式：</p>
+<table>
+<thead>
+<tr>
+<th>索引类型</th>
+<th>说明</th>
+<th>适用场景</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>LocalIndex</td>
+<td>内存 numpy 数组</td>
+<td>开发测试、小规模</td>
+</tr>
+<tr>
+<td>HybridLocalIndex</td>
+<td>内存密集+稀疏双索引</td>
+<td>HybridRouter 本地</td>
+</tr>
+<tr>
+<td>PineconeIndex</td>
+<td>Pinecone 云向量数据库</td>
+<td>生产环境、大规模</td>
+</tr>
+<tr>
+<td>QdrantIndex</td>
+<td>Qdrant 向量数据库</td>
+<td>自托管生产环境</td>
+</tr>
+<tr>
+<td>PostgresIndex</td>
+<td>pgvector 扩展</td>
+<td>已有 PostgreSQL 的环境</td>
+</tr>
+</tbody>
+</table>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;"><strong style="font-weight:700;color:#1f2937;">BaseIndex 核心接口：</strong><br/>
+- <code>add(embeddings, routes, utterances, ...)</code> — 添加向量<br/>
+- <code>query(vector, top_k, route_filter, sparse_vector)</code> — 相似度搜索<br/>
+- <code>delete(route_name)</code> — 按路由名删除<br/>
+- <code>get_utterances(include_metadata)</code> — 获取所有 utterance<br/>
+- <code>_read_hash()</code> / <code>_write_hash()</code> — 配置同步哈希<br/>
+- <code>_init_index()</code> — 延迟初始化（允许先创建对象再设置维度）</p>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;"><strong style="font-weight:700;color:#1f2937;">元数据策略：</strong><br/>
+- 所有索引统一使用 <code>sr_route</code>、<code>sr_utterance</code>、<code>sr_function_schema</code> 三个元数据字段<br/>
+- <code>parse_route_info</code> 函数从元数据中提取路由信息<br/>
+- 附加元数据通过 <code>additional_metadata</code> 字段透传</p>
+<h2 style="margin:50px 0 32px;padding:0;text-indent:0;background:transparent;border:none;border-radius:0;box-shadow:none;"><div style="display:flex;align-items:center;gap:16px;margin-bottom:8px;"><span style="font-size:11px;font-weight:400;letter-spacing:3px;text-transform:uppercase;color:#8464c5;white-space:nowrap;">CHAPTER</span><span style="flex:1;height:1px;background:rgba(147,112,219,0.4);"></span></div><div style="display:flex;align-items:stretch;gap:16px;margin-bottom:4px;flex-wrap:nowrap;"><span style="font-size:48px;font-weight:900;line-height:1;color:rgba(147,112,219,0.4);font-style:italic;min-width:50px;">08</span><div style="display:flex;flex-direction:column;justify-content:center;min-width:0;flex:1;"><span style="font-size:22px;font-weight:700;color:#7a5cc0;line-height:1.4;">动态路由与函数调用</span><span style="font-size:11px;font-weight:400;color:rgba(147,112,219,0.5);letter-spacing:1px;margin-top:4px;">CHAPTER · 章节内容</span></div></div></h2>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;">Semantic Router 支持<strong style="font-weight:700;color:#1f2937;">动态路由</strong>——不仅返回路由名，还能提取参数并调用函数：</p>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;"><strong style="font-weight:700;color:#1f2937;">工作流程：</strong><br/>
+1. 用户输入匹配到某个 Route<br/>
+2. Route 携带 <code>function_schemas</code>（JSON Schema 格式的函数定义）和 <code>llm</code><br/>
+3. 构造 prompt，将用户输入和函数 schema 发送给 LLM<br/>
+4. LLM 返回结构化参数（通过 <code>&lt;config&gt;&lt;/config&gt;</code> 标签包裹）<br/>
+5. 解析参数后执行函数调用</p>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;"><strong style="font-weight:700;color:#1f2937;">支持的 LLM：</strong><br/>
+- OpenAILLM、CohereLLM、MistralAILLM<br/>
+- LlamaCppLLM（完全本地）<br/>
+- OpenRouterLLM（聚合多模型）<br/>
+- AzureOpenAILLM</p>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;">这种设计使 Semantic Router 能够作为 Agent 的<strong style="font-weight:700;color:#1f2937;">工具选择器</strong>，替代传统的 function calling 流程。</p>
+<h2 style="margin:50px 0 32px;padding:0;text-indent:0;background:transparent;border:none;border-radius:0;box-shadow:none;"><div style="display:flex;align-items:center;gap:16px;margin-bottom:8px;"><span style="font-size:11px;font-weight:400;letter-spacing:3px;text-transform:uppercase;color:#8464c5;white-space:nowrap;">CHAPTER</span><span style="flex:1;height:1px;background:rgba(147,112,219,0.4);"></span></div><div style="display:flex;align-items:stretch;gap:16px;margin-bottom:4px;flex-wrap:nowrap;"><span style="font-size:48px;font-weight:900;line-height:1;color:rgba(147,112,219,0.4);font-style:italic;min-width:50px;">09</span><div style="display:flex;flex-direction:column;justify-content:center;min-width:0;flex:1;"><span style="font-size:22px;font-weight:700;color:#7a5cc0;line-height:1.4;">同步与持久化机制</span><span style="font-size:11px;font-weight:400;color:rgba(147,112,219,0.5);letter-spacing:1px;margin-top:4px;">CHAPTER · 章节内容</span></div></div></h2>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;">框架提供了完善的配置同步机制：</p>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;"><strong style="font-weight:700;color:#1f2937;">配置序列化：</strong><br/>
+- <code>RouterConfig</code> 类支持 JSON/YAML 文件的导入导出<br/>
+- 支持从 index（远程）反向加载配置<br/>
+- 支持从 tuple 列表快速构建</p>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;"><strong style="font-weight:700;color:#1f2937;">本地-远程同步（auto_sync）：</strong></p>
+<section style="margin:1.2em 0;border-radius:12px;overflow:hidden;background:#1e1e1e;border:2px solid #333;box-shadow:0 4px 16px rgba(0,0,0,0.2);"><section style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:#2d2d2d;border-bottom:1px solid #404040;"><span style="font-size:13px;color:#a0a0a0;font-family:Menlo,Monaco,'Courier New',monospace;letter-spacing:0.5px;">Code</span><span style="display:inline-flex;gap:6px;"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ff5f56;"></span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ffbd2e;"></span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#27c93f;"></span></span></section><section style="margin:0;padding:16px 18px;background:#1e1e1e;overflow-x:auto;white-space:pre;border-left:4px solid #00bfff;"><p style="margin:0;font-family:Menlo,Monaco,'Courier New','Source Code Pro',monospace;font-size:13px;line-height:1.8;color:#e0e0e0;background:transparent;white-space:pre;"><span style="display:block;">本地 hash ←→ 远程 hash</span><span style="display:block;">  ↓ 不匹配时</span><span style="display:block;">UtteranceDiff 计算差异</span><span style="display:block;">  ↓</span><span style="display:block;">local_delete / local_upsert / remote_delete / remote_upsert</span><span style="display:block;">  ↓</span><span style="display:block;">写入新 hash</span></p></section></section>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;">三种同步策略：<br/>
+- <code>"local"</code> — 本地配置覆盖远程<br/>
+- <code>"remote"</code> — 远程配置覆盖本地<br/>
+- <code>"error"</code> — 不一致时报错</p>
+<h2 style="margin:50px 0 32px;padding:0;text-indent:0;background:transparent;border:none;border-radius:0;box-shadow:none;"><div style="display:flex;align-items:center;gap:16px;margin-bottom:8px;"><span style="font-size:11px;font-weight:400;letter-spacing:3px;text-transform:uppercase;color:#8464c5;white-space:nowrap;">CHAPTER</span><span style="flex:1;height:1px;background:rgba(147,112,219,0.4);"></span></div><div style="display:flex;align-items:stretch;gap:16px;margin-bottom:4px;flex-wrap:nowrap;"><span style="font-size:48px;font-weight:900;line-height:1;color:rgba(147,112,219,0.4);font-style:italic;min-width:50px;">10</span><div style="display:flex;flex-direction:column;justify-content:center;min-width:0;flex:1;"><span style="font-size:22px;font-weight:700;color:#7a5cc0;line-height:1.4;">向量相似度计算</span><span style="font-size:11px;font-weight:400;color:rgba(147,112,219,0.5);letter-spacing:1px;margin-top:4px;">CHAPTER · 章节内容</span></div></div></h2>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;"><code>linear.py</code> 是最底层的计算模块，纯 numpy 实现：</p>
+<section style="margin:1.2em 0;border-radius:12px;overflow:hidden;background:#1e1e1e;border:2px solid #333;box-shadow:0 4px 16px rgba(0,0,0,0.2);"><section style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:#2d2d2d;border-bottom:1px solid #404040;"><span style="font-size:13px;color:#a0a0a0;font-family:Menlo,Monaco,'Courier New',monospace;letter-spacing:0.5px;">Python</span><span style="display:inline-flex;gap:6px;"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ff5f56;"></span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ffbd2e;"></span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#27c93f;"></span></span></section><section style="margin:0;padding:16px 18px;background:#1e1e1e;overflow-x:auto;white-space:pre;border-left:4px solid #00bfff;"><p style="margin:0;font-family:Menlo,Monaco,'Courier New','Source Code Pro',monospace;font-size:13px;line-height:1.8;color:#e0e0e0;background:transparent;white-space:pre;"><span style="display:block;">def similarity_matrix(xq: np.ndarray, index: np.ndarray) -&gt; np.ndarray:</span><span style="display:block;">    index_norm = norm(index, axis=1)</span><span style="display:block;">    xq_norm = norm(xq.T)</span><span style="display:block;">    sim = np.dot(index, xq.T) / (index_norm * xq_norm)</span><span style="display:block;">    return sim</span><span style="display:block;"> </span><span style="display:block;">def top_scores(sim: np.ndarray, top_k: int = 5) -&gt; Tuple[np.ndarray, np.ndarray]:</span><span style="display:block;">    top_k = min(top_k, sim.shape[0])</span><span style="display:block;">    idx = np.argpartition(sim, -top_k)[-top_k:]  # O(n) top-k 选择</span><span style="display:block;">    scores = sim[idx]</span><span style="display:block;">    order = np.argsort(scores)  # 排序</span><span style="display:block;">    return scores[order], idx[order]</span></p></section></section>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;">关键优化：<br/>
+- 使用 <code>np.argpartition</code> 实现 O(n) 复杂度的 top-k 选择，而非 O(n log n) 的全排序<br/>
+- 支持余弦相似度（cosine）、点积（dotproduct）、欧氏距离（euclidean）、曼哈顿距离（manhattan）四种度量</p>
+<h2 style="margin:50px 0 32px;padding:0;text-indent:0;background:transparent;border:none;border-radius:0;box-shadow:none;"><div style="display:flex;align-items:center;gap:16px;margin-bottom:8px;"><span style="font-size:11px;font-weight:400;letter-spacing:3px;text-transform:uppercase;color:#8464c5;white-space:nowrap;">CHAPTER</span><span style="flex:1;height:1px;background:rgba(147,112,219,0.4);"></span></div><div style="display:flex;align-items:stretch;gap:16px;margin-bottom:4px;flex-wrap:nowrap;"><span style="font-size:48px;font-weight:900;line-height:1;color:rgba(147,112,219,0.4);font-style:italic;min-width:50px;">11</span><div style="display:flex;flex-direction:column;justify-content:center;min-width:0;flex:1;"><span style="font-size:22px;font-weight:700;color:#7a5cc0;line-height:1.4;">架构总结</span><span style="font-size:11px;font-weight:400;color:rgba(147,112,219,0.5);letter-spacing:1px;margin-top:4px;">SUMMARY · 核心总结</span></div></div></h2>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;">Semantic Router 的核心架构优势：</p>
+<ol style="margin:0.95em 0;padding:0.75em 0.95em 0.75em 1.55em;line-height:1.8;color:#2f3441;background:#f8fafc;border-radius:6px;border:1px solid #edf2f7;list-style-position:outside;list-style-type:decimal;"><li style="margin:0.28em 0;font-size:16px;line-height:1.82;text-indent:0;"><strong style="font-weight:700;color:#1f2937;">极致的速度</strong>：向量相似度计算替代 LLM 推理，路由决策从秒级降到毫秒级</li><li style="margin:0.28em 0;font-size:16px;line-height:1.82;text-indent:0;"><strong style="font-weight:700;color:#1f2937;">高度可插拔</strong>：22+ 编码器、5 种索引、7 种 LLM 自由组合</li><li style="margin:0.28em 0;font-size:16px;line-height:1.82;text-indent:0;"><strong style="font-weight:700;color:#1f2937;">稠密+稀疏混合</strong>：HybridRouter 结合语义理解和关键词匹配的优势</li><li style="margin:0.28em 0;font-size:16px;line-height:1.82;text-indent:0;"><strong style="font-weight:700;color:#1f2937;">多模态支持</strong>：CLIP/ViT 编码器使路由不仅限于文本</li><li style="margin:0.28em 0;font-size:16px;line-height:1.82;text-indent:0;"><strong style="font-weight:700;color:#1f2937;">动态路由能力</strong>：结合 LLM 实现参数提取和函数调用</li><li style="margin:0.28em 0;font-size:16px;line-height:1.82;text-indent:0;"><strong style="font-weight:700;color:#1f2937;">完善的同步机制</strong>：hash + diff + 策略三者协作，保证本地与远程一致性</li><li style="margin:0.28em 0;font-size:16px;line-height:1.82;text-indent:0;"><strong style="font-weight:700;color:#1f2937;">阈值自优化</strong>：内置随机搜索阈值优化器，自动调优路由准确率</li><li style="margin:0.28em 0;font-size:16px;line-height:1.82;text-indent:0;"><strong style="font-weight:700;color:#1f2937;">全异步支持</strong>：所有核心操作都有 async 版本，适合高并发场景</li></ol>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;"><strong style="font-weight:700;color:#1f2937;">适用场景</strong>：意图识别、工具选择（Agent function calling 替代）、内容分类、多模态路由、客服分流、对话状态管理。</p><div style="margin:1.5em 0;text-align:center;"><p style="font-size:14px;color:#6b7280;text-indent:0;margin-bottom:0.5em;">📌 流程总结</p><img alt="流程图" src="file:///tmp/diagram.png" style="max-width:100%;border-radius:12px;border:1px solid #e2e8f0;box-shadow:0 2px 8px rgba(0,0,0,0.08);"/></div><section style="margin:32px 0 16px;padding:24px 20px;background:#f5f8ff;border:1px solid #dce9ff;border-radius:16px;text-align:center;">
+<p style="margin:0 0 20px;font-size:16px;color:#1f2937;font-weight:500;line-height:1.6;text-indent:0;">既然看到这里了，如果觉得有用，<br/>随手点个赞、推荐、转发三连吧</p>
+<div style="display:flex;justify-content:center;gap:40px;margin-bottom:16px;">
+<div style="text-align:center;">
+<div style="width:48px;height:48px;line-height:48px;margin:0 auto 8px;background:#bdaee6;border-radius:50%;font-size:24px;">👍</div>
+<p style="margin:0;font-size:12px;color:#7f5cc7;font-weight:600;">点赞</p>
+</div>
+<div style="text-align:center;">
+<div style="width:48px;height:48px;line-height:48px;margin:0 auto 8px;background:#bdaee6;border-radius:50%;font-size:24px;">❤️</div>
+<p style="margin:0;font-size:12px;color:#7f5cc7;font-weight:600;">推荐</p>
+</div>
+<div style="text-align:center;">
+<div style="width:48px;height:48px;line-height:48px;margin:0 auto 8px;background:#bdaee6;border-radius:50%;font-size:24px;">🔄</div>
+<p style="margin:0;font-size:12px;color:#7f5cc7;font-weight:600;">转发</p>
+</div>
+</div>
+<p style="margin:0;font-size:10px;font-weight:700;letter-spacing:3px;color:rgba(74,85,104,0.4);text-indent:0;">THANKS FOR READING</p>
+</section></section>

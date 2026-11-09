@@ -158,7 +158,7 @@ export function MessageTimelineRail({ entries, activeIndex, onJump, side, classN
       className={`relative w-9 shrink-0 ${className}`}
       style={style}
       onPointerMove={e => moveFromY(e.clientY, e.pointerType)}
-      onPointerLeave={clearHover}
+      onPointerLeave={e => { if (e.pointerType === 'mouse') clearHover(); }}
       onKeyDown={onKeyDown}
     >
       {/* 内层滚动盒：刻度排布（内容超高自动滚动；滚动条隐去） */}

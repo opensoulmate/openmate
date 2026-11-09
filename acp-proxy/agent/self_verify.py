@@ -170,6 +170,29 @@ _PERCEPTION_REF_RE = re.compile(
     r"|\b(?:repeat|restate|parrot)\b.{0,24}\b(?:you )?(?:heard|hear|audio)\b"
 )
 
+# 知识问答类元指令（"什么是X/介绍X/解释X/为什么"类）：正确答案是语义知识，
+# 与问题措辞天然零/低词元重合（答案不会复述"请用中文简单介绍"）——确定性词元
+# 核对必然假阴性（2026-11-05 演示体检 t1 实证：纯问答 coverage=0.0 → 补做轮
+# 整题重答 → 同一答案在会话里出现两遍）。带动作动词（写/生成/查…）的知识型
+# 任务是真实可验需求，仍按常规核对。同感知类元指令哲学：词元核对验不了"答对"。
+_INFORM_QA_RE = re.compile(
+    r"什么是|是什么|什么叫|是什么意思|介绍一?下|介绍|解释|说明一?下|说说|讲讲"
+    r"|区别|不同点|为什么|为何|怎么回事|原理|概念|含义|定义|优缺点"
+    r"|有哪些|哪些|多少|几个|如何理解"
+    r"|[？?]\s*$"
+)
+
+# 纯字面量输出类（"输出1到25的平方…最后输出『序列完毕』"类）：交付物=字面量
+# 内容本身（2026-11-05 演示体检 t6 实证：1..25 平方逐行输出完整交付后仍
+# score<0.25 判 unmet → 补做整题重答 → 50 行重复序列）。词元核对验不了
+# "照格式复现"，字面量带引号交付即视为已交付形态。带文件产物动词（保存/写入/
+# 表格/报表…）的是真实可验需求（工具产出可验），不在此列。
+_LITERAL_OUTPUT_VERB_RE = re.compile(r"输出|打印|复述|照抄|逐行|列出|显示")
+_QUOTED_RE = re.compile(r"[『「\"'][^』」\"']{1,40}[』」\"']")
+_FILE_ARTIFACT_RE = re.compile(
+    r"保存|写入|存到|文件|表格|报表|文档|图片|脚本|xlsx|docx|pdf|csv"
+)
+
 # 中文停用字（不进匹配词元）
 _STOP_CHARS = set(
     "的了请帮我你我要把和与等再就都也很吗呢吧啊呀一下进行做搞对给到在是"
@@ -251,6 +274,28 @@ def is_perception_meta(text: str) -> bool:
     """
     t = text or ""
     return bool(_PERCEPTION_REF_RE.search(t)) and not bool(_ACTION_RE.search(t))
+
+def is_informational_qa(text: str) -> bool:
+    """知识问答类元指令判定：'什么是X/介绍X/解释X'类，词元天然验不了。
+
+    正确答案是语义知识，不复述问题措辞——词元核对必然假阴性（答对仍判
+    unmet → 补做 → 同一答案出现两遍）。带动作动词的知识型任务是真实
+    可验需求，不在此列（照常核对，工具产出可验）。
+    """
+    t = text or ""
+    return bool(_INFORM_QA_RE.search(t)) and not bool(_ACTION_RE.search(t))
+
+def is_literal_output(text: str) -> bool:
+    """纯字面量输出类判定：'输出…『序列完毕』'类，交付物=字面量复现。
+
+    逐行机械输出天然不含请求措辞（"每行格式"不出现在 "1²=1" 里），词元
+    核对必然假 unmet → 补做整题重答 → 序列重复两遍。带文件产物动词的
+    是真实可验需求（保存/写入/表格…工具产出可验），不在此列。
+    """
+    t = text or ""
+    return (bool(_LITERAL_OUTPUT_VERB_RE.search(t))
+            and bool(_QUOTED_RE.search(t))
+            and not bool(_FILE_ARTIFACT_RE.search(t)))
 
 
 def _split_by_markers(text: str, marker_re: re.Pattern) -> list[str]:
@@ -339,6 +384,7 @@ class VerifyItem:
     conditional: bool = False  # 条件子句（"如果X就Y"）——不进补做清单
     perception: bool = False  # 感知类元指令（"复述你听到的内容"类）——不进补做/不计覆盖
     directive: bool = False  # 执行方式约束（"请勿拆分子任务/禁止合并"类）——不进补做/不计覆盖
+    info_meta: bool = False  # 知识问答/纯字面量输出（"什么是X"/"输出『…』"类）——不进补做/不计覆盖
 
 
 @dataclass
@@ -351,8 +397,9 @@ class VerifyReport:
         # 感知类元指令不参与完成判定（18.3）：确定性词元验不了"听到"，其未覆盖
         # 不是可执行缺口——单独一条感知元指令 = ok，不触发自检横幅。
         # 执行方式约束同理（周期#670）：词元验不了"遵守约束"，不参与完成判定。
+        # 知识问答/纯字面量输出同理（2026-11-05）：词元验不了"答对/复现"。
         return all(i.status == "met" for i in self.items
-                   if not i.perception and not i.directive)
+                   if not i.perception and not i.directive and not i.info_meta)
 
     @property
     def checked(self) -> int:
@@ -439,6 +486,13 @@ class SelfVerifier:
             if directive and status == "unmet":
                 status = "uncertain"
 
+            # 2026-11-05 知识问答/纯字面量输出封顶 uncertain：答案是语义知识或
+            # 字面量复现，与问题措辞天然零词元重合——答对仍判 unmet → 补做整题
+            # 重答 → 同一答案出现两遍（演示体检 t1/t6 实证）
+            info_meta = is_informational_qa(req) or is_literal_output(req)
+            if info_meta and status == "unmet":
+                status = "uncertain"
+
             evidence = (f"命中: " + "、".join(sorted(hit)[:6])) if hit else "无证据重合"
             if conditional:
                 evidence += "；条件项(不进补做)"
@@ -446,6 +500,8 @@ class SelfVerifier:
                 evidence += "；感知类元指令(词元无法核验，不进补做/不计覆盖)"
             if directive:
                 evidence += "；执行方式约束(词元无法核验，不进补做/不计覆盖)"
+            if info_meta:
+                evidence += "；知识问答/纯字面量输出(词元无法核验，不进补做/不计覆盖)"
             if executed_tools:
                 evidence += "；工具: " + ", ".join(e.name for e in executed_tools[:8])
             if blocked_tools:
@@ -455,11 +511,11 @@ class SelfVerifier:
                     for e in blocked_tools[:8]
                 )
             items.append(VerifyItem(req, status, round(score, 2), evidence,
-                                    conditional, perception, directive))
+                                    conditional, perception, directive, info_meta))
 
-        # 覆盖率分母不含感知类元指令/执行方式约束（18.3 覆盖率假阴性根因：分母掺入
-        # 词元天然验不了的项 → 覆盖率假低 → "覆盖 0/N" 噪音横幅）
-        verifiable = [i for i in items if not i.perception and not i.directive]
+        # 覆盖率分母不含感知类元指令/执行方式约束/知识问答（18.3 覆盖率假阴性根因：
+        # 分母掺入词元天然验不了的项 → 覆盖率假低 → "覆盖 0/N" 噪音横幅）
+        verifiable = [i for i in items if not i.perception and not i.directive and not i.info_meta]
         met = sum(1 for i in verifiable if i.status == "met")
         return VerifyReport(
             items=items,
@@ -479,19 +535,24 @@ class SelfVerifier:
                 label = "（感知类元指令，无法核验）"
             elif item.directive and item.status != "met":
                 label = "（执行方式约束，无法核验）"
+            elif item.info_meta and item.status != "met":
+                label = "（知识问答/字面量输出，无法核验）"
             elif item.conditional and item.status != "met":
                 label = "（条件项，仅提醒）"
             lines.append(f"{icons.get(item.status, '❓')} {i}. {item.requirement}{label}")
-        verifiable = [x for x in report.items if not x.perception and not x.directive]
+        verifiable = [x for x in report.items if not x.perception and not x.directive and not x.info_meta]
         met = sum(1 for x in verifiable if x.status == "met")
         line = f"— 覆盖 {met}/{len(verifiable)}"
         n_perc = sum(1 for x in report.items if x.perception)
         n_dir = sum(1 for x in report.items if x.directive)
+        n_info = sum(1 for x in report.items if x.info_meta)
         parts = []
         if n_perc:
             parts.append(f"{n_perc} 项感知类元指令")
         if n_dir:
             parts.append(f"{n_dir} 项执行方式约束")
+        if n_info:
+            parts.append(f"{n_info} 项知识问答/字面量输出")
         if parts:
             line += f"（另 {'、'.join(parts)}不计覆盖）"
         lines.append(line)

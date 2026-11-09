@@ -1,0 +1,377 @@
+<section style="margin:0 auto;max-width:690px;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;color:#1f2937;font-size:16px;line-height:1.9;"><section style="margin:0 0 1.5em;border-radius:16px;overflow:hidden;position:relative;">
+<div style="background:linear-gradient(180deg,#b0c4de 0%,#c8d6e5 35%,#dfe6ed 65%,#ecf0f5 100%);padding:2.5em 1.5em 2em;text-align:center;position:relative;min-height:140px;">
+<p style="margin:0 0 0.8em;font-size:14px;color:#2c3e50;font-weight:600;text-align:center;text-indent:0;letter-spacing:0.5px;position:relative;z-index:2;">👆 点击上方蓝字关注我，获取更多干货</p>
+<div style="position:absolute;top:20px;left:8%;width:90px;height:32px;background:rgba(255,255,255,0.6);border-radius:20px;z-index:0;"></div>
+<div style="position:absolute;top:14px;left:15%;width:60px;height:25px;background:rgba(255,255,255,0.45);border-radius:20px;z-index:0;"></div>
+<div style="position:absolute;top:45px;right:8%;width:80px;height:30px;background:rgba(255,255,255,0.5);border-radius:20px;z-index:0;"></div>
+<div style="position:absolute;top:40px;right:15%;width:55px;height:22px;background:rgba(255,255,255,0.35);border-radius:20px;z-index:0;"></div>
+<div style="margin:0 auto 10px;position:relative;z-index:1;"><span style="font-size:40px;line-height:1;">⛅</span></div>
+<p style="margin:0.3em 0 0;font-size:14px;color:#34495e;text-indent:0;position:relative;z-index:1;">沈阳 · 阴天 · 15°C ~ 25°C</p>
+<p style="margin:0.2em 0 0;font-size:11px;color:#5d6d7e;text-indent:0;position:relative;z-index:1;">⛅ 多云转晴，心情正好</p>
+</div></section><section style="margin:0 0 1.5em;border-radius:16px;overflow:hidden;
+    box-shadow:0 8px 32px rgba(147,112,219,0.2),0 0 16px rgba(147,112,219,0.2);">
+<div style="background:linear-gradient(135deg,#9370db,#ba55d3,#dda0dd);padding:1.2em 1.5em;">
+<p style="margin:0;font-size:14px;color:rgba(255,255,255,0.95);letter-spacing:1px;text-indent:0;">📋 文章概览</p>
+<p style="margin:0.3em 0 0;font-size:20px;color:#fff;font-weight:700;letter-spacing:0.5px;text-indent:0;">26.CAMEL-AI深度架构分析</p>
+</div>
+<div style="padding:1.2em 1.5em;background:linear-gradient(135deg,rgba(240,244,255,0.9),rgba(230,238,255,0.95)) padding-box,linear-gradient(90deg,#9370db,#ba55d3,#dda0dd) border-box;border:2px solid transparent;border-left:3px solid #9370db;border-right:3px solid #ba55d3;">
+<div style="display:flex;align-items:flex-start;margin:0.5em 0;">
+<span style="display:inline-flex;align-items:center;justify-content:center;
+                min-width:22px;height:22px;border-radius:50%;background:#ff6b6b;
+                color:#fff;font-size:12px;font-weight:700;margin-right:10px;flex-shrink:0;">1</span>
+<span style="line-height:1.6;color:#2d3748;">: 第一个 LLM 多智能体框架，专注于发现智能体的规模化定律 (Scaling Laws of Agents)</span>
+</div>
+<div style="display:flex;align-items:flex-start;margin:0.5em 0;">
+<span style="display:inline-flex;align-items:center;justify-content:center;
+                min-width:22px;height:22px;border-radius:50%;background:#ffd93d;
+                color:#fff;font-size:12px;font-weight:700;margin-right:10px;flex-shrink:0;">2</span>
+<span style="line-height:1.6;color:#2d3748;">核心设计理念：角色扮演范式 (Role-Playing Paradigm)</span>
+</div>
+<div style="display:flex;align-items:flex-start;margin:0.5em 0;">
+<span style="display:inline-flex;align-items:center;justify-content:center;
+                min-width:22px;height:22px;border-radius:50%;background:#6bcb77;
+                color:#fff;font-size:12px;font-weight:700;margin-right:10px;flex-shrink:0;">3</span>
+<span style="line-height:1.6;color:#2d3748;">CAMEL 的核心创新是</span>
+</div>
+<div style="display:flex;align-items:flex-start;margin:0.5em 0;">
+<span style="display:inline-flex;align-items:center;justify-content:center;
+                min-width:22px;height:22px;border-radius:50%;background:#4d96ff;
+                color:#fff;font-size:12px;font-weight:700;margin-right:10px;flex-shrink:0;">4</span>
+<span style="line-height:1.6;color:#2d3748;">协调机制，源自 NeurIPS 2023 论文</span>
+</div>
+<div style="display:flex;align-items:flex-start;margin:0.5em 0;">
+<span style="display:inline-flex;align-items:center;justify-content:center;
+                min-width:22px;height:22px;border-radius:50%;background:#ff6b6b;
+                color:#fff;font-size:12px;font-weight:700;margin-right:10px;flex-shrink:0;">5</span>
+<span style="line-height:1.6;color:#2d3748;">其核心问题是：如何让两个 LLM 代理自主协作完成任务，而无需人类持续干预</span>
+</div>
+</div>
+<div style="display:flex;justify-content:space-between;padding:0.8em 1.5em;
+        background:linear-gradient(135deg,rgba(230,238,255,0.95),rgba(240,244,255,0.98)) padding-box,linear-gradient(90deg,#ba55d3,#dda0dd) border-box;border-top:2px solid transparent;font-size:13px;color:#6b7280;">
+<span>📝 7462 字</span>
+<span>⏱ 约 18 分钟阅读</span>
+<span>📑 深度长文</span>
+</div>
+</section>
+<blockquote style="margin:1.2em 0;padding:1.2em 1.5em;background:#f5f8ff;border:2px solid #3b6dd8;border-radius:12px;color:#1f2937;line-height:1.8;box-shadow:0 4px 16px rgba(59,109,216,0.15);">
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;"><strong style="color:#1f2937;font-weight:700;">项目</strong>: camel-ai/camel<br/>
+<strong style="color:#1f2937;font-weight:700;">GitHub</strong>: https://github.com/camel-ai/camel<br/>
+<strong style="color:#1f2937;font-weight:700;">Stars</strong>: 17,600+ | <strong style="color:#1f2937;font-weight:700;">Forks</strong>: 2,000+ | <strong style="color:#1f2937;font-weight:700;">许可证</strong>: Apache 2.0<br/>
+<strong style="color:#1f2937;font-weight:700;">论文</strong>: "CAMEL: Communicative Agents for 'Mind' Exploration of Large Language Model Society" (NeurIPS 2023)<br/>
+<strong style="color:#1f2937;font-weight:700;">定位</strong>: 第一个 LLM 多智能体框架，专注于发现智能体的规模化定律 (Scaling Laws of Agents)</p>
+</blockquote>
+<h2 style="margin:50px 0 32px;padding:0;text-indent:0;background:transparent;border:none;border-radius:0;box-shadow:none;"><div style="display:flex;align-items:center;gap:16px;margin-bottom:8px;"><span style="font-size:11px;font-weight:400;letter-spacing:3px;text-transform:uppercase;color:#8464c5;white-space:nowrap;">CHAPTER</span><span style="flex:1;height:1px;background:rgba(147,112,219,0.4);"></span></div><div style="display:flex;align-items:stretch;gap:16px;margin-bottom:4px;flex-wrap:nowrap;"><span style="font-size:48px;font-weight:900;line-height:1;color:rgba(147,112,219,0.4);font-style:italic;min-width:50px;">01</span><div style="display:flex;flex-direction:column;justify-content:center;min-width:0;flex:1;"><span style="font-size:22px;font-weight:700;color:#7a5cc0;line-height:1.4;">核心设计理念：角色扮演范式 (Role-Playing Paradigm)</span><span style="font-size:11px;font-weight:400;color:rgba(147,112,219,0.5);letter-spacing:1px;margin-top:4px;">CHAPTER · 章节内容</span></div></div></h2>
+<p style="margin:1em 0;padding:0.75em 0.9em;background:#f8fafc;border:1px solid #edf2f7;border-radius:6px;line-height:1.9;font-size:16px;color:#243044;text-indent:2em;">CAMEL 的核心创新是 <strong style="font-weight:700;color:#1f2937;">角色扮演 (Role-Playing)</strong> 协调机制，源自 NeurIPS 2023 论文。其核心问题是：如何让两个 LLM 代理自主协作完成任务，而无需人类持续干预？</p>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;"><strong style="font-weight:700;color:#1f2937;">Inception Prompting 机制</strong>：<br/>
+- <strong style="font-weight:700;color:#1f2937;">AI User</strong> (指令发起者)：扮演"用户"角色，给出高层指令和任务方向<br/>
+- <strong style="font-weight:700;color:#1f2937;">AI Assistant</strong> (执行者)：扮演"助手"角色，执行具体任务并返回结果<br/>
+- <strong style="font-weight:700;color:#1f2937;">Critic</strong> (可选评审者)：评估对话质量和任务完成度</p>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;">关键洞察：无约束的代理对在 2-3 轮对话内就会发生角色反转——助手开始发号施令，用户开始提问，任务失败。CAMEL 通过 <strong style="font-weight:700;color:#1f2937;">系统提示中嵌入 "Never flip roles!"</strong> 指令来维持角色一致性，这是一种提示级别的约束而非框架级强制。</p>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;"><strong style="font-weight:700;color:#1f2937;">对话流程</strong>：</p>
+<section style="margin:1.2em 0;border-radius:12px;overflow:hidden;background:#1e1e1e;border:2px solid #333;box-shadow:0 4px 16px rgba(0,0,0,0.2);"><section style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:#2d2d2d;border-bottom:1px solid #404040;"><span style="font-size:13px;color:#a0a0a0;font-family:Menlo,Monaco,'Courier New',monospace;letter-spacing:0.5px;">Code</span><span style="display:inline-flex;gap:6px;"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ff5f56;"></span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ffbd2e;"></span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#27c93f;"></span></span></section><section style="margin:0;padding:16px 18px;background:#1e1e1e;overflow-x:auto;white-space:pre;border-left:4px solid #00bfff;"><p style="margin:0;font-family:Menlo,Monaco,'Courier New','Source Code Pro',monospace;font-size:13px;line-height:1.8;color:#e0e0e0;background:transparent;white-space:pre;"><span style="display:block;">User Agent → "开发一个量化交易算法"</span><span style="display:block;">Assistant Agent → 分析需求、提出方案</span><span style="display:block;">User Agent → 审查方案、提出修改</span><span style="display:block;">Assistant Agent → 实现代码</span><span style="display:block;">... 直到 CAMEL_TASK_DONE 标记或 token 预算耗尽</span></p></section></section>
+<h2 style="margin:50px 0 32px;padding:0;text-indent:0;background:transparent;border:none;border-radius:0;box-shadow:none;"><div style="display:flex;align-items:center;gap:16px;margin-bottom:8px;"><span style="font-size:11px;font-weight:400;letter-spacing:3px;text-transform:uppercase;color:#8464c5;white-space:nowrap;">CHAPTER</span><span style="flex:1;height:1px;background:rgba(147,112,219,0.4);"></span></div><div style="display:flex;align-items:stretch;gap:16px;margin-bottom:4px;flex-wrap:nowrap;"><span style="font-size:48px;font-weight:900;line-height:1;color:rgba(147,112,219,0.4);font-style:italic;min-width:50px;">02</span><div style="display:flex;flex-direction:column;justify-content:center;min-width:0;flex:1;"><span style="font-size:22px;font-weight:700;color:#7a5cc0;line-height:1.4;">Agent 体系架构</span><span style="font-size:11px;font-weight:400;color:rgba(147,112,219,0.5);letter-spacing:1px;margin-top:4px;">CHAPTER · 章节内容</span></div></div></h2>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;">CAMEL 的 Agent 层采用 <strong style="font-weight:700;color:#1f2937;">继承式设计</strong>，所有 Agent 继承自 <code>BaseAgent</code>：</p>
+<table>
+<thead>
+<tr>
+<th>Agent 类</th>
+<th>职责</th>
+<th>特点</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>BaseAgent</code></td>
+<td>抽象基类</td>
+<td>定义 <code>step()</code> 和 <code>reset()</code> 接口</td>
+</tr>
+<tr>
+<td><code>ChatAgent</code></td>
+<td>核心对话代理</td>
+<td>50,000+ 行代码，支持工具调用、记忆、流式输出</td>
+</tr>
+<tr>
+<td><code>CriticAgent</code></td>
+<td>评审代理</td>
+<td>评估对话质量，支持人类介入 (Human-in-the-loop)</td>
+</tr>
+<tr>
+<td><code>TaskSpecifyAgent</code></td>
+<td>任务细化</td>
+<td>将模糊任务转为具体可执行任务</td>
+</tr>
+<tr>
+<td><code>TaskPlannerAgent</code></td>
+<td>任务规划</td>
+<td>分解复杂任务为子任务序列</td>
+</tr>
+<tr>
+<td><code>TaskCreationAgent</code></td>
+<td>任务创建</td>
+<td>基于上下文动态生成新任务</td>
+</tr>
+<tr>
+<td><code>TaskPrioritizationAgent</code></td>
+<td>任务优先级</td>
+<td>对任务列表排序</td>
+</tr>
+<tr>
+<td><code>RoleAssignmentAgent</code></td>
+<td>角色分配</td>
+<td>为多代理场景自动分配角色</td>
+</tr>
+<tr>
+<td><code>SearchAgent</code></td>
+<td>搜索代理</td>
+<td>封装搜索工具能力</td>
+</tr>
+<tr>
+<td><code>KnowledgeGraphAgent</code></td>
+<td>知识图谱</td>
+<td>构建和查询知识图谱</td>
+</tr>
+<tr>
+<td><code>MCPAgent</code></td>
+<td>MCP 集成</td>
+<td>连接 MCP (Model Context Protocol) 服务器</td>
+</tr>
+<tr>
+<td><code>RepoAgent</code></td>
+<td>仓库代理</td>
+<td>分析和操作代码仓库</td>
+</tr>
+</tbody>
+</table>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;"><strong style="font-weight:700;color:#1f2937;">ChatAgent 的关键能力</strong>：<br/>
+- <strong style="font-weight:700;color:#1f2937;">多模型后端</strong>：通过 <code>ModelManager</code> 支持 40+ LLM 提供商（GPT、Claude、Ollama、vLLM 等）<br/>
+- <strong style="font-weight:700;color:#1f2937;">工具调用</strong>：集成 <code>FunctionTool</code>，支持注册外部工具<br/>
+- <strong style="font-weight:700;color:#1f2937;">记忆管理</strong>：<code>ChatHistoryMemory</code> + <code>ScoreBasedContextCreator</code> 实现智能上下文管理<br/>
+- <strong style="font-weight:700;color:#1f2937;">流式输出</strong>：<code>StreamContentAccumulator</code> 管理流式响应累积<br/>
+- <strong style="font-weight:700;color:#1f2937;">速率限制处理</strong>：自动处理 OpenAI 和 Anthropic 的 <code>RateLimitError</code><br/>
+- <strong style="font-weight:700;color:#1f2937;">可观测性</strong>：集成 AgentOps 和 Langfuse 追踪</p>
+<h2 style="margin:50px 0 32px;padding:0;text-indent:0;background:transparent;border:none;border-radius:0;box-shadow:none;"><div style="display:flex;align-items:center;gap:16px;margin-bottom:8px;"><span style="font-size:11px;font-weight:400;letter-spacing:3px;text-transform:uppercase;color:#8464c5;white-space:nowrap;">CHAPTER</span><span style="flex:1;height:1px;background:rgba(147,112,219,0.4);"></span></div><div style="display:flex;align-items:stretch;gap:16px;margin-bottom:4px;flex-wrap:nowrap;"><span style="font-size:48px;font-weight:900;line-height:1;color:rgba(147,112,219,0.4);font-style:italic;min-width:50px;">03</span><div style="display:flex;flex-direction:column;justify-content:center;min-width:0;flex:1;"><span style="font-size:22px;font-weight:700;color:#7a5cc0;line-height:1.4;">社会协作层 (Societies Layer)</span><span style="font-size:11px;font-weight:400;color:rgba(147,112,219,0.5);letter-spacing:1px;margin-top:4px;">CHAPTER · 章节内容</span></div></div></h2>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;"><code>societies</code> 模块是 CAMEL 的上层协调框架，包含两个核心组件：</p>
+<h3>RolePlaying（角色扮演）</h3>
+<section style="margin:1.2em 0;border-radius:12px;overflow:hidden;background:#1e1e1e;border:2px solid #333;box-shadow:0 4px 16px rgba(0,0,0,0.2);"><section style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:#2d2d2d;border-bottom:1px solid #404040;"><span style="font-size:13px;color:#a0a0a0;font-family:Menlo,Monaco,'Courier New',monospace;letter-spacing:0.5px;">Python</span><span style="display:inline-flex;gap:6px;"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ff5f56;"></span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ffbd2e;"></span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#27c93f;"></span></span></section><section style="margin:0;padding:16px 18px;background:#1e1e1e;overflow-x:auto;white-space:pre;border-left:4px solid #00bfff;"><p style="margin:0;font-family:Menlo,Monaco,'Courier New','Source Code Pro',monospace;font-size:13px;line-height:1.8;color:#e0e0e0;background:transparent;white-space:pre;"><span style="display:block;">session = RolePlaying(</span><span style="display:block;">    assistant_role_name="Python Programmer",</span><span style="display:block;">    user_role_name="Stock Trader",</span><span style="display:block;">    task_prompt="Develop a trading bot for the stock market",</span><span style="display:block;">    with_task_specify=True,   # 先用 TaskSpecifyAgent 细化任务</span><span style="display:block;">    with_task_planner=False,  # 可选：启用 TaskPlannerAgent 分解任务</span><span style="display:block;">    with_critic_in_the_loop=False,  # 可选：加入 CriticAgent 评审</span><span style="display:block;">    task_type=TaskType.AI_SOCIETY,</span><span style="display:block;">)</span></p></section></section>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;"><strong style="font-weight:700;color:#1f2937;">初始化流程</strong>：<br/>
+1. <code>TaskSpecifyAgent</code> 细化原始任务提示<br/>
+2. <code>TaskPlannerAgent</code>（可选）分解任务为子计划<br/>
+3. <code>SystemMessageGenerator</code> 为每个角色生成系统消息<br/>
+4. 创建 <code>ChatAgent</code> 实例并注入角色系统消息<br/>
+5. 可选创建 <code>CriticAgent</code> 或 <code>Human</code> 评审者</p>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;"><strong style="font-weight:700;color:#1f2937;"><code>step()</code> 方法的执行流程</strong>：<br/>
+1. User Agent 收到 Assistant 的上一条消息<br/>
+2. User Agent 生成响应<br/>
+3. Assistant Agent 收到 User 的响应<br/>
+4. Assistant Agent 生成执行结果<br/>
+5. 返回 <code>(assistant_response, user_response)</code> 元组</p>
+<h3>Workforce（工作团队）</h3>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;">Workforce 是 2024 年后期加入的层级化扩展，将角色扮演概念泛化为完整的多代理编排系统：</p>
+<ul style="margin:0.95em 0;padding:0.75em 0.95em 0.75em 1.55em;line-height:1.8;color:#2f3441;background:#f8fafc;border-radius:6px;border:1px solid #edf2f7;list-style-position:outside;list-style-type:disc;"><li style="margin:0.28em 0;font-size:16px;line-height:1.82;text-indent:0;"><strong style="font-weight:700;color:#1f2937;">Coordinator Agent</strong>：根据能力分配任务给合适的 Worker</li><li style="margin:0.28em 0;font-size:16px;line-height:1.82;text-indent:0;"><strong style="font-weight:700;color:#1f2937;">Task Agent</strong>：分解复杂任务、组合结果</li><li style="margin:0.28em 0;font-size:16px;line-height:1.82;text-indent:0;"><strong style="font-weight:700;color:#1f2937;">SingleAgentWorker</strong>：单代理 + 工具执行</li><li style="margin:0.28em 0;font-size:16px;line-height:1.82;text-indent:0;"><strong style="font-weight:700;color:#1f2937;">RolePlayingWorker</strong>：原始的双代理辩论格式</li><li style="margin:0.28em 0;font-size:16px;line-height:1.82;text-indent:0;"><strong style="font-weight:700;color:#1f2937;">动态 Worker 创建</strong>：当现有 Worker 无法处理失败任务时，运行时创建新的专家 Worker</li></ul>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;">Workforce 支持 <code>pause()</code>、<code>resume()</code>、<code>save_snapshot()</code> 等人工干预能力，并可通过 <code>to_mcp()</code> 暴露为 MCP 服务器。</p>
+<h2 style="margin:50px 0 32px;padding:0;text-indent:0;background:transparent;border:none;border-radius:0;box-shadow:none;"><div style="display:flex;align-items:center;gap:16px;margin-bottom:8px;"><span style="font-size:11px;font-weight:400;letter-spacing:3px;text-transform:uppercase;color:#8464c5;white-space:nowrap;">CHAPTER</span><span style="flex:1;height:1px;background:rgba(147,112,219,0.4);"></span></div><div style="display:flex;align-items:stretch;gap:16px;margin-bottom:4px;flex-wrap:nowrap;"><span style="font-size:48px;font-weight:900;line-height:1;color:rgba(147,112,219,0.4);font-style:italic;min-width:50px;">04</span><div style="display:flex;flex-direction:column;justify-content:center;min-width:0;flex:1;"><span style="font-size:22px;font-weight:700;color:#7a5cc0;line-height:1.4;">工具生态系统 (Toolkits)</span><span style="font-size:11px;font-weight:400;color:rgba(147,112,219,0.5);letter-spacing:1px;margin-top:4px;">CHAPTER · 章节内容</span></div></div></h2>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;">CAMEL 拥有 <strong style="font-weight:700;color:#1f2937;">80+ 工具包</strong>，覆盖广泛的外部能力：</p>
+<table>
+<thead>
+<tr>
+<th>类别</th>
+<th>工具示例</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>搜索</td>
+<td>SearchToolkit</td>
+<td>Web 搜索</td>
+</tr>
+<tr>
+<td>浏览器</td>
+<td>BrowserToolkit</td>
+<td>网页自动化</td>
+</tr>
+<tr>
+<td>终端</td>
+<td>CodeExecutionToolkit</td>
+<td>代码执行</td>
+</tr>
+<tr>
+<td>GitHub</td>
+<td>GithubToolkit</td>
+<td>仓库操作</td>
+</tr>
+<tr>
+<td>数据库</td>
+<td>DatabaseToolkit</td>
+<td>SQL 查询</td>
+</tr>
+<tr>
+<td>消息</td>
+<td>SlackToolkit, DiscordToolkit</td>
+<td>团队协作</td>
+</tr>
+<tr>
+<td>知识</td>
+<td>NotionToolkit</td>
+<td>文档管理</td>
+</tr>
+<tr>
+<td>思维</td>
+<td>ThinkingToolkit</td>
+<td>结构化推理</td>
+</tr>
+</tbody>
+</table>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;">工具通过 <code>FunctionTool</code> 封装为统一接口，支持：<br/>
+- 自动 schema 生成（从函数签名推断）<br/>
+- 工具调用记录 (<code>ToolCallingRecord</code>)<br/>
+- 工具输出截断和日志保存<br/>
+- <code>RegisteredAgentToolkit</code> 注册表机制</p>
+<h2 style="margin:50px 0 32px;padding:0;text-indent:0;background:transparent;border:none;border-radius:0;box-shadow:none;"><div style="display:flex;align-items:center;gap:16px;margin-bottom:8px;"><span style="font-size:11px;font-weight:400;letter-spacing:3px;text-transform:uppercase;color:#8464c5;white-space:nowrap;">CHAPTER</span><span style="flex:1;height:1px;background:rgba(147,112,219,0.4);"></span></div><div style="display:flex;align-items:stretch;gap:16px;margin-bottom:4px;flex-wrap:nowrap;"><span style="font-size:48px;font-weight:900;line-height:1;color:rgba(147,112,219,0.4);font-style:italic;min-width:50px;">05</span><div style="display:flex;flex-direction:column;justify-content:center;min-width:0;flex:1;"><span style="font-size:22px;font-weight:700;color:#7a5cc0;line-height:1.4;">模型抽象层 (Model Layer)</span><span style="font-size:11px;font-weight:400;color:rgba(147,112,219,0.5);letter-spacing:1px;margin-top:4px;">CHAPTER · 章节内容</span></div></div></h2>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;">CAMEL 的模型层提供统一的 LLM 接口：</p>
+<section style="margin:1.2em 0;border-radius:12px;overflow:hidden;background:#1e1e1e;border:2px solid #333;box-shadow:0 4px 16px rgba(0,0,0,0.2);"><section style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:#2d2d2d;border-bottom:1px solid #404040;"><span style="font-size:13px;color:#a0a0a0;font-family:Menlo,Monaco,'Courier New',monospace;letter-spacing:0.5px;">Python</span><span style="display:inline-flex;gap:6px;"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ff5f56;"></span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ffbd2e;"></span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#27c93f;"></span></span></section><section style="margin:0;padding:16px 18px;background:#1e1e1e;overflow-x:auto;white-space:pre;border-left:4px solid #00bfff;"><p style="margin:0;font-family:Menlo,Monaco,'Courier New','Source Code Pro',monospace;font-size:13px;line-height:1.8;color:#e0e0e0;background:transparent;white-space:pre;"><span style="display:block;">model = ModelFactory.create(</span><span style="display:block;">    model_platform=ModelPlatformType.OPENAI,</span><span style="display:block;">    model_type=ModelType.GPT_4O,</span><span style="display:block;">)</span></p></section></section>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;"><strong style="font-weight:700;color:#1f2937;">核心组件</strong>：<br/>
+- <code>BaseModelBackend</code>：所有模型后端的抽象基类<br/>
+- <code>ModelFactory</code>：工厂模式创建模型实例<br/>
+- <code>ModelManager</code>：管理多个模型后端，支持 fallback 和负载均衡<br/>
+- <code>ModelProcessingError</code>：统一的模型错误处理</p>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;">支持的模型平台包括 OpenAI、Anthropic、Google、Mistral、Ollama、vLLM、Together AI 等 40+ 提供商。</p>
+<h2 style="margin:50px 0 32px;padding:0;text-indent:0;background:transparent;border:none;border-radius:0;box-shadow:none;"><div style="display:flex;align-items:center;gap:16px;margin-bottom:8px;"><span style="font-size:11px;font-weight:400;letter-spacing:3px;text-transform:uppercase;color:#8464c5;white-space:nowrap;">CHAPTER</span><span style="flex:1;height:1px;background:rgba(147,112,219,0.4);"></span></div><div style="display:flex;align-items:stretch;gap:16px;margin-bottom:4px;flex-wrap:nowrap;"><span style="font-size:48px;font-weight:900;line-height:1;color:rgba(147,112,219,0.4);font-style:italic;min-width:50px;">06</span><div style="display:flex;flex-direction:column;justify-content:center;min-width:0;flex:1;"><span style="font-size:22px;font-weight:700;color:#7a5cc0;line-height:1.4;">记忆系统 (Memory System)</span><span style="font-size:11px;font-weight:400;color:rgba(147,112,219,0.5);letter-spacing:1px;margin-top:4px;">CHAPTER · 章节内容</span></div></div></h2>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;">CAMEL 实现了多层次的记忆管理：</p>
+<section style="margin:1.2em 0;border-radius:12px;overflow:hidden;background:#1e1e1e;border:2px solid #333;box-shadow:0 4px 16px rgba(0,0,0,0.2);"><section style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:#2d2d2d;border-bottom:1px solid #404040;"><span style="font-size:13px;color:#a0a0a0;font-family:Menlo,Monaco,'Courier New',monospace;letter-spacing:0.5px;">Python</span><span style="display:inline-flex;gap:6px;"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ff5f56;"></span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ffbd2e;"></span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#27c93f;"></span></span></section><section style="margin:0;padding:16px 18px;background:#1e1e1e;overflow-x:auto;white-space:pre;border-left:4px solid #00bfff;"><p style="margin:0;font-family:Menlo,Monaco,'Courier New','Source Code Pro',monospace;font-size:13px;line-height:1.8;color:#e0e0e0;background:transparent;white-space:pre;"><span style="display:block;">from camel.memories import (</span><span style="display:block;">    AgentMemory,        # 代理级记忆</span><span style="display:block;">    ChatHistoryMemory,  # 聊天历史记忆</span><span style="display:block;">    MemoryRecord,       # 记忆记录单元</span><span style="display:block;">    ScoreBasedContextCreator,  # 基于评分的上下文创建器</span><span style="display:block;">)</span></p></section></section>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;"><strong style="font-weight:700;color:#1f2937;">记忆架构</strong>：<br/>
+- <strong style="font-weight:700;color:#1f2937;">短期记忆</strong>：当前对话的完整历史<br/>
+- <strong style="font-weight:700;color:#1f2937;">长期记忆</strong>：跨会话的持久化存储（通过 <code>JsonStorage</code>）<br/>
+- <strong style="font-weight:700;color:#1f2937;">工作记忆</strong>：<code>ScoreBasedContextCreator</code> 根据相关性评分选择性加载上下文<br/>
+- <strong style="font-weight:700;color:#1f2937;">记忆记录</strong>：每条 <code>MemoryRecord</code> 包含内容、时间戳、相关性分数等元数据</p>
+<h2 style="margin:50px 0 32px;padding:0;text-indent:0;background:transparent;border:none;border-radius:0;box-shadow:none;"><div style="display:flex;align-items:center;gap:16px;margin-bottom:8px;"><span style="font-size:11px;font-weight:400;letter-spacing:3px;text-transform:uppercase;color:#8464c5;white-space:nowrap;">CHAPTER</span><span style="flex:1;height:1px;background:rgba(147,112,219,0.4);"></span></div><div style="display:flex;align-items:stretch;gap:16px;margin-bottom:4px;flex-wrap:nowrap;"><span style="font-size:48px;font-weight:900;line-height:1;color:rgba(147,112,219,0.4);font-style:italic;min-width:50px;">07</span><div style="display:flex;flex-direction:column;justify-content:center;min-width:0;flex:1;"><span style="font-size:22px;font-weight:700;color:#7a5cc0;line-height:1.4;">消息与提示系统 (Messages &amp; Prompts)</span><span style="font-size:11px;font-weight:400;color:rgba(147,112,219,0.5);letter-spacing:1px;margin-top:4px;">CHAPTER · 章节内容</span></div></div></h2>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;">CAMEL 的消息系统支持多种格式：</p>
+<ul style="margin:0.95em 0;padding:0.75em 0.95em 0.75em 1.55em;line-height:1.8;color:#2f3441;background:#f8fafc;border-radius:6px;border:1px solid #edf2f7;list-style-position:outside;list-style-type:disc;"><li style="margin:0.28em 0;font-size:16px;line-height:1.82;text-indent:0;"><code>BaseMessage</code>：基础消息类，支持文本、图像、音频等多模态</li><li style="margin:0.28em 0;font-size:16px;line-height:1.82;text-indent:0;"><code>OpenAIMessage</code>：兼容 OpenAI API 的消息格式</li><li style="margin:0.28em 0;font-size:16px;line-height:1.82;text-indent:0;"><code>FunctionCallingMessage</code>：工具调用消息</li><li style="margin:0.28em 0;font-size:16px;line-height:1.82;text-indent:0;"><code>TextPrompt</code>：提示模板，支持变量插值</li></ul>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;"><strong style="font-weight:700;color:#1f2937;">SystemMessageGenerator</strong> 根据 <code>TaskType</code> 和角色元数据动态生成系统消息：<br/>
+- <code>TaskType.AI_SOCIETY</code>：AI 社会协作场景<br/>
+- <code>TaskType.CODE</code>：代码生成场景<br/>
+- <code>TaskType.MISALIGNMENT</code>：对齐研究场景<br/>
+- <code>TaskType.SOLUTION_EXTRACTION</code>：解决方案提取场景</p>
+<h2 style="margin:50px 0 32px;padding:0;text-indent:0;background:transparent;border:none;border-radius:0;box-shadow:none;"><div style="display:flex;align-items:center;gap:16px;margin-bottom:8px;"><span style="font-size:11px;font-weight:400;letter-spacing:3px;text-transform:uppercase;color:#8464c5;white-space:nowrap;">CHAPTER</span><span style="flex:1;height:1px;background:rgba(147,112,219,0.4);"></span></div><div style="display:flex;align-items:stretch;gap:16px;margin-bottom:4px;flex-wrap:nowrap;"><span style="font-size:48px;font-weight:900;line-height:1;color:rgba(147,112,219,0.4);font-style:italic;min-width:50px;">08</span><div style="display:flex;flex-direction:column;justify-content:center;min-width:0;flex:1;"><span style="font-size:22px;font-weight:700;color:#7a5cc0;line-height:1.4;">大规模仿真能力 (OASIS)</span><span style="font-size:11px;font-weight:400;color:rgba(147,112,219,0.5);letter-spacing:1px;margin-top:4px;">CHAPTER · 章节内容</span></div></div></h2>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;">CAMEL 生态中的 OASIS (Open Agent Social Interaction Simulations) 项目实现了 <strong style="font-weight:700;color:#1f2937;">百万级代理社交仿真</strong>：</p>
+<ul style="margin:0.95em 0;padding:0.75em 0.95em 0.75em 1.55em;line-height:1.8;color:#2f3441;background:#f8fafc;border-radius:6px;border:1px solid #edf2f7;list-style-position:outside;list-style-type:disc;"><li style="margin:0.28em 0;font-size:16px;line-height:1.82;text-indent:0;"><strong style="font-weight:700;color:#1f2937;">规模</strong>：支持最多 100 万 LLM 代理同时交互</li><li style="margin:0.28em 0;font-size:16px;line-height:1.82;text-indent:0;"><strong style="font-weight:700;color:#1f2937;">平台模拟</strong>：模拟 X (Twitter)、Reddit 等社交媒体平台</li><li style="margin:0.28em 0;font-size:16px;line-height:1.82;text-indent:0;"><strong style="font-weight:700;color:#1f2937;">研究场景</strong>：虚假信息传播、羊群效应、舆论形成等社会现象</li><li style="margin:0.28em 0;font-size:16px;line-height:1.82;text-indent:0;"><strong style="font-weight:700;color:#1f2937;">架构</strong>：专用数据库 + 推荐系统 + 代理模块 + 时间引擎</li><li style="margin:0.28em 0;font-size:16px;line-height:1.82;text-indent:0;"><strong style="font-weight:700;color:#1f2937;">论文</strong>：NeurIPS 2024 收录</li></ul>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;">OASIS 继承了 CAMEL 的 <code>ChatAgent</code>，并引入异步机制加速大规模并发代理仿真。</p>
+<h2 style="margin:50px 0 32px;padding:0;text-indent:0;background:transparent;border:none;border-radius:0;box-shadow:none;"><div style="display:flex;align-items:center;gap:16px;margin-bottom:8px;"><span style="font-size:11px;font-weight:400;letter-spacing:3px;text-transform:uppercase;color:#8464c5;white-space:nowrap;">CHAPTER</span><span style="flex:1;height:1px;background:rgba(147,112,219,0.4);"></span></div><div style="display:flex;align-items:stretch;gap:16px;margin-bottom:4px;flex-wrap:nowrap;"><span style="font-size:48px;font-weight:900;line-height:1;color:rgba(147,112,219,0.4);font-style:italic;min-width:50px;">09</span><div style="display:flex;flex-direction:column;justify-content:center;min-width:0;flex:1;"><span style="font-size:22px;font-weight:700;color:#7a5cc0;line-height:1.4;">合成数据生成 (Synthetic Data Generation)</span><span style="font-size:11px;font-weight:400;color:rgba(147,112,219,0.5);letter-spacing:1px;margin-top:4px;">CHAPTER · 章节内容</span></div></div></h2>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;">CAMEL 最早且最有影响力的应用之一是 <strong style="font-weight:700;color:#1f2937;">合成数据生成</strong>：</p>
+<ul style="margin:0.95em 0;padding:0.75em 0.95em 0.75em 1.55em;line-height:1.8;color:#2f3441;background:#f8fafc;border-radius:6px;border:1px solid #edf2f7;list-style-position:outside;list-style-type:disc;"><li style="margin:0.28em 0;font-size:16px;line-height:1.82;text-indent:0;"><strong style="font-weight:700;color:#1f2937;">AI Society 数据集</strong>：25,000+ 对话，两个 GPT-3.5 Turbo 代理生成</li><li style="margin:0.28em 0;font-size:16px;line-height:1.82;text-indent:0;"><strong style="font-weight:700;color:#1f2937;">Code 数据集</strong>：代码生成对话</li><li style="margin:0.28em 0;font-size:16px;line-height:1.82;text-indent:0;"><strong style="font-weight:700;color:#1f2937;">Math/Science 数据集</strong>：单轮问答</li><li style="margin:0.28em 0;font-size:16px;line-height:1.82;text-indent:0;"><strong style="font-weight:700;color:#1f2937;">Misalignment 数据集</strong>：模拟恶意应用，研究对齐风险</li></ul>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;"><strong style="font-weight:700;color:#1f2937;">实际影响</strong>：CAMEL 生成的数据被用于训练：<br/>
+- Databricks MPT-30B-Chat<br/>
+- Microsoft Phi<br/>
+- Teknium's OpenHermes</p>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;">这使 CAMEL 成为第一个用自己代理生成的数据来训练竞争对手模型的框架。</p>
+<h2 style="margin:50px 0 32px;padding:0;text-indent:0;background:transparent;border:none;border-radius:0;box-shadow:none;"><div style="display:flex;align-items:center;gap:16px;margin-bottom:8px;"><span style="font-size:11px;font-weight:400;letter-spacing:3px;text-transform:uppercase;color:#8464c5;white-space:nowrap;">CHAPTER</span><span style="flex:1;height:1px;background:rgba(147,112,219,0.4);"></span></div><div style="display:flex;align-items:stretch;gap:16px;margin-bottom:4px;flex-wrap:nowrap;"><span style="font-size:48px;font-weight:900;line-height:1;color:rgba(147,112,219,0.4);font-style:italic;min-width:50px;">10</span><div style="display:flex;flex-direction:column;justify-content:center;min-width:0;flex:1;"><span style="font-size:22px;font-weight:700;color:#7a5cc0;line-height:1.4;">与同类框架对比</span><span style="font-size:11px;font-weight:400;color:rgba(147,112,219,0.5);letter-spacing:1px;margin-top:4px;">CHAPTER · 章节内容</span></div></div></h2>
+<table>
+<thead>
+<tr>
+<th>维度</th>
+<th>CAMEL</th>
+<th>AutoGen</th>
+<th>CrewAI</th>
+<th>LangGraph</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong style="font-weight:700;color:#1f2937;">发布时间</strong></td>
+<td>2023.03 (最早)</td>
+<td>2023.09</td>
+<td>2023.12</td>
+<td>2024.01</td>
+</tr>
+<tr>
+<td><strong style="font-weight:700;color:#1f2937;">核心范式</strong></td>
+<td>角色扮演</td>
+<td>对话式</td>
+<td>任务流程</td>
+<td>图状态机</td>
+</tr>
+<tr>
+<td><strong style="font-weight:700;color:#1f2937;">Agent 数量</strong></td>
+<td>百万级 (OASIS)</td>
+<td>数十</td>
+<td>数十</td>
+<td>数十</td>
+</tr>
+<tr>
+<td><strong style="font-weight:700;color:#1f2937;">模型支持</strong></td>
+<td>40+ 提供商</td>
+<td>中等</td>
+<td>中等</td>
+<td>广泛</td>
+</tr>
+<tr>
+<td><strong style="font-weight:700;color:#1f2937;">工具数量</strong></td>
+<td>80+</td>
+<td>20+</td>
+<td>30+</td>
+<td>50+</td>
+</tr>
+<tr>
+<td><strong style="font-weight:700;color:#1f2937;">MCP 支持</strong></td>
+<td>原生</td>
+<td>无</td>
+<td>无</td>
+<td>无</td>
+</tr>
+<tr>
+<td><strong style="font-weight:700;color:#1f2937;">学术论文</strong></td>
+<td>NeurIPS 2023</td>
+<td>无</td>
+<td>无</td>
+<td>无</td>
+</tr>
+<tr>
+<td><strong style="font-weight:700;color:#1f2937;">仿真能力</strong></td>
+<td>OASIS 百万级</td>
+<td>无</td>
+<td>无</td>
+<td>无</td>
+</tr>
+<tr>
+<td><strong style="font-weight:700;color:#1f2937;">合成数据</strong></td>
+<td>核心能力</td>
+<td>无</td>
+<td>无</td>
+<td>无</td>
+</tr>
+<tr>
+<td><strong style="font-weight:700;color:#1f2937;">人工干预</strong></td>
+<td>HITL + 暂停/恢复</td>
+<td>基础</td>
+<td>基础</td>
+<td>基础</td>
+</tr>
+</tbody>
+</table>
+<p style="margin:0.95em 0;line-height:1.92;font-size:16px;color:#333333;text-align:justify;letter-spacing:1.2px;text-indent:2em;"><strong style="font-weight:700;color:#1f2937;">CAMEL 的独特优势</strong>：<br/>
+1. <strong style="font-weight:700;color:#1f2937;">学术根基深厚</strong>：NeurIPS 论文奠定了理论基础<br/>
+2. <strong style="font-weight:700;color:#1f2937;">规模化验证</strong>：OASIS 项目证明了百万级代理的可行性<br/>
+3. <strong style="font-weight:700;color:#1f2937;">闭环进化</strong>：代理生成数据 → 训练更好模型 → 更好代理（自举循环）<br/>
+4. <strong style="font-weight:700;color:#1f2937;">MCP 原生集成</strong>：Workforce 可直接暴露为 MCP 服务器<br/>
+5. <strong style="font-weight:700;color:#1f2937;">代码即提示</strong>：每行代码/注释都作为提示，人和代理都能理解和扩展</p>
+<h2 style="margin:50px 0 32px;padding:0;text-indent:0;background:transparent;border:none;border-radius:0;box-shadow:none;"><div style="display:flex;align-items:center;gap:16px;margin-bottom:8px;"><span style="font-size:11px;font-weight:400;letter-spacing:3px;text-transform:uppercase;color:#8464c5;white-space:nowrap;">CHAPTER</span><span style="flex:1;height:1px;background:rgba(147,112,219,0.4);"></span></div><div style="display:flex;align-items:stretch;gap:16px;margin-bottom:4px;flex-wrap:nowrap;"><span style="font-size:48px;font-weight:900;line-height:1;color:rgba(147,112,219,0.4);font-style:italic;min-width:50px;">11</span><div style="display:flex;flex-direction:column;justify-content:center;min-width:0;flex:1;"><span style="font-size:22px;font-weight:700;color:#7a5cc0;line-height:1.4;">架构总览图</span><span style="font-size:11px;font-weight:400;color:rgba(147,112,219,0.5);letter-spacing:1px;margin-top:4px;">CHAPTER · 章节内容</span></div></div></h2>
+<section style="margin:1.2em 0;border-radius:12px;overflow:hidden;background:#1e1e1e;border:2px solid #333;box-shadow:0 4px 16px rgba(0,0,0,0.2);"><section style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:#2d2d2d;border-bottom:1px solid #404040;"><span style="font-size:13px;color:#a0a0a0;font-family:Menlo,Monaco,'Courier New',monospace;letter-spacing:0.5px;">Code</span><span style="display:inline-flex;gap:6px;"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ff5f56;"></span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ffbd2e;"></span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#27c93f;"></span></span></section><section style="margin:0;padding:16px 18px;background:#1e1e1e;overflow-x:auto;white-space:pre;border-left:4px solid #00bfff;"><p style="margin:0;font-family:Menlo,Monaco,'Courier New','Source Code Pro',monospace;font-size:13px;line-height:1.8;color:#e0e0e0;background:transparent;white-space:pre;"><span style="display:block;">┌─────────────────────────────────────────────────────────────┐</span><span style="display:block;">│                    CAMEL Framework                           │</span><span style="display:block;">├─────────────────────────────────────────────────────────────┤</span><span style="display:block;">│  Societies Layer                                            │</span><span style="display:block;">│  ┌──────────────────┐  ┌──────────────────────────────┐    │</span><span style="display:block;">│  │   RolePlaying     │  │        Workforce              │    │</span><span style="display:block;">│  │  (双代理角色扮演)  │  │  (多代理层级编排)              │    │</span><span style="display:block;">│  │  User ↔ Assistant │  │  Coordinator → Workers        │    │</span><span style="display:block;">│  │  + Critic (可选)  │  │  + Task Agent + Dynamic       │    │</span><span style="display:block;">│  └──────────────────┘  └──────────────────────────────┘    │</span><span style="display:block;">├─────────────────────────────────────────────────────────────┤</span><span style="display:block;">│  Agent Layer                                                │</span><span style="display:block;">│  ┌─────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐   │</span><span style="display:block;">│  │ChatAgent│ │CriticAgent│ │TaskAgent │ │RoleAssignAgent│   │</span><span style="display:block;">│  └────┬────┘ └──────────┘ └──────────┘ └──────────────┘   │</span><span style="display:block;">│       │                                                     │</span><span style="display:block;">├───────┼─────────────────────────────────────────────────────┤</span><span style="display:block;">│       │  Infrastructure Layer                               │</span><span style="display:block;">│  ┌────┴────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐   │</span><span style="display:block;">│  │ Models  │ │ Memories  │ │ Toolkits │ │   Messages    │   │</span><span style="display:block;">│  │40+ LLMs│ │ 多层记忆  │ │ 80+ 工具 │ │ 多模态消息   │   │</span><span style="display:block;">│  └─────────┘ └──────────┘ └──────────┘ └──────────────┘   │</span><span style="display:block;">├─────────────────────────────────────────────────────────────┤</span><span style="display:block;">│  Ecosystem                                                  │</span><span style="display:block;">│  OASIS (百万级仿真) · 合成数据 · MCP Server · Agent RL      │</span><span style="display:block;">└─────────────────────────────────────────────────────────────┘</span></p></section></section>
+<h2 style="margin:50px 0 32px;padding:0;text-indent:0;background:transparent;border:none;border-radius:0;box-shadow:none;"><div style="display:flex;align-items:center;gap:16px;margin-bottom:8px;"><span style="font-size:11px;font-weight:400;letter-spacing:3px;text-transform:uppercase;color:#8464c5;white-space:nowrap;">CHAPTER</span><span style="flex:1;height:1px;background:rgba(147,112,219,0.4);"></span></div><div style="display:flex;align-items:stretch;gap:16px;margin-bottom:4px;flex-wrap:nowrap;"><span style="font-size:48px;font-weight:900;line-height:1;color:rgba(147,112,219,0.4);font-style:italic;min-width:50px;">12</span><div style="display:flex;flex-direction:column;justify-content:center;min-width:0;flex:1;"><span style="font-size:22px;font-weight:700;color:#7a5cc0;line-height:1.4;">关键设计启示</span><span style="font-size:11px;font-weight:400;color:rgba(147,112,219,0.5);letter-spacing:1px;margin-top:4px;">CHAPTER · 章节内容</span></div></div></h2>
+<ol style="margin:0.95em 0;padding:0.75em 0.95em 0.75em 1.55em;line-height:1.8;color:#2f3441;background:#f8fafc;border-radius:6px;border:1px solid #edf2f7;list-style-position:outside;list-style-type:decimal;"><li style="margin:0.28em 0;font-size:16px;line-height:1.82;text-indent:0;"><strong style="font-weight:700;color:#1f2937;">角色扮演是最简多代理协调原语</strong>：两个代理、互补角色、轮替对话，就足以产生高质量合成数据</li><li style="margin:0.28em 0;font-size:16px;line-height:1.82;text-indent:0;"><strong style="font-weight:700;color:#1f2937;">提示级约束优于框架级强制</strong>：通过系统提示维持角色一致性，保持了灵活性</li><li style="margin:0.28em 0;font-size:16px;line-height:1.82;text-indent:0;"><strong style="font-weight:700;color:#1f2937;">规模化是研究目标而非工程目标</strong>：OASIS 的百万级仿真是为了发现代理行为的涌现规律</li><li style="margin:0.28em 0;font-size:16px;line-height:1.82;text-indent:0;"><strong style="font-weight:700;color:#1f2937;">闭环数据生成是护城河</strong>：代理生成数据 → 训练模型 → 更好代理的自举循环</li><li style="margin:0.28em 0;font-size:16px;line-height:1.82;text-indent:0;"><strong style="font-weight:700;color:#1f2937;">工具生态是粘性来源</strong>：80+ 工具包构成了难以复制的生态系统</li></ol><div style="margin:1.5em 0;text-align:center;"><p style="font-size:14px;color:#6b7280;text-indent:0;margin-bottom:0.5em;">📌 流程总结</p><img alt="流程图" src="file:///tmp/diagram.png" style="max-width:100%;border-radius:12px;border:1px solid #e2e8f0;box-shadow:0 2px 8px rgba(0,0,0,0.08);"/></div><section style="margin:32px 0 16px;padding:24px 20px;background:#f5f8ff;border:1px solid #dce9ff;border-radius:16px;text-align:center;">
+<p style="margin:0 0 20px;font-size:16px;color:#1f2937;font-weight:500;line-height:1.6;text-indent:0;">既然看到这里了，如果觉得有用，<br/>随手点个赞、推荐、转发三连吧</p>
+<div style="display:flex;justify-content:center;gap:40px;margin-bottom:16px;">
+<div style="text-align:center;">
+<div style="width:48px;height:48px;line-height:48px;margin:0 auto 8px;background:#bdaee6;border-radius:50%;font-size:24px;">👍</div>
+<p style="margin:0;font-size:12px;color:#7f5cc7;font-weight:600;">点赞</p>
+</div>
+<div style="text-align:center;">
+<div style="width:48px;height:48px;line-height:48px;margin:0 auto 8px;background:#bdaee6;border-radius:50%;font-size:24px;">❤️</div>
+<p style="margin:0;font-size:12px;color:#7f5cc7;font-weight:600;">推荐</p>
+</div>
+<div style="text-align:center;">
+<div style="width:48px;height:48px;line-height:48px;margin:0 auto 8px;background:#bdaee6;border-radius:50%;font-size:24px;">🔄</div>
+<p style="margin:0;font-size:12px;color:#7f5cc7;font-weight:600;">转发</p>
+</div>
+</div>
+<p style="margin:0;font-size:10px;font-weight:700;letter-spacing:3px;color:rgba(74,85,104,0.4);text-indent:0;">THANKS FOR READING</p>
+</section></section>
