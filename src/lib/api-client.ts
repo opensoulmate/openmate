@@ -11,6 +11,18 @@ export function setApiBaseUrl(url: string) {
   localStorage.setItem('openmate-api-url', url);
 }
 
+// 账号角色：解 JWT payload（登录时已带真角色），无 token/解析失败默认 user
+export function getUserRole(): string {
+  try {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('openmate-token') : null;
+    if (!token) return 'user';
+    const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+    return payload.role || 'user';
+  } catch {
+    return 'user';
+  }
+}
+
 async function request(path: string, options: RequestInit = {}) {
   const base = getApiBaseUrl();
   const headers: Record<string, string> = { 'Content-Type': 'application/json', ...(options.headers as Record<string, string> || {}) };

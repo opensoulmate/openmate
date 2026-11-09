@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import { useRef, useEffect, useCallback, useState } from "react";
 import { createPortal } from "react-dom";
-import { getUserName, getUserId, clearUser } from "@/lib/api-client";
+import { getUserName, getUserId, clearUser, getUserRole } from "@/lib/api-client";
 import {
   MessageSquare, Users, BookOpen, Workflow, Settings, Brain, Activity,
   LayoutDashboard, Bell, Server, GraduationCap, Network, Share2, Search,
@@ -20,6 +20,8 @@ import { fetchPluginNavItems, getCachedPluginNavItems, mergePluginNavItems, Plug
 import { BottomBar as OpenFaceBottomBar } from "@opensoulmate/openface";
 
 interface BottomNavItem {
+  /** 仅管理员可见（非 admin 角色从导航过滤） */
+  adminOnly?: boolean;
   href: string;
   label: string;
   icon: React.ElementType;
@@ -79,9 +81,9 @@ const baseNavItems: BottomNavItem[] = [
   { href: "/vision", label: "nav.vision", icon: ImageIcon },
   { href: "/mind", label: "nav.mind", icon: Smile },
   { href: "/soul", label: "nav.soul", icon: Brain },
-  { href: "/soma-admin", label: "nav.somaAdmin", icon: Bot },
-  { href: "/admin", label: "nav.admin", icon: Shield },
-  { href: "/permission", label: "nav.permission", icon: Shield },
+  { href: "/soma-admin", adminOnly: true, label: "nav.somaAdmin", icon: Bot },
+  { href: "/admin", adminOnly: true, label: "nav.admin", icon: Shield },
+  { href: "/permission", adminOnly: true, label: "nav.permission", icon: Shield },
   { href: "/enterprise", label: "nav.enterprise", icon: Shield },
   { href: "/sessions", label: "nav.sessions", icon: History },
   { href: "/spending", label: "nav.spending", icon: DollarSign },
@@ -130,8 +132,9 @@ export function BottomNav({ totalUnread = 0, onOpenConversations }: BottomNavPro
   }, []);
 
   // 合并基础导航项和插件导航项
+  const role = getUserRole();
   const navItems: BottomNavItem[] = [
-    ...baseNavItems,
+    ...baseNavItems.filter(item => !item.adminOnly || role === 'admin'),
     ...pluginNavItems.map(item => ({
       href: item.href,
       label: item.label,
