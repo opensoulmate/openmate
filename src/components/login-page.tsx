@@ -162,19 +162,23 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
 
         {mode === 'verify' ? (
           <div>
-            <div className="text-sm text-muted-foreground mb-3">{t('login.verifyTip', '验证码已发送至你的邮箱（10 分钟内有效）')}</div>
+            <div className="text-sm text-muted-foreground mb-1">{t('login.verifyTip', '验证码已发送至你的邮箱（10 分钟内有效）')}</div>
+            <div className="text-xs text-muted-foreground mb-3">
+              {resendIn > 0 ? (
+                <span>{resendIn} 秒后可重新发送</span>
+              ) : (
+                <button onClick={handleResend} className="px-2 py-1 rounded-md text-primary hover:bg-primary/10 transition-colors">
+                  {t('login.resendCode', '重新发送验证码')}
+                </button>
+              )}
+            </div>
             <input value={verifyCode} onChange={e => setVerifyCode(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleVerify()} placeholder={t('login.verifyCode', '6 位验证码')} className="w-full mb-3 px-4 py-3 rounded-lg border bg-background text-sm tracking-widest" autoFocus />
             <button onClick={handleVerify} disabled={loading} className="w-full px-4 py-3 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 disabled:opacity-50 mb-3">
               {loading ? <Loader2 className="w-4 h-4 animate-spin inline" /> : t('login.verifyAndLogin', '验证并登录')}
             </button>
-            <div className="flex gap-2">
-              <button onClick={handleResend} disabled={resendIn > 0} className="flex-1 px-4 py-2 rounded-lg border text-sm text-muted-foreground hover:bg-muted disabled:opacity-50">
-                {resendIn > 0 ? t('login.resendIn', '重新发送（{{n}}s）', { n: resendIn }) : t('login.resendCode', '重新发送验证码')}
-              </button>
-              <button onClick={() => { setMode('login'); setError(''); }} className="flex-1 px-4 py-2 rounded-lg border text-sm text-muted-foreground hover:bg-muted">
-                {t('login.backToLogin', '返回登录')}
-              </button>
-            </div>
+            <button onClick={() => { setMode('login'); setError(''); }} className="w-full px-4 py-2 rounded-lg border text-sm text-muted-foreground hover:bg-muted">
+              {t('login.backToLogin', '返回登录')}
+            </button>
           </div>
         ) : (
           <>
