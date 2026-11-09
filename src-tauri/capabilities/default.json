@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "OpenMate 桌面窗口能力：无边框窗口拖拽（data-tauri-drag-region 走 core:window:start_dragging，默认被 ACL 拦）",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging"
+  ]
+}
