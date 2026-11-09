@@ -553,7 +553,7 @@ function useAcpWebSocket(params: {
       if (autoName) {
         fetch(`${getApiBaseUrl()}/api/sessions/${newSessionId}`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', Authorization: 'Be' + 'arer ' + (localStorage.getItem('openmate-token') || '') },
           body: JSON.stringify({ title: autoName }),
         }).then(() => useAppStore.getState().refreshSidebar()).catch(() => useAppStore.getState().refreshSidebar());
       } else {
@@ -2324,6 +2324,22 @@ export function ChatClient() {
                 const text = assembled.trim();
                 const userMsg: Message = { id: Date.now().toString(), role: 'user', parts: [{ type: 'text', text }, ...attachments], timestamp: new Date() };
                 let currentSessionId = activeSessionIdFromStore;
+                // 默认名会话自动命名（如 ACP 直建的 "xxx 会话" 不走 temp 转正命名的洞）：
+                // 按首条用户消息前20字命名，与临时会话转正同语义；已命名则不重复 PATCH
+                if (currentSessionId) {
+                  const curName = selectedSessionRef.current?.name || '';
+                  const isDefaultName = !curName.trim() || curName === '新会话' || /.+ 会话$/.test(curName);
+                  const firstUserText = messages.find(m => m.role === 'user')?.parts?.find((p: { type: string; text?: string }) => p.type === 'text')?.text || text;
+                  const autoTitle = firstUserText.slice(0, 20);
+                  if (isDefaultName && autoTitle && curName !== autoTitle) {
+                    fetch(`${getApiBaseUrl()}/api/sessions/${currentSessionId}`, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json', Authorization: 'Be' + 'arer ' + (localStorage.getItem('openmate-token') || '') },
+                      body: JSON.stringify({ title: autoTitle }),
+                    }).then(() => useAppStore.getState().refreshSidebar()).catch(() => {});
+                    useAppStore.getState().setActiveSession(currentSessionId, null, { sessionName: autoTitle });
+                  }
+                }
                 // 没有活跃 session 时，自动创建新会话并跳转
                 if (!currentSessionId) {
                   // 直接从 store 取 agentId，不依赖 ref（ref 可能还没更新）
