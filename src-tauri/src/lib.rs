@@ -152,7 +152,7 @@ pub fn run() {
                 let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
                 let menu = Menu::with_items(app, &[&show, &quit])?;
                 if let Some(icon) = app.default_window_icon().cloned() {
-                    TrayIconBuilder::with_id("main-tray")
+                    let tray = TrayIconBuilder::with_id("main-tray")
                         .icon(icon)
                         .tooltip("OpenMate")
                         .menu(&menu)
@@ -173,6 +173,8 @@ pub fn run() {
                             }
                         })
                         .build(app)?;
+                    // 根修：TrayIcon 是 RAII（Drop=托盘设 Passive+删图标文件），必须保活到应用生命周期结束
+                    app.manage(tray);
                 }
                 if let Some(win) = app.get_webview_window("main") {
                     let w = win.clone();
