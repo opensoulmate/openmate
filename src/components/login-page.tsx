@@ -74,8 +74,9 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
     try {
       const a = api();
       if (mode === 'register') {
-        await a.register(username, password, email || `${username}@openmate.local`);
-        setUserName(username); setMode('verify'); setResendIn(60); setError('');
+        const reg = await a.register(username, password, email || `${username}@openmate.local`);
+        setUserName(username); setMode('verify'); setResendIn(60);
+        setError(reg?.pending_verification ? t('login.pendingResent', '该账号已注册但未验证，验证码已重新发送') : '');
         setLoading(false);
         return;
       } else {
