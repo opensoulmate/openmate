@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import { AccountBindings } from "@/components/account-bindings";
 import {
   Moon, Sun, Palette, Monitor, Save, Bot, Cpu, Globe, Key, Route,
   HardDrive, Info, Wrench, Sliders, Check, X,
@@ -1597,6 +1598,10 @@ export function SettingsClient() {
                     <div className="text-xs text-muted-foreground">{t("settings.signedIn")}</div>
                   </div>
                 </div>
+              </SettingCard>
+
+              <SettingCard title={t("settings.thirdPartyBinding", "第三方登录绑定")} description={t("settings.thirdPartyBindingDesc", "绑定微信/QQ 后可一键登录")}>
+                <AccountBindings />
               </SettingCard>
 
               <SettingCard title={t("settings.apiAddress")} description={t("settings.apiAddressDesc")}>
