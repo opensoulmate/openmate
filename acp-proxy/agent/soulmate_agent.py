@@ -1368,7 +1368,7 @@ class SoulMateAgent:
     _CODE_MODE_BUILTIN_TOOLS = (
         "read_file", "read_file_segment", "search_files", "terminal",
         "write_file", "patch", "execute_code", "web_search", "web_extract",
-        "search_chat_history",
+        "search_chat_history", "browser_flow_list", "browser_flow_execute",
     )
 
     async def _code_mode_tool_call(self, session_id: str, func_name: str, func_args: dict, cwd: str) -> str:
@@ -1620,6 +1620,9 @@ class SoulMateAgent:
             # 浏览器自动化（路线图 7.1）：批内同样可用（有界子进程调用）
             if func_name == "browser":
                 return self._browser_dispatch(func_args, session_id)
+            # 录制流程智能执行（录制→沉淀→按名调用）：批内同样可用（只读流程库）
+            if func_name in ("browser_flow_list", "browser_flow_execute"):
+                return self._browser_flow_dispatch(func_name, func_args)
             # 文档生成（路线图 7.2）：批内同样可用（纯本地文件写 + 有界转换）
             if func_name == "document":
                 return self._document_dispatch(func_args, session_id)
@@ -2295,6 +2298,112 @@ class SoulMateAgent:
         action = str(func_args.get("action", "") or "").strip().lower()
         params = {k: v for k, v in func_args.items() if k != "action" and v is not None}
         return tools.run(action, params)
+
+    def _browser_flow_dispatch(self, func_name: str, func_args: dict) -> str:
+        """browser_flow_list/browser_flow_execute 统一入口（主循环与 code-mode 内层共用）。
+
+        只读流程配方库（data/browser_flows/ 本地 JSON），不碰浏览器——
+        browser_flow_execute 返回「步骤+注意事项」操作计划，真正执行由模型用
+        browser 工具逐步进行（智能执行而非死板回放，注意事项=操作硬约束）。
+        读取双通道：browser_bridge 同模块直读优先（与存取面同源），agent 子进程
+        sys.path 不可达时走 HTTP 面兜底（BrowserTools._run_flows 同款访问面）。
+        """
+        def _read(op: str, arg: str = "") -> tuple[Any, str | None]:
+            """流程库读取：op=list→摘要列表；op=load→流程全文。返回 (数据, 错误)。"""
+            try:
+                # 延迟导入：sys.path 不含 acp-proxy 的运行形态不炸模块加载
+                import browser_bridge as _bb
+                return (_bb.list_flows() if op == "list" else _bb.load_flow(arg)), None
+            except Exception:
+                pass  # 直读不可达 → HTTP 面兜底
+            base = str(os.environ.get("SOULMATE_BROWSER_HTTP", "")
+                       or "http://127.0.0.1:8092").rstrip("/")
+            url = f"{base}/api/browser/flows" + (f"/{arg}" if arg else "")
+            try:
+                resp = httpx.get(url, timeout=5.0)
+                if resp.status_code != 200:
+                    return None, f"流程库 HTTP {resp.status_code}: {resp.text[:200]}"
+                data = resp.json()
+                if op == "list":
+                    return data.get("flows") or [], None
+                return data, None
+            except Exception as e:
+                return None, f"流程库不可用（本地直读与 HTTP({base}) 两通道均失败）— {e}"
+
+        if func_name == "browser_flow_list":
+            flows, err = _read("list")
+            if err:
+                return f"错误: {err}"
+            if not flows:
+                return "（流程库为空——让用户在内置浏览器点「⏺ 录制」录一段业务操作并保存流程）"
+            lines = []
+            for f in flows:
+                _notes = str(f.get("notes", "") or "").strip()
+                _sum = (_notes[:60] + "…") if len(_notes) > 60 else (_notes or "（无）")
+                _ts = f.get("created_at", 0)
+                _tm = time.strftime("%Y-%m-%d %H:%M", time.localtime(_ts)) if _ts else "未知"
+                lines.append(
+                    f"- {f.get('name', '')}（id={f.get('id', '')}，{f.get('steps', 0)}步，"
+                    f"保存于{_tm}）注意事项：{_sum}")
+            return ("【已保存流程】（用 browser_flow_execute(flow_name=名称) 按名调出执行）\n"
+                    + "\n".join(lines))
+
+        # ── browser_flow_execute：按名调出流程，返回步骤+注意事项操作计划 ──
+        flow_name = str(func_args.get("flow_name", "") or "").strip()
+        if not flow_name:
+            return "错误: 缺 flow_name（流程名称）。先调 browser_flow_list 看有哪些流程。"
+        flows, err = _read("list")
+        if err:
+            return f"错误: {err}"
+        hit = next((f for f in flows if str(f.get("name", "")) == flow_name), None)
+        if hit is None:
+            hit = next((f for f in flows if str(f.get("id", "")) == flow_name), None)
+        if hit is None:
+            _key = flow_name.lower()
+            hit = next((f for f in flows if _key in str(f.get("name", "")).lower()), None)
+        if hit is None:
+            names = "、".join(str(f.get("name", "")) for f in flows) or "（流程库为空）"
+            return f"错误: 未找到流程「{flow_name}」。可用流程：{names}"
+        rec, err = _read("load", str(hit.get("id", "")))
+        if err:
+            return f"错误: {err}"
+        if rec.get("ok") is False:
+            return f"错误: 读取流程失败 — {rec.get('error', '未知错误')}"
+        steps = [s for s in (rec.get("steps") or []) if isinstance(s, dict)]
+        params = rec.get("params") or []
+        lines = [
+            f"【流程】{rec.get('name', flow_name)}（{len(steps)}步，"
+            f"参数：{', '.join(params) or '无'}）——操作计划如下，逐步用 browser 工具执行："
+        ]
+        for i, s in enumerate(steps, 1):
+            parts = [f"{i}. [{s.get('action', '')}]"]
+            if s.get("selector"):
+                parts.append(f"selector={s.get('selector')}")
+            if s.get("text"):
+                parts.append(f"text={s.get('text')}")
+            if s.get("url"):
+                parts.append(f"url={s.get('url')}")
+            if s.get("value") not in (None, ""):
+                val = s.get("value")
+                shown = ("***（敏感字段：执行时向用户要真实值）" if s.get("secret")
+                         else (str(val) if len(str(val)) <= 40 else str(val)[:40] + "…"))
+                parts.append(f"value={shown}")
+            if s.get("submit"):
+                parts.append("（输入后回车提交）")
+            lines.append(" ".join(parts))
+        notes = str(rec.get("notes", "") or "").strip()
+        lines.append("⚠ 注意事项（执行时必须遵守的硬约束）：")
+        _note_items = [x.strip() for x in re.split(r"[\n;；]+", notes) if x.strip()] if notes else []
+        if _note_items:
+            lines.extend(f"- {n}" for n in _note_items)
+        else:
+            lines.append("- （本流程未填写注意事项，按步骤执行即可）")
+        lines.append(
+            "执行方式：本工具只出计划不碰浏览器——用 browser 工具（goto/click/type/fill/"
+            "snapshot）按步骤逐条执行；{{param}} 占位先向用户要值再替换，密码类 {{password}} "
+            "用用户提供值填入且绝不写进任何输出；遵守上方注意事项（等待/顺序/参数等）；"
+            "遇到「⏸ 用户已接管」立刻停手等用户发话。")
+        return "\n".join(lines)
 
     def _skill_save_dispatch(self, func_args: dict, session_id: str = "") -> str:
         """skill_save 分发（路线图 6.1：把成功流程写成 SKILL.md）。
@@ -3204,6 +3313,59 @@ You can send files to the user natively: to deliver a file, write a brief confir
             },
         }
         builtin_tools.append(file_recall_tool)
+
+        # ── 录制流程智能执行工具（录制→沉淀→SoulMate 按名调用）────────
+        # browser_flow_list=浏览流程配方库；browser_flow_execute=按名调出流程的
+        # 「步骤+注意事项」操作计划——工具本身不盲动浏览器，由模型用 browser 工具
+        # 逐步智能执行并把注意事项当硬约束（用户诉求：录制完能说「按XX流程来操作」，
+        # 操作中的注意事项被遵守，智能执行而非死板回放）。
+        browser_flow_tools = [{
+            "type": "function",
+            "function": {
+                "name": "browser_flow_list",
+                "description": (
+                    "查看本机已保存的浏览器录制流程清单（录制→沉淀的流程配方库）。"
+                    "返回每条流程的名称/步数/注意事项摘要/保存时间。"
+                    "当用户想看「有哪些流程/能回放什么/之前录过什么操作」时调用。"
+                    "使用注意：只读不操作浏览器；返回的名称是 browser_flow_execute 的"
+                    "flow_name 入参；注意事项只是摘要，完整注意事项在 browser_flow_execute "
+                    "的返回里，执行前必须看全。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                },
+            },
+        }, {
+            "type": "function",
+            "function": {
+                "name": "browser_flow_execute",
+                "description": (
+                    "按名称调出已保存的录制流程，返回「步骤+注意事项」操作计划供逐步"
+                    "智能执行。触发语：当用户说「按XX流程来操作/用XX流程/回放XX/照着XX"
+                    "流程干」时调用；先 browser_flow_list 确认流程名称再调用本工具。"
+                    "返回值是结构化文本：每步序号+动作+selector/值，末尾⚠注意事项列表"
+                    "——本工具不直接操作浏览器，拿到计划后用 browser 工具（goto/click/"
+                    "type/fill/snapshot）按步骤逐条执行。"
+                    "使用注意：注意事项是硬约束必须遵守（如等页面加载完再点下一步、先向"
+                    "用户要值再替换 {{param}} 占位、密码类 {{password}} 用用户提供值填入"
+                    "且绝不写进任何输出）；流程名找不到时会返回可用名称列表，不要瞎猜重名；"
+                    "步骤值为 *** 的是录制时的敏感字段，执行时向用户要真实值；"
+                    "遇到「⏸ 用户已接管」立刻停手等用户发话。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "flow_name": {
+                            "type": "string",
+                            "description": "流程名称（browser_flow_list 返回的 name；也接受流程 id）",
+                        },
+                    },
+                    "required": ["flow_name"],
+                },
+            },
+        }]
+        builtin_tools.extend(browser_flow_tools)
 
         # ── 定时任务调度工具（路线图 3.1 cron引擎）──────────────────
         # SoulMate 自己的周期调度：schedule+执行+日志（区别于 schedule_wakeup
@@ -4993,6 +5155,16 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             # ── 浏览器自动化（路线图 7.1，Playwright/CDP）──────
                             try:
                                 result = self._browser_dispatch(func_args, session_id)
+                            except Exception as e:
+                                te = self._tool_error_handler.handle_error(
+                                    session_id, func_name, e, func_args)
+                                result = te.to_model_message()
+                        elif func_name in ("browser_flow_list", "browser_flow_execute"):
+                            # ── 录制流程智能执行（录制→沉淀→按名调用）─────────
+                            # 只读流程库出「步骤+注意事项」操作计划，浏览器动作由
+                            # 模型用 browser 工具逐步执行（智能执行而非死板回放）
+                            try:
+                                result = self._browser_flow_dispatch(func_name, func_args)
                             except Exception as e:
                                 te = self._tool_error_handler.handle_error(
                                     session_id, func_name, e, func_args)

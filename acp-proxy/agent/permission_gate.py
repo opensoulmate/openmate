@@ -40,6 +40,7 @@ DEGRADED_READONLY_TOOLS = {
     "read_file", "read_file_segment", "list_files", "search_files",
     "web_search", "web_extract", "vision_analyze", "read_image",
     "check_evolution_status", "todo", "clarify",
+    "browser_flow_list", "browser_flow_execute",
 }
 
 # 降级模式下的本地灾难命令硬否决（与opensoul builtin hard deny对齐）

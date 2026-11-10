@@ -227,13 +227,15 @@ def _flow_path(flow_id: str) -> Path:
 
 
 def save_flow(body: dict) -> dict:
-    """保存录制流程。steps=[{action, selector, text, value, url, secret}]。"""
+    """保存录制流程。steps=[{action, selector, text, value, url, secret}]，notes=注意事项。"""
     name = str(body.get("name", "") or "").strip()
     if not name:
         return {"ok": False, "error": "流程名必填"}
     steps = [s for s in (body.get("steps") or []) if isinstance(s, dict) and s.get("action")]
     if not steps:
         return {"ok": False, "error": "步骤为空"}
+    # 注意事项（可选）：执行约束/坑提示，随配方落盘，SoulMate 按名调出时当硬约束带回
+    notes = str(body.get("notes", "") or "").strip()
     fid_raw = re.sub(r"[^a-zA-Z0-9_-]", "_", name)[:48].strip("_")
     # 中文名洗出来是空/下划线 → 名称哈希做 ID（同名=同 ID=覆盖保存，语义正确）
     fid = fid_raw if (fid_raw and fid_raw.isascii()) else "flow-" + hashlib.md5(name.encode("utf-8")).hexdigest()[:8]
@@ -247,6 +249,7 @@ def save_flow(body: dict) -> dict:
         "name": name,
         "steps": steps,
         "params": params,
+        "notes": notes,
         "created_at": time.time(),
     }
     _FLOWS_DIR.mkdir(parents=True, exist_ok=True)
@@ -266,6 +269,7 @@ def list_flows() -> list[dict]:
                 "name": rec.get("name", p.stem),
                 "steps": len(rec.get("steps") or []),
                 "params": rec.get("params") or [],
+                "notes": rec.get("notes", ""),
                 "created_at": rec.get("created_at", 0),
             })
         except Exception:
@@ -280,7 +284,10 @@ def load_flow(flow_id: str) -> dict:
         return {"ok": False, "error": str(e)}
     if not p.is_file():
         return {"ok": False, "error": f"流程不存在：{flow_id}"}
-    return json.loads(p.read_text(encoding="utf-8"))
+    rec = json.loads(p.read_text(encoding="utf-8"))
+    # 旧配方无 notes 字段时透传空串（前端/SoulMate 消费面拿到的字段形状统一）
+    rec.setdefault("notes", "")
+    return rec
 
 
 def delete_flow(flow_id: str) -> dict:

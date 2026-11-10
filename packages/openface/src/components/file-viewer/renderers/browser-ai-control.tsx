@@ -139,6 +139,7 @@ export function BrowserAIControl({ initialUrl }: BrowserAIControlProps) {
   const [recording, setRecording] = useState(false);
   const [recCount, setRecCount] = useState(0);
   const [flowName, setFlowName] = useState('');
+  const [flowNotes, setFlowNotes] = useState('');
   const [showSaveBar, setShowSaveBar] = useState(false);
   const recOnRef = useRef(false);
   const recStepsRef = useRef<any[]>([]);
@@ -237,14 +238,32 @@ export function BrowserAIControl({ initialUrl }: BrowserAIControlProps) {
       await fetch(`http://${host}:8092/api/browser/flows`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, steps: recStepsRef.current }),
+        body: JSON.stringify({ name, notes: flowNotes.trim(), steps: recStepsRef.current }),
       });
     } catch { /* 保存失败保留界面可重试 */ }
     recStepsRef.current = [];
     setRecCount(0);
     setShowSaveBar(false);
     setFlowName('');
+    setFlowNotes('');
   };
+
+  // ⏺ 录制开关桥：按钮上移顶排（workspace-panel 裙摆标签行），此处注册开关+广播状态
+  useEffect(() => {
+    if (!isElectron) return;
+    (window as any).__omRecordToggle = () => (recording ? stopRecording() : startRecording());
+  }, [isElectron, recording, startRecording, stopRecording]);
+  useEffect(() => {
+    if (!isElectron) return;
+    window.dispatchEvent(new CustomEvent('om-record-state', { detail: { mounted: true, recording, count: recCount } }));
+  }, [isElectron, recording, recCount]);
+  useEffect(() => {
+    if (!isElectron) return;
+    return () => {
+      delete (window as any).__omRecordToggle;
+      window.dispatchEvent(new CustomEvent('om-record-state', { detail: { mounted: false, recording: false, count: 0 } }));
+    };
+  }, [isElectron]);
 
   // webview 注册进全局标签注册表（SoulMate 自动化执行器经它定位内置浏览器）
   useEffect(() => {
@@ -309,17 +328,7 @@ export function BrowserAIControl({ initialUrl }: BrowserAIControlProps) {
 
         <div className="w-px h-4 bg-border mx-0.5" />
 
-        {/* ⏺ 录制业务流程：红点钮并入地址栏（不占常驻行）；录制中变红底+步数，点击即停 */}
-        {isElectron && (
-          <button
-            onClick={() => (recording ? stopRecording() : startRecording())}
-            title={recording ? `录制中（${recCount} 步）——点击停止` : "录制业务流程：录一段操作，沉淀为可回放流程"}
-            className={`flex items-center gap-1 px-2 py-1.5 rounded text-xs transition-colors ${recording ? 'bg-red-500/15 text-red-500' : 'hover:bg-muted/50 text-muted-foreground'}`}
-          >
-            <span className={`w-2.5 h-2.5 rounded-full ${recording ? 'bg-red-500 animate-pulse' : 'bg-red-400/60'}`} />
-            {recording && <span className="tabular-nums">{recCount}</span>}
-          </button>
-        )}
+        {/* ⏺ 录制业务流程：红点钮上移顶排（workspace-panel 裙摆标签行）——此处只保留开关/状态桥 */}
       </div>
 
       
@@ -357,6 +366,12 @@ export function BrowserAIControl({ initialUrl }: BrowserAIControlProps) {
                 value={flowName}
                 onChange={(e) => setFlowName(e.target.value)}
                 placeholder={`流程名称（已录 ${recCount} 步，如：录入订单）`}
+                className="flex-1 rounded-md border border-border bg-transparent px-2 py-1 outline-none focus:border-primary"
+              />
+              <input
+                value={flowNotes}
+                onChange={(e) => setFlowNotes(e.target.value)}
+                placeholder="注意事项（可选）例：第3步要等页面加载完，密码框用{{password}}"
                 className="flex-1 rounded-md border border-border bg-transparent px-2 py-1 outline-none focus:border-primary"
               />
               <button

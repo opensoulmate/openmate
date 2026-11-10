@@ -215,6 +215,13 @@ export function WorkspacePanel({
 }: WorkspacePanelProps) {
   const isMobile = useIsMobile();
   const [isFullscreen, setIsFullscreen] = useState(false);
+  // ⏺ 录制状态桥（按钮在顶排，录制状态机在 BrowserAIControl 里，经 om-record-state 事件同步）
+  const [recUI, setRecUI] = useState<{ mounted: boolean; recording: boolean; count: number }>({ mounted: false, recording: false, count: 0 });
+  useEffect(() => {
+    const h = (e: Event) => setRecUI((e as CustomEvent).detail);
+    window.addEventListener('om-record-state', h as EventListener);
+    return () => window.removeEventListener('om-record-state', h as EventListener);
+  }, []);
   const [fsStyle, setFsStyle] = useState<React.CSSProperties>({});
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -496,6 +503,17 @@ export function WorkspacePanel({
             </>
           )}
         />
+        {/* ⏺ 录制钮：顶排（裙摆标签行），与全屏钮同排；红点=待录，红底+步数=录制中点击即停 */}
+        {recUI.mounted && (
+          <button
+            onClick={() => (window as any).__omRecordToggle?.()}
+            title={recUI.recording ? `录制中（${recUI.count} 步）——点击停止` : '录制业务流程：录一段操作，沉淀为可回放流程'}
+            className={`shrink-0 flex items-center gap-1 px-1.5 py-1.5 rounded transition-colors mr-1 ${recUI.recording ? 'bg-red-500/15 text-red-500' : 'hover:bg-muted/30 text-muted-foreground'}`}
+          >
+            <span className={`w-2.5 h-2.5 rounded-full ${recUI.recording ? 'bg-red-500 animate-pulse' : 'bg-red-400/60'}`} />
+            {recUI.recording && <span className="text-xs tabular-nums">{recUI.count}</span>}
+          </button>
+        )}
         {(
           <button
             onClick={toggleFullscreen}
