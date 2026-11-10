@@ -40,6 +40,7 @@ const INJECT_BEHAVIOR_LOG = `(() => {
   });
   window.addEventListener('mousedown', function (e) {
     push({ type: 'click', target: describe(e.target), url: location.href });
+    recStep({ action: 'click', selector: cssPath(e.target), text: describe(e.target) });
   }, { capture: true, passive: true });
   var hoverTimer = null, lastHoverEl = null;
   window.addEventListener('mousemove', function (e) {
@@ -65,6 +66,9 @@ const INJECT_BEHAVIOR_LOG = `(() => {
       var rec = { type: 'input', target: desc, url: location.href, length: v.length };
       if (v && VALUE_OK.test(desc)) rec.value = v;
       push(rec);
+      var isSecret = SECRET.test(desc);
+      recStep({ action: 'fill', selector: cssPath(el), text: describe(el),
+                value: isSecret ? '{{password}}' : v, secret: isSecret });
     };
     var prev = timers.get(el);
     if (prev) clearTimeout(prev);
@@ -84,6 +88,55 @@ const INJECT_BEHAVIOR_LOG = `(() => {
     lastScroll = now;
     push({ type: 'scroll', scroll_y: Math.round(window.scrollY), url: location.href });
   }, { capture: true, passive: true });
+  // ── 录制（显式开启才捕获输入值：录制=录教学；密码字段参数化 {{password}} 永不落盘）──
+  // sessionStorage 承载步骤=跨同源页面导航不丢（业务流程多为同源多页表单）。
+  function cssPath(el) {
+    if (!el || el.nodeType !== 1) return '';
+    if (el.id) return '#' + el.id;
+    var path = [];
+    while (el && el.nodeType === 1 && path.length < 5) {
+      if (el.id) { path.unshift('#' + el.id); break; }
+      var seg = el.tagName.toLowerCase();
+      var p = el.parentNode;
+      if (p && p.children) {
+        var i = 1;
+        for (var k = 0; k < p.children.length; k++) { if (p.children[k] === el) { i = k + 1; break; } }
+        seg += ':nth-child(' + i + ')';
+      }
+      path.unshift(seg);
+      el = el.parentElement;
+    }
+    return path.join(' > ');
+  }
+  function recOn() { try { return sessionStorage.getItem('__omRecOn') === '1'; } catch (e) { return false; } }
+  function recStep(step) {
+    if (!recOn()) return;
+    step.ts = Date.now();
+    try {
+      var all = JSON.parse(sessionStorage.getItem('__omSteps') || '[]');
+      all.push(step);
+      sessionStorage.setItem('__omSteps', JSON.stringify(all));
+    } catch (e) { /* 隐私模式/存储满 */ }
+  }
+  window.__omStartRecording = function () {
+    try {
+      sessionStorage.setItem('__omRecOn', '1');
+      if (!sessionStorage.getItem('__omSteps')) sessionStorage.setItem('__omSteps', '[]');
+    } catch (e) {}
+    return true;
+  };
+  window.__omTakeSteps = function () {
+    try {
+      var all = JSON.parse(sessionStorage.getItem('__omSteps') || '[]');
+      sessionStorage.setItem('__omSteps', '[]');
+      return all;
+    } catch (e) { return []; }
+  };
+  window.__omStopRecording = function () {
+    var left = window.__omTakeSteps();
+    try { sessionStorage.removeItem('__omRecOn'); } catch (e) {}
+    return left;
+  };
   return true;
 })()`;
 
@@ -183,6 +236,22 @@ class TaskRunner {
   start() {
     if (!bridge() || this.ws) return;
     (window as any).__omBrowserRunnerResume = () => this.resumeFromUI();
+    // 录制控制口（浏览器标签的 ⏺ 录制按钮经它驱动页内步骤捕获）
+    (window as any).__omRecordingCtl = {
+      start: async (tabId: number) => {
+        const b = bridge(); if (!b || !tabId) return false;
+        await execOn(b, tabId, '(() => { if (!window.__omBehaviorLog) { ' + INJECT_BEHAVIOR_LOG + ' } return window.__omStartRecording(); })()');
+        return true;
+      },
+      take: async (tabId: number) => {
+        const b = bridge(); if (!b || !tabId) return [];
+        return (await execOn(b, tabId, '(() => { if (!window.__omBehaviorLog) { ' + INJECT_BEHAVIOR_LOG + ' } return window.__omTakeSteps(); })()')) || [];
+      },
+      stop: async (tabId: number) => {
+        const b = bridge(); if (!b || !tabId) return [];
+        return (await execOn(b, tabId, 'window.__omStopRecording ? window.__omStopRecording() : []')) || [];
+      },
+    };
     this.connect();
     this.startBehaviorPolling();
   }

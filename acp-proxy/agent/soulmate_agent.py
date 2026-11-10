@@ -2516,7 +2516,7 @@ ACP代理目录: {cwd}/acp-proxy（后端 Python 代码在此）
 - message_send: 统一消息出站（OpenMate/微信同一入口，支持media图片/文件附件收发）。channel='wechat'发给微信peer（拆块+限流），channel='openmate'落库到指定会话（正连前端实时可见）。用户要求"给某微信用户发消息/发文件发图片/通知某会话/主动推送"时使用；对方发来图片/截图时按消息内媒体提示块用vision_analyze/read_image理解（截图理解）
 - delegate_tasks: 子代理并行执行（拆分任务给并行worker，父代理收尾合并）。多个互不依赖的独立子任务（多路调研/多个互不依赖的问题/多份互不依赖的检查）→ delegate_tasks 拆给并行子代理并发执行（1-8个，同一批子任务一次调用派发完毕，不要分多次重复派发同一批），合并结果后由你收尾总结论。⚠️ 有先后依赖的任务不要拆（会并行跑）；每个子任务 goal 必须自包含（子代理看不到当前对话，必要背景写进 goal/context）；失败/超时的子任务会在结果里标注原因，收尾时如实反映不要当成已完成
 - group_task: AI群组任务编排（接 ai-groups 多agent群组：自动分解→按角色分配→并行执行）。需要多agent分工协作的复杂目标（规划→执行→验证→审查）→ group_task(action=orchestrate) 交给群组执行并返回合并报告；查看群组→ action=list_groups；查任务进度→ action=task_status。⚠️ 失败/超时子任务在报告中标注原因，不要当成已完成
-- skill_save: 技能保存（把成功流程写成SKILL.md含触发条件/步骤/坑，存技能库供复用）。刚成功完成多步骤可复用任务、或用户要求"把XX流程保存为技能/记住怎么做"时使用；同名技能默认不覆盖（更新传 overwrite=true）。保存后同类任务命中触发词会自动加载该技能\n- browser: 浏览器自动化（Playwright/CDP，真实浏览器会话）。action=goto 打开URL / snapshot 读页面标题+正文+链接 / click 点元素 / type 输入（submit=true回车）/ fill 清空填入 / eval 执行JS / screenshot 截图（返回文件路径可MEDIA下发）/ back 后退 / close 关闭会话 / activity 读用户全端操作流（含 hover 指针上下文——用户说「这个地方/这个按钮」指代不明时，先调 activity 找最近 hover 事件定位元素）/ resume 恢复自动操作。selector 用 CSS 选择器。需要看页面真实渲染内容、登录态页面、自动化网页操作时使用；纯静态网页抓取优先 web_extract。⚠️ 页面过长截断并自报；失败返回具体原因；页面状态跨调用保留（连续操作无需重复goto）\n- document: 文档生成（docx/pdf/xlsx，输出真实文件返回 MEDIA: 路径可直接下发）。format=docx|pdf 时 content 传块列表（heading/paragraph/bullet/table/pagebreak），format=xlsx 时传 sheets:[{{name, rows}}]。需要交付正式文档/报表/表格文件时使用；纯文本回答不需要生成文件\n- text_to_speech: 语音合成（TTS，文本→音频文件，输出返回 MEDIA: 路径可直接播放/下发）。需要把文字转成语音/音频文件（朗读稿/配音/语音播报）时使用；voice 可选（默认中文女声 zh-CN-XiaoxiaoNeural），rate 可选语速（如 +0%）。纯文字回复不需要合成音频\n- image: 图像生成/编辑（输出真实文件返回 MEDIA: 路径可直接下发）。action=generate 按 prompt 生成图像（⚠️ 未配置 AI 后端时为程序化绘制，会在结果里如实标注）；resize/crop/rotate/flip/convert/annotate/compose/thumbnail 为确定性编辑（传 path）。需要生成图片或处理图片（缩放/裁剪/加文字/拼图/转格式）时使用\n- send_file: 文件下发（本地已有文件→📎下载卡片，返回 MEDIA: 标签走既有下发通道）。path=文件绝对路径（不知道路径先用 search_files 找），message 可选随件附言。需要把本地文件交付给用户（产物/报告/日志）时使用；文件不存在/越界显式报因\n- process: 后台进程管理（长任务放后台跑，可见可管）。action=start 启动后台命令（command，返回 proc_id）/ list 列出全部 / poll 查状态 / log 看日志尾部 / kill 停止（默认 SIGTERM，force=true 才 SIGKILL）/ write 向 stdin 写入 / submit 写入并回车 / close 关闭 stdin。构建/测试/服务/长脚本等超过单次 terminal 耗时的任务用它；进程不随会话断开而终止。⚠️ 不会到点强杀长任务——超时只报状态\n
+- skill_save: 技能保存（把成功流程写成SKILL.md含触发条件/步骤/坑，存技能库供复用）。刚成功完成多步骤可复用任务、或用户要求"把XX流程保存为技能/记住怎么做"时使用；同名技能默认不覆盖（更新传 overwrite=true）。保存后同类任务命中触发词会自动加载该技能\n- browser: 浏览器自动化（Playwright/CDP，真实浏览器会话）。action=goto 打开URL / snapshot 读页面标题+正文+链接 / click 点元素 / type 输入（submit=true回车）/ fill 清空填入 / eval 执行JS / screenshot 截图（返回文件路径可MEDIA下发）/ back 后退 / close 关闭会话 / activity 读用户全端操作流（含 hover 指针上下文——用户说「这个地方/这个按钮」指代不明时，先调 activity 找最近 hover 事件定位元素）/ flows 录制流程清单 / replay 按录制流程重复执行（flow=名，data 填参数，「按XX流程再跑一遍」时用）/ resume 恢复自动操作。selector 用 CSS 选择器。需要看页面真实渲染内容、登录态页面、自动化网页操作时使用；纯静态网页抓取优先 web_extract。⚠️ 页面过长截断并自报；失败返回具体原因；页面状态跨调用保留（连续操作无需重复goto）\n- document: 文档生成（docx/pdf/xlsx，输出真实文件返回 MEDIA: 路径可直接下发）。format=docx|pdf 时 content 传块列表（heading/paragraph/bullet/table/pagebreak），format=xlsx 时传 sheets:[{{name, rows}}]。需要交付正式文档/报表/表格文件时使用；纯文本回答不需要生成文件\n- text_to_speech: 语音合成（TTS，文本→音频文件，输出返回 MEDIA: 路径可直接播放/下发）。需要把文字转成语音/音频文件（朗读稿/配音/语音播报）时使用；voice 可选（默认中文女声 zh-CN-XiaoxiaoNeural），rate 可选语速（如 +0%）。纯文字回复不需要合成音频\n- image: 图像生成/编辑（输出真实文件返回 MEDIA: 路径可直接下发）。action=generate 按 prompt 生成图像（⚠️ 未配置 AI 后端时为程序化绘制，会在结果里如实标注）；resize/crop/rotate/flip/convert/annotate/compose/thumbnail 为确定性编辑（传 path）。需要生成图片或处理图片（缩放/裁剪/加文字/拼图/转格式）时使用\n- send_file: 文件下发（本地已有文件→📎下载卡片，返回 MEDIA: 标签走既有下发通道）。path=文件绝对路径（不知道路径先用 search_files 找），message 可选随件附言。需要把本地文件交付给用户（产物/报告/日志）时使用；文件不存在/越界显式报因\n- process: 后台进程管理（长任务放后台跑，可见可管）。action=start 启动后台命令（command，返回 proc_id）/ list 列出全部 / poll 查状态 / log 看日志尾部 / kill 停止（默认 SIGTERM，force=true 才 SIGKILL）/ write 向 stdin 写入 / submit 写入并回车 / close 关闭 stdin。构建/测试/服务/长脚本等超过单次 terminal 耗时的任务用它；进程不随会话断开而终止。⚠️ 不会到点强杀长任务——超时只报状态\n
 You can send files to the user natively: to deliver a file, write a brief confirmation message (e.g. "文件已发送，请查收"), then include MEDIA:/absolute/path/to/file on a new line. The gateway extracts the tag, strips it, and sends the file as a download card. Always write some text before the MEDIA: tag — never output a bare MEDIA: tag alone. Use search_files first if you don't know the exact path. Do NOT paste file contents into chat."""
 
     # ── P1-15 五终止条件组合入trace（lazy初始化兼容 __new__ 搭建的测试agent）──
@@ -3635,7 +3635,10 @@ You can send files to the user natively: to deliver a file, write a brief confir
                     " fill（清空后填入）/ eval（执行js表达式返回结果）/ screenshot（截图"
                     "存PNG返回路径）/ back（后退）/ close（未启用）/ resume（恢复自动操作）/"
                     "activity（读用户全端操作流：data=recent明细|context摘要，含hover指针上下文——"
-                    "用户说「这个地方/这个按钮」指代不明时先调activity找最近hover事件定位元素）。"
+                    "用户说「这个地方/这个按钮」指代不明时先调activity找最近hover事件定位元素）/"
+                    "flows（已录流程清单，flow=名看步骤）/ replay（按流程重复执行：flow=名，"
+                    "data={{参数:值}} 填占位，dry_run=true 预览；缺参数会列出来问——用户说"
+                    "「按XX流程再跑一遍/录个流程回放」时用）/ resume（恢复自动操作）。"
                     "接管语义（必须遵守）：用户手动操作浏览器后，动作会返回'⏸ 用户已接管'并"
                     "全部暂停——此时立刻停手等用户发话；用户说'继续'后先调 resume 再继续动作。"
                     "需要看页面真实渲染内容/登录态页面/自动化网页操作时使用；纯静态网页抓取"
@@ -3648,7 +3651,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             "type": "string",
                             "enum": ["goto", "snapshot", "click", "type", "fill",
                                      "eval", "screenshot", "back", "close", "resume",
-                                     "activity"],
+                                     "activity", "flows", "replay"],
                             "description": "要执行的浏览器动作",
                         },
                         "url": {"type": "string", "description": "目标URL（goto）"},

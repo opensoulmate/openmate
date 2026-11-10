@@ -12,6 +12,7 @@ BrowserTools = 有界子进程调用 + 确定性输出格式化。worker（agent
 import json
 import logging
 import os
+import re
 import select
 import subprocess
 import time
@@ -26,7 +27,7 @@ WORKER_START_TIMEOUT_S = 15.0
 
 SUPPORTED_ACTIONS = (
     "goto", "snapshot", "click", "type", "fill", "eval", "screenshot", "back", "close",
-    "resume", "activity",
+    "resume", "activity", "flows", "replay",
 )
 
 _START_HINT = (
@@ -208,6 +209,11 @@ class BrowserTools:
         #    不走执行通道（懂用户在做什么、「这个地方」指的哪）。
         if action == "activity":
             return self._run_activity(params)
+        # ── flows/replay=录制流程配方（录制→回放）：清单/查看/按流程重复执行。
+        if action == "flows":
+            return self._run_flows(params)
+        if action == "replay":
+            return self._run_replay(params)
         # ── 默认模式=应用通道：任务发给 OpenMate 内置浏览器执行（真浏览器同一扇窗，
         #    用户随时接管）。SOULMATE_BROWSER_MODE=worker 走独立 playwright 子进程。
         mode = str(os.environ.get("SOULMATE_BROWSER_MODE", "") or "app").strip().lower()
@@ -245,6 +251,101 @@ class BrowserTools:
         return note + self._format(action, resp.get("result") or {})
 
     # ── 应用通道模式（默认）：任务经 acp-proxy browser_bridge 发给 OpenMate 内置浏览器 ──
+
+    @staticmethod
+    def _bridge_base() -> str:
+        return str(os.environ.get("SOULMATE_BROWSER_HTTP", "") or "http://127.0.0.1:8092").rstrip("/")
+
+    def _run_flows(self, params: dict) -> str:
+        """流程配方清单/查看（录制→回放的沉淀库）。flow=名称/ID 时输出完整步骤。"""
+        flow = str(params.get("flow", "") or "").strip()
+        try:
+            if flow:
+                url = f"{self._bridge_base()}/api/browser/flows/{flow}"
+            else:
+                url = f"{self._bridge_base()}/api/browser/flows"
+            with urllib.request.urlopen(url, timeout=5) as r:
+                data = json.loads(r.read().decode())
+        except Exception as e:
+            return f"❌ 读取流程库失败：{e}"
+        if flow:
+            if not data.get("ok", True):
+                return f"❌ {data.get('error', '流程不存在')}"
+            steps = data.get("steps") or []
+            lines = [f"【流程】{data.get('name', flow)}（{len(steps)}步，参数：{', '.join(data.get('params') or []) or '无'}）"]
+            for i, s in enumerate(steps, 1):
+                desc = s.get("selector") or s.get("text") or s.get("url") or ""
+                val = s.get("value", "")
+                shown = "***" if s.get("secret") else (val if len(str(val)) <= 40 else str(val)[:40] + "…")
+                lines.append(f"{i}. [{s.get('action')}] {desc}" + (f" = {shown}" if val else ""))
+            return "\n".join(lines)
+        flows = data.get("flows") or []
+        if not flows:
+            return "（流程库为空——让用户在内置浏览器点「⏺ 录制」录一段业务操作即可沉淀）"
+        lines = ["【已保存流程】（用 replay(flow=名称) 重复执行）"]
+        for f in flows:
+            lines.append(f"- {f.get('name')}（{f.get('steps')}步，参数：{', '.join(f.get('params') or []) or '无'}）")
+        return "\n".join(lines)
+
+    def _run_replay(self, params: dict) -> str:
+        """按录制流程重复执行（智能回放：逐步走应用通道，⏸接管即停，缺参数现场问）。
+
+        flow=流程名/ID；data={参数:值} 填 {{param}} 占位；dry_run=true 只预览不执行。
+        """
+        flow = str(params.get("flow", "") or "").strip()
+        if not flow:
+            return "❌ 缺 flow（流程名/ID）。先调 flows 看有哪些流程。"
+        data = dict(params.get("data") or {})
+        try:
+            with urllib.request.urlopen(f"{self._bridge_base()}/api/browser/flows/{flow}", timeout=5) as r:
+                rec = json.loads(r.read().decode())
+        except Exception as e:
+            return f"❌ 读取流程失败：{e}"
+        if not rec.get("ok", True):
+            return f"❌ {rec.get('error', '流程不存在')}"
+        steps = rec.get("steps") or []
+        missing: set[str] = set()
+
+        def subst(text: str) -> str:
+            def _rep(m):
+                key = m.group(1)
+                if key in data:
+                    return str(data[key])
+                missing.add(key)
+                return m.group(0)
+            return re.sub(r"\{\{(\w+)\}\}", _rep, str(text or ""))
+
+        # 预检：参数占位齐全才开跑（缺参现场问，别跑到一半卡住）
+        for s in steps:
+            for field in ("value", "url"):
+                if s.get(field):
+                    subst(s[field])
+        if missing:
+            return (f"❌ 流程「{rec.get('name')}」需要参数：{', '.join(sorted(missing))}"
+                    f"（敏感字段不入流程，回放时提供 data={{...}} 填入后重跑）")
+        if params.get("dry_run"):
+            return self._run_flows({"flow": flow}) + "\n（dry_run 预览，未执行）"
+
+        results = []
+        for i, s in enumerate(steps, 1):
+            action = str(s.get("action", ""))
+            p: dict = {}
+            if action == "goto":
+                p["url"] = subst(s.get("url", ""))
+            elif action in ("click",):
+                p = {"selector": s.get("selector", ""), "text": s.get("text", "")}
+            elif action in ("fill", "type"):
+                p = {"selector": s.get("selector", ""), "text": subst(s.get("value", "")),
+                     "submit": bool(s.get("submit"))}
+            else:
+                results.append(f"{i}. [{action}] ⏭ 跳过（不支持的录制步骤）")
+                continue
+            out = self._run_app_mode(action, p)
+            results.append(f"{i}. [{action}] {out.strip()[:160]}")
+            if "⏸" in out:
+                results.append("—— 回放已中止（用户接管），用户说\"继续\"后可重新 replay")
+                break
+        return f"【回放】{rec.get('name')}（{len(steps)}步）\n" + "\n".join(results)
 
     def _run_activity(self, params: dict) -> str:
         """读用户全端操作流（OpenSense 行为感知 · Sense 第五通道）。

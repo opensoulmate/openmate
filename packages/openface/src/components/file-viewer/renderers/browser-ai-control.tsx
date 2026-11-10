@@ -139,6 +139,15 @@ export function BrowserAIControl({ initialUrl, onAIAction }: BrowserAIControlPro
   const webviewRef = useRef<any>(null);
   const isElectron = typeof window !== 'undefined' && !!(window as any).openmateDesktop?.webviewExec;
   const [runnerState, setRunnerState] = useState<{ action: string; paused: boolean; at: number } | null>(null);
+  // ── ⏺ 录制业务流程（录制→沉淀为配方→SoulMate replay 回放）──
+  const [recording, setRecording] = useState(false);
+  const [recCount, setRecCount] = useState(0);
+  const [flowName, setFlowName] = useState('');
+  const [showSaveBar, setShowSaveBar] = useState(false);
+  const recOnRef = useRef(false);
+  const recStepsRef = useRef<any[]>([]);
+  const recTimerRef = useRef<any>(null);
+  const webviewIdRef = useRef<number | null>(null);
 
   const navigate = useCallback((targetUrl: string) => {
     let finalUrl = targetUrl;
@@ -164,6 +173,15 @@ export function BrowserAIControl({ initialUrl, onAIAction }: BrowserAIControlPro
       const u = e?.url || wv.getAttribute?.('src');
       if (u) { setUrl(u); setInputUrl(u); }
       setLoading(false);
+      // 录制：导航=goto 步骤（与页内步骤同一时间轴）
+      if (recOnRef.current && u) {
+        const steps = recStepsRef.current;
+        const last = steps[steps.length - 1];
+        if (!last || last.action !== 'goto' || last.url !== u) {
+          steps.push({ action: 'goto', url: u });
+          setRecCount(steps.length);
+        }
+      }
     };
     wv.addEventListener('did-stop-loading', onNav);
     wv.addEventListener('did-navigate', onNav);
@@ -183,6 +201,55 @@ export function BrowserAIControl({ initialUrl, onAIAction }: BrowserAIControlPro
     return () => window.removeEventListener('om-runner-state', onState);
   }, []);
 
+  // ── ⏺ 录制控制（页内步骤 300ms 收取 + 导航 goto 步骤同轴合并）──
+  const recCtl = () => (window as any).__omRecordingCtl;
+  const startRecording = async () => {
+    const id = webviewIdRef.current;
+    if (!id || !recCtl()) return;
+    recStepsRef.current = [];
+    setRecCount(0);
+    recOnRef.current = true;
+    setRecording(true);
+    await recCtl().start(id);
+    recTimerRef.current = window.setInterval(async () => {
+      const id2 = webviewIdRef.current;
+      if (!id2 || !recCtl()) return;
+      const evs: any[] = (await recCtl().take(id2).catch(() => [])) || [];
+      if (evs.length) {
+        recStepsRef.current.push(...evs);
+        setRecCount(recStepsRef.current.length);
+      }
+    }, 300);
+  };
+  const stopRecording = async () => {
+    recOnRef.current = false;
+    setRecording(false);
+    if (recTimerRef.current) { window.clearInterval(recTimerRef.current); recTimerRef.current = null; }
+    const id = webviewIdRef.current;
+    if (id && recCtl()) {
+      const left: any[] = (await recCtl().stop(id).catch(() => [])) || [];
+      if (left.length) recStepsRef.current.push(...left);
+    }
+    setRecCount(recStepsRef.current.length);
+    if (recStepsRef.current.length > 0) setShowSaveBar(true);
+  };
+  const saveFlow = async () => {
+    const name = flowName.trim();
+    if (!name) return;
+    try {
+      const host = location.hostname || '127.0.0.1';
+      await fetch(`http://${host}:8092/api/browser/flows`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, steps: recStepsRef.current }),
+      });
+    } catch { /* 保存失败保留界面可重试 */ }
+    recStepsRef.current = [];
+    setRecCount(0);
+    setShowSaveBar(false);
+    setFlowName('');
+  };
+
   // webview 注册进全局标签注册表（SoulMate 自动化执行器经它定位内置浏览器）
   useEffect(() => {
     if (!isElectron) return;
@@ -192,7 +259,7 @@ export function BrowserAIControl({ initialUrl, onAIAction }: BrowserAIControlPro
     const register = () => {
       try {
         const id = wv?.getWebContentsId?.();
-        if (id) g.__omWebviews[id] = wv;
+        if (id) { g.__omWebviews[id] = wv; webviewIdRef.current = id; }
       } catch { /* webview 未就绪 */ }
     };
     register();
@@ -476,6 +543,54 @@ export function BrowserAIControl({ initialUrl, onAIAction }: BrowserAIControlPro
               {log.error && <span className="text-red-400 text-[10px] ml-auto">{log.error}</span>}
             </div>
           ))}
+        </div>
+      )}
+
+      {/* ⏺ 录制业务流程：录一段操作→沉淀为配方→SoulMate replay 重复执行 */}
+      {isElectron && (
+        <div className="flex items-center gap-2 border-t border-border px-3 py-1.5 text-xs">
+          {!recording ? (
+            <button
+              onClick={startRecording}
+              className="rounded-md px-2 py-1 hover:bg-primary/10 transition-colors"
+              title="录制一段业务操作，沉淀为可回放流程"
+            >
+              ⏺ 录制流程
+            </button>
+          ) : (
+            <>
+              <span className="text-red-500 animate-pulse">⏺ 录制中（{recCount} 步）</span>
+              <button
+                onClick={stopRecording}
+                className="ml-auto rounded-md bg-red-500/15 px-2.5 py-1 text-red-500 hover:bg-red-500/25 transition-colors"
+              >
+                停止
+              </button>
+            </>
+          )}
+          {showSaveBar && (
+            <>
+              <input
+                value={flowName}
+                onChange={(e) => setFlowName(e.target.value)}
+                placeholder={`流程名称（已录 ${recCount} 步，如：录入订单）`}
+                className="flex-1 rounded-md border border-border bg-transparent px-2 py-1 outline-none focus:border-primary"
+              />
+              <button
+                onClick={saveFlow}
+                disabled={!flowName.trim()}
+                className="rounded-md bg-primary/10 px-2.5 py-1 text-primary hover:bg-primary/20 transition-colors disabled:opacity-40"
+              >
+                保存流程
+              </button>
+              <button
+                onClick={() => { recStepsRef.current = []; setRecCount(0); setShowSaveBar(false); }}
+                className="rounded-md px-2 py-1 hover:bg-primary/10 transition-colors"
+              >
+                丢弃
+              </button>
+            </>
+          )}
         </div>
       )}
 
