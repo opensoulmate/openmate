@@ -499,6 +499,18 @@ export function BrowserAIControl({ initialUrl, onAIAction }: BrowserAIControlPro
           <Sparkles className="w-3.5 h-3.5" />
           <span className="hidden sm:inline">AI</span>
         </button>
+
+        {/* ⏺ 录制业务流程：红点钮并入地址栏（不占常驻行）；录制中变红底+步数，点击即停 */}
+        {isElectron && (
+          <button
+            onClick={() => (recording ? stopRecording() : startRecording())}
+            title={recording ? `录制中（${recCount} 步）——点击停止` : "录制业务流程：录一段操作，沉淀为可回放流程"}
+            className={`flex items-center gap-1 px-2 py-1.5 rounded text-xs transition-colors ${recording ? 'bg-red-500/15 text-red-500' : 'hover:bg-muted/50 text-muted-foreground'}`}
+          >
+            <span className={`w-2.5 h-2.5 rounded-full ${recording ? 'bg-red-500 animate-pulse' : 'bg-red-400/60'}`} />
+            {recording && <span className="tabular-nums">{recCount}</span>}
+          </button>
+        )}
       </div>
 
       {/* ── AI instruction bar ── */}
@@ -546,30 +558,9 @@ export function BrowserAIControl({ initialUrl, onAIAction }: BrowserAIControlPro
         </div>
       )}
 
-      {/* ⏺ 录制业务流程：录一段操作→沉淀为配方→SoulMate replay 重复执行 */}
-      {isElectron && (
+      {/* ⏺ 录制钮已并入地址栏（红点钮不占常驻行）；此行仅在保存流程名的瞬间出现 */}
+      {isElectron && showSaveBar && (
         <div className="flex items-center gap-2 border-t border-border px-3 py-1.5 text-xs">
-          {!recording ? (
-            <button
-              onClick={startRecording}
-              className="rounded-md px-2 py-1 hover:bg-primary/10 transition-colors"
-              title="录制一段业务操作，沉淀为可回放流程"
-            >
-              ⏺ 录制流程
-            </button>
-          ) : (
-            <>
-              <span className="text-red-500 animate-pulse">⏺ 录制中（{recCount} 步）</span>
-              <button
-                onClick={stopRecording}
-                className="ml-auto rounded-md bg-red-500/15 px-2.5 py-1 text-red-500 hover:bg-red-500/25 transition-colors"
-              >
-                停止
-              </button>
-            </>
-          )}
-          {showSaveBar && (
-            <>
               <input
                 value={flowName}
                 onChange={(e) => setFlowName(e.target.value)}
@@ -589,8 +580,6 @@ export function BrowserAIControl({ initialUrl, onAIAction }: BrowserAIControlPro
               >
                 丢弃
               </button>
-            </>
-          )}
         </div>
       )}
 
