@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicedoc/tauri/refs/heads/v2/crates/tauri-cli/config.schema.json",
   "productName": "OpenMate",
-  "version": "0.1.0",
+  "version": "1.2.0",
   "identifier": "com.openmate.app",
   "build": {
     "frontendDist": "http://100.76.2.155:3000",
@@ -31,6 +31,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -42,9 +43,9 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://raw.githubusercontent.com/open-soulmate/openmate/main/updater.json"
+        "https://climbing.top/openmate-releases/tauri-updater.json"
       ],
-      "pubkey": ""
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDg3RjFBNDExQjY1QkQ3MkYKUldRdjExdTJFYVR4aHlPM3dwTGJLSWppNUxLcFdNQmwrWUNha0xvVlF4UHBvMVY2RC9BdEFreGwK"
     }
   }
 }

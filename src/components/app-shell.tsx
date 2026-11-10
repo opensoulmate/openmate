@@ -10,6 +10,7 @@ import { TerminalPanel } from "@/components/terminal-panel";
 import { BottomNav } from "@/components/bottom-nav";
 import { TopBar } from "@/components/top-bar";
 import { ShellTitleBar } from "@/components/shell-title-bar";
+import { initTauriDesktopBridge } from "@/lib/tauri-desktop-bridge";
 import { WorkspacePanel } from '@opensoulmate/openface';
 import { AIGroupsSidebar } from "@/components/ai-groups-sidebar";
 import { useAIGroupsStore } from "@/stores/ai-groups-store";
@@ -114,6 +115,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // 桌面壳：更新就绪 → 主题化弹窗（替代原生对话框，与 app 风格一致）
   const [updateInfo, setUpdateInfo] = useState<{ version: string } | null>(null);
   useEffect(() => {
+    // Tauri 壳补同款桥（Electron 走自己的 preload 桥，此处只在 Tauri 生效）
+    initTauriDesktopBridge();
     const bridge = (window as any).openmateDesktop;
     if (!bridge?.onUpdateReady) return;
     const off = bridge.onUpdateReady((data: { version: string }) => setUpdateInfo(data));
@@ -581,7 +584,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="mx-4 w-full max-w-sm rounded-2xl border border-border bg-card p-5 shadow-2xl">
             <h3 className="text-base font-semibold text-foreground">新版本 v{updateInfo.version} 已就绪</h3>
             <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
-              点"立即重启"完成更新；选"稍后"则下次退出应用时自动安装。
+              点"立即重启"完成更新；
+              {(window as any).__TAURI_INTERNALS__
+                ? '选"稍后"则下次启动时再提醒。'
+                : '选"稍后"则下次退出应用时自动安装。'}
             </p>
             <div className="mt-4 flex justify-end gap-2">
               <button
