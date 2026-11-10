@@ -399,7 +399,6 @@ export function WorkspacePanel({
           <BrowserAIControl
             key={activeTab.id}
             initialUrl={activeTab.url}
-            onAIAction={onBrowserAIAction || (async () => null)}
           />
         );
 

@@ -10,7 +10,6 @@ interface BrowserAIControlProps {
   /** Initial URL to load */
   initialUrl?: string;
   /** AI callback: sends page context + instruction, returns actions to execute */
-  onAIAction: (context: PageContext, instruction: string) => Promise<AIAction[] | null>;
 }
 
 interface PageContext {
@@ -126,13 +125,10 @@ async function executeActionElectron(
   }
 }
 
-export function BrowserAIControl({ initialUrl, onAIAction }: BrowserAIControlProps) {
+export function BrowserAIControl({ initialUrl }: BrowserAIControlProps) {
   const [url, setUrl] = useState(initialUrl || 'about:blank');
   const [inputUrl, setInputUrl] = useState(initialUrl || '');
   const [loading, setLoading] = useState(false);
-  const [aiMode, setAiMode] = useState(false);
-  const [aiInstruction, setAiInstruction] = useState('');
-  const [aiLoading, setAiLoading] = useState(false);
   const [actionLog, setActionLog] = useState<ActionLog[]>([]);
   const [showLog, setShowLog] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -274,188 +270,7 @@ export function BrowserAIControl({ initialUrl, onAIAction }: BrowserAIControlPro
   }, [isElectron]);
 
   // Extract page context from iframe
-  const extractPageContext = useCallback(async (): Promise<PageContext | null> => {
-    // Electron 真浏览器：在页面本体里提取（跨域无碍），与 iframe 版同构
-    if (isElectron && webviewRef.current) {
-      const bridge = (window as any).openmateDesktop;
-      const tabId = webviewRef.current.getWebContentsId?.();
-      if (!tabId) return null;
-      const res = await bridge.webviewExec(tabId, EXTRACT_SCRIPT);
-      return res?.ok ? res.result : null;
-    }
-    const iframe = iframeRef.current;
-    if (!iframe) return null;
-
-    try {
-      const doc = iframe.contentDocument || iframe.contentWindow?.document;
-      if (!doc) return null;
-
-      const title = doc.title || '';
-      const iframeUrl = iframe.contentWindow?.location?.href || url;
-
-      // Extract interactive elements
-      const interactiveElements: InteractiveElement[] = [];
-      const selectors = ['a', 'button', 'input', 'textarea', 'select', '[role="button"]', '[onclick]'];
-
-      selectors.forEach(selector => {
-        doc.querySelectorAll(selector).forEach((el, i) => {
-          const htmlEl = el as HTMLElement;
-          const rect = htmlEl.getBoundingClientRect();
-          const tag = htmlEl.tagName.toLowerCase();
-          const id = htmlEl.id || '';
-          const name = (htmlEl as HTMLInputElement).name || '';
-          const type = (htmlEl as HTMLInputElement).type || '';
-          const placeholder = (htmlEl as HTMLInputElement).placeholder || '';
-          const text = htmlEl.textContent?.trim().slice(0, 50) || '';
-          const href = (htmlEl as HTMLAnchorElement).href || '';
-
-          // Generate a unique selector
-          let uniqueSelector = tag;
-          if (id) uniqueSelector = `#${id}`;
-          else if (name) uniqueSelector = `${tag}[name="${name}"]`;
-          else uniqueSelector = `${tag}:nth-of-type(${i + 1})`;
-
-          if (rect.width > 0 && rect.height > 0) {
-            interactiveElements.push({
-              tag, id, name, type, placeholder, text, href,
-              selector: uniqueSelector,
-              rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
-            });
-          }
-        });
-      });
-
-      // Build DOM summary for AI
-      const bodyText = doc.body?.textContent?.slice(0, 2000) || '';
-      const domSummary = `页面标题: ${title}\nURL: ${iframeUrl}\n\n页面内容摘要:\n${bodyText.slice(0, 1500)}\n\n可交互元素 (${interactiveElements.length}个):\n${interactiveElements.slice(0, 30).map((el, i) =>
-        `${i + 1}. [${el.tag}] ${el.text || el.placeholder || el.href || el.name || el.id || '(无文本)'} ${el.type ? `type=${el.type}` : ''}`
-      ).join('\n')}`;
-
-      return { url: iframeUrl, title, domSummary, interactiveElements };
-    } catch (e) {
-      // Cross-origin - can't access
-      return {
-        url, title: '', domSummary: `无法访问页面内容（跨域限制）。URL: ${url}`,
-        interactiveElements: [],
-      };
-    }
-  }, [url]);
-
-  // Execute AI action on the page
-  const executeAction = useCallback(async (action: AIAction): Promise<{ success: boolean; error?: string }> => {
-    // Electron 真浏览器：主进程直驱（真实键鼠+页面本体 DOM）
-    if (isElectron && webviewRef.current) {
-      return executeActionElectron(action, (window as any).openmateDesktop, webviewRef.current);
-    }
-    const iframe = iframeRef.current;
-    if (!iframe) return { success: false, error: 'iframe not found' };
-
-    try {
-      const doc = iframe.contentDocument || iframe.contentWindow?.document;
-      if (!doc) return { success: false, error: '无法访问页面（跨域）' };
-
-      switch (action.type) {
-        case 'click': {
-          if (!action.selector) return { success: false, error: '缺少selector' };
-          const el = doc.querySelector(action.selector) as HTMLElement;
-          if (!el) return { success: false, error: `未找到元素: ${action.selector}` };
-          el.click();
-          return { success: true };
-        }
-        case 'type': {
-          if (!action.selector || !action.value) return { success: false, error: '缺少selector或value' };
-          const input = doc.querySelector(action.selector) as HTMLInputElement;
-          if (!input) return { success: false, error: `未找到输入框: ${action.selector}` };
-          input.focus();
-          input.value = action.value;
-          input.dispatchEvent(new Event('input', { bubbles: true }));
-          input.dispatchEvent(new Event('change', { bubbles: true }));
-          return { success: true };
-        }
-        case 'navigate': {
-          if (!action.url) return { success: false, error: '缺少URL' };
-          iframe.src = action.url;
-          setUrl(action.url);
-          setInputUrl(action.url);
-          return { success: true };
-        }
-        case 'scroll': {
-          const scrollY = parseInt(action.value || '500') || 500;
-          iframe.contentWindow?.scrollBy(0, scrollY);
-          return { success: true };
-        }
-        case 'wait': {
-          const ms = parseInt(action.value || '1000') || 1000;
-          await new Promise(r => setTimeout(r, ms));
-          return { success: true };
-        }
-        case 'extract': {
-          if (!action.selector) return { success: false, error: '缺少selector' };
-          doc.querySelector(action.selector);
-          return { success: true };
-        }
-        default:
-          return { success: false, error: `未知操作类型: ${action.type}` };
-      }
-    } catch (e) {
-      return { success: false, error: String(e) };
-    }
-  }, []);
-
-  // AI handles the instruction
-  const handleAIInstruction = useCallback(async () => {
-    if (!aiInstruction.trim() || aiLoading) return;
-    setAiLoading(true);
-    setActionLog([]);
-    setShowLog(true);
-
-    try {
-      const context = await extractPageContext();
-      if (!context) {
-        setActionLog([{ action: { type: 'wait', description: '无法读取页面内容' }, status: 'error', error: '页面未加载或跨域限制' }]);
-        return;
-      }
-
-      const actions = await onAIAction(context, aiInstruction);
-      if (!actions || actions.length === 0) {
-        setActionLog([{ action: { type: 'wait', description: 'AI未返回操作' }, status: 'error' }]);
-        return;
-      }
-
-      // Execute actions sequentially
-      const log: ActionLog[] = [];
-      for (const action of actions) {
-        log.push({ action, status: 'pending' });
-        setActionLog([...log]);
-
-        const result = await executeAction(action);
-        log[log.length - 1]!.status = result.success ? 'success' : 'error';
-        log[log.length - 1]!.error = result.error;
-        setActionLog([...log]);
-
-        // Wait between actions
-        if (result.success && action.type !== 'wait') {
-          await new Promise(r => setTimeout(r, 500));
-        }
-      }
-    } finally {
-      setAiLoading(false);
-    }
-  }, [aiInstruction, aiLoading, extractPageContext, onAIAction, executeAction]);
-
-  // Keyboard shortcut
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k' && aiMode) {
-        e.preventDefault();
-        handleAIInstruction();
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [aiMode, handleAIInstruction]);
-
-  return (
+      return (
     <div className="flex flex-col h-full min-h-0">
       {/* ── Navigation bar ── */}
       <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-border bg-muted/30">
@@ -494,12 +309,6 @@ export function BrowserAIControl({ initialUrl, onAIAction }: BrowserAIControlPro
 
         <div className="w-px h-4 bg-border mx-0.5" />
 
-        <button onClick={() => setAiMode(!aiMode)}
-          className={`flex items-center gap-1 px-2 py-1.5 rounded text-xs transition-colors ${aiMode ? 'bg-primary/20 text-primary' : 'hover:bg-muted/50 text-muted-foreground'}`}>
-          <Sparkles className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">AI</span>
-        </button>
-
         {/* ⏺ 录制业务流程：红点钮并入地址栏（不占常驻行）；录制中变红底+步数，点击即停 */}
         {isElectron && (
           <button
@@ -513,24 +322,7 @@ export function BrowserAIControl({ initialUrl, onAIAction }: BrowserAIControlPro
         )}
       </div>
 
-      {/* ── AI instruction bar ── */}
-      {aiMode && (
-        <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-border bg-primary/5">
-          <Sparkles className="w-3.5 h-3.5 text-primary shrink-0" />
-          <input
-            value={aiInstruction}
-            onChange={e => setAiInstruction(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleAIInstruction()}
-            placeholder="告诉AI要做什么... (例：点击登录按钮、在搜索框输入Python)"
-            className="flex-1 bg-transparent text-xs text-foreground outline-none"
-            disabled={aiLoading}
-          />
-          <button onClick={handleAIInstruction} disabled={aiLoading || !aiInstruction.trim()}
-            className="p-1.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors">
-            {aiLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
-          </button>
-        </div>
-      )}
+      
 
       {/* ── Action log ── */}
       {showLog && actionLog.length > 0 && (
