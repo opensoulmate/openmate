@@ -201,23 +201,25 @@ function initUpdater() {
   setTimeout(check, 10 * 1000); // 启动 10 秒后首查
   setInterval(check, 4 * 60 * 60 * 1000); // 之后每 4 小时
   autoUpdater.on('update-downloaded', (info) => {
-    // 主题化弹窗：交给渲染层（与 app 同风格）；无渲染层才退回原生对话框
+    // 无感更新语义：后台下载已完成，安装延迟到退出（autoInstallOnAppQuit）——
+    // 绝不打断正在跑的 CDP/Agent 任务（唯一硬限制=运行中不能换主 exe，故安装只在
+    // 程序不运行时发生）。弹窗=知会型，默认"知道了"，"立即更新"是可选项。
     const w = BrowserWindow.getAllWindows()[0];
     if (w && !w.isDestroyed()) {
       w.webContents.send('openmate-update-ready', { version: info.version });
     } else {
       dialog.showMessageBox({
-        type: 'info', buttons: ['立即重启', '稍后'], defaultId: 0, cancelId: 1,
+        type: 'info', buttons: ['知道了', '立即更新'], defaultId: 0, cancelId: 0,
         title: 'OpenMate 更新就绪',
-        message: `新版本 ${info.version} 已下载完成`,
-        detail: '点"立即重启"完成更新；不重启的话，下次退出应用时会自动安装。',
+        message: `新版本 ${info.version} 已在后台下载完成`,
+        detail: '不打断正在跑的任务：下次退出应用时自动安装，下次打开即新版本。要现在更新点"立即更新"（会重启应用）。',
       }).then(({ response }) => {
-        if (response === 0) autoUpdater.quitAndInstall(true, true); // 无感：静默安装+装完自启
+        if (response === 1) autoUpdater.quitAndInstall(true, true); // 用户主动选才立即装+自启
       });
     }
   });
   ipcMain.on('openmate-update-action', (e, action) => {
-    if (action === 'install') autoUpdater.quitAndInstall(true, true); // 无感：静默安装+装完自启
+    if (action === 'install') autoUpdater.quitAndInstall(true, true); // 用户主动选才立即装+自启
   });
   // 测试钩子：OPENMATE_FAKE_UPDATE=1 弹一次更新提示（验收/UI 调试）
   if (process.env.OPENMATE_FAKE_UPDATE === '1') {
