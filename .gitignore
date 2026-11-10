@@ -32,3 +32,4 @@ certs/
 acp-proxy/skills/*.json
 acp-proxy/stability_test_results*
 *.bak-*
+desktop/dist/

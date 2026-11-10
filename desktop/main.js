@@ -66,7 +66,11 @@ function createWindow() {
     minHeight: 600,
     title: 'OpenMate',
     icon: path.join(__dirname, 'icon.png'),
-    backgroundColor: '#0b0f14',
+    // 毛玻璃：Windows=Acrylic 系统材质、macOS=under-window vibrancy；玻璃从半透明的
+    // 侧栏/标题栏底下透出来（CSS 端 .om-glass）。Linux 无系统材质，保持实底。
+    backgroundColor: (process.platform === 'win32' || process.platform === 'darwin') ? '#00000000' : '#0b0f14',
+    ...(process.platform === 'win32' ? { backgroundMaterial: 'acrylic' } : {}),
+    ...(process.platform === 'darwin' ? { vibrancy: 'under-window', visualEffectState: 'active' } : {}),
     autoHideMenuBar: true,
     webPreferences: {
       nodeIntegration: false,

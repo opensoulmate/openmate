@@ -13,7 +13,7 @@
   },
   "devDependencies": {
     "electron": "45.1.0",
-    "electron-builder": "^26.0.0"
+    "electron-builder": "^26.18.0"
   },
   "build": {
     "appId": "top.climbing.openmate",
@@ -41,6 +41,9 @@
         "dir"
       ],
       "category": "Network"
+    },
+    "electronDownload": {
+      "mirror": "https://npmmirror.com/mirrors/electron/"
     }
   }
 }

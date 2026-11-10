@@ -133,6 +133,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     };
     installBehaviorSensor();
     startBrowserTaskRunner();
+    // 毛玻璃：桌面壳挂 om-glass（CSS 端磨砂生效；网页版不挂=实底）
+    if ((window as any).openmateDesktop || (window as any).__TAURI_INTERNALS__) {
+      document.documentElement.classList.add('om-glass');
+    }
     return () => {
       delete g.__omOpenWebTab;
     };
@@ -506,7 +510,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {/* Top utility bar — full screen width */}
       <ShellTitleBar />
       {/* shrink-0：整行永不被 flex 压矮，防止图标溢出后被下方内容区背景盖住 */}
-      <div className="flex shrink-0 items-center">
+      <div className="om-chrome flex shrink-0 items-center">
         <div className="flex-1 min-w-0">
           <TopBar
             eventCount={eventCount}

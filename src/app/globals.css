@@ -224,6 +224,26 @@ body {
   background: color-mix(in srgb, var(--color-primary) 30%, transparent);
 }
 
+/* ─── 毛玻璃（桌面壳 Acrylic/vibrancy）────────────────────────────────────
+   仅 Electron/Tauri 桌面壳启用（html.om-glass 由 app-shell 挂载）：
+   侧栏+标题栏磨砂透出系统材质，内容区面板自绘实底保证可读。 */
+html.om-glass,
+html.om-glass body {
+  background: transparent;
+}
+/* 侧栏磨砂：在原 token 上做透明化（不改 token 本体，暗/亮主题通用） */
+html.om-glass [data-sidebar] {
+  background: color-mix(in srgb, var(--color-sidebar) 58%, transparent) !important;
+  backdrop-filter: blur(20px) saturate(1.35);
+  -webkit-backdrop-filter: blur(20px) saturate(1.35);
+}
+/* 标题栏/顶栏磨砂条 */
+html.om-glass .om-chrome {
+  background: color-mix(in srgb, var(--color-background) 52%, transparent) !important;
+  backdrop-filter: blur(20px) saturate(1.35);
+  -webkit-backdrop-filter: blur(20px) saturate(1.35);
+}
+
 /* ─── Light Theme ─────────────────────────────────────────────────────── */
 .light {
   --color-background: #ffffff;
