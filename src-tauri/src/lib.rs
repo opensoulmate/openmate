@@ -1,5 +1,6 @@
 use serde::Serialize;
 use std::process::Command;
+use tauri::Emitter;
 use tauri::Manager;
 
 #[derive(Serialize)]
@@ -200,6 +201,26 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
+            // ── 主窗口改 Rust 构造（conf 不再定义窗口）──
+            // tauri 2.11 的 on_new_window 是构造期链式方法（mut self→Self），conf 建的窗
+            // 挂不上：workspace 浏览器里 target=_blank / window.open 被静默吞（用户报障
+            // "点百度链接没响应"）。此处拦截新窗请求 → 转发前端开 workspace 新 web-browser
+            // 标签（Electron 时代 main.js 拦 new-window 的同款行为）。
+            let handle_new_win = app.handle().clone();
+            tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("".into()))
+                .title("OpenMate｜开放协同的AI智能伙伴")
+                .decorations(false)
+                .transparent(true)
+                .visible(false)
+                .inner_size(1440.0, 900.0)
+                .min_inner_size(375.0, 600.0)
+                .resizable(true)
+                .center()
+                .on_new_window(move |url, _features| {
+                    let _ = handle_new_win.emit("open-web-tab", url.to_string());
+                    tauri::webview::NewWindowResponse::Deny
+                })
+                .build()?;
             #[cfg(debug_assertions)]
             {
                 let window = app.get_webview_window("main").unwrap();

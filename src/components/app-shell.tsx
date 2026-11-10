@@ -124,12 +124,32 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, []);
   useEffect(() => {
     const bridge = (window as any).openmateDesktop;
-    if (!bridge?.onOpenWebTab) return;
-    const off = bridge.onOpenWebTab((url: string) => {
-      setPendingWebUrl(url);
-      setRightPanelOpen(true);
-    });
-    return typeof off === 'function' ? off : undefined;
+    if (bridge?.onOpenWebTab) {
+      const off = bridge.onOpenWebTab((url: string) => {
+        setPendingWebUrl(url);
+        setRightPanelOpen(true);
+      });
+      return typeof off === 'function' ? off : undefined;
+    }
+    // Tauri 壳：Rust 侧 on_new_window 拦截 target=_blank → open-web-tab 事件
+    //（Electron 拦 new-window 同款语义：新窗请求落成 workspace 新 web-browser 标签）
+    if ((window as any).__TAURI_INTERNALS__) {
+      let unlisten: (() => void) | undefined;
+      let cancelled = false;
+      import('@tauri-apps/api/event').then(({ listen }) => {
+        listen<string>('open-web-tab', (e) => {
+          setPendingWebUrl(e.payload);
+          setRightPanelOpen(true);
+        }).then((f) => {
+          if (cancelled) f();
+          else unlisten = f;
+        });
+      });
+      return () => {
+        cancelled = true;
+        unlisten?.();
+      };
+    }
   }, [setRightPanelOpen]);
   const pageSidebar = useAppStore((s) => s.pageSidebar);
   const pageWorkspace = useAppStore((s) => s.pageWorkspace);
