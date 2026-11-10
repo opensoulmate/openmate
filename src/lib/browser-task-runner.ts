@@ -102,8 +102,26 @@ class TaskRunner {
   private seenHumanAt = 0;
   private reconnectTimer: any = null;
 
+  /** 状态广播：浏览器标签的 UI 显示「▶ 自动执行中 / ⏸ 已接管」+ 继续按钮 */
+  private notifyState(action: string, paused: boolean) {
+    try {
+      window.dispatchEvent(new CustomEvent('om-runner-state', {
+        detail: { action, paused, at: Date.now() },
+      }));
+    } catch { /* 非浏览器环境 */ }
+  }
+
+  /** UI 的【继续自动执行】按钮：本地立即解除接管冻结 */
+  resumeFromUI() {
+    this.paused = false;
+    this.seenHumanAt = 0;
+    this.lastActionEnd = Date.now();
+    this.notifyState('resume', false);
+  }
+
   start() {
     if (!bridge() || this.ws) return;
+    (window as any).__omBrowserRunnerResume = () => this.resumeFromUI();
     this.connect();
   }
 
@@ -167,10 +185,12 @@ class TaskRunner {
       if (humanAt > this.lastActionEnd && humanAt > this.seenHumanAt) {
         this.paused = true;
         this.seenHumanAt = humanAt;
+        this.notifyState('takeover', true);
       }
       if (this.paused) {
         return reply(false, {}, '⏸ 用户已接管浏览器（正在手动操作）。停手等待，用户说"继续"后调 browser(action=resume) 再继续。');
       }
+      this.notifyState(task.action, false);
       const result = await this.execute(b, tabId, task.action, task.params || {});
       this.lastActionEnd = Date.now();
       reply(true, result);

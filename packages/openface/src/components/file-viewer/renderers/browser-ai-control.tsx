@@ -138,6 +138,7 @@ export function BrowserAIControl({ initialUrl, onAIAction }: BrowserAIControlPro
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const webviewRef = useRef<any>(null);
   const isElectron = typeof window !== 'undefined' && !!(window as any).openmateDesktop?.webviewExec;
+  const [runnerState, setRunnerState] = useState<{ action: string; paused: boolean; at: number } | null>(null);
 
   const navigate = useCallback((targetUrl: string) => {
     let finalUrl = targetUrl;
@@ -174,6 +175,13 @@ export function BrowserAIControl({ initialUrl, onAIAction }: BrowserAIControlPro
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isElectron]);
+
+  // SoulMate 自动执行状态（接管可见性：▶ 自动执行中 / ⏸ 已接管+继续按钮）
+  useEffect(() => {
+    const onState = (e: any) => setRunnerState(e?.detail || null);
+    window.addEventListener('om-runner-state', onState);
+    return () => window.removeEventListener('om-runner-state', onState);
+  }, []);
 
   // webview 注册进全局标签注册表（SoulMate 自动化执行器经它定位内置浏览器）
   useEffect(() => {
@@ -468,6 +476,25 @@ export function BrowserAIControl({ initialUrl, onAIAction }: BrowserAIControlPro
               {log.error && <span className="text-red-400 text-[10px] ml-auto">{log.error}</span>}
             </div>
           ))}
+        </div>
+      )}
+
+      {/* SoulMate 自动执行状态条：接管时冻结可见+一键交还 */}
+      {isElectron && runnerState && (runnerState.paused || Date.now() - runnerState.at < 15000) && (
+        <div className={`flex items-center gap-2 border-t border-border px-3 py-1.5 text-xs ${runnerState.paused ? 'bg-amber-500/10 text-amber-600' : 'bg-primary/10 text-primary'}`}>
+          {runnerState.paused ? (
+            <>
+              <span>⏸ 已接管浏览器（SoulMate 已停手，随时说"继续"或点按钮）</span>
+              <button
+                onClick={() => (window as any).__omBrowserRunnerResume?.()}
+                className="ml-auto rounded-md bg-amber-500/15 px-2.5 py-1 font-medium hover:bg-amber-500/25 transition-colors"
+              >
+                继续自动执行
+              </button>
+            </>
+          ) : (
+            <span>▶ SoulMate 自动执行中（{runnerState.action}）——你现在也能直接操作</span>
+          )}
         </div>
       )}
 
