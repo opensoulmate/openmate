@@ -1,7 +1,7 @@
 {
   "name": "openmate-desktop",
   "productName": "OpenMate",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "OpenMate Desktop — Electron 薄壳，加载 OpenMate Web（:3000），网页版/桌面版同源，支持在线更新",
   "main": "main.js",
   "scripts": {
@@ -34,7 +34,9 @@
       "oneClick": true,
       "perMachine": false,
       "shortcutName": "OpenMate",
-      "artifactName": "OpenMate-Setup-${version}.${ext}"
+      "artifactName": "OpenMate-Setup-${version}.${ext}",
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true
     },
     "linux": {
       "target": [
