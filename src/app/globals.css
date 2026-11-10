@@ -231,17 +231,18 @@ html.om-glass,
 html.om-glass body {
   background: transparent;
 }
-/* 侧栏磨砂：在原 token 上做透明化（不改 token 本体，暗/亮主题通用） */
+/* 侧栏磨砂：在原 token 上做透明化（不改 token 本体，暗/亮主题通用）
+   可读性优先：不透明度 78%+重模糊 26px——玻璃质感在，文字对比度不掉 */
 html.om-glass [data-sidebar] {
-  background: color-mix(in srgb, var(--color-sidebar) 58%, transparent) !important;
-  backdrop-filter: blur(20px) saturate(1.35);
-  -webkit-backdrop-filter: blur(20px) saturate(1.35);
+  background: color-mix(in srgb, var(--color-sidebar) 78%, transparent) !important;
+  backdrop-filter: blur(26px) saturate(1.3);
+  -webkit-backdrop-filter: blur(26px) saturate(1.3);
 }
 /* 标题栏/顶栏磨砂条 */
 html.om-glass .om-chrome {
-  background: color-mix(in srgb, var(--color-background) 52%, transparent) !important;
-  backdrop-filter: blur(20px) saturate(1.35);
-  -webkit-backdrop-filter: blur(20px) saturate(1.35);
+  background: color-mix(in srgb, var(--color-background) 74%, transparent) !important;
+  backdrop-filter: blur(26px) saturate(1.3);
+  -webkit-backdrop-filter: blur(26px) saturate(1.3);
 }
 
 /* ─── Light Theme ─────────────────────────────────────────────────────── */
