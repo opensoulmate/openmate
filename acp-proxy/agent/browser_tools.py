@@ -9,11 +9,13 @@ BrowserTools = 有界子进程调用 + 确定性输出格式化。worker（agent
 - 动作超时/进程崩溃 → 显式报因 + 会话重建提示（页面状态丢失如实告知）；
 - 动作失败（选择器没找到等）→ 具体错误文本回注 LLM，不吞。
 """
+import json
 import logging
 import os
 import select
 import subprocess
 import time
+import urllib.request
 from pathlib import Path
 
 logger = logging.getLogger("acp-agent.browser-tools")
@@ -24,7 +26,7 @@ WORKER_START_TIMEOUT_S = 15.0
 
 SUPPORTED_ACTIONS = (
     "goto", "snapshot", "click", "type", "fill", "eval", "screenshot", "back", "close",
-    "resume",
+    "resume", "activity",
 )
 
 _START_HINT = (
@@ -202,6 +204,10 @@ class BrowserTools:
         params = dict(params or {})
         if action not in SUPPORTED_ACTIONS:
             return (f"❌ 未知 action: {action!r}。支持: {', '.join(SUPPORTED_ACTIONS)}")
+        # ── activity=读用户全端操作流（OpenSense 行为感知）：纯服务端拉取，
+        #    不走执行通道（懂用户在做什么、「这个地方」指的哪）。
+        if action == "activity":
+            return self._run_activity(params)
         # ── 默认模式=应用通道：任务发给 OpenMate 内置浏览器执行（真浏览器同一扇窗，
         #    用户随时接管）。SOULMATE_BROWSER_MODE=worker 走独立 playwright 子进程。
         mode = str(os.environ.get("SOULMATE_BROWSER_MODE", "") or "app").strip().lower()
@@ -239,6 +245,41 @@ class BrowserTools:
         return note + self._format(action, resp.get("result") or {})
 
     # ── 应用通道模式（默认）：任务经 acp-proxy browser_bridge 发给 OpenMate 内置浏览器 ──
+
+    def _run_activity(self, params: dict) -> str:
+        """读用户全端操作流（OpenSense 行为感知 · Sense 第五通道）。
+
+        data=recent 操作流明细（默认）/ context 摘要块；minutes 时间窗（默认 10）。
+        用户说「这个地方/这个按钮」时：最近一条 hover 事件=鼠标指着的元素。
+        """
+        kind = str(params.get("data", "recent") or "recent").strip().lower()
+        base = str(os.environ.get("SOULMATE_SENSE_URL", "http://127.0.0.1:8090") or "").rstrip("/")
+        try:
+            if kind == "context":
+                minutes = float(params.get("minutes", 10) or 10)
+                url = f"{base}/api/sense/behavior/context?minutes={minutes:g}"
+            else:
+                limit = int(params.get("limit", 40) or 40)
+                since = float(params.get("since", 0) or 0)
+                url = f"{base}/api/sense/behavior/recent?limit={limit}&since={since:g}"
+            with urllib.request.urlopen(url, timeout=5) as r:
+                data = json.loads(r.read().decode())
+        except Exception as e:
+            return f"❌ 读取用户操作流失败：{e}"
+        if kind == "context":
+            ctx = str(data.get("context", "") or "")
+            return ctx or "（近期无用户操作记录）"
+        events = data.get("events") or []
+        if not events:
+            return "（近期无用户操作记录）"
+        lines = []
+        for e in events:
+            t = time.strftime("%H:%M", time.localtime(float(e.get("ts", 0) or 0)))
+            src = "🌐" if e.get("source") == "browser" else "🖥"
+            lines.append(
+                f"{t} {src}[{e.get('type', '')}] {e.get('target', '')} {e.get('detail', '')}".rstrip()
+            )
+        return "【用户近期操作流】（hover=鼠标指着的元素，「这个地方」即指它）\n" + "\n".join(lines)
 
     def _run_app_mode(self, action: str, params: dict) -> str:
         """HTTP 投递任务 + 长轮询结果。结果与 worker 模式同构 → _format 无改动消费。"""
