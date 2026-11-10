@@ -21,6 +21,7 @@ const isTauri = () =>
 export function ShellTitleBar() {
   const [mounted, setMounted] = useState(false);
   const [title, setTitle] = useState('OpenMate');
+  const [maximized, setMaximized] = useState(false);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -31,7 +32,10 @@ export function ShellTitleBar() {
     const syncMax = () => {
       window.__TAURI_INTERNALS__
         ?.invoke('is_maximized_window')
-        .then((max: unknown) => root.classList.toggle('tauri-maximized', !!max))
+        .then((max: unknown) => {
+          root.classList.toggle('tauri-maximized', !!max);
+          setMaximized(!!max);
+        })
         .catch(() => {});
     };
     syncMax();
@@ -84,11 +88,11 @@ export function ShellTitleBar() {
         </button>
         <button
           type="button"
-          aria-label="最大化"
+          aria-label={maximized ? '还原' : '最大化'}
           onClick={() => invoke('toggle_maximize_window')}
           className="h-full w-11 text-[11px] opacity-70 transition-colors hover:bg-foreground/10 hover:opacity-100"
         >
-          ▢
+          {maximized ? '❐' : '▢'}
         </button>
         <button
           type="button"
