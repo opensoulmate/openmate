@@ -234,13 +234,13 @@ html.om-glass body {
 /* 侧栏磨砂：在原 token 上做透明化（不改 token 本体，暗/亮主题通用）
    可读性优先：不透明度 78%+重模糊 26px——玻璃质感在，文字对比度不掉 */
 html.om-glass [data-sidebar] {
-  background: color-mix(in srgb, var(--color-sidebar) 92%, transparent) !important;
+  background: color-mix(in srgb, var(--color-sidebar) 88%, transparent) !important;
   backdrop-filter: blur(32px) saturate(1.2);
   -webkit-backdrop-filter: blur(32px) saturate(1.2);
 }
 /* 标题栏/顶栏磨砂条 */
 html.om-glass .om-chrome {
-  background: color-mix(in srgb, var(--color-background) 90%, transparent) !important;
+  background: color-mix(in srgb, var(--color-background) 88%, transparent) !important;
   backdrop-filter: blur(32px) saturate(1.2);
   -webkit-backdrop-filter: blur(32px) saturate(1.2);
 }
