@@ -20,6 +20,12 @@ function resolveUrl() {
   return 'http://127.0.0.1:3000';
 }
 const OPENMATE_URL = resolveUrl();
+// 地址回退链：config/env 指定 > 本机 :3000 > Netbird 托管（Windows 端跑本机无前端时自动落到托管版）
+const URL_FALLBACKS = Array.from(new Set([
+  OPENMATE_URL,
+  'http://127.0.0.1:3000',
+  'http://100.76.2.155:3000',
+]));
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) app.quit();
 
@@ -81,23 +87,32 @@ function createWindow() {
       if (win && !win.isDestroyed()) win.show();
     }, wait);
   });
-  win.loadURL(OPENMATE_URL);
-
-  // 自诊断：连不上就在窗口里写清原因（黑窗之谜→明明白白的错误页）
-  win.webContents.on('did-fail-load', (e, code, desc, url, isMainFrame) => {
-    if (!isMainFrame || code === -3) return; // -3=主动跳转噪音
-    const html = `data:text/html;charset=utf-8,${encodeURIComponent(`
+  let urlIdx = 0;
+  const loadNext = () => {
+    if (urlIdx >= URL_FALLBACKS.length) {
+      // 回退链全挂 → 明明白白的错误页（黑窗之谜终结者）
+      const html = `data:text/html;charset=utf-8,${encodeURIComponent(`
       <body style="background:#0b0f14;color:#e6edf3;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
       <div style="max-width:520px;line-height:1.9">
         <h2 style="color:#f85149">⚠️ 连不上 OpenMate 服务</h2>
-        <p>目标地址：<b style="color:#79c0ff">${OPENMATE_URL}</b><br>错误：${desc} (code ${code})</p>
+        <p>已尝试地址：<b style="color:#79c0ff">${URL_FALLBACKS.join('、')}</b><br>最后错误：${loadNext.lastDesc || '不可达'} (code ${loadNext.lastCode || '?'})</p>
         <p style="color:#8b949e">排查三步：<br>
         ① 用浏览器打开上面的地址——浏览器也打不开=网络不通（同一 WiFi？NetBird 开着？）<br>
-        ② 浏览器打得开=改本目录 config.json 的 url 后重启本程序<br>
+        ② 浏览器打得开=改 exe 同目录 config.json 的 url 后重启本程序<br>
         ③ 服务端在 Linux 机器上，确认它开着</p>
       </div></body>`)}`;
-    win.loadURL(html);
+      win.loadURL(html);
+      return;
+    }
+    win.loadURL(URL_FALLBACKS[urlIdx++]);
+  };
+  win.webContents.on('did-fail-load', (e, code, desc, validated, isMainFrame) => {
+    if (!isMainFrame || code === -3) return; // -3=主动跳转噪音
+    loadNext.lastCode = code;
+    loadNext.lastDesc = desc;
+    loadNext(); // 试下一个回退地址；全挂时 loadNext 自己写错误页
   });
+  loadNext();
 
   // 外链/新窗口 → workspace 新标签页（事件桥交渲染层开标签，不再弹独立窗口）
   const toWorkspaceTab = (url) => {
