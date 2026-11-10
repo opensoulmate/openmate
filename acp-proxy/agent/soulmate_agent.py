@@ -3602,14 +3602,16 @@ You can send files to the user natively: to deliver a file, write a brief confir
             "function": {
                 "name": "browser",
                 "description": (
-                    "浏览器自动化（Playwright/CDP，真实浏览器会话，页面状态跨调用"
-                    "保留——连续操作无需重复goto）。action 取值：goto（打开url）/"
-                    "snapshot（读页面标题+正文+链接，过长截断并自报）/ click（点元素）/"
-                    "type（selector处输入text，submit=true回车提交）/ fill（清空后填入）/"
-                    "eval（执行js表达式返回结果）/ screenshot（截图存PNG，path可省略"
-                    "自动落盘并返回路径）/ back（后退）/ close（关闭浏览器会话）。"
-                    "selector 用 CSS 选择器。需要看页面真实渲染内容/登录态页面/自动化"
-                    "网页操作时使用；纯静态网页抓取优先 web_extract。"
+                    "驱动 OpenMate 内置浏览器（用户眼前的真浏览器窗，同一扇窗：用户随时"
+                    "手动接管）。action 取值：goto（打开url）/"
+                    "snapshot（读页面标题+正文+链接，过长截断并自报）/ click（点元素，"
+                    "selector或text）/ type（selector处输入text，submit=true回车提交）/"
+                    " fill（清空后填入）/ eval（执行js表达式返回结果）/ screenshot（截图"
+                    "存PNG返回路径）/ back（后退）/ close（未启用）/ resume（恢复自动操作）。"
+                    "接管语义（必须遵守）：用户手动操作浏览器后，动作会返回'⏸ 用户已接管'并"
+                    "全部暂停——此时立刻停手等用户发话；用户说'继续'后先调 resume 再继续动作。"
+                    "需要看页面真实渲染内容/登录态页面/自动化网页操作时使用；纯静态网页抓取"
+                    "优先 web_extract。"
                 ),
                 "parameters": {
                     "type": "object",
@@ -3617,7 +3619,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
                         "action": {
                             "type": "string",
                             "enum": ["goto", "snapshot", "click", "type", "fill",
-                                     "eval", "screenshot", "back", "close"],
+                                     "eval", "screenshot", "back", "close", "resume"],
                             "description": "要执行的浏览器动作",
                         },
                         "url": {"type": "string", "description": "目标URL（goto）"},

@@ -217,6 +217,7 @@ pub fn run() {
                 .resizable(true)
                 .center()
                 .on_new_window(move |url, _features| {
+                    eprintln!("[newwin] 拦截到新窗请求: {}", url);
                     let _ = handle_new_win.emit("open-web-tab", url.to_string());
                     tauri::webview::NewWindowResponse::Deny
                 })

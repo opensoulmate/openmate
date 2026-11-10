@@ -11,6 +11,7 @@ import { BottomNav } from "@/components/bottom-nav";
 import { TopBar } from "@/components/top-bar";
 import { ShellTitleBar } from "@/components/shell-title-bar";
 import { initTauriDesktopBridge } from "@/lib/tauri-desktop-bridge";
+import { startBrowserTaskRunner } from "@/lib/browser-task-runner";
 import { WorkspacePanel } from '@opensoulmate/openface';
 import { AIGroupsSidebar } from "@/components/ai-groups-sidebar";
 import { useAIGroupsStore } from "@/stores/ai-groups-store";
@@ -122,6 +123,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     const off = bridge.onUpdateReady((data: { version: string }) => setUpdateInfo(data));
     return typeof off === 'function' ? off : undefined;
   }, []);
+  // 内置浏览器自动化：SoulMate 的 browser 工具经 acp-proxy 通道驱动本窗口的 webview
+  useEffect(() => {
+    const g = window as any;
+    g.__omOpenWebTab = (url: string) => {
+      setPendingWebUrl(url);
+      setRightPanelOpen(true);
+    };
+    startBrowserTaskRunner();
+    return () => {
+      delete g.__omOpenWebTab;
+    };
+  }, [setRightPanelOpen]);
+
   useEffect(() => {
     const bridge = (window as any).openmateDesktop;
     if (bridge?.onOpenWebTab) {
@@ -138,6 +152,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       let cancelled = false;
       import('@tauri-apps/api/event').then(({ listen }) => {
         listen<string>('open-web-tab', (e) => {
+          console.error('[newwin] 事件到达前端:', e.payload);
           setPendingWebUrl(e.payload);
           setRightPanelOpen(true);
         }).then((f) => {

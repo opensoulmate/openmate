@@ -293,6 +293,11 @@ async def ws_mcp_route(websocket: WebSocket):
     await ws_mcp_endpoint(websocket)
 
 
+# ── 内置浏览器自动化通道（SoulMate browser 工具 ↔ OpenMate 应用 webview）──
+from browser_bridge import install as _install_browser_bridge
+_install_browser_bridge(app)
+
+
 # ── P0-4: agent活动观测（goose peek三指标 + claude-code noop自报 + 插话队列）──
 # soulmate agent以stdio子进程运行，活动快照持久化在SQLite，本进程跨进程读取。
 _activity_store_singleton = None

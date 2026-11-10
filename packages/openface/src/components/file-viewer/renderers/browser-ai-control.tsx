@@ -48,6 +48,84 @@ interface ActionLog {
   error?: string;
 }
 
+// ── Electron 内嵌真浏览器（<webview>）引擎 ──
+// 同一扇窗双用途：人手动=真渲染真输入；AI=主进程直驱 webContents（页面本体 DOM+真实键鼠）。
+const WebViewTag = 'webview' as any;
+
+// 页面本体提取（跨域无碍——在页面自己肚子里执行）：返回与 iframe 版同构的 PageContext
+const EXTRACT_SCRIPT = `(() => {
+  const selectors = ['a','button','input','textarea','select','[role="button"]','[onclick]'];
+  const els = [];
+  selectors.forEach(function(sel) {
+    document.querySelectorAll(sel).forEach(function(el, i) {
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) return;
+      let s = el.tagName.toLowerCase();
+      if (el.id) { s = '#' + el.id; }
+      else if (el.name) { s = el.tagName.toLowerCase() + '[name="' + el.name + '"]'; }
+      els.push({
+        tag: el.tagName.toLowerCase(), id: el.id || '', name: el.name || '',
+        type: el.type || '', placeholder: el.placeholder || '',
+        text: (el.textContent || '').trim().slice(0, 50), href: el.href || '',
+        selector: s, rect: { x: r.x, y: r.y, width: r.width, height: r.height },
+      });
+    });
+  });
+  return {
+    url: location.href, title: document.title || '',
+    domSummary: (document.body ? document.body.innerText : '').slice(0, 2000),
+    interactiveElements: els,
+  };
+})()`;
+
+async function executeActionElectron(
+  action: AIAction, bridge: any, wv: any,
+): Promise<{ success: boolean; error?: string }> {
+  const tabId = wv.getWebContentsId?.();
+  if (!tabId) return { success: false, error: 'webview 未就绪' };
+  const exec = (code: string) => bridge.webviewExec(tabId, code);
+  switch (action.type) {
+    case 'click': {
+      if (!action.selector) return { success: false, error: '缺少selector' };
+      // 元素中心坐标 → 真实鼠标事件（可信输入，风控识别不出是机器）
+      const r = await exec(`(() => { const el = document.querySelector(${JSON.stringify(action.selector)}); if (!el) return null; el.scrollIntoView({ block: 'center' }); const b = el.getBoundingClientRect(); return { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) }; })()`);
+      if (!r.ok) return { success: false, error: r.error };
+      if (!r.result) return { success: false, error: '未找到元素: ' + action.selector };
+      const { x, y } = r.result;
+      await bridge.webviewInput(tabId, { type: 'mouseDown', x, y, button: 'left', clickCount: 1 });
+      await bridge.webviewInput(tabId, { type: 'mouseUp', x, y, button: 'left', clickCount: 1 });
+      return { success: true };
+    }
+    case 'type': {
+      if (!action.selector || !action.value) return { success: false, error: '缺少selector或value' };
+      const f = await exec(`!!(document.querySelector(${JSON.stringify(action.selector)}) || {}).focus`);
+      if (!f.ok) return { success: false, error: f.error };
+      await exec(`document.querySelector(${JSON.stringify(action.selector)})?.focus()`);
+      await bridge.webviewInput(tabId, { type: 'char', keyCode: action.value });
+      return { success: true };
+    }
+    case 'navigate': {
+      if (!action.url) return { success: false, error: '缺少URL' };
+      await bridge.webviewNav(tabId, action.url);
+      return { success: true };
+    }
+    case 'scroll': {
+      const scrollY = parseInt(action.value || '500') || 500;
+      await exec(`window.scrollBy(0, ${scrollY})`);
+      return { success: true };
+    }
+    case 'wait': {
+      const ms = parseInt(action.value || '1000') || 1000;
+      await new Promise((r) => setTimeout(r, ms));
+      return { success: true };
+    }
+    case 'extract':
+      return { success: true };
+    default:
+      return { success: false, error: '未知操作类型: ' + action.type };
+  }
+}
+
 export function BrowserAIControl({ initialUrl, onAIAction }: BrowserAIControlProps) {
   const [url, setUrl] = useState(initialUrl || 'about:blank');
   const [inputUrl, setInputUrl] = useState(initialUrl || '');
@@ -58,6 +136,8 @@ export function BrowserAIControl({ initialUrl, onAIAction }: BrowserAIControlPro
   const [actionLog, setActionLog] = useState<ActionLog[]>([]);
   const [showLog, setShowLog] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const webviewRef = useRef<any>(null);
+  const isElectron = typeof window !== 'undefined' && !!(window as any).openmateDesktop?.webviewExec;
 
   const navigate = useCallback((targetUrl: string) => {
     let finalUrl = targetUrl;
@@ -75,8 +155,59 @@ export function BrowserAIControl({ initialUrl, onAIAction }: BrowserAIControlPro
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialUrl]);
 
+  // webview 加载状态/URL 同步（Electron 真浏览器的事件流，替代 iframe 的 onLoad）
+  useEffect(() => {
+    const wv = webviewRef.current;
+    if (!isElectron || !wv?.addEventListener) return;
+    const onNav = (e: any) => {
+      const u = e?.url || wv.getAttribute?.('src');
+      if (u) { setUrl(u); setInputUrl(u); }
+      setLoading(false);
+    };
+    wv.addEventListener('did-stop-loading', onNav);
+    wv.addEventListener('did-navigate', onNav);
+    wv.addEventListener('did-navigate-in-page', onNav);
+    return () => {
+      wv.removeEventListener?.('did-stop-loading', onNav);
+      wv.removeEventListener?.('did-navigate', onNav);
+      wv.removeEventListener?.('did-navigate-in-page', onNav);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isElectron]);
+
+  // webview 注册进全局标签注册表（SoulMate 自动化执行器经它定位内置浏览器）
+  useEffect(() => {
+    if (!isElectron) return;
+    const wv = webviewRef.current;
+    const g = window as any;
+    g.__omWebviews = g.__omWebviews || {};
+    const register = () => {
+      try {
+        const id = wv?.getWebContentsId?.();
+        if (id) g.__omWebviews[id] = wv;
+      } catch { /* webview 未就绪 */ }
+    };
+    register();
+    wv?.addEventListener?.('dom-ready', register);
+    return () => {
+      try {
+        const id = wv?.getWebContentsId?.();
+        if (id) delete g.__omWebviews[id];
+      } catch { /* 已销毁 */ }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isElectron]);
+
   // Extract page context from iframe
   const extractPageContext = useCallback(async (): Promise<PageContext | null> => {
+    // Electron 真浏览器：在页面本体里提取（跨域无碍），与 iframe 版同构
+    if (isElectron && webviewRef.current) {
+      const bridge = (window as any).openmateDesktop;
+      const tabId = webviewRef.current.getWebContentsId?.();
+      if (!tabId) return null;
+      const res = await bridge.webviewExec(tabId, EXTRACT_SCRIPT);
+      return res?.ok ? res.result : null;
+    }
     const iframe = iframeRef.current;
     if (!iframe) return null;
 
@@ -137,6 +268,10 @@ export function BrowserAIControl({ initialUrl, onAIAction }: BrowserAIControlPro
 
   // Execute AI action on the page
   const executeAction = useCallback(async (action: AIAction): Promise<{ success: boolean; error?: string }> => {
+    // Electron 真浏览器：主进程直驱（真实键鼠+页面本体 DOM）
+    if (isElectron && webviewRef.current) {
+      return executeActionElectron(action, (window as any).openmateDesktop, webviewRef.current);
+    }
     const iframe = iframeRef.current;
     if (!iframe) return { success: false, error: 'iframe not found' };
 
@@ -343,14 +478,23 @@ export function BrowserAIControl({ initialUrl, onAIAction }: BrowserAIControlPro
             <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
           </div>
         )}
-        <iframe
-          ref={iframeRef}
-          src={url}
-          className="w-full h-full border-0"
-          title="Browser"
-          sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
-          onLoad={() => setLoading(false)}
-        />
+        {isElectron ? (
+          <WebViewTag
+            ref={webviewRef}
+            src={url}
+            allowpopups="true"
+            className="w-full h-full border-0"
+          />
+        ) : (
+          <iframe
+            ref={iframeRef}
+            src={url}
+            className="w-full h-full border-0"
+            title="Browser"
+            sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
+            onLoad={() => setLoading(false)}
+          />
+        )}
       </div>
     </div>
   );

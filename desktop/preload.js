@@ -15,4 +15,9 @@ contextBridge.exposeInMainWorld('openmateDesktop', {
     ipcRenderer.on('openmate-open-web-tab', h);
     return () => ipcRenderer.removeListener('openmate-open-web-tab', h);
   },
+  // ── 内嵌浏览器 AI 直驱（同一扇窗：executeJavaScript=页面DOM，sendInputEvent=真实键鼠）──
+  webviewExec: (tabId, code) => ipcRenderer.invoke('webview-exec', { tabId, code }),
+  webviewInput: (tabId, event) => ipcRenderer.invoke('webview-input', { tabId, event }),
+  webviewNav: (tabId, url) => ipcRenderer.invoke('webview-nav', { tabId, url }),
+  webviewCapture: (tabId) => ipcRenderer.invoke('webview-capture', { tabId }),
 });

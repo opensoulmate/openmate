@@ -24,6 +24,7 @@ WORKER_START_TIMEOUT_S = 15.0
 
 SUPPORTED_ACTIONS = (
     "goto", "snapshot", "click", "type", "fill", "eval", "screenshot", "back", "close",
+    "resume",
 )
 
 _START_HINT = (
@@ -201,6 +202,11 @@ class BrowserTools:
         params = dict(params or {})
         if action not in SUPPORTED_ACTIONS:
             return (f"❌ 未知 action: {action!r}。支持: {', '.join(SUPPORTED_ACTIONS)}")
+        # ── 默认模式=应用通道：任务发给 OpenMate 内置浏览器执行（真浏览器同一扇窗，
+        #    用户随时接管）。SOULMATE_BROWSER_MODE=worker 走独立 playwright 子进程。
+        mode = str(os.environ.get("SOULMATE_BROWSER_MODE", "") or "app").strip().lower()
+        if mode == "app":
+            return self._run_app_mode(action, params)
         # screenshot 未给路径 → 自动落 shot_dir（返回路径供 MEDIA: 下发）
         if action == "screenshot" and not str(params.get("path", "") or "").strip():
             os.makedirs(self.shot_dir, exist_ok=True)
@@ -232,6 +238,44 @@ class BrowserTools:
             return f"{note}❌ 浏览器操作失败（{action}）：{resp.get('error', '未知错误')}"
         return note + self._format(action, resp.get("result") or {})
 
+    # ── 应用通道模式（默认）：任务经 acp-proxy browser_bridge 发给 OpenMate 内置浏览器 ──
+
+    def _run_app_mode(self, action: str, params: dict) -> str:
+        """HTTP 投递任务 + 长轮询结果。结果与 worker 模式同构 → _format 无改动消费。"""
+        import json
+        import urllib.request
+        base = str(os.environ.get("SOULMATE_BROWSER_HTTP", "") or "http://127.0.0.1:8092").rstrip("/")
+        note = ""
+        if self._lost_state:
+            self._lost_state = False
+            note = "（⚠️ 此前有动作未确认完成，页面状态可能已变化）\n"
+        session_id = str(os.environ.get("SOULMATE_SESSION_ID", "") or "")
+        try:
+            req = urllib.request.Request(
+                f"{base}/api/browser/task",
+                data=json.dumps({"action": action, "params": params,
+                                 "session_id": session_id}, ensure_ascii=False).encode(),
+                headers={"Content-Type": "application/json"}, method="POST")
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                tid = json.loads(resp.read().decode()).get("task_id", "")
+        except Exception as e:
+            return f"⚠️ 浏览器通道不可达（{base}）：{e}\n确认 acp-proxy 在跑。"
+        wait_s = min(float(self.timeout_s or 60), 40.0)
+        try:
+            with urllib.request.urlopen(
+                    f"{base}/api/browser/result/{tid}?wait_s={wait_s:g}",
+                    timeout=wait_s + 10) as resp:
+                out = json.loads(resp.read().decode())
+        except Exception as e:
+            self._lost_state = True
+            return f"⚠️ 浏览器结果轮询失败：{e}（动作未确认完成）"
+        if not out.get("ok"):
+            err = str(out.get("error", "未知错误"))
+            if "超时" in err or "断开" in err:
+                self._lost_state = True
+            return f"{note}❌ 浏览器操作失败（{action}）：{err}"
+        return note + self._format(action, out.get("result") or {})
+
     # ── 确定性输出格式化（人类可读，截断自报） ─────────────────────
 
     @staticmethod
@@ -239,6 +283,8 @@ class BrowserTools:
         head_note = f"{r.get('note', '')}\n" if r.get("note") else ""
         if action == "goto":
             return f"{head_note}✅ 已打开 {r.get('url', '')}\n标题: {r.get('title', '')}"
+        if action == "resume":
+            return f"{head_note}▶️ 已恢复自动操作（用户接管状态清除）"
         if action == "snapshot":
             lines = [
                 f"📄 页面快照",

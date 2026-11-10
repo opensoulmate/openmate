@@ -1,5 +1,5 @@
 // OpenMate Desktop — Electron 薄壳（对标 Hermes Desktop 架构：壳+同一后端，同步架构自带）
-const { app, BrowserWindow, Tray, Menu, shell, nativeImage, nativeTheme, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, Tray, Menu, shell, nativeImage, nativeTheme, ipcMain, dialog, webContents } = require('electron');
 const path = require('path');
 
 // 地址解析：环境变量 > 同目录 config.json > 本机默认（Windows 免环境变量，改 config.json 即可）
@@ -65,6 +65,7 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      webviewTag: true, // 内嵌真浏览器面板（<webview>）：人手动+AI直驱同一扇窗
       preload: path.join(__dirname, 'preload.js'),
     },
     show: false, // 就绪前由 splash 顶着
@@ -119,6 +120,54 @@ function createWindow() {
   win.on('closed', () => { win = null; });
 }
 
+// ── 内嵌浏览器（<webview>）支撑 ──
+// 语义：workspace 浏览器标签=真 Chromium 面板（真渲染/真输入），AI 走同一扇窗的
+// webContents 直驱（executeJavaScript=页面本体 DOM，sendInputEvent=真实键鼠），
+// 折叠面板=webview 隐藏但照跑（Electron 语义天然）。
+app.on('web-contents-created', (_e, wc) => {
+  if (wc.getType() !== 'webview') return;
+  // webview 里的 target=_blank / window.open → workspace 新标签（与主窗同款语义，不弹独立窗）
+  wc.setWindowOpenHandler(({ url }) => {
+    if (/^https?:/i.test(url)) {
+      const w = BrowserWindow.getAllWindows()[0];
+      if (w && !w.isDestroyed()) w.webContents.send('openmate-open-web-tab', url);
+    }
+    return { action: 'deny' };
+  });
+});
+
+const getWebviewWc = (tabId) => {
+  const wc = webContents.fromId(tabId);
+  return wc && !wc.isDestroyed() ? wc : null;
+};
+// 页面本体求值（AI 读页面/改 DOM 的主通道）
+ipcMain.handle('webview-exec', async (_e, { tabId, code }) => {
+  const wc = getWebviewWc(tabId);
+  if (!wc) return { ok: false, error: 'webview 已关闭' };
+  try { return { ok: true, result: await wc.executeJavaScript(code, true) }; }
+  catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+});
+// 真实键鼠（风控识别不出是机器）
+ipcMain.handle('webview-input', (_e, { tabId, event }) => {
+  const wc = getWebviewWc(tabId);
+  if (!wc) return { ok: false, error: 'webview 已关闭' };
+  wc.sendInputEvent(event);
+  return { ok: true };
+});
+// 导航 / 取证截图
+ipcMain.handle('webview-nav', (_e, { tabId, url }) => {
+  const wc = getWebviewWc(tabId);
+  if (!wc) return { ok: false, error: 'webview 已关闭' };
+  wc.loadURL(url);
+  return { ok: true };
+});
+ipcMain.handle('webview-capture', async (_e, { tabId }) => {
+  const wc = getWebviewWc(tabId);
+  if (!wc) return { ok: false, error: 'webview 已关闭' };
+  const img = await wc.capturePage();
+  return { ok: true, dataUrl: img.toDataURL() };
+});
+
 function createTray() {
   try {
     const iconPath = path.join(__dirname, 'icon.png');
@@ -163,12 +212,12 @@ function initUpdater() {
         message: `新版本 ${info.version} 已下载完成`,
         detail: '点"立即重启"完成更新；不重启的话，下次退出应用时会自动安装。',
       }).then(({ response }) => {
-        if (response === 0) autoUpdater.quitAndInstall();
+        if (response === 0) autoUpdater.quitAndInstall(true, true); // 无感：静默安装+装完自启
       });
     }
   });
   ipcMain.on('openmate-update-action', (e, action) => {
-    if (action === 'install') autoUpdater.quitAndInstall();
+    if (action === 'install') autoUpdater.quitAndInstall(true, true); // 无感：静默安装+装完自启
   });
   // 测试钩子：OPENMATE_FAKE_UPDATE=1 弹一次更新提示（验收/UI 调试）
   if (process.env.OPENMATE_FAKE_UPDATE === '1') {
