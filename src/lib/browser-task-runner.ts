@@ -13,16 +13,77 @@ type Bridge = {
   webviewCapture: (tabId: number) => Promise<{ ok: boolean; dataUrl?: string; error?: string }>;
 };
 
-const INJECT_INPUT_LOG = `(() => {
+const INJECT_BEHAVIOR_LOG = `(() => {
   if (window.__omInputHooked) return true;
   window.__omInputHooked = true;
   window.__omInputLog = [];
+  window.__omBehaviorLog = [];
+  function push(ev) {
+    ev.ts = Date.now();
+    window.__omBehaviorLog.push(ev);
+    if (window.__omBehaviorLog.length > 100) window.__omBehaviorLog.shift();
+  }
+  function describe(el) {
+    if (!el) return '';
+    var tag = (el.tagName || '').toLowerCase();
+    var text = ((el.innerText || '') + '').trim().replace(/\\s+/g, ' ').slice(0, 24)
+      || ((el.placeholder || '') + '').slice(0, 24)
+      || ((el.getAttribute && el.getAttribute('aria-label')) || '').slice(0, 24)
+      || ((el.id || el.name || '') + '').slice(0, 24);
+    return text ? tag + '「' + text + '」' : tag;
+  }
   ['mousedown','keydown','wheel'].forEach(function (t) {
     window.addEventListener(t, function () {
       window.__omInputLog.push(Date.now());
       if (window.__omInputLog.length > 30) window.__omInputLog.shift();
     }, { capture: true, passive: true });
   });
+  window.addEventListener('mousedown', function (e) {
+    push({ type: 'click', target: describe(e.target), url: location.href });
+  }, { capture: true, passive: true });
+  var hoverTimer = null, lastHoverEl = null;
+  window.addEventListener('mousemove', function (e) {
+    var el = document.elementFromPoint(e.clientX, e.clientY);
+    if (el === lastHoverEl) return;
+    lastHoverEl = el;
+    if (hoverTimer) clearTimeout(hoverTimer);
+    var x = Math.round(e.clientX), y = Math.round(e.clientY);
+    hoverTimer = setTimeout(function () {
+      push({ type: 'hover', target: describe(el), x: x, y: y, url: location.href });
+    }, 400);
+  }, { capture: true, passive: true });
+  var SECRET = /password|passwd|pwd|secret|token|otp|captcha|验证码|密码|密钥|口令/i;
+  var VALUE_OK = /search|query|keyword|^q$|搜索|查找/i;
+  var timers = new WeakMap();
+  window.addEventListener('input', function (e) {
+    var el = e.target;
+    if (!el || !el.tagName) return;
+    var desc = describe(el);
+    if (SECRET.test(desc)) { push({ type: 'input', target: desc, url: location.href }); return; }
+    var fire = function () {
+      var v = ((el.value || '') + '');
+      var rec = { type: 'input', target: desc, url: location.href, length: v.length };
+      if (v && VALUE_OK.test(desc)) rec.value = v;
+      push(rec);
+    };
+    var prev = timers.get(el);
+    if (prev) clearTimeout(prev);
+    timers.set(el, setTimeout(fire, 1200));
+  }, { capture: true, passive: true });
+  window.addEventListener('submit', function () {
+    push({ type: 'submit', target: 'form', url: location.href });
+  }, { capture: true, passive: true });
+  window.addEventListener('copy', function () {
+    var s = (window.getSelection ? String(window.getSelection()) : '');
+    push({ type: 'copy', length: s.length, url: location.href });
+  }, { capture: true, passive: true });
+  var lastScroll = 0;
+  window.addEventListener('scroll', function () {
+    var now = Date.now();
+    if (now - lastScroll < 2000) return;
+    lastScroll = now;
+    push({ type: 'scroll', scroll_y: Math.round(window.scrollY), url: location.href });
+  }, { capture: true, passive: true });
   return true;
 })()`;
 
@@ -123,6 +184,36 @@ class TaskRunner {
     if (!bridge() || this.ws) return;
     (window as any).__omBrowserRunnerResume = () => this.resumeFromUI();
     this.connect();
+    this.startBehaviorPolling();
+  }
+
+  /** 全端行为感知的浏览器子流：每 4s 把各 webview 页面内的语义事件汇入 outbox
+   *  （由 behavior-sensor 的批量上行统一送往 OpenSense，source=browser）。
+   *  __omBrowserBehaviorFlush：用户发话（Enter）时立即清流，消轮询时差。 */
+  private async flushBrowserBehavior() {
+    const b = bridge();
+    if (!b) return;
+    const reg = tabRegistry();
+    for (const idStr of Object.keys(reg)) {
+      try {
+        const evs: any[] = await execOn(
+          b,
+          Number(idStr),
+          '(() => { if (!window.__omBehaviorLog) { ' + INJECT_BEHAVIOR_LOG + ' } return (window.__omBehaviorLog = window.__omBehaviorLog || []).splice(0, 100); })()',
+        );
+        if (Array.isArray(evs) && evs.length) {
+          const g = window as any;
+          g.__omBehaviorOutbox = g.__omBehaviorOutbox || [];
+          for (const ev of evs) g.__omBehaviorOutbox.push({ ...ev, source: 'browser' });
+        }
+      } catch { /* webview 过渡期（导航中）求值失败=下一拍再取 */ }
+    }
+  }
+
+  private startBehaviorPolling() {
+    (window as any).__omBrowserBehaviorFlush = () => this.flushBrowserBehavior();
+    const timer = window.setInterval(() => this.flushBrowserBehavior(), 4000);
+    (window as any).__omBehaviorPollTimer = timer;
   }
 
   private connect() {
@@ -179,7 +270,7 @@ class TaskRunner {
       const tabId = await pickTab(b, task.params);
       if (!tabId) return reply(false, {}, '内置浏览器标签未就绪（workspace 未打开浏览器标签）');
       // 接管检测：AI 动作结束后的真实输入时间戳 → 暂停
-      await execOn(b, tabId, INJECT_INPUT_LOG).catch(() => null);
+      await execOn(b, tabId, INJECT_BEHAVIOR_LOG).catch(() => null);
       const log: number[] = (await execOn(b, tabId, 'window.__omInputLog || []').catch(() => [])) || [];
       const humanAt = log.length ? Math.max(...log) : 0;
       if (humanAt > this.lastActionEnd && humanAt > this.seenHumanAt) {
@@ -236,7 +327,7 @@ class TaskRunner {
         await b.webviewInput(tabId, { type: 'mouseDown', x: pt.x, y: pt.y, button: 'left', clickCount: 1 });
         await b.webviewInput(tabId, { type: 'mouseUp', x: pt.x, y: pt.y, button: 'left', clickCount: 1 });
         await new Promise((r) => setTimeout(r, 400));
-        await execOn(b, tabId, INJECT_INPUT_LOG).catch(() => null);
+        await execOn(b, tabId, INJECT_BEHAVIOR_LOG).catch(() => null);
         const pu = await pageTitleUrl(b, tabId);
         return { clicked: sel, ...pu };
       }
@@ -254,7 +345,7 @@ class TaskRunner {
           await b.webviewInput(tabId, { type: 'keyUp', keyCode: 'Enter' });
           await waitSettled(b, tabId, 8000).catch(() => null);
         }
-        await execOn(b, tabId, INJECT_INPUT_LOG).catch(() => null);
+        await execOn(b, tabId, INJECT_BEHAVIOR_LOG).catch(() => null);
         const pu = await pageTitleUrl(b, tabId);
         return { chars: text.length, typed_into: sel, submitted: submit, ...pu };
       }
@@ -271,7 +362,7 @@ class TaskRunner {
           el.dispatchEvent(new Event('change', { bubbles: true }));
           return true;
         })()`);
-        await execOn(b, tabId, INJECT_INPUT_LOG).catch(() => null);
+        await execOn(b, tabId, INJECT_BEHAVIOR_LOG).catch(() => null);
         const pu = await pageTitleUrl(b, tabId);
         return { chars: text.length, typed_into: sel, submitted: false, ...pu };
       }

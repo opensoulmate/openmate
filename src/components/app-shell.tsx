@@ -12,6 +12,7 @@ import { TopBar } from "@/components/top-bar";
 import { ShellTitleBar } from "@/components/shell-title-bar";
 import { initTauriDesktopBridge } from "@/lib/tauri-desktop-bridge";
 import { startBrowserTaskRunner } from "@/lib/browser-task-runner";
+import { installBehaviorSensor } from "@/lib/behavior-sensor";
 import { WorkspacePanel } from '@opensoulmate/openface';
 import { AIGroupsSidebar } from "@/components/ai-groups-sidebar";
 import { useAIGroupsStore } from "@/stores/ai-groups-store";
@@ -130,6 +131,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       setPendingWebUrl(url);
       setRightPanelOpen(true);
     };
+    installBehaviorSensor();
     startBrowserTaskRunner();
     return () => {
       delete g.__omOpenWebTab;
