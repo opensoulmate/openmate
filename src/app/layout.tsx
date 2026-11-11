@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import "@/styles/sidebar.css";
 import I18nProvider from "@/components/i18n-provider";
+import SplashGate from "@/components/splash-gate";
 
 export const viewport: Viewport = {
   themeColor: "#7c3aed",
@@ -72,7 +73,7 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body className="h-screen overflow-hidden bg-background text-foreground antialiased">
-        <I18nProvider>{children}</I18nProvider>
+        <I18nProvider><SplashGate />{children}</I18nProvider>
       <script dangerouslySetInnerHTML={{ __html: "if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js')}" }} />
       </body>
     </html>
