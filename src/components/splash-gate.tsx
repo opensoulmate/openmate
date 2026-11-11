@@ -60,11 +60,9 @@ export default function SplashGate() {
       style={{ background: '#0b0f14' }}
     >
       <img
-        src="/logo-icon.png"
+        src="/mark-wide.png"
         alt="OpenMate"
-        width={104}
-        height={104}
-        style={{ marginBottom: 14 }}
+        style={{ height: 88, width: 'auto', marginBottom: 14 }}
       />
       <div
         className="text-2xl font-semibold tracking-wide"
