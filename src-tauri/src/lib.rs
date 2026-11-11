@@ -207,7 +207,10 @@ pub fn run() {
             // "点百度链接没响应"）。此处拦截新窗请求 → 转发前端开 workspace 新 web-browser
             // 标签（Electron 时代 main.js 拦 new-window 的同款行为）。
             let handle_new_win = app.handle().clone();
-            tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("".into()))
+            // 平台分流：decorations/transparent/inner_size 等是桌面专用 API（安卓 E0599），
+            // 移动端只建最小窗（全屏由系统管）；on_new_window 拦截两平台都要。
+            #[cfg(desktop)]
+            let win_builder = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("".into()))
                 .title("OpenMate｜开放协同的AI智能伙伴")
                 .decorations(false)
                 .transparent(true)
@@ -215,7 +218,10 @@ pub fn run() {
                 .inner_size(1440.0, 900.0)
                 .min_inner_size(375.0, 600.0)
                 .resizable(true)
-                .center()
+                .center();
+            #[cfg(mobile)]
+            let win_builder = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("".into()));
+            win_builder
                 .on_new_window(move |url, _features| {
                     eprintln!("[newwin] 拦截到新窗请求: {}", url);
                     let _ = handle_new_win.emit("open-web-tab", url.to_string());
