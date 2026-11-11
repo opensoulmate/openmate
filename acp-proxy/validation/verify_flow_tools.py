@@ -7,6 +7,9 @@
      ④skill.md 生成内容完整（frontmatter/六节）
      ⑤密码脱敏（不落回执不落 skill）
      + 确定性无头执行驱动、桥派发回执（ws 回传点）、超时回执、HTTP 面。
+     ⑥/⑦webview 自动重开+断点续跑：webview 已关闭→ensure→重试成功、重试仍败如实
+     报错不无限重试、重试在回执里可见、webview-ready 超时有界、两层防线（execute_flow_steps
+     /_run_app_mode）互认已自救标注不再二次重试。
 """
 import json
 import re
@@ -377,6 +380,199 @@ def t6_execution_driver_and_bridge():
         check("HTTP 面验证", False, f"{type(e).__name__}: {e}")
 
 
+# ══ ⑦ webview 自动重开 + 断点续跑（自救代替报错，重试进凭证）══════
+
+def t7_webview_selfheal():
+    print("⑦ webview 自动重开+断点续跑（单步有界重试）")
+    # ① webview 已关闭 → ensure-webview（有界10s）→ 重试该步一次 → 成功继续
+    fresh_env()
+    calls, ens = [], []
+
+    def run(a, p, s=False):
+        calls.append(a)
+        return (False, "webview 已关闭") if len(calls) == 1 else (True, "ok")
+
+    def ensure(t):
+        ens.append(t)
+        return True, "webview 已自动重开就绪"
+
+    out = fr.execute_flow_steps([{"action": "goto", "url": "https://a.com"}], {}, run,
+                                engine="app", flow_name="自救", ensure_webview=ensure)
+    check("①webview已关闭→ensure→重试成功", out["ok"] and out["executed"] == 1, str(out))
+    check("①ensure 有界调用1次（10s）", len(ens) == 1 and ens[0] == 10.0, str(ens))
+    rc = fr.get_receipts(0)
+    check("①重试步回执标注 (重试1)", bool(rc) and rc[0]["action"] == "goto(重试1)", str(rc))
+    check("①重试成功回执为成功", bool(rc) and rc[0]["ok"] is True, str(rc))
+    check("①凭证可见自救（重试1 进凭证）", "(重试1)" in out["report"], out["report"])
+    check("①执行日志不掩盖自救过程", any("自救" in r for r in out["results"]), str(out["results"]))
+
+    # ② 重试仍败 → 如实报错「（重开后仍失败）」，不无限重试（每步最多2次调用）
+    fresh_env()
+    calls2 = []
+
+    def run2(a, p, s=False):
+        calls2.append(a)
+        return False, "webview 未就绪"
+
+    out2 = fr.execute_flow_steps([{"action": "goto", "url": "https://a.com"},
+                                  {"action": "click", "selector": "#x"}],
+                                 {}, run2, engine="app", flow_name="自救失败",
+                                 ensure_webview=lambda t: (True, "已重开"))
+    check("②重试仍败→整体失败", not out2["ok"] and "第1步" in out2["error"], out2["error"])
+    check("②重试仍败如实报（重开后仍失败）", "重开后仍失败" in out2["error"], out2["error"])
+    check("②不无限重试（每步最多2次调用）", len(calls2) == 2, str(calls2))
+    check("②失败即停第2步未执行", "未执行步骤" in out2["report"] and "第2步" in out2["report"],
+          out2["report"])
+    rc2 = fr.get_receipts(0)
+    check("②失败重试回执 (重试1)+仍失败标注",
+          bool(rc2) and "(重试1)" in rc2[0]["action"] and "重开后仍失败" in rc2[0]["error"], str(rc2))
+
+    # 两层防线互认：已带自救标注的错误不再二次重试（叠加仍为有界）
+    fresh_env()
+    calls3, ens3 = [], []
+
+    def run3(a, p, s=False):
+        calls3.append(a)
+        return False, "webview 已关闭（重开后仍失败）"
+
+    out3 = fr.execute_flow_steps([{"action": "goto", "url": "https://a.com"}], {}, run3,
+                                 engine="app", flow_name="已自救",
+                                 ensure_webview=lambda t: (ens3.append(t), (True, "x"))[1])
+    check("②已自救错误不再二次重试", len(calls3) == 1 and not ens3 and not out3["ok"], str(calls3))
+    check("②已重试标注判据（(重试1)命中）",
+          fr.webview_lost("webview 已关闭") and not fr.webview_lost("goto(重试1) webview 已关闭"))
+
+    # ensure 失败（webview-ready 超时）→ 仍只重试一次，超时如实并入报因（禁挂死）
+    fresh_env()
+    calls4, ens4 = [], []
+
+    def run4(a, p, s=False):
+        calls4.append(a)
+        return False, "webview 未就绪"
+
+    out4 = fr.execute_flow_steps([{"action": "goto", "url": "https://a.com"}], {}, run4,
+                                 engine="app", flow_name="ensure超时",
+                                 ensure_webview=lambda t: (ens4.append(t),
+                                                           (False, "webview-ready 等待超时（10s 有界）"))[1])
+    check("④ensure 超时仍单次重试不挂死", len(calls4) == 2 and not out4["ok"], str(calls4))
+    check("④ensure 超时如实并入过程记录",
+          any("webview-ready" in r for r in out4["results"]), str(out4["results"]))
+
+    # ③ 重试在回执里可见（桥派发层：receipt_action=(重试1) 标注 + fail_note 附注）
+    fresh_env()
+    tid = bb.submit_task("screenshot", {}, receipt_action="screenshot(重试1)",
+                         fail_note="（重开后仍失败）")["task_id"]
+    bb._complete(tid, False, error="webview 已关闭")
+    rr = [x for x in fr.get_receipts(0) if x["task_id"] == tid][0]
+    check("③桥回执 action 标注 (重试1)", rr["action"] == "screenshot(重试1)", str(rr))
+    check("③桥回执失败附（重开后仍失败）", "（重开后仍失败）" in rr["error"], str(rr))
+    tid2 = bb.submit_task("screenshot", {}, receipt_action="screenshot(重试1)")["task_id"]
+    bb._complete(tid2, True, {"path": "/tmp/s.png"})
+    rr2 = [x for x in fr.get_receipts(0) if x["task_id"] == tid2][0]
+    check("③重试成功回执 screenshot(重试1) → OK",
+          rr2["ok"] and rr2["action"] == "screenshot(重试1)", str(rr2))
+
+    # ④ webview-ready 超时有界（bridge 控制通道 ensure_webview）
+    bb._APPS.clear()
+    bb._ENSURE_WAITERS.clear()
+    t0 = time.time()
+    r = bb.ensure_webview(timeout=1.0)
+    check("④无应用连接立即如实报因", not r["ok"] and "未连接" in r["error"], str(r))
+    check("④无应用返回不阻塞", time.time() - t0 < 1.0, f"{time.time() - t0:.2f}s")
+
+    import asyncio
+    import threading as _th
+    loop = asyncio.new_event_loop()
+    _th.Thread(target=loop.run_forever, daemon=True).start()
+
+    class _FakeWS:  # 指令下发成功但应用不回 webview-ready
+        sent = []
+
+        async def send_text(self, m):
+            _FakeWS.sent.append(m)
+
+    bb._APPS["_default"] = {"ws": _FakeWS(), "loop": loop}
+    t1 = time.time()
+    r2 = bb.ensure_webview(timeout=1.5)
+    dt = time.time() - t1
+    check("④webview-ready 超时有界如实报因", not r2["ok"] and "超时" in r2["error"] and "有界" in r2["error"],
+          str(r2))
+    check("④超时≈设定值不挂死（1.2s≤dt<4s）", 1.2 <= dt < 4.0, f"{dt:.2f}s")
+    check("④ensure-webview 控制指令已下发", bool(_FakeWS.sent) and "ensure-webview" in _FakeWS.sent[0],
+          str(_FakeWS.sent))
+
+    class _ReplyWS:  # 应用收到 ensure-webview → 自动重开 → 回 webview-ready
+        async def send_text(self, m):
+            msg = json.loads(m)
+            bb._on_control({"type": "control", "cmd": "webview-ready",
+                            "request_id": msg.get("request_id"), "ok": True})
+
+    bb._APPS["_default"] = {"ws": _ReplyWS(), "loop": loop}
+    r3 = bb.ensure_webview(timeout=3.0)
+    check("④webview-ready 回执→自救成功", r3["ok"] is True, str(r3))
+    check("④等待者清空（无泄漏）", not bb._ENSURE_WAITERS, str(bb._ENSURE_WAITERS))
+    bb._APPS.clear()
+
+    # HTTP 面：/api/browser/ensure-webview（无应用=快速如实报因，有界）
+    try:
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        app = FastAPI()
+        bb.install(app)
+        client = TestClient(app)
+        resp = client.post("/api/browser/ensure-webview", json={"timeout": 2})
+        check("④HTTP ensure-webview 面", resp.status_code == 200
+              and resp.json().get("ok") is False and "未连接" in resp.json().get("error", ""),
+              resp.text)
+    except Exception as e:
+        check("④HTTP ensure-webview 面", False, f"{type(e).__name__}: {e}")
+
+    # ⑥ 单步自救第二层防线：_run_app_mode 层（有界重试进回执，禁无限重试）
+    sys.path.insert(0, str(ACP_ROOT / "agent"))  # 运行时经 sys.path 解析
+    import browser_tools  # pyright: ignore[reportMissingImports]
+    bt = browser_tools.BrowserTools()
+    seq = {"n": 0}
+    ens_calls = []
+
+    def fake_dispatch(action, params, secret=False, receipt_action="", fail_note=""):
+        seq["n"] += 1
+        if seq["n"] == 1:
+            return "❌ 浏览器操作失败（screenshot）：webview 已关闭"
+        assert receipt_action == "screenshot(重试1)", receipt_action
+        return "📸 截图已保存: /tmp/s.png（123 字节）"
+
+    bt._app_dispatch = fake_dispatch
+    bt._ensure_webview = lambda timeout_s=10.0: (
+        ens_calls.append(timeout_s), (True, "webview 已自动重开就绪"))[1]
+    out5 = bt._run_app_mode("screenshot", {})
+    check("⑥_run_app_mode 自救重试成功", "截图已保存" in out5 and "自救" in out5, out5)
+    check("⑥_run_app_mode ensure 有界1次（10s）", ens_calls == [10.0], str(ens_calls))
+
+    cnt = {"n": 0}
+
+    def fake_dispatch_fail(action, params, secret=False, receipt_action="", fail_note=""):
+        cnt["n"] += 1
+        if cnt["n"] > 1:  # 重试派发才带标注（首派发原样）
+            assert receipt_action == "screenshot(重试1)" and fail_note == "（重开后仍失败）", \
+                (receipt_action, fail_note)
+        return "❌ 浏览器操作失败（screenshot）：webview 已关闭"
+
+    bt._app_dispatch = fake_dispatch_fail
+    out6 = bt._run_app_mode("screenshot", {})
+    check("⑥_run_app_mode 重试仍败如实报（重开后仍失败）", "重开后仍失败" in out6, out6)
+    check("⑥_run_app_mode 禁无限重试（2次派发）", cnt["n"] == 2, str(cnt))
+
+    cnt2 = {"n": 0}
+
+    def fake_dispatch_done(action, params, secret=False, receipt_action="", fail_note=""):
+        cnt2["n"] += 1
+        return "❌ 浏览器操作失败（screenshot）：webview 已关闭（重开后仍失败）"
+
+    bt._app_dispatch = fake_dispatch_done
+    bt._run_app_mode("screenshot", {})
+    check("⑥两层防线互认：已自救错误不再二次重试", cnt2["n"] == 1, str(cnt2))
+
+
 if __name__ == "__main__":
     t1_receipts_and_report()
     t2_context_inference()
@@ -384,5 +580,6 @@ if __name__ == "__main__":
     t4_skill_generation()
     t5_masking()
     t6_execution_driver_and_bridge()
+    t7_webview_selfheal()
     print(f"\n== 结果: {PASS} PASS / {FAIL} FAIL ==")
     sys.exit(0 if FAIL == 0 else 1)

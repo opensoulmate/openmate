@@ -19,6 +19,16 @@ import time
 import urllib.request
 from pathlib import Path
 
+# flow_receipts 纯逻辑层（webview 失活判定同一真源）：sys.path 不可达时现场补路径
+try:
+    from flow_receipts import webview_lost as _webview_lost
+except ImportError:  # pragma: no cover - agent 子进程独立 sys.path 形态
+    import sys as _sys
+    _ACP_ROOT = str(Path(__file__).resolve().parent.parent)
+    if _ACP_ROOT not in _sys.path:
+        _sys.path.insert(0, _ACP_ROOT)
+    from flow_receipts import webview_lost as _webview_lost
+
 logger = logging.getLogger("acp-agent.browser-tools")
 
 DEFAULT_PYTHON = "/usr/bin/python"
@@ -388,7 +398,50 @@ class BrowserTools:
 
     def _run_app_mode(self, action: str, params: dict, secret: bool = False) -> str:
         """HTTP 投递任务 + 长轮询结果。结果与 worker 模式同构 → _format 无改动消费。
-        secret=True 透传给 bridge（执行回执按 *** 脱敏，密码/凭据不落回执）。"""
+
+        webview 自救（单步有界重试，断点续跑）：结果含「webview 已关闭/未就绪」→
+        ensure-webview（bridge 控制通道，有界 10s）→ 重试该步一次；成功继续（回执标注
+        「(重试1)」），仍败如实报「（重开后仍失败）」。禁止无限重试（已自救标注的错误
+        不再触发——execute_flow_steps 层同款判据，两层防线叠加仍为有界）。
+        """
+        out = self._app_dispatch(action, params, secret=secret)
+        if not (str(out).lstrip().startswith(("❌", "⚠️")) and _webview_lost(out)):
+            return out
+        # ── 自救：ensure-webview（有界）→ 重试1次，重试进回执（账单不掩盖自救过程）──
+        ens_ok, ens_note = self._ensure_webview()
+        out2 = self._app_dispatch(action, params, secret=secret,
+                                  receipt_action=f"{action}(重试1)",
+                                  fail_note="（重开后仍失败）")
+        if not str(out2).lstrip().startswith(("❌", "⚠️")):
+            return f"（webview 自救：{'成功' if ens_ok else '未确认'}：{ens_note}→已重试1次）\n" + out2
+        return out2 if "重开后仍失败" in str(out2) else f"{out2}（重开后仍失败）"
+
+    def _ensure_webview(self, timeout_s: float = 10.0) -> tuple[bool, str]:
+        """ensure-webview 自救口（bridge 控制通道）：应用自动重开浏览器 tab 并回 webview-ready。
+
+        等待有界（timeout_s，缺省 10s）：超时/不可达如实报因，绝不挂死执行链。
+        """
+        base = str(os.environ.get("SOULMATE_BROWSER_HTTP", "") or "http://127.0.0.1:8092").rstrip("/")
+        try:
+            req = urllib.request.Request(
+                f"{base}/api/browser/ensure-webview",
+                data=json.dumps({"timeout": float(timeout_s),
+                                 "session_id": str(os.environ.get("SOULMATE_SESSION_ID", "") or "")},
+                                ensure_ascii=False).encode(),
+                headers={"Content-Type": "application/json"}, method="POST")
+            with urllib.request.urlopen(req, timeout=float(timeout_s) + 5) as resp:
+                out = json.loads(resp.read().decode())
+        except Exception as e:
+            return False, f"ensure-webview 通道不可达：{e}"
+        if out.get("ok"):
+            return True, "webview 已自动重开就绪"
+        return False, f"webview 重开未就绪：{str(out.get('error', '未知错误'))}"
+
+    def _app_dispatch(self, action: str, params: dict, secret: bool = False,
+                      receipt_action: str = "", fail_note: str = "") -> str:
+        """HTTP 投递任务 + 长轮询结果（单次派发，不做重试——重试在 _run_app_mode 层）。
+        secret=True 透传给 bridge（执行回执按 *** 脱敏，密码/凭据不落回执）。
+        receipt_action/fail_note 透传：重试步回执标注「(重试1)」/失败附「（重开后仍失败）」。"""
         import json
         import urllib.request
         base = str(os.environ.get("SOULMATE_BROWSER_HTTP", "") or "http://127.0.0.1:8092").rstrip("/")
@@ -401,7 +454,9 @@ class BrowserTools:
             req = urllib.request.Request(
                 f"{base}/api/browser/task",
                 data=json.dumps({"action": action, "params": params,
-                                 "session_id": session_id, "secret": bool(secret)},
+                                 "session_id": session_id, "secret": bool(secret),
+                                 "receipt_action": str(receipt_action or ""),
+                                 "fail_note": str(fail_note or "")},
                                 ensure_ascii=False).encode(),
                 headers={"Content-Type": "application/json"}, method="POST")
             with urllib.request.urlopen(req, timeout=5) as resp:

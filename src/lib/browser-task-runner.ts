@@ -169,20 +169,39 @@ function tabRegistry(): Record<number, any> {
   return g.__omWebviews;
 }
 
-async function pickTab(b: Bridge, params: any): Promise<number | null> {
+/** 活 webview 定位：逐个探针 webContents 活性，顺手清掉失活注册（webview 卸载时
+ *  清理抛错会留幽灵条目 → pickTab 选到死 tab 的根因）。最近注册的优先。 */
+async function aliveTabId(b: Bridge): Promise<number | null> {
   const reg = tabRegistry();
   const ids = Object.keys(reg).map(Number);
-  if (ids.length > 0) return ids[ids.length - 1]; // 最近注册的标签
-  // 没有内置浏览器标签 → 开一个（workspace 落点，与外链新标签同款）
-  const opener = (window as any).__omOpenWebTab;
-  if (!opener) return null;
-  opener(String(params?.url || 'about:blank'));
-  for (let i = 0; i < 20; i++) {
-    await new Promise((r) => setTimeout(r, 300));
-    const ids2 = Object.keys(tabRegistry()).map(Number);
-    if (ids2.length > 0) return ids2[ids2.length - 1];
+  for (let i = ids.length - 1; i >= 0; i--) {
+    const id = ids[i];
+    const r = await b.webviewExec(id, '1 + 1').catch(() => null);
+    if (r?.ok) return id;
+    delete reg[id]; // webContents 已销毁/未就绪 → 清幽灵注册
   }
   return null;
+}
+
+/** 开浏览器标签并等 webview 注册就绪（有界 ~6s，禁无限等）。
+ *  与「打开浏览器」按钮/外链新标签同一条代码路径（__omOpenWebTab → workspace web-browser 标签）。 */
+async function openWebTabAndWait(b: Bridge, url?: string): Promise<number | null> {
+  const opener = (window as any).__omOpenWebTab;
+  if (!opener) return null;
+  opener(String(url || 'about:blank'));
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setTimeout(r, 300));
+    const id = await aliveTabId(b);
+    if (id) return id;
+  }
+  return null;
+}
+
+async function pickTab(b: Bridge, params: any): Promise<number | null> {
+  const alive = await aliveTabId(b);
+  if (alive) return alive;
+  // 没有活的内置浏览器标签（tab 被关/切走卸载）→ 自动开一个（workspace 落点，与外链新标签同款）
+  return openWebTabAndWait(b, params?.url);
 }
 
 async function execOn(b: Bridge, tabId: number, code: string): Promise<any> {
@@ -302,6 +321,7 @@ class TaskRunner {
       let msg: any = null;
       try { msg = JSON.parse(e.data); } catch { return; }
       if (msg?.type === 'task') this.runTask(msg);
+      else if (msg?.type === 'control' && msg?.cmd === 'ensure-webview') this.ensureWebview(msg);
     };
     ws.onclose = () => { this.ws = null; this.scheduleReconnect(); };
     ws.onerror = () => { try { ws.close(); } catch { /* 已关 */ } };
@@ -318,6 +338,26 @@ class TaskRunner {
   private send(payload: any) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(payload));
+    }
+  }
+
+  /** 控制消息 ensure-webview（webview 自救）：无活浏览器标签（tab 被关/切走后 webview
+   *  卸载）→ 自动创建/切到浏览器标签（复用「打开浏览器」同条代码路径），webview 就绪回
+   *  webview-ready。等待有界（~6s），超时如实报因——bridge 侧同样有界，禁无限等。 */
+  private async ensureWebview(msg: { request_id?: string; url?: string }) {
+    const rid = String(msg?.request_id || '');
+    const reply = (ok: boolean, error = '') =>
+      this.send({ type: 'control', cmd: 'webview-ready', request_id: rid, ok, error });
+    try {
+      const b = bridge();
+      if (!b) return reply(false, '应用无内置浏览器桥（非 Electron 壳）');
+      const alive = await aliveTabId(b);
+      if (alive) return reply(true);
+      const id = await openWebTabAndWait(b, msg?.url);
+      if (id) return reply(true);
+      reply(false, 'webview-ready 超时（有界等待）：浏览器标签未就绪（workspace 未创建浏览器标签）');
+    } catch (e: any) {
+      reply(false, String(e?.message || e));
     }
   }
 

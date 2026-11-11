@@ -44,6 +44,21 @@ _INTRANET_URL_RE = re.compile(
 # URL 查询串里的敏感键值（password=xxx → password=***）
 _SENSITIVE_QUERY_RE = re.compile(r"(?i)((?:pass|pwd|token|secret|key|auth|cred)\w*=)[^&#]*")
 
+# webview 失活特征（应用通道 <webview> 被关/卸载）：命中→单步自救（ensure-webview→重试1次）
+WEBVIEW_LOST_RE = re.compile(
+    r"webview\s*已关闭|webview\s*未就绪|webview\s*已销毁|内置浏览器标签未就绪")
+# 已自救标记：带此标注的错误/步骤不再二次重试（两层防线叠加也禁无限重试）
+RETRY_USED_RE = re.compile(r"重开后仍失败|\(重试\d+\)|（重试\d+）")
+
+
+def webview_lost(text: str) -> bool:
+    """错误文本是否为 webview 失活（已关闭/未就绪/已销毁）→ 触发单步自救重试。
+
+    已带重试标注（重试N/重开后仍失败）的错误返回 False——禁止无限重试。
+    """
+    t = str(text or "")
+    return bool(WEBVIEW_LOST_RE.search(t)) and not RETRY_USED_RE.search(t)
+
 
 # ── 脱敏（铁律：密码/凭据一律脱敏，不落回执不落 skill）────────────
 
@@ -396,14 +411,41 @@ def _subst(text: str, data: dict, missing: set) -> str:
     return re.sub(r"\{\{(\w+)\}\}", _rep, str(text or ""))
 
 
+def _http_ensure_webview(timeout_s: float = 10.0) -> tuple[bool, str]:
+    """默认自救通道：POST /api/browser/ensure-webview（bridge 控制通道，有界 timeout_s）。
+
+    bridge 向应用发 ensure-webview 控制消息并等 webview-ready（有界等待）；
+    超时/不可达如实报因，绝不挂死调用方。
+    """
+    import urllib.request
+    base = str(os.environ.get("SOULMATE_BROWSER_HTTP", "")
+               or "http://127.0.0.1:8092").rstrip("/")
+    try:
+        req = urllib.request.Request(
+            f"{base}/api/browser/ensure-webview",
+            data=json.dumps({"timeout": float(timeout_s)}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=float(timeout_s) + 5) as resp:
+            out = json.loads(resp.read().decode())
+        ok = bool(out.get("ok"))
+        return ok, ("webview 已自动重开就绪" if ok
+                    else f"webview 重开未就绪：{str(out.get('error', '未知错误'))}")
+    except Exception as e:
+        return False, f"ensure-webview 通道不可达：{e}"
+
+
 def execute_flow_steps(steps: list[dict], data: dict, run_action, engine: str = "headless",
-                       flow_name: str = "") -> dict:
+                       flow_name: str = "", ensure_webview=None) -> dict:
     """按步骤清单确定性执行（goto/click/type/fill），每步结果写入回执表（同一套执行凭证）。
 
     run_action(action, params, secret) -> (ok, summary)：实际执行通道（无头=Playwright
     worker；有头=应用通道 _run_app_mode）。secret=True 的步骤值不落回执。
     无头执行遇登录/内网地址显式报错「此流程需要登录态/内网环境，必须有头执行」，
     禁止静默换引擎。缺参数先报不执行（跑到一半不许卡住）。
+    webview 自救（断点续跑，有界）：步骤结果含「webview 已关闭/未就绪」→ ensure_webview
+    （有界 10s）→ 重试该步一次 → 成功继续/仍败如实报「（重开后仍失败）」；重试步回执
+    标注「(重试1)」进凭证，账单不掩盖自救过程。禁止无限重试（已重试标注的错误不再触发）。
+    ensure_webview(timeout_s) -> (ok, note)：自救通道（缺省走 bridge HTTP 控制口，测试可注入）。
     返回 {ok, error, results, executed, planned, receipts, report}。
     """
     steps = [s for s in (steps or []) if isinstance(s, dict)]
@@ -457,13 +499,34 @@ def execute_flow_steps(steps: list[dict], data: dict, run_action, engine: str = 
         except Exception as e:  # 执行通道异常=失败如实报因，不吞不换引擎
             ok, summary = False, f"{type(e).__name__}: {e}"[:160]
         duration = time.time() - started
+        rec_action = action
+        # ── webview 自救（断点续跑）：webview 已关闭/未就绪 → ensure-webview（有界10s）
+        #    → 重试该步一次；成功继续，仍败如实报「（重开后仍失败）」。禁止无限重试 ──
+        if not ok and webview_lost(str(summary)):
+            ens = ensure_webview or _http_ensure_webview
+            try:
+                ens_ok, ens_note = ens(10.0)
+            except Exception as e:  # 自救通道异常=如实记，仍做单次重试
+                ens_ok, ens_note = False, f"ensure-webview 异常：{type(e).__name__}: {e}"
+            results.append(
+                f"  ↳ 自救：{str(summary).strip()[:80]} → ensure-webview"
+                f"（{'成功' if ens_ok else '失败'}：{ens_note}）→ 重试该步1次")
+            started = time.time()
+            try:
+                ok, summary = run_action(action, params, sensitive)
+            except Exception as e:
+                ok, summary = False, f"{type(e).__name__}: {e}"[:160]
+            duration += time.time() - started
+            rec_action = f"{action}(重试1)"  # 重试进凭证：账单不掩盖自救过程
+            if not ok:
+                summary = f"{summary}（重开后仍失败）"
         rec = record_receipt(
-            task_id=f"flow-{uuid.uuid4().hex[:8]}", action=action, params=params,
+            task_id=f"flow-{uuid.uuid4().hex[:8]}", action=rec_action, params=params,
             ok=bool(ok), error=("" if ok else str(summary)), summary=str(summary),
             duration=duration, engine=str(engine), secret=sensitive,
             step_index=i, flow=flow_name)
         receipts.append(rec)
-        results.append(f"{i}. [{action}] {'✅' if ok else '❌'} {str(summary).strip()[:160]}")
+        results.append(f"{i}. [{rec_action}] {'✅' if ok else '❌'} {str(summary).strip()[:160]}")
         if not ok:
             return {"ok": False,
                     "error": f"第{i}步 {action} 失败，已停（不继续盲跑）：{summary}",

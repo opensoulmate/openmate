@@ -39,22 +39,30 @@ _TASKS: dict = {}
 _LOCK = threading.Lock()
 _APPS: dict = {}  # session_id -> {"ws": WebSocket, "loop": asyncio.AbstractEventLoop}
 _SHOT_DIR = Path.home() / ".hermes" / "soulmate" / "browser_shots"
+# webview 自救控制通道：request_id -> {"event": threading.Event, "result": dict|None}
+_ENSURE_WAITERS: dict = {}
 
 # 任务执行上限（应用端单动作）；长轮询上限必须大于它，让真实错误先回来如实报因
 TASK_TIMEOUT_S = 45.0
+# webview 自救等待上限（webview-ready 有界等待，禁无限等）
+ENSURE_WEBVIEW_TIMEOUT_S = 10.0
 
 
-def submit_task(action: str, params: dict, session_id: str = "", secret: bool = False) -> dict:
+def submit_task(action: str, params: dict, session_id: str = "", secret: bool = False,
+                receipt_action: str = "", fail_note: str = "") -> dict:
     """agent 侧投递任务（HTTP 线程调用）。返回 task_id。
 
     secret=True 表示本步输入含密码/凭据——回执摘要脱敏为 ***（铁律：不落回执）。
     secret 只留服务端（不进 ws 派发消息）。
+    receipt_action：回执上的动作标注（如 screenshot(重试1)——重试进凭证，账单不掩盖自救）。
+    fail_note：失败时附在回执错误后的注记（如 （重开后仍失败）），成功不附。
     """
     tid = uuid.uuid4().hex[:12]
     rec = {
         "task_id": tid, "action": action, "params": params or {},
         "session_id": session_id, "created": time.time(), "secret": bool(secret),
         "done": threading.Event(), "ok": False, "result": {}, "error": "",
+        "receipt_action": str(receipt_action or ""), "fail_note": str(fail_note or ""),
     }
     with _LOCK:
         _TASKS[tid] = rec
@@ -85,8 +93,12 @@ def wait_result(task_id: str, wait_s: float = 30.0) -> dict:
             err = "OpenMate 应用未连接（内置浏览器通道无客户端）——确认桌面端在跑"
         else:
             err = f"应用执行超时（{wait_s:g}s）——页面卡死或动作过慢，未确认完成"
-        record_receipt(task_id=task_id, action=rec.get("action", ""), params=rec.get("params") or {},
-                       ok=False, error=err, duration=time.time() - rec.get("created", time.time()),
+        record_receipt(task_id=task_id,
+                       action=rec.get("receipt_action") or rec.get("action", ""),
+                       params=rec.get("params") or {},
+                       ok=False,
+                       error=err + str(rec.get("fail_note", "") or ""),
+                       duration=time.time() - rec.get("created", time.time()),
                        engine="app", secret=bool(rec.get("secret")))
         return {"ok": False, "error": err}
     if rec["ok"]:
@@ -108,6 +120,62 @@ def status() -> dict:
                 "tasks_total": len(_TASKS)}
 
 
+# ── webview 自救控制通道（ensure-webview ⇄ webview-ready）────────────
+# 浏览器 tab 被关/切走后 <webview> 卸载（webContents 销毁）→ 步骤报「webview 已关闭」。
+# 自救：bridge 发 ensure-webview 控制消息 → 应用自动创建/切到浏览器标签（复用「打开浏览器」
+# 同条代码路径）→ webview 就绪回 webview-ready。等待有界（默认 10s），禁无限等。
+
+def _on_control(msg: dict) -> None:
+    """应用侧控制回执（webview-ready 等）：唤醒对应 ensure 等待者（request_id 配对）。"""
+    rid = str(msg.get("request_id", "") or "")
+    with _LOCK:
+        w = _ENSURE_WAITERS.get(rid)
+        if w is None:
+            return
+        w["result"] = {"ok": bool(msg.get("ok", True)), "error": str(msg.get("error", "") or "")}
+        w["event"].set()
+
+
+def ensure_webview(session_id: str = "", timeout: float = ENSURE_WEBVIEW_TIMEOUT_S) -> dict:
+    """webview 自救：向应用发 ensure-webview 控制消息，等 webview-ready（有界 timeout）。
+
+    应用收到后自动创建/切到浏览器标签并注册 webview，就绪回 webview-ready；
+    无应用连接/发送失败/webview-ready 超时 → 如实报因（不挂死调用方，禁止无限等）。
+    """
+    try:
+        timeout = max(1.0, min(float(timeout or ENSURE_WEBVIEW_TIMEOUT_S), 30.0))
+    except (TypeError, ValueError):
+        timeout = ENSURE_WEBVIEW_TIMEOUT_S
+    rid = uuid.uuid4().hex[:8]
+    ev = threading.Event()
+    with _LOCK:
+        apps = dict(_APPS)
+        _ENSURE_WAITERS[rid] = {"event": ev, "result": None}
+    try:
+        app = apps.get(session_id or "_default") or next(iter(apps.values()), None)
+        if app is None:
+            return {"ok": False,
+                    "error": "OpenMate 应用未连接（内置浏览器通道无客户端）——确认桌面端在跑"}
+        msg = json.dumps({"type": "control", "cmd": "ensure-webview", "request_id": rid},
+                         ensure_ascii=False)
+        try:
+            fut = asyncio.run_coroutine_threadsafe(app["ws"].send_text(msg), app["loop"])
+            fut.result(timeout=min(timeout, 5.0))
+        except Exception as e:
+            return {"ok": False, "error": f"ensure-webview 指令下发失败：{e}"}
+        if not ev.wait(timeout):
+            return {"ok": False,
+                    "error": f"webview-ready 等待超时（{timeout:g}s 有界）——应用未确认 webview 就绪"}
+        with _LOCK:
+            res = (_ENSURE_WAITERS.get(rid) or {}).get("result") or {}
+        if res.get("ok"):
+            return {"ok": True, "error": ""}
+        return {"ok": False, "error": str(res.get("error", "") or "应用报告 webview 未就绪")}
+    finally:
+        with _LOCK:
+            _ENSURE_WAITERS.pop(rid, None)
+
+
 def _complete(tid: str, ok: bool, result: dict | None = None, error: str = "") -> None:
     """ws 回传点：任务完成（result/cancel）→ 写执行回执（服务端派发实录，凭证数据源）。"""
     with _LOCK:
@@ -126,8 +194,10 @@ def _complete(tid: str, ok: bool, result: dict | None = None, error: str = "") -
         action, params = rec.get("action", ""), rec.get("params") or {}
         secret, created = bool(rec.get("secret")), rec.get("created", time.time())
         res, err = rec.get("result") or {}, rec.get("error", "")
-    record_receipt(task_id=tid, action=action, params=params, ok=ok,
-                   error=("" if ok else err), summary=(_digest(res) if ok else ""),
+        rec_action = rec.get("receipt_action") or action
+        fail_note = str(rec.get("fail_note", "") or "")
+    record_receipt(task_id=tid, action=rec_action, params=params, ok=ok,
+                   error=("" if ok else err + fail_note), summary=(_digest(res) if ok else ""),
                    duration=time.time() - created, engine="app", secret=secret)
 
 
@@ -163,6 +233,7 @@ async def ws_browser_endpoint(websocket: WebSocket):
     """
     await websocket.accept()
     session_id = ""
+    loop = asyncio.get_running_loop()  # 自救控制消息跨线程下发用（run_coroutine_threadsafe）
     recv_task = asyncio.create_task(websocket.receive_text())
     try:
         while True:
@@ -187,7 +258,9 @@ async def ws_browser_endpoint(websocket: WebSocket):
             if mtype == "hello":
                 session_id = str(msg.get("session_id", "") or "")
                 with _LOCK:
-                    _APPS[session_id or "_default"] = {"ws": websocket}
+                    _APPS[session_id or "_default"] = {"ws": websocket, "loop": loop}
+            elif mtype == "control":
+                _on_control(msg)  # webview-ready 等控制回执（自救等待者配对唤醒）
             elif mtype == "result":
                 _complete(str(msg.get("task_id", "")), bool(msg.get("ok")),
                           result=msg.get("result") or {}, error=str(msg.get("error", "")))
@@ -223,7 +296,16 @@ def install(app) -> None:
         params = req.get("params") or {}
         session_id = str(req.get("session_id", "") or "")
         secret = bool(req.get("secret"))
-        return submit_task(action, params, session_id, secret=secret)
+        return submit_task(action, params, session_id, secret=secret,
+                           receipt_action=str(req.get("receipt_action", "") or ""),
+                           fail_note=str(req.get("fail_note", "") or ""))
+
+    @app.post("/api/browser/ensure-webview")
+    async def _ensure_webview(req: dict):
+        # webview 自救控制口：向应用发 ensure-webview，等 webview-ready（有界 timeout，禁无限等）
+        return await asyncio.to_thread(
+            ensure_webview, str(req.get("session_id", "") or ""),
+            float(req.get("timeout", ENSURE_WEBVIEW_TIMEOUT_S) or ENSURE_WEBVIEW_TIMEOUT_S))
 
     @app.get("/api/browser/receipts")
     async def _receipts(since: float = 0.0):
