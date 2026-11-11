@@ -2302,9 +2302,12 @@ class SoulMateAgent:
     def _browser_flow_dispatch(self, func_name: str, func_args: dict) -> str:
         """browser_flow_list/browser_flow_execute 统一入口（主循环与 code-mode 内层共用）。
 
-        只读流程配方库（data/browser_flows/ 本地 JSON），不碰浏览器——
-        browser_flow_execute 返回「步骤+注意事项」操作计划，真正执行由模型用
-        browser 工具逐步进行（智能执行而非死板回放，注意事项=操作硬约束）。
+        流程配方库（data/browser_flows/ 本地 JSON）按名调出，分层路由执行：
+        browser_flow_execute 的 engine（auto/headed/headless）按流程 context 路由——
+        headed=应用通道 _run_app_mode 逐步智能执行（出「步骤+步骤意图+注意事项」计划），
+        headless=Playwright 按步骤清单确定性执行（每步结果写回执表）；无头遇登录/内网
+        显式拒绝。done=true=执行收尾：自动拉取执行窗口的服务端回执出「执行凭证」
+        （治冒名——凭证来自服务端派发记录，模型无法伪造）。
         读取双通道：browser_bridge 同模块直读优先（与存取面同源），agent 子进程
         sys.path 不可达时走 HTTP 面兜底（BrowserTools._run_flows 同款访问面）。
         """
@@ -2330,6 +2333,36 @@ class SoulMateAgent:
             except Exception as e:
                 return None, f"流程库不可用（本地直读与 HTTP({base}) 两通道均失败）— {e}"
 
+        def _fr():
+            """纯逻辑层 flow_receipts（分层路由/执行凭证/skill 指导，无 fastapi 依赖）。"""
+            try:
+                import flow_receipts as fr
+                return fr
+            except Exception:
+                import sys as _sys
+                root = str(Path(__file__).resolve().parent.parent)
+                if root not in _sys.path:
+                    _sys.path.insert(0, root)
+                import flow_receipts as fr
+                return fr
+
+        def _receipts(since: float) -> list:
+            """执行窗口回执：直读滚动表优先（服务端落盘实录，跨进程可见），HTTP 面兜底。"""
+            try:
+                return _fr().get_receipts(since)
+            except Exception:
+                pass
+            base = str(os.environ.get("SOULMATE_BROWSER_HTTP", "")
+                       or "http://127.0.0.1:8092").rstrip("/")
+            try:
+                resp = httpx.get(f"{base}/api/browser/receipts",
+                                 params={"since": float(since or 0)}, timeout=5.0)
+                if resp.status_code == 200:
+                    return resp.json().get("receipts") or []
+            except Exception:
+                pass
+            return []
+
         if func_name == "browser_flow_list":
             flows, err = _read("list")
             if err:
@@ -2344,7 +2377,8 @@ class SoulMateAgent:
                 _tm = time.strftime("%Y-%m-%d %H:%M", time.localtime(_ts)) if _ts else "未知"
                 lines.append(
                     f"- {f.get('name', '')}（id={f.get('id', '')}，{f.get('steps', 0)}步，"
-                    f"保存于{_tm}）注意事项：{_sum}")
+                    f"保存于{_tm}，skill：{'已沉淀' if f.get('skill') else '无'}，"
+                    f"引擎：{(f.get('context') or {}).get('preferred', 'auto')}）注意事项：{_sum}")
             return ("【已保存流程】（用 browser_flow_execute(flow_name=名称) 按名调出执行）\n"
                     + "\n".join(lines))
 
@@ -2371,9 +2405,40 @@ class SoulMateAgent:
             return f"错误: 读取流程失败 — {rec.get('error', '未知错误')}"
         steps = [s for s in (rec.get("steps") or []) if isinstance(s, dict)]
         params = rec.get("params") or []
+        ctx = rec.get("context") or {}
+        data = dict(func_args.get("data") or {})
+        fr = _fr()
+
+        # ── done=true：执行收尾——自动拉取本次执行窗口的回执，出「执行凭证」账单 ──
+        if bool(func_args.get("done")):
+            since_raw = func_args.get("since")
+            try:
+                since = float(since_raw) if since_raw not in (None, "") else fr.flow_window(hit.get("id", ""))
+            except (TypeError, ValueError):
+                since = fr.flow_window(hit.get("id", ""))
+            receipts = _receipts(since)
+            note = ""
+            if since <= 0:
+                note = "（⚠ 未记录执行窗口，回执取自全量滚动表，可能混入其他操作）\n"
+            return (f"【流程】{rec.get('name', flow_name)}（{len(steps)}步）执行收尾\n"
+                    + note + fr.execution_report(receipts, steps, flow_name=str(rec.get("name", ""))))
+
+        # ── 分层路由：auto 按流程 context（needs_login/intranet→headed，否则 headless）；
+        #    无头遇登录/内网显式拒绝，禁止静默换引擎 ──
+        engine_arg = str(func_args.get("engine", "auto") or "auto").strip().lower()
+        resolved, eng_err = fr.decide_engine(ctx, engine_arg)
+        if eng_err:
+            return (f"❌ {eng_err}\n流程「{rec.get('name', flow_name)}」"
+                    f"context(needs_login={bool(ctx.get('needs_login'))}, "
+                    f"intranet={bool(ctx.get('intranet'))})——如需执行请传 engine=headed")
+
+        # ── 执行计划（注入 skill.md 沉淀的「步骤意图+注意事项」智能执行指导）──
         lines = [
             f"【流程】{rec.get('name', flow_name)}（{len(steps)}步，"
-            f"参数：{', '.join(params) or '无'}）——操作计划如下，逐步用 browser 工具执行："
+            f"参数：{', '.join(params) or '无'}）"
+            f"——执行引擎：{resolved}"
+            + ("（有头·OpenMate 应用通道 _run_app_mode）" if resolved == "headed"
+               else "（无头·Playwright 后台确定性执行）")
         ]
         for i, s in enumerate(steps, 1):
             parts = [f"{i}. [{s.get('action', '')}]"]
@@ -2384,25 +2449,56 @@ class SoulMateAgent:
             if s.get("url"):
                 parts.append(f"url={s.get('url')}")
             if s.get("value") not in (None, ""):
-                val = s.get("value")
                 shown = ("***（敏感字段：执行时向用户要真实值）" if s.get("secret")
-                         else (str(val) if len(str(val)) <= 40 else str(val)[:40] + "…"))
+                         else (str(s.get('value')) if len(str(s.get('value'))) <= 40
+                               else str(s.get('value'))[:40] + "…"))
                 parts.append(f"value={shown}")
             if s.get("submit"):
                 parts.append("（输入后回车提交）")
             lines.append(" ".join(parts))
-        notes = str(rec.get("notes", "") or "").strip()
+        skill_md = str(rec.get("skill_md", "") or "")
+        sections = fr.skill_sections(rec)
+
+        def _sec(md: str, title: str, fallback: str) -> str:
+            m = re.search(rf"## {re.escape(title)}\n(.*?)(?=\n## |\Z)", md or "", re.S)
+            return (m.group(1).strip() if m else fallback)
+
+        lines.append("【步骤意图（skill.md 沉淀的智能执行指导，不只原始步骤）】")
+        lines.extend(_sec(skill_md, "步骤意图", sections["steps_intent"]).splitlines() or ["（无）"])
         lines.append("⚠ 注意事项（执行时必须遵守的硬约束）：")
-        _note_items = [x.strip() for x in re.split(r"[\n;；]+", notes) if x.strip()] if notes else []
-        if _note_items:
-            lines.extend(f"- {n}" for n in _note_items)
-        else:
-            lines.append("- （本流程未填写注意事项，按步骤执行即可）")
+        lines.extend(_sec(skill_md, "⚠注意事项", sections["notes"]).splitlines() or ["- （本流程未填写注意事项，按步骤执行即可）"])
+
+        # ── 执行路由 ──
+        if resolved == "headless":
+            # 无头：Playwright 按步骤清单确定性执行，每步结果写入回执表（同一套执行凭证）
+            tools = getattr(self, "_browser_tools_inst", None)
+            if tools is None:
+                tools = BrowserTools()
+                self._browser_tools_inst = tools
+            fr.start_flow_window(str(hit.get("id", "")))
+
+            def _run(a: str, p: dict, secret: bool = False):
+                out = tools.run(a, p, mode="worker", secret=secret)
+                return (not out.lstrip().startswith(("❌", "⚠️"))), out.strip()[:160]
+
+            exe = fr.execute_flow_steps(steps, data, _run, engine="headless",
+                                        flow_name=str(rec.get("name", "")))
+            lines.append("【无头执行结果】（每步已写入服务端回执表）")
+            lines.extend(exe["results"] or ["（无步骤执行）"])
+            if exe["error"]:
+                lines.append(f"❌ {exe['error']}")
+            lines.append(exe["report"])
+            return "\n".join(lines)
+
+        # headed：出操作计划（智能执行），逐步用 browser 工具（应用通道 _run_app_mode）执行
+        fr.start_flow_window(str(hit.get("id", "")))
         lines.append(
             "执行方式：本工具只出计划不碰浏览器——用 browser 工具（goto/click/type/fill/"
-            "snapshot）按步骤逐条执行；{{param}} 占位先向用户要值再替换，密码类 {{password}} "
-            "用用户提供值填入且绝不写进任何输出；遵守上方注意事项（等待/顺序/参数等）；"
-            "遇到「⏸ 用户已接管」立刻停手等用户发话。")
+            "snapshot）按步骤逐条执行（有头应用通道，用户随时接管）；{{param}} 占位先向用户"
+            "要值再替换，密码类 {{password}} 用用户提供值填入且绝不写进任何输出；遵守上方"
+            "注意事项（等待/顺序/参数等）；遇到「⏸ 用户已接管」立刻停手等用户发话。"
+            "全部执行完（或宣布完成）后必须再调 browser_flow_execute(flow_name=同名, done=true) "
+            "生成执行凭证——凭证来自服务端派发记录，模型无法伪造。")
         return "\n".join(lines)
 
     def _skill_save_dispatch(self, func_args: dict, session_id: str = "") -> str:
@@ -3341,12 +3437,19 @@ You can send files to the user natively: to deliver a file, write a brief confir
             "function": {
                 "name": "browser_flow_execute",
                 "description": (
-                    "按名称调出已保存的录制流程，返回「步骤+注意事项」操作计划供逐步"
-                    "智能执行。触发语：当用户说「按XX流程来操作/用XX流程/回放XX/照着XX"
-                    "流程干」时调用；先 browser_flow_list 确认流程名称再调用本工具。"
-                    "返回值是结构化文本：每步序号+动作+selector/值，末尾⚠注意事项列表"
-                    "——本工具不直接操作浏览器，拿到计划后用 browser 工具（goto/click/"
-                    "type/fill/snapshot）按步骤逐条执行。"
+                    "按名称调出已保存的录制流程，按分层路由执行或返回「步骤+注意事项+"
+                    "步骤意图」操作计划。触发语：当用户说「按XX流程来操作/用XX流程/回放XX/"
+                    "照着XX流程干」时调用；先 browser_flow_list 确认流程名称再调用本工具。"
+                    "引擎分层路由（engine 参数，auto=按流程 context 自动选）：流程需登录态/"
+                    "内网 → headed 有头·应用通道逐步智能执行；公开页面批量 → headless 无头"
+                    "Playwright 确定性执行（用户说「后台跑」时传 headless）。无头遇登录/内网"
+                    "流程会显式拒绝「必须有头执行」，禁止静默换引擎。"
+                    "返回值是结构化文本：步骤清单+skill.md 沉淀的步骤意图（智能执行指导）+"
+                    "⚠注意事项（硬约束）；headed 模式拿到计划后用 browser 工具（goto/click/"
+                    "type/fill/snapshot）按步骤逐条执行，全部执行完必须再调 "
+                    "browser_flow_execute(flow_name=同名, done=true) 生成「执行凭证」——"
+                    "凭证来自服务端派发记录（实际派发X步/计划Y步/未执行步骤），模型无法伪造，"
+                    "0 条回执会如实显示「0 步实际执行」。"
                     "使用注意：注意事项是硬约束必须遵守（如等页面加载完再点下一步、先向"
                     "用户要值再替换 {{param}} 占位、密码类 {{password}} 用用户提供值填入"
                     "且绝不写进任何输出）；流程名找不到时会返回可用名称列表，不要瞎猜重名；"
@@ -3359,6 +3462,20 @@ You can send files to the user natively: to deliver a file, write a brief confir
                         "flow_name": {
                             "type": "string",
                             "description": "流程名称（browser_flow_list 返回的 name；也接受流程 id）",
+                        },
+                        "engine": {
+                            "type": "string",
+                            "description": ("执行引擎：auto（缺省，按流程 context 自动路由）/"
+                                            "headed（有头·应用通道）/headless（无头·Playwright 后台）。"
+                                            "用户说「后台跑/无头/挂机跑」时传 headless"),
+                        },
+                        "data": {
+                            "type": "object",
+                            "description": "{{param}} 占位的填充参数 {参数名: 值}；密码类值只用于执行，绝不写进任何输出",
+                        },
+                        "done": {
+                            "type": "boolean",
+                            "description": "true=执行收尾：自动拉取本次执行窗口的服务端回执生成「执行凭证」（宣布完成后必调）",
                         },
                     },
                     "required": ["flow_name"],

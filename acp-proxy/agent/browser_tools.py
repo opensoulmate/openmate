@@ -200,7 +200,10 @@ class BrowserTools:
 
     # ── 工具入口 ────────────────────────────────────────────────
 
-    def run(self, action: str, params: dict | None = None) -> str:
+    def run(self, action: str, params: dict | None = None,
+            mode: str = "", secret: bool = False) -> str:
+        """执行浏览器动作。mode 覆盖 SOULMATE_BROWSER_MODE（'app'=应用通道有头，
+        'worker'=Playwright 独立会话）；secret=True 时本步输入含凭据（回执脱敏 ***）。"""
         action = str(action or "").strip().lower()
         params = dict(params or {})
         if action not in SUPPORTED_ACTIONS:
@@ -215,10 +218,11 @@ class BrowserTools:
         if action == "replay":
             return self._run_replay(params)
         # ── 默认模式=应用通道：任务发给 OpenMate 内置浏览器执行（真浏览器同一扇窗，
-        #    用户随时接管）。SOULMATE_BROWSER_MODE=worker 走独立 playwright 子进程。
-        mode = str(os.environ.get("SOULMATE_BROWSER_MODE", "") or "app").strip().lower()
+        #    用户随时接管）。SOULMATE_BROWSER_MODE=worker 走独立 playwright 子进程；
+        #    mode 入参可显式覆盖（流程分层路由：headed=app / headless=worker）。
+        mode = str(mode or os.environ.get("SOULMATE_BROWSER_MODE", "") or "app").strip().lower()
         if mode == "app":
-            return self._run_app_mode(action, params)
+            return self._run_app_mode(action, params, secret=secret)
         # screenshot 未给路径 → 自动落 shot_dir（返回路径供 MEDIA: 下发）
         if action == "screenshot" and not str(params.get("path", "") or "").strip():
             os.makedirs(self.shot_dir, exist_ok=True)
@@ -382,8 +386,9 @@ class BrowserTools:
             )
         return "【用户近期操作流】（hover=鼠标指着的元素，「这个地方」即指它）\n" + "\n".join(lines)
 
-    def _run_app_mode(self, action: str, params: dict) -> str:
-        """HTTP 投递任务 + 长轮询结果。结果与 worker 模式同构 → _format 无改动消费。"""
+    def _run_app_mode(self, action: str, params: dict, secret: bool = False) -> str:
+        """HTTP 投递任务 + 长轮询结果。结果与 worker 模式同构 → _format 无改动消费。
+        secret=True 透传给 bridge（执行回执按 *** 脱敏，密码/凭据不落回执）。"""
         import json
         import urllib.request
         base = str(os.environ.get("SOULMATE_BROWSER_HTTP", "") or "http://127.0.0.1:8092").rstrip("/")
@@ -396,7 +401,8 @@ class BrowserTools:
             req = urllib.request.Request(
                 f"{base}/api/browser/task",
                 data=json.dumps({"action": action, "params": params,
-                                 "session_id": session_id}, ensure_ascii=False).encode(),
+                                 "session_id": session_id, "secret": bool(secret)},
+                                ensure_ascii=False).encode(),
                 headers={"Content-Type": "application/json"}, method="POST")
             with urllib.request.urlopen(req, timeout=5) as resp:
                 tid = json.loads(resp.read().decode()).get("task_id", "")

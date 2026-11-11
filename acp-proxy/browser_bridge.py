@@ -21,6 +21,19 @@ from pathlib import Path
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+# 执行凭证/分层路由/skill 沉淀纯逻辑层（同一真源，无 fastapi 依赖）
+from flow_receipts import (  # noqa: F401  (re-export：agent 侧统一从 browser_bridge 取)
+    decide_engine,
+    execute_flow_steps,
+    execution_report,
+    get_receipts,
+    headless_refusal_reason,
+    infer_flow_context,
+    mask_params,
+    record_receipt,
+    skill_md_for,
+)
+
 # 任务信箱：task_id -> rec（done=threading.Event，WS 线程与 HTTP 线程共享）
 _TASKS: dict = {}
 _LOCK = threading.Lock()
@@ -31,12 +44,16 @@ _SHOT_DIR = Path.home() / ".hermes" / "soulmate" / "browser_shots"
 TASK_TIMEOUT_S = 45.0
 
 
-def submit_task(action: str, params: dict, session_id: str = "") -> dict:
-    """agent 侧投递任务（HTTP 线程调用）。返回 task_id。"""
+def submit_task(action: str, params: dict, session_id: str = "", secret: bool = False) -> dict:
+    """agent 侧投递任务（HTTP 线程调用）。返回 task_id。
+
+    secret=True 表示本步输入含密码/凭据——回执摘要脱敏为 ***（铁律：不落回执）。
+    secret 只留服务端（不进 ws 派发消息）。
+    """
     tid = uuid.uuid4().hex[:12]
     rec = {
         "task_id": tid, "action": action, "params": params or {},
-        "session_id": session_id, "created": time.time(),
+        "session_id": session_id, "created": time.time(), "secret": bool(secret),
         "done": threading.Event(), "ok": False, "result": {}, "error": "",
     }
     with _LOCK:
@@ -44,18 +61,34 @@ def submit_task(action: str, params: dict, session_id: str = "") -> dict:
     return {"task_id": tid}
 
 
+def _digest(result: dict) -> str:
+    """结果摘要（回执用）：URL/标题/点击/输入目标等非敏感锚点，绝不带输入值。"""
+    if not isinstance(result, dict):
+        return str(result)[:120]
+    bits = [str(result.get(k, "")) for k in ("url", "title", "clicked", "typed_into", "path")]
+    s = " ".join(b for b in bits if b)
+    return s[:160] or "(无结果摘要)"
+
+
 def wait_result(task_id: str, wait_s: float = 30.0) -> dict:
-    """长轮询结果（HTTP 线程调用）。超时=如实报因，禁编造。"""
+    """长轮询结果（HTTP 线程调用）。超时=如实报因，禁编造。
+
+    超时/未连接也写执行回执（ok=False「未确认完成」）——派发过就有账单；
+    迟到的真实结果由 _complete 按 task_id 覆盖改写（同一份实录）。
+    """
     with _LOCK:
         rec = _TASKS.get(task_id)
     if rec is None:
         return {"ok": False, "error": f"未知任务 {task_id}"}
     if not rec["done"].wait(timeout=wait_s):
         if not app_connected(rec.get("session_id", "")):
-            return {"ok": False,
-                    "error": "OpenMate 应用未连接（内置浏览器通道无客户端）——确认桌面端在跑"}
-        return {"ok": False,
-                "error": f"应用执行超时（{wait_s:g}s）——页面卡死或动作过慢，未确认完成"}
+            err = "OpenMate 应用未连接（内置浏览器通道无客户端）——确认桌面端在跑"
+        else:
+            err = f"应用执行超时（{wait_s:g}s）——页面卡死或动作过慢，未确认完成"
+        record_receipt(task_id=task_id, action=rec.get("action", ""), params=rec.get("params") or {},
+                       ok=False, error=err, duration=time.time() - rec.get("created", time.time()),
+                       engine="app", secret=bool(rec.get("secret")))
+        return {"ok": False, "error": err}
     if rec["ok"]:
         return {"ok": True, "result": rec["result"]}
     return {"ok": False, "error": rec["error"]}
@@ -76,6 +109,7 @@ def status() -> dict:
 
 
 def _complete(tid: str, ok: bool, result: dict | None = None, error: str = "") -> None:
+    """ws 回传点：任务完成（result/cancel）→ 写执行回执（服务端派发实录，凭证数据源）。"""
     with _LOCK:
         rec = _TASKS.get(tid)
         if rec is None:
@@ -89,6 +123,12 @@ def _complete(tid: str, ok: bool, result: dict | None = None, error: str = "") -
         else:
             rec["error"] = error or "未知错误"
         rec["done"].set()
+        action, params = rec.get("action", ""), rec.get("params") or {}
+        secret, created = bool(rec.get("secret")), rec.get("created", time.time())
+        res, err = rec.get("result") or {}, rec.get("error", "")
+    record_receipt(task_id=tid, action=action, params=params, ok=ok,
+                   error=("" if ok else err), summary=(_digest(res) if ok else ""),
+                   duration=time.time() - created, engine="app", secret=secret)
 
 
 def _save_shot(data_url: str) -> str:
@@ -182,7 +222,24 @@ def install(app) -> None:
         action = str(req.get("action", "") or "").strip().lower()
         params = req.get("params") or {}
         session_id = str(req.get("session_id", "") or "")
-        return submit_task(action, params, session_id)
+        secret = bool(req.get("secret"))
+        return submit_task(action, params, session_id, secret=secret)
+
+    @app.get("/api/browser/receipts")
+    async def _receipts(since: float = 0.0):
+        # 执行回执（服务端派发实录）：since=<ts> 取该时刻后的回执——凭证的唯一数据源
+        return {"receipts": get_receipts(since)}
+
+    @app.post("/api/browser/receipt")
+    async def _receipt_post(body: dict):
+        # 跨进程补录（无头执行步骤回执）：与派发回执同一滚动表，供同一套执行凭证
+        return {"ok": True, "receipt": record_receipt(
+            task_id=str(body.get("task_id", "")), action=str(body.get("action", "")),
+            params=body.get("params") or {}, ok=bool(body.get("ok")),
+            error=str(body.get("error", "")), summary=str(body.get("summary", "")),
+            duration=float(body.get("duration", 0) or 0),
+            engine=str(body.get("engine", "") or "headless"), secret=bool(body.get("secret")),
+            step_index=int(body.get("step_index", 0) or 0), flow=str(body.get("flow", "")))}
 
     @app.get("/api/browser/result/{task_id}")
     async def _result(task_id: str, wait_s: float = 30.0):
@@ -227,7 +284,11 @@ def _flow_path(flow_id: str) -> Path:
 
 
 def save_flow(body: dict) -> dict:
-    """保存录制流程。steps=[{action, selector, text, value, url, secret}]，notes=注意事项。"""
+    """保存录制流程。steps=[{action, selector, text, value, url, secret}]，notes=注意事项。
+
+    落盘同时自动沉淀两样：①context（needs_login/intranet/preferred 自动推断，
+    分层路由的依据）②<data/browser_flows/{flow_id}.skill.md>（录制完成自动 skill 化）。
+    """
     name = str(body.get("name", "") or "").strip()
     if not name:
         return {"ok": False, "error": "流程名必填"}
@@ -250,11 +311,16 @@ def save_flow(body: dict) -> dict:
         "steps": steps,
         "params": params,
         "notes": notes,
+        "context": infer_flow_context(steps),
         "created_at": time.time(),
     }
     _FLOWS_DIR.mkdir(parents=True, exist_ok=True)
     _flow_path(fid).write_text(json.dumps(rec, ensure_ascii=False, indent=2), encoding="utf-8")
-    return {"ok": True, "id": fid, "steps": len(steps), "params": params}
+    # 录制完成自动 skill 化：同名 skill.md 随配方落盘（密码/凭据不落 skill）
+    skill_path = _FLOWS_DIR / f"{fid}.skill.md"
+    skill_path.write_text(skill_md_for(rec), encoding="utf-8")
+    return {"ok": True, "id": fid, "steps": len(steps), "params": params,
+            "context": rec["context"], "skill_file": str(skill_path)}
 
 
 def list_flows() -> list[dict]:
@@ -270,6 +336,8 @@ def list_flows() -> list[dict]:
                 "steps": len(rec.get("steps") or []),
                 "params": rec.get("params") or [],
                 "notes": rec.get("notes", ""),
+                "context": rec.get("context") or infer_flow_context(rec.get("steps") or []),
+                "skill": (_FLOWS_DIR / f"{p.stem}.skill.md").is_file(),
                 "created_at": rec.get("created_at", 0),
             })
         except Exception:
@@ -287,6 +355,13 @@ def load_flow(flow_id: str) -> dict:
     rec = json.loads(p.read_text(encoding="utf-8"))
     # 旧配方无 notes 字段时透传空串（前端/SoulMate 消费面拿到的字段形状统一）
     rec.setdefault("notes", "")
+    # 旧配方无 context → 现场推断（分层路由对旧流程同样生效）
+    rec.setdefault("context", infer_flow_context(rec.get("steps") or []))
+    # skill.md 全文随读出（执行计划注入「步骤意图+注意事项」的智能执行指导）
+    try:
+        rec["skill_md"] = (_FLOWS_DIR / f"{p.stem}.skill.md").read_text(encoding="utf-8")
+    except Exception:
+        rec["skill_md"] = ""
     return rec
 
 
@@ -297,5 +372,8 @@ def delete_flow(flow_id: str) -> dict:
         return {"ok": False, "error": str(e)}
     if p.is_file():
         p.unlink()
+        skill_p = _FLOWS_DIR / f"{p.stem}.skill.md"
+        if skill_p.is_file():
+            skill_p.unlink()  # 配方删除 → 沉淀的 skill 同步清（不留幽灵技能）
         return {"ok": True}
     return {"ok": False, "error": f"流程不存在：{flow_id}"}
