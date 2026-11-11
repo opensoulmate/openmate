@@ -657,7 +657,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           // 收起=透明停靠（绝不滑出视口）：滑出/裁剪会让 <webview> 丢 VizSurface，
           // capturePage 挂死或抛 UnknownVizError（五态实测：opacity:0 是唯一保表面的隐藏态）
           opacity: rightPanelOpen ? 1 : 0,
-          transform: rightPanelOpen ? 'translateX(0)' : 'translateX(24px)',
+          // 开=必须 transform:none（transform≠none 会让面板内 position:fixed 全屏动画失效）
+          transform: rightPanelOpen ? 'none' : 'translateX(24px)',
           pointerEvents: rightPanelOpen ? 'auto' : 'none',
         }}
       >
