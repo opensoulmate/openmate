@@ -59,6 +59,13 @@ export default function SplashGate() {
       className={`fixed inset-0 z-[9999] flex flex-col items-center justify-center transition-opacity duration-300 ${fading ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
       style={{ background: '#0b0f14' }}
     >
+      <img
+        src="/logo-icon.png"
+        alt="OpenMate"
+        width={104}
+        height={104}
+        style={{ marginBottom: 14 }}
+      />
       <div
         className="text-2xl font-semibold tracking-wide"
         style={{ color: 'var(--cyan-hi, #55b9dc)' }}
