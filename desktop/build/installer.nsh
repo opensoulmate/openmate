@@ -8,4 +8,7 @@
   ClearErrors
   WinShell::SetLnkAUMI "$DESKTOP\${SHORTCUT_NAME}.lnk" "${APP_ID}"
   System::Call 'Shell32::SHChangeNotify(i 0x8000000, i 0, i 0, i 0)'
+  ; 图标缓存根修：Explorer 按路径缓存 exe 图标，更新换 exe 不换路径=显示旧图；
+  ; ie4uinit -show 令系统重建该路径图标缓存（Win10/11 有效，无副作用）
+  ExecWait 'ie4uinit.exe -show'
 !macroend
