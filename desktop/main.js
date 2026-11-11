@@ -145,6 +145,16 @@ function createWindow() {
 // 折叠面板=webview 隐藏但照跑（Electron 语义天然）。
 app.on('web-contents-created', (_e, wc) => {
   if (wc.getType() !== 'webview') return;
+  // 滚动条与对话框同款（globals.css 同一真源）：webview 是独立渲染进程，主界面 CSS 进不去，
+  // 每页加载完成后注入同一样式（6px 定宽/透明轨/hover 显影）——样式一致性，非守卫
+  const SCROLLBAR_CSS = `::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:transparent;border-radius:3px;transition:background .3s ease}
+*:hover::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15)}
+::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.3)}`;
+  const injectScrollbarCss = () => { wc.insertCSS(SCROLLBAR_CSS).catch(() => {}); };
+  wc.on('did-finish-load', injectScrollbarCss);
+  injectScrollbarCss();
   // webview 里的 target=_blank / window.open → workspace 新标签（与主窗同款语义，不弹独立窗）
   wc.setWindowOpenHandler(({ url }) => {
     if (/^https?:/i.test(url)) {

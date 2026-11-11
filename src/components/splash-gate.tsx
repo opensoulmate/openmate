@@ -60,7 +60,7 @@ export default function SplashGate() {
       style={{ background: '#0b0f14' }}
     >
       <img
-        src="/mark-wide.png"
+        src="/app-icon-512.png"
         alt="OpenMate"
         style={{ height: 'clamp(48px, 11vw, 88px)', width: 'auto', marginBottom: 14 }}
       />

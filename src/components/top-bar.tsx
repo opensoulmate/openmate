@@ -68,7 +68,7 @@ export function TopBar({ eventCount = 0 }: TopBarProps) {
     <OpenFaceTopBar
       left={
         <Link href="/chat" className="flex items-center gap-1.5 shrink-0 px-3 hover:opacity-80 transition-opacity">
-          <img src="/mark-wide.png" alt="OpenMate" className="h-6 sm:h-7 w-auto shrink-0" />
+          <img src="/app-icon-512.png" alt="OpenMate" className="h-6 sm:h-7 w-auto shrink-0" />
           <span className="text-sm font-semibold text-foreground hidden sm:inline">OpenMate</span>
         </Link>
       }
