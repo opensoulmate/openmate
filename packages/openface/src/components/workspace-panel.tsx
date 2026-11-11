@@ -225,6 +225,16 @@ export function WorkspacePanel({
   const [fsStyle, setFsStyle] = useState<React.CSSProperties>({});
   const rootRef = useRef<HTMLDivElement>(null);
 
+  const exitFullscreen = useCallback(() => {
+    // Slide back to original position
+    if (rootRef.current) {
+      const rect = rootRef.current.getBoundingClientRect();
+      setFsStyle(prev => ({ ...prev, left: rect.left, right: window.innerWidth - rect.right, transition: 'left 300ms ease-in-out, right 300ms ease-in-out' }));
+      setTimeout(() => setFsStyle({}), 310);
+    }
+    setIsFullscreen(false);
+  }, []);
+
   const toggleFullscreen = useCallback(() => {
     if (!isFullscreen && rootRef.current) {
       const rect = rootRef.current.getBoundingClientRect();
@@ -235,16 +245,28 @@ export function WorkspacePanel({
       requestAnimationFrame(() => {
         setFsStyle({ ...base, left: 0, right: 0, transition: 'left 300ms ease-in-out, right 300ms ease-in-out' });
       });
+      setIsFullscreen(true);
+      // 互斥协议：告知应用壳"进入全屏"（左栏自动折叠/退出时恢复）
+      window.dispatchEvent(new CustomEvent('om-fullscreen-state', { detail: { on: true } }));
     } else {
-      // Slide back to original position
-      if (rootRef.current) {
-        const rect = rootRef.current.getBoundingClientRect();
-        setFsStyle(prev => ({ ...prev, left: rect.left, right: window.innerWidth - rect.right, transition: 'left 300ms ease-in-out, right 300ms ease-in-out' }));
-        setTimeout(() => setFsStyle({}), 310);
-      }
+      exitFullscreen();
+      window.dispatchEvent(new CustomEvent('om-fullscreen-state', { detail: { on: false } }));
     }
-    setIsFullscreen(!isFullscreen);
-  }, [isFullscreen]);
+  }, [isFullscreen, exitFullscreen]);
+
+  // 互斥协议：左栏被手动展开时，应用壳广播 om-fullscreen-exit → 此处收场
+  const fsActiveRef = useRef(false);
+  fsActiveRef.current = isFullscreen;
+  useEffect(() => {
+    const onExit = () => {
+      if (fsActiveRef.current) {
+        exitFullscreen();
+        window.dispatchEvent(new CustomEvent('om-fullscreen-state', { detail: { on: false } }));
+      }
+    };
+    window.addEventListener('om-fullscreen-exit', onExit);
+    return () => window.removeEventListener('om-fullscreen-exit', onExit);
+  }, [exitFullscreen]);
 
   // Self-contained state — no external store dependency
   const [workspaceMap, setWorkspaceMap] = useState<Record<string, WorkspaceState>>({});

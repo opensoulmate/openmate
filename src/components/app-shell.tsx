@@ -181,6 +181,33 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [midScreenExpanded, setMidScreenExpanded] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const effectiveCollapsed = isMobile ? !mobileSidebarOpen : (collapsed || (isMidScreen && !midScreenExpanded));
+  // ── 全屏↔左栏互斥（openface 工作台全屏经 CustomEvent 协调）──
+  // 进全屏：左栏自动折叠（记住原状态）；退出全屏：恢复；全屏中手动展开左栏=退出全屏
+  const [fsActive, setFsActive] = useState(false);
+  const fsWasCollapsed = useState<{ v: boolean | null }>({ v: null })[0];
+  useEffect(() => {
+    const onFs = (e: Event) => {
+      const on = (e as CustomEvent).detail?.on;
+      if (on) {
+        fsWasCollapsed.v = effectiveCollapsed;
+        setFsActive(true);
+        if (isMobile) { if (mobileSidebarOpen) setMobileSidebarOpen(false); }
+        else if (isMidScreen) { if (midScreenExpanded) setMidScreenExpanded(false); }
+        else if (!collapsed) toggle();
+      } else {
+        const was = fsWasCollapsed.v;
+        fsWasCollapsed.v = null;
+        setFsActive(false);
+        if (was === false) {
+          if (isMobile) { if (!mobileSidebarOpen) setMobileSidebarOpen(true); }
+          else if (isMidScreen) { if (!midScreenExpanded) setMidScreenExpanded(true); }
+          else if (collapsed) toggle();
+        }
+      }
+    };
+    window.addEventListener('om-fullscreen-state', onFs);
+    return () => window.removeEventListener('om-fullscreen-state', onFs);
+  }, [effectiveCollapsed, isMobile, isMidScreen, mobileSidebarOpen, midScreenExpanded, collapsed, toggle, fsWasCollapsed]);
   const currentPanel = useAppStore((s) => s.currentPanel);
   const setCurrentPanel = useAppStore((s) => s.setCurrentPanel);
   const { t } = useTranslation();
@@ -521,6 +548,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {/* Middle: sidebar + content + right panel */}
       <div className="relative flex flex-1 min-h-0 overflow-hidden">
         <SidebarProvider open={!effectiveCollapsed} onOpenChange={(open) => {
+          // 互斥：全屏中手动展开左侧 = 退出全屏
+          if (open && fsActive) window.dispatchEvent(new CustomEvent('om-fullscreen-exit'));
           if (open === effectiveCollapsed) {
             if (isMobile) {
               setMobileSidebarOpen(prev => !prev);
