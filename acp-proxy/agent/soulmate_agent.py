@@ -2303,8 +2303,10 @@ class SoulMateAgent:
         """browser_flow_list/browser_flow_execute 统一入口（主循环与 code-mode 内层共用）。
 
         流程配方库（data/browser_flows/ 本地 JSON）按名调出，分层路由执行：
-        browser_flow_execute 的 engine（auto/headed/headless）按流程 context 路由——
-        headed=应用通道 _run_app_mode 逐步智能执行（出「步骤+步骤意图+注意事项」计划），
+        browser_flow_execute 的 engine（auto/headed/headless）——**默认有头**：auto 一律
+        headed（用户的 OpenMate 有窗可见、可接管）；headless 仅当用户明确说「后台跑」
+        时才传，禁止自行切无头（同一流程两次路由必须一致）。headed=应用通道
+        _run_app_mode 逐步智能执行（出「步骤+步骤意图+注意事项」计划），
         headless=Playwright 按步骤清单确定性执行（每步结果写回执表）；无头遇登录/内网
         显式拒绝。done=true=执行收尾：自动拉取执行窗口的服务端回执出「执行凭证」
         （治冒名——凭证来自服务端派发记录，模型无法伪造）。

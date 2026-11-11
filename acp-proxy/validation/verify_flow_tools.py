@@ -144,7 +144,7 @@ def t3_engine_routing():
     both_ctx = {"needs_login": True, "intranet": True}
     pub_ctx = {"needs_login": False, "intranet": False}
 
-    check("auto+公开→headless", fr.decide_engine(pub_ctx, "auto") == ("headless", ""))
+    check("auto+公开→headed（默认有头）", fr.decide_engine(pub_ctx, "auto") == ("headed", ""))
     check("auto+登录→headed", fr.decide_engine(login_ctx, "auto") == ("headed", ""))
     check("auto+内网→headed", fr.decide_engine(intranet_ctx, "auto") == ("headed", ""))
     check("显式 headed 放行", fr.decide_engine(login_ctx, "headed") == ("headed", ""))

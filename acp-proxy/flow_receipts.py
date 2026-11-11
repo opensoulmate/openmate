@@ -189,8 +189,9 @@ def headless_refusal_reason(url: str) -> str:
 def decide_engine(context: dict, engine: str = "auto") -> tuple[str, str]:
     """engine 路由决策。返回 (resolved, error)；error 非空=显式拒绝（禁止静默换引擎）。
 
-    auto=按流程 context（needs_login/intranet→headed，否则 headless）；
-    显式 headless 遇登录态/内网 → 报错「此流程需要登录态/内网环境，必须有头执行」。
+    默认有头（对用户承诺的语义）：auto 一律 headed；headless 仅当调用方显式指定
+    （用户明确说「后台跑」）。context 标注只做显式 headless 的越界校验，不自动切
+    引擎——否则同一流程两次执行会路由不一致（实测踩过：一次有头一次无头）。
     """
     engine = str(engine or "auto").strip().lower() or "auto"
     if engine not in ("auto", "headed", "headless"):
@@ -202,7 +203,7 @@ def decide_engine(context: dict, engine: str = "auto") -> tuple[str, str]:
         return "", (f"此流程需要{need}，必须有头执行"
                     f"（engine=headless 被显式拒绝，禁止静默换引擎；请传 engine=headed）")
     if engine == "auto":
-        return ("headed" if (needs_login or intranet) else "headless"), ""
+        return "headed", ""  # 默认有头；headless 只走显式指定
     return engine, ""
 
 
