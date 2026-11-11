@@ -650,10 +650,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       )}
       {/* Container: absolute positioned, slides with right property */}
       <div
-        className="absolute inset-y-0 top-0 z-10 h-full min-w-0 border-l border-border transition-[right] duration-200 ease-linear flex flex-col overflow-hidden"
+        className="absolute inset-y-0 top-0 z-10 h-full min-w-0 border-l border-border transition-[opacity,transform] duration-200 ease-linear flex flex-col overflow-hidden"
         style={{
           width: rightPanelWidth,
-          right: rightPanelOpen ? 0 : -rightPanelWidth,
+          right: 0,
+          // 收起=透明停靠（绝不滑出视口）：滑出/裁剪会让 <webview> 丢 VizSurface，
+          // capturePage 挂死或抛 UnknownVizError（五态实测：opacity:0 是唯一保表面的隐藏态）
+          opacity: rightPanelOpen ? 1 : 0,
+          transform: rightPanelOpen ? 'translateX(0)' : 'translateX(24px)',
+          pointerEvents: rightPanelOpen ? 'auto' : 'none',
         }}
       >
         <WorkspacePanel sessionId={activeSessionIdFromStore || '__default__'} className="h-full" pendingFilePreview={pendingFilePreview} pendingWebUrl={pendingWebUrl} />

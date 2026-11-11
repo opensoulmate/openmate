@@ -183,7 +183,12 @@ ipcMain.handle('webview-nav', (_e, { tabId, url }) => {
 ipcMain.handle('webview-capture', async (_e, { tabId }) => {
   const wc = getWebviewWc(tabId);
   if (!wc) return { ok: false, error: 'webview 已关闭' };
-  const img = await wc.capturePage();
+  // 窗口最小化/无合成表面时 capturePage 会永久挂起（实测）——8 秒显式报错，不挂死调用方
+  const img = await Promise.race([
+    wc.capturePage(),
+    new Promise((_, rej) => setTimeout(() => rej(new Error('截图超时：窗口最小化或页面不可见时无合成表面可截')), 8000)),
+  ]).catch((e) => ({ __err: e.message }));
+  if (img && img.__err) return { ok: false, error: img.__err };
   return { ok: true, dataUrl: img.toDataURL() };
 });
 
