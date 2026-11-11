@@ -62,7 +62,7 @@ export default function SplashGate() {
       <img
         src="/mark-wide.png"
         alt="OpenMate"
-        style={{ height: 88, width: 'auto', marginBottom: 14 }}
+        style={{ height: 'clamp(48px, 11vw, 88px)', width: 'auto', marginBottom: 14 }}
       />
       <div
         className="text-2xl font-semibold tracking-wide"
