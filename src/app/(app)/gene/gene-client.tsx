@@ -392,7 +392,7 @@ export function GeneClient() {
   return (
       <PageLayout title="Gene">
         
-    <div className="p-4 sm:p-3 lg:p-6 max-w-6xl mx-auto space-y-3 lg:space-y-6">
+    <div className="p-3 lg:p-6 max-w-6xl mx-auto space-y-3 lg:space-y-6 h-full overflow-y-auto">
       {/* Header */}
       <div className="flex items-center gap-3">
         <div className="p-2 rounded-lg bg-gradient-to-br from-emerald-500/20 to-teal-500/20">

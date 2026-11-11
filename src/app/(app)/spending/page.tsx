@@ -1,11 +1,18 @@
 'use client';
 
+import { useMemo } from 'react';
 import { useAppStore, type SessionSpending } from '@/stores/app-store';
 import { DollarSign, TrendingUp, MessageSquare, Zap, Trash2 } from 'lucide-react';
+import { PageLayout } from '@/components/page-layout';
 
 export default function SpendingPage() {
-  const allSpending = useAppStore((s) => s.getAllSpending());
   const sessionSpending = useAppStore((s) => s.sessionSpending);
+  // 从稳定的 sessionSpending 引用派生排序列表；不能在选择器里调 getAllSpending()——
+  // 它每次返回新数组，zustand v5 下会让 useSyncExternalStore 无限重渲染（Maximum update depth exceeded）
+  const allSpending = useMemo(
+    () => Object.values(sessionSpending).sort((a, b) => b.lastUpdated - a.lastUpdated),
+    [sessionSpending]
+  );
 
   const totalCost = allSpending.reduce((sum, s) => sum + s.totalCost, 0);
   const totalMessages = allSpending.reduce((sum, s) => sum + s.messageCount, 0);
@@ -20,14 +27,16 @@ export default function SpendingPage() {
   };
 
   return (
-    <div className="flex flex-col h-full overflow-y-auto p-4 lg:p-6 gap-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold">💰 花销统计</h1>
+    <PageLayout
+      title="💰 花销统计"
+      headerActions={
         <button onClick={handleClear} className="flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg bg-muted hover:bg-muted/80 text-muted-foreground transition-colors">
           <Trash2 className="w-3.5 h-3.5" />
           清空记录
         </button>
-      </div>
+      }
+    >
+      <div className="px-3 lg:px-6 py-4 lg:py-6 h-full overflow-y-auto space-y-6">
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -72,7 +81,8 @@ export default function SpendingPage() {
           </tbody>
         </table>
       </div>
-    </div>
+      </div>
+    </PageLayout>
   );
 }
 

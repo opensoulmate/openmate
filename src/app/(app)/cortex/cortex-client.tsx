@@ -422,7 +422,7 @@ export function CortexClient() {
       </div>
 
       {/* Tab bar */}
-      <div className="flex gap-1 border-b border-border px-3 lg:px-6 py-2 overflow-x-auto">
+      <div className="flex flex-wrap gap-1 border-b border-border px-3 lg:px-6 py-2 overflow-x-auto">
         {tabs.map((t) => (
           <button
             key={t.id}
@@ -943,8 +943,8 @@ export function CortexClient() {
                         {i + 1}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-xs lg:text-sm font-medium truncate">{entry.title}</p>
-                        {entry.snippet && <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{entry.snippet}</p>}
+                        <p className="text-xs lg:text-sm font-medium">{entry.title}</p>
+                        {entry.snippet && <p className="text-xs text-muted-foreground mt-1">{entry.snippet}</p>}
                         {entry.tags && entry.tags.length > 0 && (
                           <div className="flex flex-wrap gap-1 mt-1.5">
                             {entry.tags.map((tag, j) => (
@@ -993,8 +993,8 @@ export function CortexClient() {
                           {i + 1}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-xs lg:text-sm font-medium truncate">{entry.title}</p>
-                          {entry.snippet && <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{entry.snippet}</p>}
+                          <p className="text-xs lg:text-sm font-medium">{entry.title}</p>
+                          {entry.snippet && <p className="text-xs text-muted-foreground mt-1">{entry.snippet}</p>}
                         </div>
                         {entry.score !== undefined && (
                           <span className="text-xs font-medium text-primary">{(entry.score * 100).toFixed(0)}%</span>
@@ -1158,7 +1158,7 @@ export function CortexClient() {
                       <p className="text-xs font-medium text-emerald-500 mb-2">🏆 {t('cortex.quality.topQuality')}</p>
                       {qualityReport.top_5.map((item, i) => (
                         <div key={i} className="flex items-center gap-2 text-xs py-1.5">
-                          <span className="font-medium truncate flex-1">{item.title}</span>
+                          <span className="font-medium flex-1">{item.title}</span>
                           <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-bold", GRADE_COLORS[item.grade])}>{item.grade}</span>
                         </div>
                       ))}
@@ -1169,7 +1169,7 @@ export function CortexClient() {
                       <p className="text-xs font-medium text-red-500 mb-2">⚠️ {t('cortex.quality.needsImprovement')}</p>
                       {qualityReport.bottom_5.map((item, i) => (
                         <div key={i} className="flex items-center gap-2 text-xs py-1.5">
-                          <span className="font-medium truncate flex-1">{item.title}</span>
+                          <span className="font-medium flex-1">{item.title}</span>
                           <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-bold", GRADE_COLORS[item.grade])}>{item.grade}</span>
                         </div>
                       ))}
@@ -1193,7 +1193,7 @@ export function CortexClient() {
                         {i + 1}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-xs lg:text-sm font-medium truncate">{item.title}</p>
+                        <p className="text-xs lg:text-sm font-medium">{item.title}</p>
                         {item.scores && (
                           <div className="flex gap-2 mt-1">
                             {Object.entries(item.scores).slice(0, 3).map(([dimName, dimScore], j) => (

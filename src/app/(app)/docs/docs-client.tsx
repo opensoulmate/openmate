@@ -318,6 +318,7 @@ export function DocsClient() {
         </div>
       }
     >
+      <div className="h-full overflow-y-auto px-3 lg:px-6 py-4 lg:py-6">
       {/* 加载状态 */}
       {loading && (
         <div className="flex items-center justify-center py-20 text-muted-foreground text-sm">
@@ -414,6 +415,7 @@ export function DocsClient() {
           )}
         </>
       )}
+      </div>
     </PageLayout>
   );
 }

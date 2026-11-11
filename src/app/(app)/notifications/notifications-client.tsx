@@ -310,7 +310,7 @@ export function NotificationsClient() {
   return (
       <PageLayout title="Notifications" workspace={workspaceContent}>
         
-    <div className="px-3 lg:px-6 py-4 lg:py-6 space-y-4 lg:space-y-6">
+    <div className="px-3 lg:px-6 py-4 lg:py-6 space-y-4 lg:space-y-6 h-full overflow-y-auto">
       {/* Header */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 lg:gap-3 min-w-0">

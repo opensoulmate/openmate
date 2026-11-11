@@ -84,7 +84,7 @@ export function KnowledgeRequestsClient() {
   return (
       <PageLayout title="Knowledge Requests">
         
-    <div className="px-3 lg:px-6 py-4 lg:py-6 space-y-4 lg:space-y-6 max-w-6xl mx-auto">
+    <div className="px-3 lg:px-6 py-4 lg:py-6 space-y-4 lg:space-y-6 max-w-6xl mx-auto h-full overflow-y-auto">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl lg:text-2xl font-bold flex items-center gap-2">

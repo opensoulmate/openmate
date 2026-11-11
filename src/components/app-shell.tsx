@@ -15,6 +15,7 @@ import { startBrowserTaskRunner } from "@/lib/browser-task-runner";
 import { installBehaviorSensor } from "@/lib/behavior-sensor";
 import { WorkspacePanel } from '@opensoulmate/openface';
 import { AIGroupsSidebar } from "@/components/ai-groups-sidebar";
+import { OrganNavSidebar } from "@/components/organ-nav-sidebar";
 import { useAIGroupsStore } from "@/stores/ai-groups-store";
 
 import { useVisibilityPoll } from "@/hooks/use-visibility-poll";
@@ -610,7 +611,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                       )}
                     />
                   </>
-                ) : null}
+                ) : (
+                  <OrganNavSidebar />
+                )}
               </SidebarContent>
               <SidebarFooter />
               <SidebarRail />
