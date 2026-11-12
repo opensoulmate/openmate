@@ -143,6 +143,8 @@ class EvolutionPipeline:
         # 收敛追踪
         self._score_history: list[float] = []
         self._consecutive_no_improve = 0
+        # study 观察发现（33-StudyLoop §7.2 第三种进化燃料，观察阶段收集，_plan 吸收）
+        self._study_findings: list[dict] = []
 
     async def run_pipeline(self, failure_batch: list[dict]) -> dict:
         """执行完整的7阶段流水线"""
@@ -158,6 +160,13 @@ class EvolutionPipeline:
             for attempt in range(MAX_RETRIES):
                 result["attempt"] = attempt + 1
                 self.audit.log({"round_id": round_id, "event": "attempt_start", "attempt": attempt + 1})
+
+                # ⓪ Observe-study：外部软件世界观察（33-StudyLoop §7.2 第三种进化燃料）
+                # 与既有 failure 观察并列，不替换；opensoul 不可达时静默降级
+                study_observation = await self._observe_study()
+                result["stages"]["study"] = study_observation
+                self._study_findings = study_observation.get("findings", [])
+                self.strand._log("observe_study", f"🔬 study观察: {len(self._study_findings)}条功能发现 ({study_observation.get('status', '?')})")
 
                 # ① Locate：诊断故障
                 diagnosis = await self._locate(failure_batch)
@@ -246,6 +255,24 @@ class EvolutionPipeline:
         self.audit.log({"round_id": round_id, "event": "pipeline_done", "success": result["success"], "stages": list(result["stages"].keys())})
         return result
 
+    # ── ⓪ Observe-study（33-StudyLoop §7：study 来源，与 failure 观察并列） ──
+    async def _observe_study(self) -> dict:
+        """跑 study 目标清单→证据→功能发现（第三种进化燃料）。
+
+        静默降级铁律：opensoul 不可达/超时/清单坏 都不得打断观察阶段，
+        run_study_round 内部已兜底不抛，这里再加一层防护（import 失败等）。
+        频控由 study_hook 保证：单轮 ≤3 目标、截图 ≤12 张、总超时 120s。
+        """
+        try:
+            from study_hook import run_study_round
+            study_result = await run_study_round(self.acp_dir / "data" / "study_targets.json")
+            self._study_findings = study_result.get("findings", [])
+            return study_result
+        except Exception as e:
+            logger.warning(f"study观察降级（不阻断进化）: {e}")
+            self._study_findings = []
+            return {"status": "degraded", "findings": [], "targets_run": [], "evidence_ids": [], "errors": [str(e)[:200]]}
+
     # ── ① Locate ──
 
     async def _locate(self, failure_batch: list[dict]) -> dict:
@@ -295,9 +322,11 @@ class EvolutionPipeline:
                     pass
 
         feedback = self._load_recent_feedback(self.repo_root)
+        # study 发现（33-StudyLoop §7.3）：与 feedback 并列注入，来源=study，有证据 id 支撑
+        study_section = self._format_study_section()
         prompt = f"""你是一个代码修复专家。根据诊断结果生成修复方案。
 
-{feedback}
+{feedback}{study_section}
 根因：{diagnosis.get('root_cause', '')}
 影响文件：{', '.join(affected)}
 修复策略：{diagnosis.get('fix_strategy', '')}
@@ -615,6 +644,17 @@ class EvolutionPipeline:
 
         queue_path.write_text(json.dumps(entries, ensure_ascii=False, indent=2), encoding="utf-8")
         logger.info(f"Hermes审核队列已提交: {round_id} ({len(files)}个文件, 核心文件={has_core})")
+
+    def _format_study_section(self) -> str:
+        """study 发现段落（与 _load_recent_feedback 并列进 _plan prompt，标明来源 study）"""
+        if not self._study_findings:
+            return ""
+        try:
+            from study_hook import format_study_findings
+            return "\n" + format_study_findings(self._study_findings)
+        except Exception as e:
+            logger.warning(f"study发现段落格式化失败（不阻断规划）: {e}")
+            return ""
 
     @staticmethod
     def _load_recent_feedback(repo_root: Path, limit: int = 5) -> str:
