@@ -1,0 +1,174 @@
+{
+  "$comment": "MCP tool schemas for the OpenMate download capability, for the SoulMate integration group to register directly. Backend implementations live once in opensoul (src/api/download_search.py + src/api/download_api.py); these map to the REST endpoints listed in each tool's 'x-endpoint'. Register with the standard MCP tools (name/description/inputSchema). The engine kernel (protocol) is the engine group's; these are the facade-level tools.",
+  "tools": [
+    {
+      "name": "torrent_search",
+      "description": "Search torrents across pluggable sources (Internet Archive, Academic Torrents, and user-configured RSS/JSON sources). Returns a unified list of results. Short-TTL cached. Unreachable sources degrade gracefully and are reported in 'errors'.",
+      "x-endpoint": "GET /api/download/search?query=&category=&limit=",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Free-text search query (title/keywords)."
+          },
+          "category": {
+            "type": "string",
+            "description": "Optional category filter (e.g. video, audio, books, software). Adapter-specific; best-effort."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Max results to return (1-100, default 20).",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          }
+        },
+        "required": ["query"]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": { "type": "string" },
+                "size": { "type": "integer", "description": "Total bytes (0 if unknown)." },
+                "seeders": { "type": "integer" },
+                "source": { "type": "string", "description": "Which adapter produced this row." },
+                "url": { "type": "string", "description": "HTTP(S)/.torrent URL (present when not a magnet)." },
+                "magnet": { "type": "string", "description": "magnet: URI (present when it is one)." }
+              },
+              "required": ["title", "size", "seeders", "source"]
+            }
+          },
+          "errors": { "type": "array", "items": { "type": "object" } },
+          "total": { "type": "integer" }
+        }
+      }
+    },
+    {
+      "name": "download_add",
+      "description": "Add a download task. Accepts an HTTP(S) URL, a magnet link, or a .torrent URL. target='remote' downloads to the server backend; target='local' downloads to the user's own machine (handled by the desktop local engine, not the server). Returns the created DownloadTask.",
+      "x-endpoint": "POST /api/download/download (target=remote) | POST /api/download/remote/add",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "The download source: an http(s):// URL, a magnet:?xt=... link, or a URL ending in .torrent."
+          },
+          "target": {
+            "type": "string",
+            "enum": ["local", "remote"],
+            "description": "Where to download to. 'remote' = the server backend (this service). 'local' = the user's machine (desktop local engine).",
+            "default": "remote"
+          },
+          "filename": {
+            "type": "string",
+            "description": "Optional explicit output filename."
+          },
+          "dest": {
+            "type": "string",
+            "description": "Optional explicit absolute destination path (remote target only; defaults to the configured download_dir)."
+          }
+        },
+        "required": ["url"]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "url": { "type": "string" },
+          "filename": { "type": "string" },
+          "dest": { "type": "string" },
+          "status": { "type": "string", "enum": ["pending", "downloading", "paused", "done", "error"] },
+          "origin": { "type": "string", "enum": ["local", "remote"] },
+          "totalBytes": { "type": "integer" },
+          "downloadedBytes": { "type": "integer" },
+          "progress": { "type": "number" },
+          "addedAt": { "type": "number" }
+        }
+      }
+    },
+    {
+      "name": "download_task_status",
+      "description": "Get the current status of a single download task by id: progress, speed, ETA, byte counts, and error if any.",
+      "x-endpoint": "GET /api/download/remote/{task_id}/metadata | GET /api/download/tasks (filter by id)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "The task id returned by download_add / download_task_list."
+          }
+        },
+        "required": ["task_id"]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "url": { "type": "string" },
+          "filename": { "type": "string" },
+          "dest": { "type": "string" },
+          "status": { "type": "string" },
+          "totalBytes": { "type": "integer" },
+          "downloadedBytes": { "type": "integer" },
+          "speed": { "type": "integer" },
+          "eta": { "type": "integer" },
+          "progress": { "type": "number" },
+          "origin": { "type": "string" },
+          "error": { "type": ["string", "null"] }
+        }
+      }
+    },
+    {
+      "name": "download_task_list",
+      "description": "List all download tasks (both remote/server and local), each as a DownloadTask. Optionally filter by status or origin.",
+      "x-endpoint": "GET /api/download/tasks",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "Optional filter by status (pending|downloading|paused|done|error).",
+            "enum": ["pending", "downloading", "paused", "done", "error"]
+          },
+          "origin": {
+            "type": "string",
+            "description": "Optional filter by origin (local|remote).",
+            "enum": ["local", "remote"]
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "tasks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string" },
+                "url": { "type": "string" },
+                "filename": { "type": "string" },
+                "dest": { "type": "string" },
+                "status": { "type": "string" },
+                "origin": { "type": "string" },
+                "totalBytes": { "type": "integer" },
+                "downloadedBytes": { "type": "integer" },
+                "progress": { "type": "number" },
+                "type": { "type": "string" },
+                "addedAt": { "type": "number" }
+              }
+            }
+          },
+          "total": { "type": "integer" }
+        }
+      }
+    }
+  ]
+}
