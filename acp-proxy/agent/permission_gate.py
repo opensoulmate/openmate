@@ -41,6 +41,8 @@ DEGRADED_READONLY_TOOLS = {
     "web_search", "web_extract", "vision_analyze", "read_image",
     "check_evolution_status", "todo", "clarify",
     "browser_flow_list", "browser_flow_execute",
+    # 下载中心只读三件（搜索/查进度/列任务）；download_add 有副作用不进白名单
+    "torrent_search", "download_task_status", "download_task_list",
 }
 
 # 降级模式下的本地灾难命令硬否决（与opensoul builtin hard deny对齐）
