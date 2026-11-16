@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
+import random
 import time
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
@@ -24,7 +25,7 @@ from .models import DownloadTask, TaskStatus, TaskType
 from .picker import PiecePicker
 
 MAX_PEERS = 30
-MAX_METADATA_PEERS = 12
+MAX_METADATA_PEERS = 24
 PER_PEER_INFLIGHT = 12
 METADATA_TIMEOUT = 90.0
 CONNECT_TIMEOUT = 10.0
@@ -296,6 +297,8 @@ class BtSession:
                             break
                     else:  # reject
                         break
+        except (ConnectionError, OSError, asyncio.TimeoutError, pw.PeerError):
+            pass  # 单 peer 失败不外抛；批量重试由 _fetch_metadata 循环负责
         finally:
             await conn.close()
 
@@ -336,6 +339,7 @@ class BtSession:
         self.known_peers.update(out)
         for p in out:
             self.dht.report_peer(info_hash, p)  # 回馈 DHT 网络
+        random.shuffle(out)  # 打散顺序：每轮批头不同，避免固定重试同一批（防火墙 peer 常在头部）
         return out
 
     # ── 下载/做种主循环 ──────────────────────────────────────
@@ -823,9 +827,9 @@ class BtEngine:
             sess = BtSession(task, source, None, magnet, None, lambda: None, self._dht)
             opts = options or {}
             sess.use_public_trackers = bool(opts.get("use_public_trackers", True))
-            if opts.get("metadata_timeout"):
-                sess.metadata_timeout = float(opts["metadata_timeout"])
-            await asyncio.wait_for(sess._fetch_metadata(), timeout)  # noqa: SLF001
+            # 元数据窗口 = 调用方 timeout（除非 options.metadata_timeout 显式覆盖）
+            sess.metadata_timeout = float(opts.get("metadata_timeout") or timeout)
+            await asyncio.wait_for(sess._fetch_metadata(), timeout + 5)  # noqa: SLF001
             assert sess.meta is not None
             return torrent_mod.file_list(sess.meta)
         with open(source, "rb") as f:

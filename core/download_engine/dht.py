@@ -353,9 +353,9 @@ class DhtClient:
         )
         tokens: List[Tuple[Node, bytes]] = []
         seen: set = set()
-        shortlist = self.table.closest(info_hash, K * 2)
+        shortlist = self.table.closest(info_hash, K * 4)
         rounds = 0
-        while shortlist and rounds < 8:
+        while shortlist and rounds < 12:
             batch = [n for n in shortlist if n.addr not in seen][:ALPHA]
             if not batch:
                 break
@@ -384,14 +384,19 @@ class DhtClient:
                         if xor_distance(n.id, info_hash) < best:
                             closer = True
             shortlist.sort(key=lambda n: xor_distance(n.id, info_hash))
-            shortlist = shortlist[: K * 2]
+            shortlist = shortlist[: K * 4]
             rounds += 1
-            if found and rounds >= 3:
+            # 找到后继续扩几轮攒候选（DHT 候选常带防火墙 peer，多挑多试）
+            if found and rounds >= 8 and not closer:
                 break
             if not closer and not found and rounds >= 4:
                 break
         if self.announce_port and tokens:
-            await self._announce(info_hash, tokens)
+            # announce 失败绝不影响 get_peers 的成果（曾因 sendto 异常吞掉全部 peers）
+            try:
+                await self._announce(info_hash, tokens)
+            except Exception:  # noqa: BLE001
+                pass
         return [p for p in found if p[1] > 0]
 
     async def _announce(self, info_hash: bytes, tokens: List[Tuple[Node, bytes]]) -> None:
@@ -405,7 +410,7 @@ class DhtClient:
             }
             try:
                 await self._proto.query(node, "announce_peer", args)  # type: ignore[union-attr]
-            except DhtError:
+            except Exception:  # noqa: BLE001（DhtError/OSError 都不影响其他节点）
                 continue
 
     async def ping(self, node: Node) -> bool:
@@ -444,7 +449,7 @@ class DhtClient:
         async def one(n: Node) -> Optional[Tuple[Node, dict]]:
             try:
                 return n, await self._proto.query(n, method, args)  # type: ignore[union-attr]
-            except DhtError:
+            except Exception:  # noqa: BLE001（超时/DhtError/网络异常一律降级跳过）
                 return None
 
         results = await asyncio.gather(*[one(n) for n in nodes])

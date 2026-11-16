@@ -126,8 +126,8 @@ def test_lsd_discovery_or_skip():
                 a.announce_now()          # 真实组播广播
                 await asyncio.sleep(1.0)
                 await a.close()
-            if not found:
-                # 组播环回不可达：单播注入同一 BT-SEARCH 报文（等价收包路径）
+            if not any(h == info_hash for h, _ in found):
+                # 组播环回不可达（或只有外来 LSD 流量）：单播注入同一 BT-SEARCH 报文（等价收包路径）
                 injected = True
                 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 sock.settimeout(3)
