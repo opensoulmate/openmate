@@ -1,10 +1,11 @@
-"""peer.py — BT peer wire protocol（BEP3）+ 扩展协议（BEP10）编解码与连接封装。"""
+"""peer.py — BT peer wire protocol（BEP3）+ 扩展协议（BEP10）+ PEX（BEP11）编解码与连接封装。"""
 
 from __future__ import annotations
 
 import asyncio
+import socket
 import struct
-from typing import Optional, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 from . import bencode
 
@@ -23,8 +24,9 @@ MSG_PIECE = 7
 MSG_CANCEL = 8
 MSG_EXTENDED = 20
 
-# 本端 ut_metadata 扩展 id（BEP10 m 字典里公布）
+# 本端扩展 id（BEP10 m 字典里公布）
 LOCAL_UT_METADATA_ID = 3
+LOCAL_UT_PEX_ID = 2  # BEP11 ut_pex
 
 
 class PeerError(Exception):
@@ -112,31 +114,97 @@ def parse_extended(payload: bytes) -> Tuple[int, bytes]:
 
 
 def build_ext_handshake(metadata_size: Optional[int] = None, version: str = "OpenMate/0.1") -> bytes:
-    """BEP10 扩展握手（返回可直接写到 wire 的完整 extended 消息）。"""
-    m = {b"ut_metadata": LOCAL_UT_METADATA_ID}
+    """BEP10 扩展握手（返回可直接写到 wire 的完整 extended 消息）。
+
+    公布 ut_metadata（BEP9）与 ut_pex（BEP11）。
+    """
+    m = {b"ut_metadata": LOCAL_UT_METADATA_ID, b"ut_pex": LOCAL_UT_PEX_ID}
     d = {b"m": m, b"v": version.encode()}
     if metadata_size is not None:
         d[b"metadata_size"] = metadata_size
     return build_extended(0, bencode.encode(d))
 
 
-def parse_ext_handshake(payload: bytes) -> Tuple[Optional[int], Optional[int]]:
-    """返回 (对端 ut_metadata 扩展 id, metadata_size)。"""
+def parse_ext_handshake(payload: bytes) -> Tuple[Optional[int], Optional[int], Optional[int]]:
+    """返回 (对端 ut_metadata 扩展 id, metadata_size, 对端 ut_pex 扩展 id)。"""
     try:
         d = bencode.decode(payload)
     except bencode.BencodeError as e:
         raise PeerError(f"扩展握手载荷非法: {e}") from e
     if not isinstance(d, dict):
         raise PeerError("扩展握手载荷必须是字典")
-    ut = None
+    ut = ut_pex = None
     m = d.get(b"m")
     if isinstance(m, dict):
         v = m.get(b"ut_metadata")
         if isinstance(v, int):
             ut = v
+        v = m.get(b"ut_pex")
+        if isinstance(v, int):
+            ut_pex = v
     size = d.get(b"metadata_size")
     size = size if isinstance(size, int) and size > 0 else None
-    return ut, size
+    return ut, size, ut_pex
+
+
+# ── BEP11 ut_pex（peer exchange） ────────────────────────────
+
+
+def build_pex(
+    added: Sequence[Tuple[str, int]] = (),
+    dropped: Sequence[Tuple[str, int]] = (),
+) -> bytes:
+    """ut_pex 载荷（返回 payload；用 build_extended(对端 ut_pex id, ...) 发出）。"""
+    d: dict = {}
+    if added:
+        d[b"added"] = _compact_v4(added)
+    if dropped:
+        d[b"dropped"] = _compact_v4(dropped)
+    return bencode.encode(d)
+
+
+def parse_pex(payload: bytes) -> Tuple[List[Tuple[str, int]], List[Tuple[str, int]], List[Tuple[str, int]]]:
+    """返回 (added IPv4, added IPv6, dropped)。"""
+    try:
+        d = bencode.decode(payload)
+    except bencode.BencodeError as e:
+        raise PeerError(f"ut_pex 载荷非法: {e}") from e
+    if not isinstance(d, dict):
+        raise PeerError("ut_pex 载荷必须是字典")
+    added = _uncompact_v4(d.get(b"added") or b"")
+    added6 = _uncompact_v6(d.get(b"added6") or b"")
+    dropped = _uncompact_v4(d.get(b"dropped") or b"")
+    return added, added6, dropped
+
+
+def _compact_v4(peers: Sequence[Tuple[str, int]]) -> bytes:
+    out = bytearray()
+    for host, port in peers:
+        try:
+            out += socket.inet_aton(host) + struct.pack(">H", port)
+        except OSError:
+            continue
+    return bytes(out)
+
+
+def _uncompact_v4(data: bytes) -> List[Tuple[str, int]]:
+    out = []
+    for i in range(0, len(data) - len(data) % 6, 6):
+        host = socket.inet_ntoa(data[i : i + 4])
+        (port,) = struct.unpack(">H", data[i + 4 : i + 6])
+        if port:
+            out.append((host, port))
+    return out
+
+
+def _uncompact_v6(data: bytes) -> List[Tuple[str, int]]:
+    out = []
+    for i in range(0, len(data) - len(data) % 18, 18):
+        host = socket.inet_ntop(socket.AF_INET6, data[i : i + 16])
+        (port,) = struct.unpack(">H", data[i + 16 : i + 18])
+        if port:
+            out.append((host, port))
+    return out
 
 
 def bitfield_bytes(num_pieces: int, have: list) -> bytes:
@@ -169,6 +237,7 @@ class PeerConnection:
         self.supports_ext = False
         self.remote_ut_metadata: Optional[int] = None
         self.remote_metadata_size: Optional[int] = None
+        self.remote_ut_pex: Optional[int] = None
         self.choked = True          # 对端是否 choke 我们
         self.interested = False
         self.bitfield: list = []
@@ -179,12 +248,21 @@ class PeerConnection:
         return cls(reader, writer)
 
     async def do_handshake(self, info_hash: bytes, peer_id: bytes) -> None:
+        """出站：先发后收。"""
         self.writer.write(build_handshake(info_hash, peer_id))
         await self.writer.drain()
         data = await asyncio.wait_for(self.reader.readexactly(HANDSHAKE_LEN), 15)
         got_hash, self.peer_id, self.supports_ext = parse_handshake(data)
         if got_hash != info_hash:
             raise PeerError("info_hash 不匹配")
+
+    async def do_handshake_incoming(self, peer_id: bytes) -> bytes:
+        """入站：先收后发。返回对端握手里的 info_hash（用于路由到对应任务）。"""
+        data = await asyncio.wait_for(self.reader.readexactly(HANDSHAKE_LEN), 15)
+        got_hash, self.peer_id, self.supports_ext = parse_handshake(data)
+        self.writer.write(build_handshake(got_hash, peer_id))
+        await self.writer.drain()
+        return got_hash
 
     async def send(self, data: bytes) -> None:
         self.writer.write(data)

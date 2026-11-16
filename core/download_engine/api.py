@@ -27,6 +27,7 @@ from typing import Any, Dict, Optional, Tuple
 
 from .engine import Engine, EngineError
 from .http_engine import HttpEngineError
+from .pan_share import PanShareError
 
 MAX_BODY = 1024 * 1024
 
@@ -74,18 +75,30 @@ class ApiServer:
                 if ":" in line:
                     k, _, v = line.partition(":")
                     headers[k.strip().lower()] = v.strip()
+            if method == "OPTIONS":
+                # 浏览器预检（renderer 直连引擎 REST 是跨源 fetch）：免 token 放行
+                await self._respond(writer, 204, b"")
+                return
             body = b""
             clen = int(headers.get("content-length", "0") or 0)
             if clen:
                 body = await reader.readexactly(min(clen, MAX_BODY))
             status, payload = await self._route(method, target, headers, body)
         except Exception as e:  # noqa: BLE001
-            status, payload = 500, {"error": f"服务器内部错误: {e}"}
+            status, payload = 500, _err("internal", f"服务器内部错误: {e}")
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        await self._respond(writer, status, data)
+
+    async def _respond(self, writer: asyncio.StreamWriter, status: int, data: bytes) -> None:
         head_out = (
             f"HTTP/1.1 {status} {_REASON.get(status, 'Unknown')}\r\n"
             f"Content-Type: application/json; charset=utf-8\r\n"
             f"Content-Length: {len(data)}\r\n"
+            # renderer 直连（Electron 页面 origin ≠ 127.0.0.1:port）：CORS 必须放行。
+            # 仅绑 127.0.0.1 + token 鉴权，Allow-Origin:* 不扩面。
+            f"Access-Control-Allow-Origin: *\r\n"
+            f"Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n"
+            f"Access-Control-Allow-Headers: Content-Type, Authorization, X-Auth-Token\r\n"
             f"Connection: close\r\n\r\n"
         ).encode("latin-1")
         try:
@@ -114,7 +127,7 @@ class ApiServer:
         if path == "/health":
             return 200, {"ok": True, "engine": "openmate-download-engine", "origin": self.engine.origin}
         if not self._authed(headers):
-            return 401, {"error": "未授权：缺少或错误的 token"}
+            return 401, _err("unauthorized", "未授权：缺少或错误的 token")
 
         try:
             if path == "/api/tasks" and method == "GET":
@@ -134,12 +147,23 @@ class ApiServer:
                 return 200, self.engine.config_get()
             if path == "/api/config" and method in ("PUT", "POST"):
                 d = _json_body(body)
+                # 网盘登录凭据（用户自有账号，传空串清除）：两键双认
+                extra_cfg = None
+                for k in ("panCookie", "pan_cookie"):
+                    if k in d:
+                        extra_cfg = d[k]
+                        break
                 return 200, self.engine.config_set(
-                    d.get("dir"), d.get("concurrency"), d.get("speedLimit", d.get("speed_limit"))
+                    d.get("dir"),
+                    d.get("concurrency"),
+                    d.get("speedLimit", d.get("speed_limit")),
+                    extra_cfg,
                 )
             if path == "/api/metadata" and method == "POST":
                 d = _json_body(body)
-                files = await self.engine.metadata(d.get("source", ""), float(d.get("timeout", 90)))
+                files = await self.engine.metadata(
+                    d.get("source", ""), float(d.get("timeout", 90)), d.get("options")
+                )
                 return 200, {"files": files}
             if path == "/api/shutdown" and method == "POST":
                 asyncio.get_running_loop().call_soon(self._stopping.set)
@@ -157,15 +181,42 @@ class ApiServer:
                     remove_files = bool(
                         d.get("remove_files", query.get("removeFiles", query.get("remove_files", "")))
                     )
-                    await self.engine.remove(tid, remove_files)
-                    return 200, {"ok": True}
-            return 404, {"error": f"未知路由: {method} {path}"}
-        except (EngineError, HttpEngineError) as e:
-            return 400, {"error": str(e)}
+                    res = await self.engine.remove(tid, remove_files)
+                    return 200, {"ok": True, "removed_file": bool(res.get("removed_file"))}
+            return 404, _err("not_found", f"未知路由: {method} {path}")
+        except (EngineError, HttpEngineError, PanShareError) as e:
+            return 400, _err(_classify_error(e), str(e))
         except ValueError as e:
-            return 400, {"error": f"请求非法: {e}"}
+            return 400, _err("bad_request", f"请求非法: {e}")
         except Exception as e:  # noqa: BLE001
-            return 500, {"error": f"引擎错误: {e}"}
+            return 500, _err("internal", f"引擎错误: {e}")
+
+
+def _err(code: str, message: str) -> Dict[str, Any]:
+    """错误形状=契约 §2 细分码（与 mock 引擎一致）：{"error": {"code", "message"}}。"""
+    return {"error": {"code": code, "message": message}}
+
+
+def _classify_error(e: Exception) -> str:
+    """异常 → 契约 §2 细分码（不接受单一模糊串）。
+
+    PanShareError 自带细分码（pan_link_invalid/pan_extract_code_wrong/
+    pan_login_required/pan_speed_limited/pan_risk_control/pan_resolve_failed）
+    直通前端。
+    """
+    code = getattr(e, "code", None)
+    if code:
+        return code
+    msg = str(e)
+    if "不支持的来源" in msg or "仅支持" in msg or "不支持" in msg:
+        return "unsupported_scheme"
+    if "不存在" in msg:
+        return "not_found"
+    if isinstance(e, HttpEngineError):
+        return "network_error"
+    if "Range" in msg or "range" in msg:
+        return "range_unsupported"
+    return "bad_request"
 
 
 def _json_body(body: bytes) -> Dict[str, Any]:

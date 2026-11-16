@@ -104,7 +104,7 @@ def test_add_list_events_flow(tmp_path, http_server):
     assert events["cursor"] > 0
 
 
-def test_thunder_route_and_video_reject(tmp_path, http_server):
+def test_thunder_route_ftp_accepted_video_reject(tmp_path, http_server):
     import base64
 
     async def scenario():
@@ -114,19 +114,21 @@ def test_thunder_route_and_video_reject(tmp_path, http_server):
         task = await e.add(thunder)
         with pytest.raises(EngineError):
             await e.add("https://www.bilibili.com/video/BV1xx")
-        with pytest.raises(EngineError):
-            await e.add("ftp://example.com/f")
+        # FTP 不再「暂缓」：接受并路由到 FTP 引擎（ftp- 前缀）
+        ftp_task = await e.add("ftp://127.0.0.1:9/nope.bin")
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
             if e.list()[0]["status"] in ("done", "error"):
                 break
             await asyncio.sleep(0.05)
         await e.shutdown()
-        return task, e
+        return task, ftp_task
 
-    task, _ = asyncio.run(scenario())
+    task, ftp_task = asyncio.run(scenario())
     assert task["type"] == "thunder"
     assert task["url"].startswith("thunder://")  # 契约：url 保留用户原始输入
+    assert ftp_task["id"].startswith("ftp-")
+    assert ftp_task["type"] == "http"
 
 
 def test_config_get_set(tmp_path):

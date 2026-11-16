@@ -57,12 +57,17 @@ class TaskType(str, Enum):
     BT = "bt"
     VIDEO = "video"
     THUNDER = "thunder"
+    PAN_SHARE = "pan_share"  # 网盘分享链（百度分享+提取码→解析直链→HTTP 引擎下载）
 
 
 # 视频站走 yt-dlp 插件/后端，本机引擎不直接下载
 _VIDEO_HOSTS = re.compile(
     r"(^|\.)(youtube\.com|youtu\.be|bilibili\.com|b23\.tv|tiktok\.com|douyin\.com)$"
 )
+
+# 网盘分享域（百度网盘分享链；官方分享路径 /s/ 与 /share/）
+_PAN_HOSTS = re.compile(r"(^|\.)(pan\.baidu\.com|yun\.baidu\.com)$")
+_PAN_SHARE_PATH = re.compile(r"^/(s/|share/)", re.I)
 
 
 def classify_source(source: str) -> TaskType:
@@ -76,9 +81,14 @@ def classify_source(source: str) -> TaskType:
     if low.endswith(".torrent") or ".torrent?" in low:
         return TaskType.BT
     try:
-        host = (urlsplit(s).hostname or "").lower()
+        _split = urlsplit(s)
+        host = (_split.hostname or "").lower()
+        path = _split.path or ""
     except ValueError:
-        host = ""
+        host, path = "", ""
+    # 网盘分享链（仅分享路径算 pan_share；d.pcs.baidu.com 等直链下载域仍走 HTTP）
+    if host and _PAN_HOSTS.search(host) and _PAN_SHARE_PATH.match(path):
+        return TaskType.PAN_SHARE
     if host and _VIDEO_HOSTS.search(host):
         return TaskType.VIDEO
     return TaskType.HTTP

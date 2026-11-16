@@ -33,3 +33,7 @@ acp-proxy/skills/*.json
 acp-proxy/stability_test_results*
 *.bak-*
 desktop/dist/
+
+# === 下载引擎构建产物（PyInstaller） ===
+core/dist/
+core/.freeze-venv/

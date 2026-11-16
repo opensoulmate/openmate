@@ -18,6 +18,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from . import metadata as md, peer as pw, torrent as torrent_mod, trackers
 from .dht import DhtClient
+from .lsd import LsdClient
 from .magnet import Magnet, parse as parse_magnet
 from .models import DownloadTask, TaskStatus, TaskType
 from .picker import PiecePicker
@@ -136,6 +137,8 @@ class BtSession:
         self.known_peers: Set[Tuple[str, int]] = set()
         self.used_peers: Set[Tuple[str, int]] = set()
         self.seeding = False
+        self.listen_port = 0  # 引擎 BT 监听端口（tracker/DHT/LSD announce 用）
+        self.use_public_trackers = True  # options.use_public_trackers=false → 只走 DHT/PEX/LSD
         self._run_task: Optional[asyncio.Task] = None
         self._done_bytes = 0
         self._sample_t = time.monotonic()
@@ -256,8 +259,6 @@ class BtSession:
             await conn.do_handshake(info_hash, self.peer_id)
             await conn.send(pw.build_ext_handshake())
             remote_id: Optional[int] = None
-            if asm.total_size is None:
-                pass
             msgs = 0
             while not asm.complete() and msgs < asm.num_pieces + 20 and not self.cancel.is_set():
                 try:
@@ -269,7 +270,7 @@ class BtSession:
                     continue
                 ext_id, body = pw.parse_extended(payload)
                 if ext_id == 0:
-                    remote_id, msize = pw.parse_ext_handshake(body)
+                    remote_id, msize, _pex = pw.parse_ext_handshake(body)
                     if remote_id is None:
                         break
                     if asm.total_size is None:
@@ -299,9 +300,10 @@ class BtSession:
 
     def _magnet_trackers(self) -> List[str]:
         urls = list(self.magnet.trackers) if self.magnet else []
-        for t in trackers.PUBLIC_TRACKERS:
-            if t not in urls:
-                urls.append(t)
+        if self.use_public_trackers:  # 公共 tracker 注入（options.use_public_trackers=false 可关）
+            for t in trackers.PUBLIC_TRACKERS:
+                if t not in urls:
+                    urls.append(t)
         return urls
 
     async def _collect_peers(self, attempted: Set[Tuple[str, int]]) -> List[Tuple[str, int]]:
@@ -309,7 +311,7 @@ class BtSession:
         urls = self._tracker_urls or self._magnet_trackers()
         self._tracker_urls = urls
         params = trackers.build_announce_params(
-            info_hash, self.peer_id, 6881, 0,
+            info_hash, self.peer_id, self.listen_port or 6881, 0,
             self.task.downloaded_bytes, max(1, self.task.total_bytes), "started",
         )
         found: Set[Tuple[str, int]] = set()
@@ -319,6 +321,7 @@ class BtSession:
                 found.update(peers)
             except Exception:  # noqa: BLE001
                 continue
+        # peer 来源并集：tracker ∪ DHT（用户添加/PEX/LSD 已预先入 known_peers）
         try:
             found.update(await self.dht.get_peers(info_hash))
         except Exception:  # noqa: BLE001
@@ -326,6 +329,8 @@ class BtSession:
         out = [p for p in found if p not in attempted and p not in self.used_peers]
         attempted.update(out)
         self.known_peers.update(out)
+        for p in out:
+            self.dht.report_peer(info_hash, p)  # 回馈 DHT 网络
         return out
 
     # ── 下载/做种主循环 ──────────────────────────────────────
@@ -360,12 +365,12 @@ class BtSession:
         info_hash = self.meta.info_hash  # type: ignore[union-attr]
         # tracker 来源：torrent 自带 announce-list；磁力任务在 _magnet_trackers 里已注入公共 tracker
         urls = list(dict.fromkeys(self._tracker_urls))
-        if not urls and self.magnet is not None:
+        if not urls and self.magnet is not None and self.use_public_trackers:
             urls = trackers.PUBLIC_TRACKERS
         event: Optional[str] = "started"
         while True:
             params = trackers.build_announce_params(
-                info_hash, self.peer_id, 6881, 0,
+                info_hash, self.peer_id, self.listen_port or 6881, 0,
                 self.task.downloaded_bytes,
                 max(0, self.task.total_bytes - self.task.downloaded_bytes),
                 event,
@@ -407,6 +412,15 @@ class BtSession:
         self.peers[key] = conn
         try:
             await conn.do_handshake(info_hash, self.peer_id)
+        except (asyncio.CancelledError, asyncio.IncompleteReadError, ConnectionError, pw.PeerError, OSError):
+            self.peers.pop(key, None)
+            await conn.close()
+            return
+        await self._run_peer(conn, key)
+
+    async def _run_peer(self, conn: pw.PeerConnection, key: str) -> None:
+        """握手完成后的对端消息泵（出站/入站共用）。"""
+        try:
             if conn.supports_ext:
                 msize = len(self.meta.info_raw) if self.meta else None  # type: ignore[union-attr]
                 await conn.send(pw.build_ext_handshake(msize))
@@ -457,9 +471,15 @@ class BtSession:
                 elif msg_id == pw.MSG_EXTENDED:
                     ext_id, body = pw.parse_extended(payload)
                     if ext_id == 0:
-                        conn.remote_ut_metadata, conn.remote_metadata_size = (
+                        conn.remote_ut_metadata, conn.remote_metadata_size, conn.remote_ut_pex = (
                             pw.parse_ext_handshake(body)
                         )
+                        if conn.remote_ut_pex is not None:
+                            await self._send_pex(conn)
+                    elif ext_id == pw.LOCAL_UT_PEX_ID:
+                        self._on_pex(body)
+                        if conn.remote_ut_pex is not None:
+                            await self._send_pex(conn)  # 礼尚往来
                 # 填充下载请求（rarest-first；endgame 由 picker 处理重复借还）
                 if not conn.choked and not self.seeding:
                     reqs = self.picker.pick(key, PER_PEER_INFLIGHT - outstanding)
@@ -473,6 +493,32 @@ class BtSession:
             if self.picker is not None:
                 self.picker.peer_drop(key)
             await conn.close()
+
+    # ── PEX（BEP11） ─────────────────────────────────────────
+
+    def _on_pex(self, payload: bytes) -> None:
+        """ut_pex 增量合并进 peer 池（added 采纳、dropped 剔除）。"""
+        try:
+            added, added6, dropped = pw.parse_pex(payload)
+        except pw.PeerError:
+            return
+        info_hash = self.meta.info_hash if self.meta else None  # type: ignore[union-attr]
+        for p in added + added6:
+            self.known_peers.add(p)  # adopted：known_peers 是"认识的"，含在用的
+            if info_hash is not None:
+                self.dht.report_peer(info_hash, p)
+        for p in dropped:
+            self.known_peers.discard(p)
+            self.used_peers.discard(p)  # 允许后续重连（对方说它换了端口）
+
+    async def _send_pex(self, conn: pw.PeerConnection) -> None:
+        if conn.remote_ut_pex is None:
+            return
+        sample = list(self.known_peers)[:50]  # compact v4；IPv6 由编码器自动跳过
+        try:
+            await conn.send(pw.build_extended(conn.remote_ut_pex, pw.build_pex(added=sample)))
+        except Exception:  # noqa: BLE001
+            pass
 
     def _peer_has(self, key: str, pieces: Set[int]) -> None:
         assert self.picker is not None
@@ -542,10 +588,80 @@ class BtEngine:
         self._sessions: Dict[str, BtSession] = {}
         self._tasks: Dict[str, DownloadTask] = {}
         self._counter = int(time.time() * 1000) % 100000
+        self.listen_port = 0
+        self._server: Optional[asyncio.base_events.Server] = None
+        self._lsd: Optional[LsdClient] = None
 
     def _next_id(self) -> str:
         self._counter += 1
         return f"bt-{self._counter}"
+
+    # ── 入站 peer 监听 + LSD（BEP14） ─────────────────────────
+
+    async def start(self) -> None:
+        """启动入站 peer 监听（DHT announce_peer / LSD / tracker 的 Port 从此真实）。
+
+        监听失败（端口/权限）时降级：只有出站连接，LSD 不可用则跳过。
+        """
+        if self._server is not None:
+            return
+        loop = asyncio.get_running_loop()
+        try:
+            self._server = await asyncio.start_server(self._on_incoming, "0.0.0.0", 0)
+            self.listen_port = self._server.sockets[0].getsockname()[1]
+        except OSError:
+            self._server = None
+        self._dht.announce_port = self.listen_port or None
+        self._lsd = LsdClient(self.listen_port, self._on_lsd_peer)
+        started = await self._lsd.start()
+        if not started:
+            self._lsd = None  # 组播不可用：降级容忍
+        for sess in self._sessions.values():
+            sess.listen_port = self.listen_port
+            self._lsd_register(sess)
+
+    def _lsd_register(self, sess: BtSession) -> None:
+        if self._lsd is None:
+            return
+        h = self._info_hash_of(sess)
+        if h is not None:
+            self._lsd.add_info_hash(h)
+
+    def _info_hash_of(self, sess: BtSession) -> Optional[bytes]:
+        if sess.meta is not None:
+            return sess.meta.info_hash
+        if sess.magnet is not None:
+            return sess.magnet.info_hash
+        return None
+
+    def _session_by_hash(self, info_hash: bytes) -> Optional[BtSession]:
+        for sess in self._sessions.values():
+            if self._info_hash_of(sess) == info_hash:
+                return sess
+        return None
+
+    async def _on_incoming(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        """入站 peer：按 info_hash 路由到对应任务会话（做种/下载都走同一消息泵）。"""
+        conn = pw.PeerConnection(reader, writer)
+        try:
+            info_hash = await conn.do_handshake_incoming(b"-OM0100-" + os.urandom(12))
+            sess = self._session_by_hash(info_hash)
+            if sess is None:
+                await conn.close()
+                return
+            host = writer.get_extra_info("peername") or ("?", 0)
+            key = f"in:{host[0]}:{host[1]}"
+            sess.peers[key] = conn
+            await sess._run_peer(conn, key)  # noqa: SLF001
+        except (asyncio.IncompleteReadError, ConnectionError, pw.PeerError, OSError, asyncio.TimeoutError):
+            await conn.close()
+
+    def _on_lsd_peer(self, info_hash: bytes, peer: Tuple[str, int]) -> None:
+        """LSD 发现的局域网做种端 → 对应任务的 peer 池。"""
+        sess = self._session_by_hash(info_hash)
+        if sess is not None and peer not in sess.used_peers:
+            sess.known_peers.add(peer)
+        self._dht.report_peer(info_hash, peer)
 
     # ── 持久化 ──────────────────────────────────────────────
 
@@ -591,6 +707,8 @@ class BtEngine:
                                 sess.picker.mark_have(i)
                 self._tasks[task.id] = task
                 self._sessions[task.id] = sess
+                sess.listen_port = self.listen_port
+                self._lsd_register(sess)
             except Exception:  # noqa: BLE001
                 continue
 
@@ -624,8 +742,18 @@ class BtEngine:
             type=TaskType.BT,
         )
         sess = BtSession(task, source, meta, magnet, only, self._persist, self._dht)
+        sess.listen_port = self.listen_port
+        sess.use_public_trackers = bool(options.get("use_public_trackers", True))
+        # 用户添加的 peer（options.peers: ["host:port", ...]）直接入 peer 池
+        for entry in options.get("peers") or []:
+            try:
+                h, _, p = str(entry).rpartition(":")
+                sess.known_peers.add((h, int(p)))
+            except ValueError:
+                continue
         self._tasks[task.id] = task
         self._sessions[task.id] = sess
+        self._lsd_register(sess)
         self._persist()
         asyncio.get_running_loop().create_task(sess.run())
         return task
@@ -674,7 +802,7 @@ class BtEngine:
                 sess._update_progress()  # noqa: SLF001
         return list(self._tasks.values())
 
-    async def metadata(self, source: str, timeout: float = METADATA_TIMEOUT) -> List[Tuple[str, int]]:
+    async def metadata(self, source: str, timeout: float = METADATA_TIMEOUT, options: Optional[Dict[str, Any]] = None) -> List[Tuple[str, int]]:
         """磁力/torrent → 文件清单 [(path, length)]（磁力经 ut_metadata 拉取）。"""
         if source.strip().lower().startswith("magnet:"):
             magnet = parse_magnet(source)
@@ -686,6 +814,7 @@ class BtEngine:
                 type=TaskType.BT,
             )
             sess = BtSession(task, source, None, magnet, None, lambda: None, self._dht)
+            sess.use_public_trackers = bool((options or {}).get("use_public_trackers", True))
             await asyncio.wait_for(sess._fetch_metadata(), timeout)  # noqa: SLF001
             assert sess.meta is not None
             return torrent_mod.file_list(sess.meta)
@@ -696,3 +825,10 @@ class BtEngine:
     async def shutdown(self) -> None:
         for sess in list(self._sessions.values()):
             await sess.stop()
+        if self._lsd is not None:
+            await self._lsd.close()
+            self._lsd = None
+        if self._server is not None:
+            self._server.close()
+            self._server = None
+        await self._dht.close()

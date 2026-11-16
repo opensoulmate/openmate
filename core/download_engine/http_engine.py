@@ -90,11 +90,17 @@ class HttpRecord:
     etag: Optional[str] = None
     last_modified: Optional[str] = None
     accept_ranges: bool = False
+    # 实际下载 URL（pan_share/thunder 任务：task.url 保留用户原始输入，
+    # 下载走解析出的直链；直链有时效，resume 前由 engine 重新解析覆盖）
+    download_url: Optional[str] = None
     worker: Optional[asyncio.Task] = None
     cancel: asyncio.Event = field(default_factory=asyncio.Event)
     # 速度采样窗口
     sample_t: float = field(default_factory=time.monotonic)
     sample_bytes: int = 0
+
+    def url(self) -> str:
+        return self.download_url or self.task.url
 
     def to_state(self) -> Dict[str, Any]:
         d = self.task.state_dict()
@@ -104,6 +110,7 @@ class HttpRecord:
                 "etag": self.etag,
                 "last_modified": self.last_modified,
                 "accept_ranges": self.accept_ranges,
+                "download_url": self.download_url,
             }
         )
         return d
@@ -118,6 +125,7 @@ class HttpRecord:
             etag=d.get("etag"),
             last_modified=d.get("last_modified"),
             accept_ranges=bool(d.get("accept_ranges", False)),
+            download_url=d.get("download_url"),
         )
 
 
@@ -339,7 +347,7 @@ class HttpEngine:
         client = self._get_client()
         req_headers = dict(headers)
         req_headers["Range"] = "bytes=0-0"
-        resp = await client.get(task.url, headers=req_headers)
+        resp = await client.get(rec.url(), headers=req_headers)
         try:
             if resp.status_code == 206:
                 cr = resp.headers.get("Content-Range", "")
@@ -359,7 +367,7 @@ class HttpEngine:
             rec.etag = resp.headers.get("ETag") or rec.etag
             rec.last_modified = resp.headers.get("Last-Modified") or rec.last_modified
             # 仅当文件名还是 URL 派生的默认值时才用 Content-Disposition 覆盖（尊重显式命名）
-            if task.filename in ("", "download", filename_from_url(task.url)):
+            if task.filename in ("", "download", filename_from_url(rec.url())):
                 name = filename_from_content_disposition(resp.headers.get("Content-Disposition"))
                 if name:
                     task.filename = name
@@ -409,7 +417,7 @@ class HttpEngine:
                     req_headers["Range"] = f"bytes={want_start}-"
                 if rec.etag:
                     req_headers["If-Range"] = rec.etag
-                async with client.stream("GET", task.url, headers=req_headers) as resp:
+                async with client.stream("GET", rec.url(), headers=req_headers) as resp:
                     if resp.status_code == 200 and (seg.done > 0 or seg.start > 0):
                         # 服务器忽略 Range / 内容已变：本段从头再来
                         seg.done = 0

@@ -1,0 +1,11 @@
+{
+  "errno": 0,
+  "list": [
+    {
+      "fs_id": 1122334455,
+      "dlink": "https://d.pcs.baidu.com/file/recorded-dlink?fid=1122334455&rt=pr",
+      "server_filename": "ubuntu-22.04-live-server-amd64.iso",
+      "size": 3221225472
+    }
+  ]
+}
