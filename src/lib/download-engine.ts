@@ -2,12 +2,13 @@
  * 下载引擎接口层（双目标：本机 / 后端）
  *
  *   DownloadEngine（add/pause/resume/remove/list）
- *     ├─ LocalEngineAdapter  → window.__TAURI__ invoke → Rust → aria2 sidecar（本地 JSON-RPC）
- *     │    Tauri 不存在（浏览器/移动端）时 isAvailable()=false，UI 隐藏本机模式，优雅降级。
- *     └─ RemoteEngineAdapter → REST（getApiBaseUrl()）→ 后端 aria2 服务（现有 /api/download/*）
+ *     ├─ LocalEngineAdapter  → Electron preload 桥（window.openmateDesktop.downloadEngine.getInfo）
+ *     │    → 直连 Python 引擎 REST（127.0.0.1:port + token）。桥只透传端点，下载逻辑
+ *     │    全在 Python 引擎（core/download_engine）侧——JS/TS 仅 fetch 转发薄层。
+ *     │    Electron 桥不存在（浏览器/移动端）时 isAvailable()=false，UI 隐藏本机模式。
+ *     └─ RemoteEngineAdapter → REST（getApiBaseUrl()）→ 后端引擎服务（现有 /api/download/*）
  *
  * 任务模型带 origin: 'local' | 'remote'，列表双源汇总，行内徽标区分。
- * 注：LocalEngineAdapter 的 Rust 命令（download_*）为接口预留，src-tauri 侧后续落地。
  */
 import { getApiBaseUrl } from '@/lib/api-client';
 
@@ -99,56 +100,113 @@ export function normalizeTask(row: any, origin: DownloadOrigin): DownloadTask {
   };
 }
 
-/* ── 本机引擎：window.__TAURI__ invoke 包装（aria2 sidecar，接口预留） ── */
+/* ── 本机引擎：Electron preload 桥拿端点（port/token）→ 直连引擎 REST ── */
 
-type TauriInvoke = <T = unknown>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
-
-function getTauriInvoke(): TauriInvoke | null {
-  if (typeof window === 'undefined') return null;
-  const w = window as unknown as {
-    __TAURI__?: { core?: { invoke?: TauriInvoke } };
-    __TAURI_INTERNALS__?: { invoke?: TauriInvoke };
-  };
-  return w.__TAURI__?.core?.invoke ?? w.__TAURI_INTERNALS__?.invoke ?? null;
+/** Electron preload 桥（desktop/preload.js openmateDesktop.downloadEngine）——只透传端点 */
+export interface DesktopEngineBridge {
+  getInfo(): Promise<{ port: number; token: string; pid?: number; origin?: string } | null>;
 }
 
-/** 本机引擎是否可用（Tauri 不存在时 UI 隐藏本机模式，只留后端） */
+function getDesktopBridge(): DesktopEngineBridge | null {
+  if (typeof window === 'undefined') return null;
+  const w = window as unknown as { openmateDesktop?: { downloadEngine?: DesktopEngineBridge } };
+  return w.openmateDesktop?.downloadEngine ?? null;
+}
+
+/** 本机引擎是否可用（Electron 桥不存在时 UI 隐藏本机模式，只留后端） */
 export function isLocalEngineAvailable(): boolean {
-  return getTauriInvoke() !== null;
+  return getDesktopBridge() !== null;
+}
+
+/** 引擎任务行（core/download_engine to_dict，camelCase）→ 前端统一结构 */
+function fromEngineTask(t: any): DownloadTask {
+  const statusStr = String(t?.status || 'pending');
+  const status: DownloadStatus =
+    statusStr === 'done' ? 'done'
+    : statusStr === 'error' ? 'error'
+    : statusStr === 'paused' ? 'paused'
+    : statusStr === 'pending' ? 'pending'
+    : 'downloading';
+  return {
+    id: String(t?.id || ''),
+    url: String(t?.url || ''),
+    dest: String(t?.dest || ''),
+    filename: String(t?.filename || ''),
+    totalBytes: Number(t?.totalBytes || 0),
+    downloadedBytes: Number(t?.downloadedBytes || 0),
+    speed: status === 'downloading' ? Number(t?.speed || 0) : 0,
+    eta: status === 'downloading' ? Number(t?.eta || 0) : 0,
+    progress: Number(t?.progress || 0),
+    status,
+    type: detectUrlType(String(t?.url || '')),
+    error: t?.error || undefined,
+    addedAt: Number(t?.addedAt || 0) * (Number(t?.addedAt || 0) < 1e12 ? 1000 : 1),
+    origin: 'local',
+  };
 }
 
 export class LocalEngineAdapter implements DownloadEngine {
   readonly origin: DownloadOrigin = 'local';
+  private endpoint: { base: string; token: string } | null = null;
 
   isAvailable(): boolean {
     return isLocalEngineAvailable();
   }
 
-  private invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-    const inv = getTauriInvoke();
-    if (!inv) return Promise.reject(new Error('local engine unavailable (no Tauri runtime)'));
-    return inv<T>(cmd, args);
+  /** 端点来自 preload 桥（main 进程 spawn 引擎的握手结果），此后纯 fetch 直连引擎 REST */
+  private async api<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const bridge = getDesktopBridge();
+    if (!bridge) throw new Error('local engine unavailable (no Electron preload bridge)');
+    if (!this.endpoint) {
+      const info = await bridge.getInfo();
+      if (!info?.port) throw new Error('local engine unavailable (engine not started)');
+      this.endpoint = { base: `http://127.0.0.1:${info.port}`, token: info.token };
+    }
+    const doFetch = () =>
+      fetch(`${this.endpoint!.base}${path}`, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Auth-Token': this.endpoint!.token,
+          Authorization: 'Bearer ' + this.endpoint!.token,
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+    let res = await doFetch();
+    if (!res.ok && this.endpoint) {
+      // 引擎可能已重启换端口：重取握手信息重试一次
+      this.endpoint = null;
+      const info = await bridge.getInfo();
+      if (!info?.port) throw new Error(`local engine ${method} ${path} failed: ${res.status}`);
+      this.endpoint = { base: `http://127.0.0.1:${info.port}`, token: info.token };
+      res = await doFetch();
+    }
+    if (!res.ok) throw new Error(`local engine ${method} ${path} failed: ${res.status}`);
+    return (await res.json()) as T;
   }
 
   async list(): Promise<DownloadTask[]> {
-    const rows = await this.invoke<any[]>('download_list');
-    return (rows || []).map((r) => normalizeTask(r, 'local'));
+    const data = await this.api<{ tasks: any[] }>('GET', '/api/tasks');
+    return (data.tasks || []).map(fromEngineTask);
   }
 
-  add(input: AddDownloadInput): Promise<void> {
-    return this.invoke<void>('download_add', { url: input.url, filename: input.filename ?? null });
+  async add(input: AddDownloadInput): Promise<void> {
+    await this.api('POST', '/api/tasks', {
+      url: input.url,
+      ...(input.filename ? { filename: input.filename } : {}),
+    });
   }
 
-  pause(id: string): Promise<void> {
-    return this.invoke<void>('download_pause', { id });
+  async pause(id: string): Promise<void> {
+    await this.api('POST', `/api/tasks/${encodeURIComponent(id)}/pause`);
   }
 
-  resume(id: string): Promise<void> {
-    return this.invoke<void>('download_resume', { id });
+  async resume(id: string): Promise<void> {
+    await this.api('POST', `/api/tasks/${encodeURIComponent(id)}/resume`);
   }
 
-  remove(id: string): Promise<void> {
-    return this.invoke<void>('download_remove', { id });
+  async remove(id: string): Promise<void> {
+    await this.api('POST', `/api/tasks/${encodeURIComponent(id)}/remove`, { remove_files: false });
   }
 }
 

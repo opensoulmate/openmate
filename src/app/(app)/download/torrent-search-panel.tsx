@@ -1,10 +1,10 @@
 'use client';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertCircle, Download, Loader2, Plus, Search, Trash2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
-  CustomSourceConfig, PluggableSearchSource, SearchSourceBatch, TorrentSearchResult,
-  addCustomSourceConfig, getAllSearchSources, listCustomSourceConfigs, removeCustomSourceConfig, searchAll,
+  SearchSourceBatch, SearchSourceInfo, TorrentSearchResult,
+  addSearchSource, listSearchSources, removeSearchSource, searchTorrents,
 } from '@/lib/torrent-search';
 import { DownloadOrigin, engineFor, formatBytes, readStoredTarget, storeTarget } from '@/lib/download-engine';
 import { EngineTargetSelect } from './engine-target-select';
@@ -21,7 +21,7 @@ function SourceBadge({ name }: { name: string }) {
 /**
  * 种子搜索面板（下载页内嵌面板，不建新页）：
  * 搜索框 + 结果列表（标题/大小/做种数/来源）+ 一键「下载」弹目标选择。
- * 源可插拔（PluggableSearchSource）：内置 Internet Archive / Academic Torrents + 用户自定义 RSS/JSON。
+ * 搜索/源管理全部走后端 REST（单一真源=服务端适配层），本组件只做请求+渲染。
  */
 export function TorrentSearchPanel() {
   const { t } = useTranslation();
@@ -32,16 +32,26 @@ export function TorrentSearchPanel() {
   const [pending, setPending] = useState<TorrentSearchResult | null>(null);
   const [target, setTarget] = useState<DownloadOrigin>(readStoredTarget);
   const [notice, setNotice] = useState<string | null>(null);
-  const sources = useMemo(() => getAllSearchSources(), []);
+  const [sourceNames, setSourceNames] = useState<string[]>([]);
+
+  useEffect(() => {
+    listSearchSources()
+      .then((srcs) => setSourceNames(srcs.filter((s) => s.enabled).map((s) => s.name)))
+      .catch(() => setSourceNames([])); // 源列表拉不到=只剩「全部源」chip，搜索仍可用
+  }, []);
 
   const runSearch = useCallback(async () => {
     if (!query.trim()) return;
     setSearching(true);
     setNotice(null);
-    const result = await searchAll(query.trim(), sources);
-    setBatches(result);
+    try {
+      setBatches(await searchTorrents(query.trim()));
+    } catch (e: any) {
+      setBatches([]);
+      setNotice(e?.message || String(e));
+    }
     setSearching(false);
-  }, [query, sources]);
+  }, [query]);
 
   const results = useMemo(
     () =>
@@ -92,7 +102,7 @@ export function TorrentSearchPanel() {
         </div>
         {/* 源筛选 chip 行 */}
         <div className="flex items-center gap-1.5 flex-wrap">
-          {['all', ...sources.map((s) => s.name)].map((name) => (
+          {['all', ...sourceNames].map((name) => (
             <button
               key={name}
               onClick={() => setSourceFilter(name)}
@@ -215,35 +225,41 @@ export function TorrentSearchPanel() {
   );
 }
 
-/* ── 自定义搜索源管理（设置区内嵌）：用户自定义 RSS/JSON 源增删 ── */
+/* ── 自定义搜索源管理（设置区内嵌）：源存服务端（POST/DELETE /search/sources），非 localStorage ── */
 
 export function CustomSourceSettings() {
   const { t } = useTranslation();
-  const [configs, setConfigs] = useState<CustomSourceConfig[]>(() => listCustomSourceConfigs());
+  const [configs, setConfigs] = useState<SearchSourceInfo[]>([]);
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
   const [kind, setKind] = useState<'json' | 'rss'>('json');
-  const [titlePath, setTitlePath] = useState('');
-  const [sizePath, setSizePath] = useState('');
-  const [seedersPath, setSeedersPath] = useState('');
-  const [linkPath, setLinkPath] = useState('');
+  const [err, setErr] = useState<string | null>(null);
 
-  const refresh = () => setConfigs(listCustomSourceConfigs());
+  const refresh = useCallback(async () => {
+    try {
+      const srcs = await listSearchSources();
+      setConfigs(srcs.filter((s) => !s.builtin));
+      setErr(null);
+    } catch (e: any) {
+      setErr(e?.message || String(e));
+    }
+  }, []);
 
-  const add = () => {
-    if (!name.trim() || !url.trim()) return;
-    addCustomSourceConfig({
-      id: `custom-${Date.now()}`,
-      name: name.trim(),
-      kind,
-      url: url.trim(),
-      titlePath: titlePath.trim() || undefined,
-      sizePath: sizePath.trim() || undefined,
-      seedersPath: seedersPath.trim() || undefined,
-      linkPath: linkPath.trim() || undefined,
-    });
-    setName(''); setUrl(''); setTitlePath(''); setSizePath(''); setSeedersPath(''); setLinkPath('');
+  useEffect(() => {
     refresh();
+  }, [refresh]);
+
+  const add = async () => {
+    if (!name.trim() || !url.trim()) return;
+    try {
+      await addSearchSource(name.trim(), kind, url.trim());
+      setName('');
+      setUrl('');
+      setErr(null);
+      await refresh();
+    } catch (e: any) {
+      setErr(e?.message || String(e));
+    }
   };
 
   return (
@@ -251,16 +267,16 @@ export function CustomSourceSettings() {
       <label className="text-xs lg:text-sm font-medium mb-1.5 block">
         {t('download.customSources', '自定义搜索源（RSS / JSON）')}
       </label>
-      {/* 已有自定义源列表 */}
+      {/* 已有自定义源列表（服务端存管） */}
       {configs.length > 0 && (
         <div className="space-y-1.5 mb-2.5">
           {configs.map((c) => (
-            <div key={c.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-muted/60">
+            <div key={c.name} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-muted/60">
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary uppercase shrink-0">{c.kind}</span>
               <span className="text-xs font-medium truncate shrink-0 max-w-[8rem]">{c.name}</span>
               <span className="text-[11px] text-muted-foreground truncate flex-1">{c.url}</span>
               <button
-                onClick={() => { removeCustomSourceConfig(c.id); refresh(); }}
+                onClick={async () => { try { await removeSearchSource(c.name); } catch (e: any) { setErr(e?.message || String(e)); } refresh(); }}
                 title={t('download.deleteSource', '删除源')}
                 className="p-1 rounded hover:bg-red-500/10 text-muted-foreground hover:text-red-500 shrink-0"
               >
@@ -294,13 +310,8 @@ export function CustomSourceSettings() {
           placeholder={t('download.sourceUrl', 'URL 模板（含 {query} 占位符）')}
           className="w-full px-3 py-2 rounded-lg bg-muted text-xs outline-none border border-border focus:border-primary"
         />
-        {kind === 'json' && (
-          <div className="grid grid-cols-2 gap-2">
-            <input value={titlePath} onChange={(e) => setTitlePath(e.target.value)} placeholder={t('download.titleField', '标题字段（如 data.title）')} className="px-3 py-2 rounded-lg bg-muted text-[11px] outline-none border border-border focus:border-primary" />
-            <input value={sizePath} onChange={(e) => setSizePath(e.target.value)} placeholder={t('download.sizeField', '大小字段（字节）')} className="px-3 py-2 rounded-lg bg-muted text-[11px] outline-none border border-border focus:border-primary" />
-            <input value={seedersPath} onChange={(e) => setSeedersPath(e.target.value)} placeholder={t('download.seedersField', '做种字段')} className="px-3 py-2 rounded-lg bg-muted text-[11px] outline-none border border-border focus:border-primary" />
-            <input value={linkPath} onChange={(e) => setLinkPath(e.target.value)} placeholder={t('download.linkField', '链接字段（磁力/.torrent/详情）')} className="px-3 py-2 rounded-lg bg-muted text-[11px] outline-none border border-border focus:border-primary" />
-          </div>
+        {err && (
+          <p className="text-[11px] text-red-500/80">{err}</p>
         )}
         <button
           onClick={add}

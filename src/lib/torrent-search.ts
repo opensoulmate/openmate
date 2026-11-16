@@ -1,9 +1,14 @@
 /**
- * 种子搜索·可插拔源适配器（PluggableSearchSource）
- *   内置合法公共源：Internet Archive（advancedsearch JSON API）、Academic Torrents（apiv2 JSON API）
- *   用户自定义源：RSS / JSON（URL 模板含 {query}，JSON 支持字段点路径映射），存 localStorage 可增删
- * 单源失败不拖垮其它源（searchAll 逐源 allSettled）。
+ * 种子搜索·前端请求薄层（单一真源=服务端 src/api/download_search.py 适配层）
+ *
+ * 前端只做两件事：① 调后端 REST（搜索 + 源管理）② 结果行映射到 UI 卡片形状。
+ * 源适配（内置 Internet Archive / Academic Torrents、自定义 RSS/JSON 解析、缓存、
+ * 逐源并发/超时）全部在服务端实现——前端禁重复实现（单一真源铁律）。
+ * 自定义源存服务端（POST/DELETE /search/sources），localStorage 不再是主存储。
+ * 移动端（无 Electron/Tauri）天然走同一服务端搜索。
  */
+
+import { getApiBaseUrl } from '@/lib/api-client';
 
 export interface TorrentSearchResult {
   id: string;
@@ -16,220 +21,101 @@ export interface TorrentSearchResult {
   detailUrl?: string;
 }
 
-export interface PluggableSearchSource {
-  id: string;
+/** 源信息（服务端 /search/sources 行） */
+export interface SearchSourceInfo {
   name: string;
-  kind: 'builtin' | 'custom';
-  search(query: string, signal?: AbortSignal): Promise<TorrentSearchResult[]>;
-}
-
-/* ── 内置源 1：Internet Archive（archive.org advancedsearch JSON API） ── */
-
-class InternetArchiveSource implements PluggableSearchSource {
-  readonly id = 'internet-archive';
-  readonly name = 'Internet Archive';
-  readonly kind = 'builtin' as const;
-
-  async search(query: string, signal?: AbortSignal): Promise<TorrentSearchResult[]> {
-    const q = `${query} AND mediatype:data`;
-    const url =
-      `https://archive.org/advancedsearch.php?q=${encodeURIComponent(q)}` +
-      `&fl%5B%5D=identifier&fl%5B%5D=title&fl%5B%5D=item_size&fl%5B%5D=downloads&rows=20&page=1&output=json`;
-    const res = await fetch(url, { signal });
-    if (!res.ok) throw new Error(`Internet Archive HTTP ${res.status}`);
-    const data = await res.json();
-    const docs: any[] = data?.response?.docs || [];
-    return docs.map((d) => {
-      const identifier = String(d.identifier || '');
-      return {
-        id: `ia:${identifier}`,
-        title: String(d.title || identifier),
-        size: Number(d.item_size || 0),
-        seeders: -1, // IA 不公开做种数（官方保种 + webseed）
-        source: this.name,
-        torrentUrl: identifier ? `https://archive.org/download/${identifier}/${identifier}_archive.torrent` : undefined,
-        detailUrl: identifier ? `https://archive.org/details/${identifier}` : undefined,
-      };
-    });
-  }
-}
-
-/* ── 内置源 2：Academic Torrents（academictorrents.com/apiv2/entries?search=） ── */
-
-class AcademicTorrentsSource implements PluggableSearchSource {
-  readonly id = 'academic-torrents';
-  readonly name = 'Academic Torrents';
-  readonly kind = 'builtin' as const;
-
-  async search(query: string, signal?: AbortSignal): Promise<TorrentSearchResult[]> {
-    const url = `https://academictorrents.com/apiv2/entries?search=${encodeURIComponent(query)}`;
-    const res = await fetch(url, { signal });
-    if (!res.ok) throw new Error(`Academic Torrents HTTP ${res.status}`);
-    const json = await res.json();
-    const entries: any[] = Array.isArray(json) ? json : json?.entries || json?.results || json?.data || [];
-    return entries.map((e, i) => {
-      const infohash = String(e.infohash || e.info_hash || '').toLowerCase();
-      const name = String(e.name || e.title || infohash || `torrent-${i}`);
-      return {
-        id: `at:${infohash || i}`,
-        title: name,
-        size: Number(e.size || 0),
-        seeders: Number.isFinite(Number(e.mirrors)) ? Number(e.mirrors) : Number.isFinite(Number(e.seeders)) ? Number(e.seeders) : -1,
-        source: this.name,
-        magnet: infohash ? `magnet:?xt=urn:btih:${infohash}&dn=${encodeURIComponent(name)}` : undefined,
-        torrentUrl: infohash ? `https://academictorrents.com/download/${infohash}.torrent` : undefined,
-        detailUrl: typeof e.url === 'string' && e.url.startsWith('http') ? e.url : undefined,
-      };
-    });
-  }
-}
-
-/* ── 用户自定义源：RSS / JSON ── */
-
-export interface CustomSourceConfig {
-  id: string;
-  name: string;
-  kind: 'json' | 'rss';
-  /** URL 模板，含 {query} 占位符 */
+  kind: string;      // 'internet-archive' | 'academic-torrents' | 'json' | 'rss'
   url: string;
-  /** JSON 字段点路径映射（可空，自动猜常见字段名） */
-  listPath?: string;
-  titlePath?: string;
-  sizePath?: string;
-  seedersPath?: string;
-  linkPath?: string;
-  magnetPath?: string;
+  enabled: boolean;
+  builtin: boolean;
 }
 
-const CUSTOM_SOURCES_KEY = 'openmate-search-custom-sources';
-
-export function listCustomSourceConfigs(): CustomSourceConfig[] {
-  if (typeof window === 'undefined') return [];
-  try {
-    const raw = JSON.parse(localStorage.getItem(CUSTOM_SOURCES_KEY) || '[]');
-    return Array.isArray(raw) ? raw.filter((c: any) => c && c.id && c.url) : [];
-  } catch {
-    return [];
-  }
-}
-
-export function saveCustomSourceConfigs(configs: CustomSourceConfig[]): void {
-  if (typeof window !== 'undefined') localStorage.setItem(CUSTOM_SOURCES_KEY, JSON.stringify(configs));
-}
-
-export function addCustomSourceConfig(cfg: CustomSourceConfig): void {
-  saveCustomSourceConfigs([...listCustomSourceConfigs(), cfg]);
-}
-
-export function removeCustomSourceConfig(id: string): void {
-  saveCustomSourceConfigs(listCustomSourceConfigs().filter((c) => c.id !== id));
-}
-
-function getPath(obj: any, path?: string): any {
-  if (!path) return undefined;
-  return path.split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj);
-}
-
-function firstOf(obj: any, paths: string[]): any {
-  for (const p of paths) {
-    const v = getPath(obj, p);
-    if (v !== undefined && v !== null) return v;
-  }
-  return undefined;
-}
-
-function toSearchResult(raw: any, cfg: CustomSourceConfig, i: number): TorrentSearchResult {
-  const title = String(firstOf(raw, [cfg.titlePath || '', 'title', 'name', 'headline']) ?? `result-${i}`);
-  const sizeRaw = firstOf(raw, [cfg.sizePath || '', 'size', 'item_size', 'length', 'contentLength']);
-  const seedersRaw = firstOf(raw, [cfg.seedersPath || '', 'seeders', 'mirrors', 'seeds']);
-  const link = String(firstOf(raw, [cfg.linkPath || '', 'link', 'url', 'guid', 'permalink']) ?? '');
-  const magnetRaw = firstOf(raw, [cfg.magnetPath || '', 'magnet']);
-  const magnetStr = typeof magnetRaw === 'string' && magnetRaw.startsWith('magnet:') ? magnetRaw : link.startsWith('magnet:') ? link : undefined;
-  return {
-    id: `${cfg.id}:${i}`,
-    title,
-    size: Number(sizeRaw) || 0,
-    seeders: Number.isFinite(Number(seedersRaw)) ? Number(seedersRaw) : -1,
-    source: cfg.name,
-    magnet: magnetStr,
-    torrentUrl: /\.torrent([?#]|$)/i.test(link) ? link : undefined,
-    detailUrl: link.startsWith('http') ? link : undefined,
-  };
-}
-
-function createCustomSource(cfg: CustomSourceConfig): PluggableSearchSource {
-  return {
-    id: cfg.id,
-    name: cfg.name,
-    kind: 'custom',
-    async search(query: string, signal?: AbortSignal): Promise<TorrentSearchResult[]> {
-      const url = cfg.url.replace(/\{query\}/g, encodeURIComponent(query));
-      const res = await fetch(url, { signal });
-      if (!res.ok) throw new Error(`${cfg.name} HTTP ${res.status}`);
-      if (cfg.kind === 'rss') {
-        const xml = await res.text();
-        const doc = new DOMParser().parseFromString(xml, 'text/xml');
-        const items = Array.from(doc.querySelectorAll('item'));
-        return items.map((it, i) => {
-          const title = it.querySelector('title')?.textContent?.trim() || `result-${i}`;
-          const link = it.querySelector('link')?.textContent?.trim() || '';
-          const enclosure = it.querySelector('enclosure');
-          const encUrl = enclosure?.getAttribute('url') || '';
-          const size = Number(enclosure?.getAttribute('length') || 0);
-          return {
-            id: `${cfg.id}:${i}`,
-            title,
-            size,
-            seeders: -1,
-            source: cfg.name,
-            magnet: (link.startsWith('magnet:') ? link : encUrl.startsWith('magnet:') ? encUrl : undefined),
-            torrentUrl: /\.torrent([?#]|$)/i.test(encUrl) ? encUrl : undefined,
-            detailUrl: link.startsWith('http') ? link : undefined,
-          };
-        });
-      }
-      const json = await res.json();
-      const list: any[] = Array.isArray(json)
-        ? json
-        : (getPath(json, cfg.listPath) as any[]) ||
-          json?.results || json?.items || json?.docs || json?.torrents || json?.data || json?.entries || [];
-      return (Array.isArray(list) ? list : []).map((raw, i) => toSearchResult(raw, cfg, i));
-    },
-  };
-}
-
-/** 全部可用源（内置 + 自定义） */
-export function getAllSearchSources(): PluggableSearchSource[] {
-  return [
-    new InternetArchiveSource(),
-    new AcademicTorrentsSource(),
-    ...listCustomSourceConfigs().map(createCustomSource),
-  ];
-}
-
+/** 按源分组的搜索批（UI 分组/错误展示形状；source=服务端源名） */
 export interface SearchSourceBatch {
-  source: PluggableSearchSource;
+  source: { id: string; name: string };
   results: TorrentSearchResult[];
   error?: string;
 }
 
-/** 并发搜索所有源，逐源隔离错误（15s 超时，单源挂起不拖垮其它源） */
-export async function searchAll(query: string, sources: PluggableSearchSource[], signal?: AbortSignal): Promise<SearchSourceBatch[]> {
-  return Promise.all(
-    sources.map(async (source): Promise<SearchSourceBatch> => {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 15000);
-      const onAbort = () => controller.abort();
-      signal?.addEventListener('abort', onAbort);
-      try {
-        return { source, results: await source.search(query, controller.signal) };
-      } catch (e: any) {
-        const timedOut = controller.signal.aborted && !signal?.aborted;
-        return { source, results: [], error: timedOut ? 'timeout (15s)' : e?.message || String(e) };
-      } finally {
-        clearTimeout(timer);
-        signal?.removeEventListener('abort', onAbort);
-      }
-    })
+/** 服务端统一结果行（{title,size,seeders,source,url|magnet}） */
+interface ServerSearchRow {
+  title?: string;
+  size?: number;
+  seeders?: number;
+  source?: string;
+  url?: string;
+  magnet?: string;
+}
+
+/** 服务端结果行 → UI 结果卡形状（url 按 .torrent 直链 / 详情页分流） */
+export function toUiResult(row: ServerSearchRow, i: number): TorrentSearchResult {
+  const url = row.url || '';
+  const seeders = Number(row.seeders);
+  return {
+    id: `${row.source || 'src'}:${i}`,
+    title: String(row.title || ''),
+    size: Number(row.size || 0),
+    seeders: Number.isFinite(seeders) && seeders > 0 ? seeders : -1,
+    source: String(row.source || ''),
+    magnet: row.magnet || (url.startsWith('magnet:') ? url : undefined),
+    torrentUrl: /\.torrent([?#]|$)/i.test(url) ? url : undefined,
+    detailUrl: url.startsWith('http') ? url : undefined,
+  };
+}
+
+/**
+ * 搜索（后端逐源并发 + 短 TTL 缓存 + 逐源错误隔离）→ 按源分组批。
+ * 后端 errors[{source,error}] 并入对应批（单源失败不拖垮其它源，禁 fabricate）。
+ */
+export async function searchTorrents(query: string, limit = 20): Promise<SearchSourceBatch[]> {
+  const res = await fetch(
+    `${getApiBaseUrl()}/api/download/search?query=${encodeURIComponent(query)}&limit=${limit}`
   );
+  if (!res.ok) throw new Error(`search failed: HTTP ${res.status}`);
+  const data = await res.json();
+  const batches = new Map<string, SearchSourceBatch>();
+  const batchFor = (name: string): SearchSourceBatch => {
+    if (!batches.has(name)) batches.set(name, { source: { id: name, name }, results: [] });
+    return batches.get(name)!;
+  };
+  ((data?.results || []) as ServerSearchRow[]).forEach((row, i) => {
+    batchFor(String(row.source || 'unknown')).results.push(toUiResult(row, i));
+  });
+  ((data?.errors || []) as { source?: string; error?: string }[]).forEach((e) => {
+    batchFor(String(e.source || 'unknown')).error = e.error || 'unknown error';
+  });
+  return [...batches.values()];
+}
+
+/** 源列表（内置 + 自定义，服务端存管） */
+export async function listSearchSources(): Promise<SearchSourceInfo[]> {
+  const res = await fetch(`${getApiBaseUrl()}/api/download/search/sources`);
+  if (!res.ok) throw new Error(`list sources failed: HTTP ${res.status}`);
+  const data = await res.json();
+  return ((data?.sources || []) as any[]).map((s) => ({
+    name: String(s.name || ''),
+    kind: String(s.kind || ''),
+    url: String(s.url || ''),
+    enabled: Boolean(s.enabled),
+    builtin: Boolean(s.builtin),
+  }));
+}
+
+/** 增自定义源（服务端持久化；kind=json|rss，url 可含 {query} 占位符） */
+export async function addSearchSource(name: string, kind: 'json' | 'rss', url: string): Promise<void> {
+  const res = await fetch(`${getApiBaseUrl()}/api/download/search/sources`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, kind, url }),
+  });
+  if (!res.ok) throw new Error(`add source failed: HTTP ${res.status}`);
+}
+
+/** 删自定义源（服务端持久化） */
+export async function removeSearchSource(name: string): Promise<void> {
+  const res = await fetch(
+    `${getApiBaseUrl()}/api/download/search/sources/${encodeURIComponent(name)}`,
+    { method: 'DELETE' }
+  );
+  if (!res.ok) throw new Error(`remove source failed: HTTP ${res.status}`);
 }

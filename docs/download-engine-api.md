@@ -1,78 +1,88 @@
 # OpenMate 下载引擎 · 接口契约（facade ↔ 引擎内核）
 
-> 状态：v1（供引擎组对齐）。本文件定义 **后端门面（facade，在 opensoul）** 与 **引擎内核
-> （engine kernel，引擎组产出的 Rust 引擎：librqbit BT/磁力 + 自研 HTTP 分段）** 之间的
-> REST/WS 契约，以及门面暴露给前端的 DownloadTask 形状。
+> 状态：v2（引擎内核已交付，契约随实现归正）。本文件定义 **后端门面（facade，在 opensoul）**
+> 与 **引擎内核（engine kernel，`openmate/core/download_engine/`，纯 Python）** 之间的 REST
+> 契约，以及门面暴露给前端的 DownloadTask 形状。
 >
 > 分工边界（防撞车）：
 > - **引擎组**：协议内核 —— HTTP(S) 分段（asyncio + httpx + Range + 断点续传 + 限速）、
 >   BT/磁力（自研 BT 核心）、任务状态机、元数据预取。产出统一引擎（纯 Python）放
->   `~/openmate/core/download_engine/`，实现本契约的 REST/WS。**引擎定稿=纯 Python 自研，
+>   `~/openmate/core/download_engine/`，实现本契约的 REST。**引擎定稿=纯 Python 自研，
 >   禁 Rust/aria2；curl 链仅留作最后降级。**
 > - **后端门面（本仓）**：① 引擎进程管理（spawn/健康检查/重启/优雅退出）② REST/WS API 层
 >   （字段兼容前端 DownloadTask + `origin:'remote'` + `remove_files`）③ 后端任务表/持久化 +
 >   目录配置（默认 `~/downloads`，可配）④ 与 opensoul 现有进程体系集成（lifespan 起停）。
 >   门面**不实现协议内核**，只做进程管理 + 转发 + 任务登记表 + 形状对齐。
 >
-> 桌面壳已确认为 **Electron（desktop/）**，非 Tauri；本契约不含桌面端假设，引擎只跑服务端。
+> 桌面壳已确认为 **Electron（desktop/）**，非 Tauri；桌面本机模式=Electron spawn
+> PyInstaller 冻结的引擎单文件（另一路，不由本门面负责），renderer 经 preload 桥拿端点后
+> 直连引擎 REST（引擎须开 CORS：renderer 页面 origin ≠ 127.0.0.1:port）。
 >
-> 当前实现：内核尚未就绪，用 **mock 引擎**（`engine/mock_engine.py`，同一 REST 形状、真做
-> HTTP 下载与断点续传）跑通门面与验证。引擎组交付 `core/download_engine/`（纯 Python）后：
-> opensoul 侧**优先同进程路由直接挂载**（Python FastAPI 可 import，进程管理能省则省），
-> 否则以子进程 spawn（`DOWNLOAD_ENGINE_CMD` 指定），契约不变。桌面本机模式=Electron spawn
-> PyInstaller 冻结的引擎单文件（另一路，不由本门面负责）。
+> 当前实现：内核已交付（`core/download_engine`，python -m download_engine / 冻结单文件同一
+> 契约），opensoul 侧子进程 spawn（`DOWNLOAD_ENGINE_CMD` 可换同契约引擎，如 stdlib-only 的
+> `engine/mock_engine.py` 降级件）。
 
 ---
 
-## 1. 进程管理契约（门面 → 引擎二进制）
+## 1. 进程管理契约（门面 → 引擎进程）
 
-门面以子进程方式启动引擎（跟随 opensoul 现有 spawn 约定）：
+门面以子进程方式启动引擎（跟随 opensoul 现有 spawn 约定；python -m download_engine /
+PyInstaller 冻结单文件同一 CLI）：
 
 ```
-<engine-bin> --port <P> --secret <S> --dir <D> --state <F>
+<engine-cmd> --port <P> --token <S> --dir <D> --data-dir <F> --origin remote
 ```
 
 | 参数 | 含义 |
 |------|------|
-| `--port` | 引擎 REST 监听端口（门面选空闲端口）；仅绑 `127.0.0.1` |
-| `--secret` | 门面生成的随机令牌；所有请求经 `X-Engine-Secret: <S>` 鉴权 |
-| `--dir` | 默认下载目录（门面传入，缺省解析后的 `~/downloads`） |
-| `--state` | 引擎自状态文件路径（引擎内核的续传/状态持久化，引擎组自理） |
+| `--port` | 引擎 REST 监听端口（门面选空闲端口，0=随机）；仅绑 `127.0.0.1` |
+| `--token` | 门面生成的随机令牌（缺省引擎自生成）；所有请求经 `X-Auth-Token: <S>` 或 `Authorization: Bearer *** `--dir` | 默认下载目录（门面传入，缺省解析后的 `~/downloads`） |
+| `--data-dir` | 引擎自状态目录（续传/状态持久化，引擎自理） |
+| `--origin` | 任务 origin 值（桌面=local，后端=remote） |
 
 生命周期：
+- **握手**：引擎就绪后向 stdout 打**首行 JSON**：`{"event":"listening","port":N,"token":"...","pid":N,...}`
+  （Electron main 读此行拿端点经 preload 转发给 renderer；门面已知 port/token，读 /health 即可）。
 - **spawn**：门面 `start()` 拉起进程，轮询 `GET /health` 直到就绪（超时 8s 记失败）。
 - **健康检查**：门面 `is_running()` = 子进程存活 **且** `GET /health` 通；纯探测**不触发 spawn**。
 - **重启**：健康检查失败（进程退出/RPC 不通）时门面重新 spawn；连续失败降级到 HTTP fallback。
-- **优雅退出**：门面 `stop()` 先 `POST /shutdown`（引擎落盘自状态），再 SIGTERM，超时 SIGKILL。
+- **优雅退出**：门面 `stop()` 先 `POST /api/shutdown`（引擎落盘自状态），再 SIGTERM，超时 SIGKILL。
 
 ---
 
 ## 2. 引擎内核 REST 契约（门面消费，引擎组实现）
 
-Base：`http://127.0.0.1:<port>`，鉴权头 `X-Engine-Secret: <S>`。所有响应 `application/json`。
+Base：`http://127.0.0.1:<port>`，鉴权头 `X-Auth-Token: <S>` 或 `Authorization: Bearer *** 响应 `application/json`。跨源直连（Electron renderer）：全部响应带
+`Access-Control-Allow-Origin: *`，`OPTIONS` 预检免 token 204 放行。
 
 | 方法 | 路径 | 说明 | 返回 |
 |------|------|------|------|
-| GET | `/health` | 存活探针 | `{"status":"ok","engine":"<name>","version":"<v>"}` |
-| GET | `/status` | 引擎概况 | `{"engine","version","download_dir","active":N,"waiting":N}` |
-| GET | `/tasks` | 全部任务 | `{"tasks":[Task...]}` |
-| POST | `/tasks` | 新建下载 | `Task`（201）。body `{"url","dest"?,"filename"?}` |
-| GET | `/tasks/{id}` | 单任务 | `Task` |
-| GET | `/tasks/{id}/metadata` | 元数据（BT 文件清单/分片/Tracker 等） | `{"task":Task,"metadata":{...}}` |
-| POST | `/tasks/{id}/pause` | 暂停 | `Task` |
-| POST | `/tasks/{id}/resume` | 继续 | `Task` |
-| DELETE | `/tasks/{id}?remove_files=<bool>` | 移除；`remove_files=true` 连带删已下载文件 | `{"status":"removed","removed_file":bool}` |
-| GET | `/config` | 引擎配置 | `Config` |
-| POST | `/config` | 改配置 | `Config`。body `{"key","value"}` |
-| POST | `/shutdown` | 优雅退出（落自状态） | `{"status":"ok"}` |
+| GET | `/health` | 存活探针（免 token） | `{"ok":true,"engine":"<name>","origin":"<o>"}` |
+| GET | `/api/tasks` | 全部任务 | `{"tasks":[Task...]}` |
+| POST | `/api/tasks` | 新建下载 | `{"task":Task}`（201）。body `{"url","dir"?,"filename"?,"options"?}` |
+| POST | `/api/tasks/{id}/pause` | 暂停 | `{"task":Task}` |
+| POST | `/api/tasks/{id}/resume` | 继续 | `{"task":Task}` |
+| POST | `/api/tasks/{id}/remove` | 移除；body `{"remove_files":bool}` 连带删已下载文件 | `{"ok":true,"removed_file":bool}` |
+| GET | `/api/events?after=N` | 事件轮询（added/progress/status/removed） | `{"events":[...],"cursor":N}` |
+| GET | `/api/config` | 引擎配置 | `{"dir","concurrency","speedLimit","origin","dataDir"}` |
+| PUT/POST | `/api/config` | 改配置 | `Config`。body `{"dir"?,"concurrency"?,"speedLimit"?}` |
+| POST | `/api/metadata` | BT 元数据（磁力/.torrent 文件清单） | `{"files":[{"path","length"}]}` |
+| POST | `/api/shutdown` | 优雅退出（落自状态） | `{"ok":true}` |
 
 错误：非 2xx 时 `{"error":{"code":"<细分码>","message":"<人读>"}}`。细分码至少区分：
-`bad_request` / `not_found` / `unsupported_scheme`（如 FTP 暂缓）/ `io_error` /
-`network_error` / `range_unsupported` / `internal`。**错误信息必须细分**，不接受单一模糊串。
+`bad_request` / `not_found` / `unauthorized` / `unsupported_scheme`（如 FTP 暂缓）/ `io_error` /
+`network_error` / `range_unsupported` / `internal`（网盘链路另带 `pan_*` 细分码）。
+**错误信息必须细分**，不接受单一模糊串。
 
-### WS（进度事件，可选但推荐）
+网盘分享（pan_share）细分码：`pan_link_invalid`（链接失效）/ `pan_extract_code_wrong`（提取码错误）/
+`pan_login_required`（需登录：Cookie 未配或失效）/ `pan_speed_limited`（被限速）/
+`pan_risk_control`（风控/验证码——不打码不绕过，待人工处理）/ `pan_resolve_failed`（其它解析失败）。
+边界如实：不破解会员限速/不打码/不绕风控——非会员下载限速是网盘付费服务墙，如实呈现。
 
-`GET /ws`（升级 WebSocket）：引擎周期性（≥1s）或状态变更时推送 JSON 帧：
+### 进度事件（可选但推荐）
+
+引擎提供轮询事件面 `GET /api/events?after=N`（added/progress/status/removed，游标递增）；
+WS 为可选增强（`GET /ws` 升级 WebSocket，实现则按下方帧形推送，未实现时前端轮询 /api/tasks 兜底）：
 
 ```json
 {"type":"task","task":{ ...Task... }}
@@ -201,15 +211,19 @@ search(query, category?, limit?) -> { "results": [{title,size,seeders,source,url
 
 - 内置适配器：**Internet Archive**（advancedsearch JSON API）+ **Academic Torrents**（RSS browse）。
 - 用户自定义源：**RSS / JSON**（配置增删），字段灵活映射到统一形状。
+- **网盘搜索源（pan）**：用户自配「网盘搜索索引」URL 模板（`kind:"pan"`，模板含 `{query}`；
+  百度无官方搜索 API），响应自动识别 JSON/HTML 两形态，可选 `fields` 映射
+  `{title,size,share_url,extract_code}`；结果形状扩为
+  `{title,size,share_url,extract_code,source}`（share_url=分享链，extract_code=提取码）。
 - 结果短 TTL 缓存（默认 120s），按 (source, query, category, limit) 键。
 - 适配器失败→该源 0 行 + `errors[]` 记 `{source,error}`，**禁 fabricate**；网络隔离环境下内置源如实回空+错误。
 
 门面 REST：
 - `GET  /api/download/search?query=&category=&limit=` → 统一形状结果
 - `GET  /api/download/search/sources` → 列源（内置+自定义）
-- `POST /api/download/search/sources` `{name,kind:json|rss,url}` → 增自定义源
+- `POST /api/download/search/sources` `{name,kind:json|rss|pan,url,fields?}` → 增自定义源
 - `DELETE /api/download/search/sources/{name}` → 删自定义源
 
-MCP 工具面（供 SoulMate 集成组注册）：`torrent_search` / `download_add(url|magnet|torrent,target=local|remote)` /
+MCP 工具面（供 SoulMate 集成组注册）：`torrent_search` / `download_add(url|magnet|torrent|网盘分享链,target=local|remote,extract_code?)` /
 `download_task_status` / `download_task_list`，schema 见 **`docs/download-mcp-tools.json`**（字段兼容 DownloadTask +
 `origin` + `remove_files`）。target=remote 走本后端引擎；target=local 走桌面本机引擎（Electron，另一路）。
