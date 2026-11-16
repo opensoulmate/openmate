@@ -326,8 +326,11 @@ class BtSession:
             except Exception:  # noqa: BLE001
                 continue
         # peer 来源并集：tracker ∪ DHT（用户添加/PEX/LSD 已预先入 known_peers）
+        # DHT 查询限时，避免拖爆外层元数据窗口
         try:
-            found.update(await self.dht.get_peers(info_hash))
+            found.update(
+                await asyncio.wait_for(self.dht.get_peers(info_hash), 40)
+            )
         except Exception:  # noqa: BLE001
             pass
         out = [p for p in found if p not in attempted and p not in self.used_peers]
@@ -829,7 +832,10 @@ class BtEngine:
             sess.use_public_trackers = bool(opts.get("use_public_trackers", True))
             # 元数据窗口 = 调用方 timeout（除非 options.metadata_timeout 显式覆盖）
             sess.metadata_timeout = float(opts.get("metadata_timeout") or timeout)
-            await asyncio.wait_for(sess._fetch_metadata(), timeout + 5)  # noqa: SLF001
+            try:
+                await asyncio.wait_for(sess._fetch_metadata(), timeout + 10)  # noqa: SLF001
+            except asyncio.TimeoutError as e:
+                raise BtError(f"磁力元数据获取超时（{int(timeout)}s）") from e
             assert sess.meta is not None
             return torrent_mod.file_list(sess.meta)
         with open(source, "rb") as f:

@@ -38,6 +38,7 @@ DEFAULT_BOOTSTRAP = [
     "router.utorrent.com:6881",
     "dht.transmissionbt.com:6881",
     "dht.libtorrent.org:25401",
+    "router.bitcomet.com:6881",
 ]
 
 
