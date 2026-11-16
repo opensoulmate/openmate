@@ -111,8 +111,10 @@ def test_lsd_discovery_or_skip():
     info_hash = b"\x77" * 20
     found = []
     reply = []
+    injected = False
 
     async def scenario():
+        nonlocal injected
         b = lsd.LsdClient(6882, lambda h, p: found.append((h, p)))
         b.add_info_hash(info_hash)
         if not await b.start():
@@ -126,10 +128,15 @@ def test_lsd_discovery_or_skip():
                 await a.close()
             if not found:
                 # 组播环回不可达：单播注入同一 BT-SEARCH 报文（等价收包路径）
+                injected = True
                 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 sock.settimeout(3)
                 bound_port = b._transport.get_extra_info("sockname")[1]  # noqa: SLF001
-                sock.sendto(lsd.build_search(6883, {info_hash}), ("127.0.0.1", bound_port))
+                for _ in range(3):
+                    sock.sendto(lsd.build_search(6883, {info_hash}), ("127.0.0.1", bound_port))
+                    await asyncio.sleep(0.7)
+                    if found:
+                        break
                 try:
                     data, _ = await asyncio.to_thread(sock.recvfrom, 2048)
                     reply.append(data)
@@ -145,4 +152,5 @@ def test_lsd_discovery_or_skip():
     if state == "unavailable":
         pytest.skip("组播 239.255.255.250:6771 不可绑定（防火墙/容器），降级容忍")
     assert any(h == info_hash for h, _ in found), f"LSD 应发现局域网做种端: {found}"
-    assert reply and reply[0].startswith(b"HTTP/1.1 200"), "发现方应回 200 OK（带自身端口）"
+    if injected:
+        assert reply and reply[0].startswith(b"HTTP/1.1 200"), "发现方应回 200 OK（带自身端口）"

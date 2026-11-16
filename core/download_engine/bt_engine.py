@@ -139,6 +139,7 @@ class BtSession:
         self.seeding = False
         self.listen_port = 0  # 引擎 BT 监听端口（tracker/DHT/LSD announce 用）
         self.use_public_trackers = True  # options.use_public_trackers=false → 只走 DHT/PEX/LSD
+        self.metadata_timeout = METADATA_TIMEOUT  # options.metadata_timeout 可调
         self._run_task: Optional[asyncio.Task] = None
         self._done_bytes = 0
         self._sample_t = time.monotonic()
@@ -222,7 +223,7 @@ class BtSession:
         assert self.magnet is not None
         info_hash = self.magnet.info_hash
         asm = md.MetadataAssembler(info_hash)
-        deadline = time.monotonic() + METADATA_TIMEOUT
+        deadline = time.monotonic() + self.metadata_timeout
         attempted: Set[Tuple[str, int]] = set()
         while not asm.complete() and time.monotonic() < deadline:
             if self.cancel.is_set():
@@ -327,6 +328,10 @@ class BtSession:
         except Exception:  # noqa: BLE001
             pass
         out = [p for p in found if p not in attempted and p not in self.used_peers]
+        if not out and found:
+            # 新 peer 枯竭：允许重试之前失败的（防火墙 peer 可能时来时走）
+            attempted.clear()
+            out = [p for p in found if p not in self.used_peers]
         attempted.update(out)
         self.known_peers.update(out)
         for p in out:
@@ -744,6 +749,8 @@ class BtEngine:
         sess = BtSession(task, source, meta, magnet, only, self._persist, self._dht)
         sess.listen_port = self.listen_port
         sess.use_public_trackers = bool(options.get("use_public_trackers", True))
+        if options.get("metadata_timeout"):
+            sess.metadata_timeout = float(options["metadata_timeout"])
         # 用户添加的 peer（options.peers: ["host:port", ...]）直接入 peer 池
         for entry in options.get("peers") or []:
             try:
@@ -814,7 +821,10 @@ class BtEngine:
                 type=TaskType.BT,
             )
             sess = BtSession(task, source, None, magnet, None, lambda: None, self._dht)
-            sess.use_public_trackers = bool((options or {}).get("use_public_trackers", True))
+            opts = options or {}
+            sess.use_public_trackers = bool(opts.get("use_public_trackers", True))
+            if opts.get("metadata_timeout"):
+                sess.metadata_timeout = float(opts["metadata_timeout"])
             await asyncio.wait_for(sess._fetch_metadata(), timeout)  # noqa: SLF001
             assert sess.meta is not None
             return torrent_mod.file_list(sess.meta)

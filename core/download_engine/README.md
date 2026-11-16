@@ -1,9 +1,12 @@
 # OpenMate 本机下载引擎（openmate-engine）
 
 纯 Python 自研下载引擎（无 Rust / 无 aria2 依赖）：
-**HTTP(S) 分段下载**（asyncio + httpx）+ **自研 BT 内核**（bencode / .torrent / 磁力 +
-ut_metadata 元数据交换（BEP9/10）/ HTTP·UDP tracker（BEP3/15）/ rarest-first + endgame
-分片调度 / SHA1 逐片校验 / 做种）+ **token 鉴权 REST**（127.0.0.1）+ **JSON 任务持久化**。
+**HTTP(S) 分段下载**（asyncio + httpx）+ **FTP/FTPS**（stdlib ftplib，REST 断点续传）+
+**自研 BT 内核**（bencode / .torrent / 磁力 + ut_metadata 元数据交换（BEP9/10）/
+HTTP·UDP tracker（BEP3/15）/ **DHT（BEP5 Kademlia：KRPC ping·find_node·get_peers·
+announce_peer、路由表、token 校验、公共节点 bootstrap）** / **PEX（BEP11 ut_pex）** /
+**LSD（BEP14 组播局域网发现）** / rarest-first + endgame 分片调度 / SHA1 逐片校验 /
+入站 peer 监听 + 做种）+ **token 鉴权 REST**（127.0.0.1）+ **JSON 任务持久化**。
 
 同一套代码两种部署：Electron 桌面壳 spawn 为子进程（PyInstaller 单文件），或后端以服务方式运行。
 
@@ -51,17 +54,19 @@ pyinstaller -F -n openmate-engine --paths core core/download_engine/__main__.py
 | --- | --- | --- |
 | GET | `/health` | 存活探测（免 token） |
 | GET | `/api/tasks` | 任务列表 |
-| POST | `/api/tasks` | 新建 `{url, dir?, filename?, options?}`；url 支持 http(s)/magnet/.torrent 路径/thunder·flashget·qqdl 快雷链 |
+| POST | `/api/tasks` | 新建 `{url, dir?, filename?, options?}`；url 支持 http(s)/ftp(s)/magnet/.torrent 路径/thunder·flashget·qqdl 快雷链 |
 | POST | `/api/tasks/{id}/pause` | 暂停 |
 | POST | `/api/tasks/{id}/resume` | 继续（error 任务=重试） |
 | POST | `/api/tasks/{id}/remove` | 移除 `{remove_files?}`（true 连文件一起删） |
 | GET | `/api/events?after=N` | 轮询事件 `{events, cursor}`（added/progress/status/error/removed） |
 | GET | `/api/config` | 当前配置 |
 | PUT | `/api/config` | `{dir?, concurrency?, speedLimit?}`（dir 空串=重置） |
-| POST | `/api/metadata` | `{source}` 磁力/torrent → 文件清单 `{files:[{path,length}]}`（磁力经 ut_metadata 拉取） |
+| POST | `/api/metadata` | `{source, options?}` 磁力/torrent → 文件清单 `{files:[{path,length}]}`（磁力经 ut_metadata 拉取） |
 | POST | `/api/shutdown` | 优雅停机（保存会话后退出） |
 
-`options`：`{rename, select_files("1-3,5"), user_agent, referer, cookie, headers}`。
+`options`：`{rename, select_files("1-3,5"), user_agent, referer, cookie, headers,
+peers(["host:port"…] 用户添加 peer), use_public_trackers(false=纯 DHT/PEX/LSD 找 peer),
+pan_cookie, extract_code}`。
 
 ### 任务结构（DownloadTask 契约）
 
@@ -85,9 +90,18 @@ pyinstaller -F -n openmate-engine --paths core core/download_engine/__main__.py
 
 ## BT 内核说明
 
-- 磁力：公共 tracker 列表注入（`trackers.PUBLIC_TRACKERS`）+ 种子自带 announce → ut_metadata 拉元数据
-  （sha1 == infohash 校验）→ 分片下载（rarest-first，尾部 endgame 重复借还 + cancel）→ 逐片 SHA1 校验落盘 → 做种。
-- **DHT 二期**：`dht.py` 预留 `DhtClient.get_peers(info_hash)` 接口位，当前磁力 peer 全部来自 tracker。
+- peer 来源并集：**tracker（含公共 tracker 注入）∪ DHT ∪ PEX ∪ LSD ∪ 用户添加**；
+  `options.use_public_trackers=false` 可关公共 tracker 注入（磁力不带 tr 时走纯 DHT）。
+- 磁力：ut_metadata 拉元数据（sha1 == infohash 校验）→ 分片下载（rarest-first，
+  尾部 endgame 重复借还 + cancel）→ 逐片 SHA1 校验落盘 → 做种（入站监听已开，
+  tracker/DHT/LSD 的 Port 真实可达）。
+- **DHT（BEP5）**：`dht.py` 全量实现——Kademlia 160×k-bucket 路由表、KRPC 四方法、
+  token 签发/校验（sha1(ip+secret)、定时轮换）、公共节点 bootstrap、迭代 get_peers
+  与 announce_peer；无 UDP 网络时快速降级返回空集。
+- **PEX（BEP11 ut_pex）**：peer 交换增量合并（added 采纳 / dropped 剔除），互发样本。
+- **LSD（BEP14）**：组播 239.255.255.250:6771 发现局域网做种端；组播不可用降级容忍。
+- **FTP/FTPS**：`ftp_engine.py`（ftplib + asyncio 线程池）：单流 + SIZE/REST 断点续传、
+  服务器不支持 REST 自动整段重来；错误细分（认证 530 / 文件 550 / DNS / TLS / 超时）。
 
 ## 测试
 
