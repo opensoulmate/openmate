@@ -2745,7 +2745,7 @@ ACP代理目录: {cwd}/acp-proxy（后端 Python 代码在此）
 - message_send: 统一消息出站（OpenMate/微信同一入口，支持media图片/文件附件收发）。channel='wechat'发给微信peer（拆块+限流），channel='openmate'落库到指定会话（正连前端实时可见）。用户要求"给某微信用户发消息/发文件发图片/通知某会话/主动推送"时使用；对方发来图片/截图时按消息内媒体提示块用vision_analyze/read_image理解（截图理解）
 - delegate_tasks: 子代理并行执行（拆分任务给并行worker，父代理收尾合并）。多个互不依赖的独立子任务（多路调研/多个互不依赖的问题/多份互不依赖的检查）→ delegate_tasks 拆给并行子代理并发执行（1-8个，同一批子任务一次调用派发完毕，不要分多次重复派发同一批），合并结果后由你收尾总结论。⚠️ 有先后依赖的任务不要拆（会并行跑）；每个子任务 goal 必须自包含（子代理看不到当前对话，必要背景写进 goal/context）；失败/超时的子任务会在结果里标注原因，收尾时如实反映不要当成已完成
 - group_task: AI群组任务编排（接 ai-groups 多agent群组：自动分解→按角色分配→并行执行）。需要多agent分工协作的复杂目标（规划→执行→验证→审查）→ group_task(action=orchestrate) 交给群组执行并返回合并报告；查看群组→ action=list_groups；查任务进度→ action=task_status。⚠️ 失败/超时子任务在报告中标注原因，不要当成已完成
-- skill_save: 技能保存（把成功流程写成SKILL.md含触发条件/步骤/坑，存技能库供复用）。刚成功完成多步骤可复用任务、或用户要求"把XX流程保存为技能/记住怎么做"时使用；同名技能默认不覆盖（更新传 overwrite=true）。保存后同类任务命中触发词会自动加载该技能\n- browser: 浏览器自动化（Playwright/CDP，真实浏览器会话）。action=goto 打开URL / snapshot 读页面标题+正文+链接 / click 点元素 / type 输入（submit=true回车）/ fill 清空填入 / eval 执行JS / screenshot 截图（返回文件路径可MEDIA下发）/ back 后退 / close 关闭会话 / activity 读用户全端操作流（含 hover 指针上下文——用户说「这个地方/这个按钮」指代不明时，先调 activity 找最近 hover 事件定位元素）/ flows 录制流程清单 / replay 按录制流程重复执行（flow=名，data 填参数，「按XX流程再跑一遍」时用）/ resume 恢复自动操作。selector 用 CSS 选择器。需要看页面真实渲染内容、登录态页面、自动化网页操作时使用；纯静态网页抓取优先 web_extract。⚠️ 页面过长截断并自报；失败返回具体原因；页面状态跨调用保留（连续操作无需重复goto）\n- document: 文档生成（docx/pdf/xlsx，输出真实文件返回 MEDIA: 路径可直接下发）。format=docx|pdf 时 content 传块列表（heading/paragraph/bullet/table/pagebreak），format=xlsx 时传 sheets:[{{name, rows}}]。需要交付正式文档/报表/表格文件时使用；纯文本回答不需要生成文件\n- text_to_speech: 语音合成（TTS，文本→音频文件，输出返回 MEDIA: 路径可直接播放/下发）。需要把文字转成语音/音频文件（朗读稿/配音/语音播报）时使用；voice 可选（默认中文女声 zh-CN-XiaoxiaoNeural），rate 可选语速（如 +0%）。纯文字回复不需要合成音频\n- image: 图像生成/编辑（输出真实文件返回 MEDIA: 路径可直接下发）。action=generate 按 prompt 生成图像（⚠️ 未配置 AI 后端时为程序化绘制，会在结果里如实标注）；resize/crop/rotate/flip/convert/annotate/compose/thumbnail 为确定性编辑（传 path）。需要生成图片或处理图片（缩放/裁剪/加文字/拼图/转格式）时使用\n- send_file: 文件下发（本地已有文件→📎下载卡片，返回 MEDIA: 标签走既有下发通道）。path=文件绝对路径（不知道路径先用 search_files 找），message 可选随件附言。需要把本地文件交付给用户（产物/报告/日志）时使用；文件不存在/越界显式报因\n- process: 后台进程管理（长任务放后台跑，可见可管）。action=start 启动后台命令（command，返回 proc_id）/ list 列出全部 / poll 查状态 / log 看日志尾部 / kill 停止（默认 SIGTERM，force=true 才 SIGKILL）/ write 向 stdin 写入 / submit 写入并回车 / close 关闭 stdin。构建/测试/服务/长脚本等超过单次 terminal 耗时的任务用它；进程不随会话断开而终止。⚠️ 不会到点强杀长任务——超时只报状态\n- torrent_search / download_add / download_task_status / download_task_list: 下载中心工具链（自然语言→搜索→加任务→回报进度完整对话流）。「帮我找XX」「最新有什么好的电影/资源」等找资源诉求→ torrent_search 搜索并呈现候选（标题/大小/做种数/源）；多个候选有歧义先问一句要哪部（可用 clarify），无歧义默认取最合适的一个；选定候选或用户给出链接/磁力→ download_add 加任务（target 默认 remote 后端落盘）；「下到哪了/好了没/有哪些下载任务」→ download_task_status / download_task_list 回报进度。⚠️ 搜索结果只作候选呈现，未经确认不要批量添加多个任务\n
+- skill_save: 技能保存（把成功流程写成SKILL.md含触发条件/步骤/坑，存技能库供复用）。刚成功完成多步骤可复用任务、或用户要求"把XX流程保存为技能/记住怎么做"时使用；同名技能默认不覆盖（更新传 overwrite=true）。保存后同类任务命中触发词会自动加载该技能\n- browser: 浏览器自动化（Playwright/CDP，真实浏览器会话）。action=goto 打开URL / snapshot 读页面标题+正文+链接 / click 点元素 / type 输入（submit=true回车）/ fill 清空填入 / eval 执行JS / screenshot 截图（返回文件路径可MEDIA下发）/ back 后退 / close 关闭会话 / activity 读用户全端操作流（含 hover 指针上下文——用户说「这个地方/这个按钮」指代不明时，先调 activity 找最近 hover 事件定位元素）/ flows 录制流程清单 / replay 按录制流程重复执行（flow=名，data 填参数，「按XX流程再跑一遍」时用）/ resume 恢复自动操作。selector 用 CSS 选择器。需要看页面真实渲染内容、登录态页面、自动化网页操作时使用；纯静态网页抓取优先 web_extract。⚠️ 页面过长截断并自报；失败返回具体原因；页面状态跨调用保留（连续操作无需重复goto）\n- document: 文档生成（docx/pdf/xlsx，输出真实文件返回 MEDIA: 路径可直接下发）。format=docx|pdf 时 content 传块列表（heading/paragraph/bullet/table/pagebreak），format=xlsx 时传 sheets:[{{name, rows}}]。需要交付正式文档/报表/表格文件时使用；纯文本回答不需要生成文件\n- text_to_speech: 语音合成（TTS，文本→音频文件，输出返回 MEDIA: 路径可直接播放/下发）。需要把文字转成语音/音频文件（朗读稿/配音/语音播报）时使用；voice 可选（默认中文女声 zh-CN-XiaoxiaoNeural），rate 可选语速（如 +0%）。纯文字回复不需要合成音频\n- image: 图像生成/编辑（输出真实文件返回 MEDIA: 路径可直接下发）。action=generate 按 prompt 生成图像（⚠️ 未配置 AI 后端时为程序化绘制，会在结果里如实标注）；resize/crop/rotate/flip/convert/annotate/compose/thumbnail 为确定性编辑（传 path）。需要生成图片或处理图片（缩放/裁剪/加文字/拼图/转格式）时使用\n- send_file: 文件下发（本地已有文件→📎下载卡片，返回 MEDIA: 标签走既有下发通道）。path=文件绝对路径（不知道路径先用 search_files 找），message 可选随件附言。需要把本地文件交付给用户（产物/报告/日志）时使用；文件不存在/越界显式报因\n- process: 后台进程管理（长任务放后台跑，可见可管）。action=start 启动后台命令（command，返回 proc_id）/ list 列出全部 / poll 查状态 / log 看日志尾部 / kill 停止（默认 SIGTERM，force=true 才 SIGKILL）/ write 向 stdin 写入 / submit 写入并回车 / close 关闭 stdin。构建/测试/服务/长脚本等超过单次 terminal 耗时的任务用它；进程不随会话断开而终止。⚠️ 不会到点强杀长任务——超时只报状态\n- torrent_search / download_add / download_task_status / download_task_list: 下载中心工具链（自然语言→搜索→加任务→回报进度完整对话流）。「帮我找XX」「最新有什么好的电影/资源」等找资源诉求→ torrent_search 搜索并呈现候选（标题/大小/做种数/源）；多个候选有歧义先问一句要哪部（可用 clarify），无歧义默认取最合适的一个；选定候选或用户给出链接/磁力→ download_add 加任务（target 默认 remote 后端落盘）；「下到哪了/好了没/有哪些下载任务」→ download_task_status / download_task_list 回报进度。网盘用法：「找百度网盘资源/网盘资源」→ torrent_search（网盘源候选含分享链 share_url 与提取码 extract_code）→ 选定后 download_add(url=分享链, extract_code=提取码) 加 pan_share 任务（引擎用用户自配 Cookie 解析直链下载；不破解会员限速/不打码/不绕风控，非会员下载限速如实呈现）。⚠️ 搜索结果只作候选呈现，未经确认不要批量添加多个任务\n
 You can send files to the user natively: to deliver a file, write a brief confirmation message (e.g. "文件已发送，请查收"), then include MEDIA:/absolute/path/to/file on a new line. The gateway extracts the tag, strips it, and sends the file as a download card. Always write some text before the MEDIA: tag — never output a bare MEDIA: tag alone. Use search_files first if you don't know the exact path. Do NOT paste file contents into chat."""
 
     # ── P1-15 五终止条件组合入trace（lazy初始化兼容 __new__ 搭建的测试agent）──
@@ -4192,13 +4192,14 @@ You can send files to the user natively: to deliver a file, write a brief confir
             "function": {
                 "name": "torrent_search",
                 "description": (
-                    "下载中心·种子搜索（查询→候选列表：标题/大小/做种数/源，"
-                    "附可入任务的磁力/.torrent 链）。用户想找电影/剧集/音乐/"
-                    "软件/资料等资源下载、或说「帮我找一下XX」「最新有什么好的」"
-                    "时先搜索。搜索后把候选呈现给用户：多个候选有歧义先问一句要"
-                    "哪部（可用 clarify），无歧义默认取最合适的一个；选定后用 "
-                    "download_add 加任务。⚠️ 搜索结果只作候选呈现，未经确认不要"
-                    "批量添加多个任务"
+                    "下载中心·种子/资源搜索（查询→候选列表：标题/大小/做种数/源，"
+                    "附可入任务的磁力/.torrent 链；网盘源候选额外含分享链 share_url"
+                    "与提取码 extract_code）。用户想找电影/剧集/音乐/软件/资料等资源"
+                    "下载、说「帮我找一下XX」「最新有什么好的」、或「找百度网盘资源」"
+                    "时先搜索。搜索后把候选呈现给用户：多个候选有歧义先问一句要哪部"
+                    "（可用 clarify），无歧义默认取最合适的一个；选定后用 download_add "
+                    "加任务（网盘候选带 extract_code）。⚠️ 搜索结果只作候选呈现，未经"
+                    "确认不要批量添加多个任务"
                 ),
                 "parameters": {
                     "type": "object",
@@ -4218,22 +4219,26 @@ You can send files to the user natively: to deliver a file, write a brief confir
             "function": {
                 "name": "download_add",
                 "description": (
-                    "下载中心·添加下载任务（url|magnet: 磁力链|.torrent 直链，"
-                    "target=local 本机|remote 后端，默认 remote）。搜索选定候选、"
-                    "或用户直接给出下载链接/磁力链时使用；成功返回 task_id，之后"
-                    "用 download_task_status/download_task_list 回报进度"
+                    "下载中心·添加下载任务（url|magnet: 磁力链|.torrent 直链|"
+                    "网盘分享链 pan.baidu.com/s/...，target=local 本机|remote 后端，"
+                    "默认 remote）。搜索选定候选、或用户直接给出下载链接/磁力链/"
+                    "网盘分享链时使用；网盘分享链必须带 extract_code=提取码（若有），"
+                    "走 pan_share 任务解析直链下载。成功返回 task_id，之后用 "
+                    "download_task_status/download_task_list 回报进度"
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "url": {"type": "string",
-                                "description": "下载源：http/https 链接、magnet: 磁力链或 .torrent 直链"},
+                                "description": "下载源：http/https 链接、magnet: 磁力链、.torrent 直链或网盘分享链"},
                         "target": {"type": "string",
                                    "description": "下载目标：remote=后端服务器落盘（默认）/ local=本机"},
                         "filename": {"type": "string",
                                      "description": "落盘文件名（可省略，后端按 URL/元数据解析）"},
                         "dest": {"type": "string",
                                  "description": "落盘绝对路径（可省略，remote 目标专用；缺省用后端配置的下载目录）"},
+                        "extract_code": {"type": "string",
+                                         "description": "网盘分享提取码（网盘分享链时传，可从搜索候选/用户消息获取；非网盘任务省略）"},
                     },
                     "required": ["url"],
                 },

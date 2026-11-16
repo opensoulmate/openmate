@@ -3,8 +3,11 @@
 docs/download-mcp-tools.json 四件套，REST x-endpoint 对齐后端
 opensoul src/api/download_search.py + src/api/download_api.py）：
 
-- torrent_search(query, category?, limit?)  种子搜索→候选列表（标题/大小/做种数/源）
-- download_add(url, target=local|remote)    url|magnet|.torrent 直链入下载任务
+- torrent_search(query, category?, limit?)  种子/资源搜索→候选列表（标题/大小/
+       做种数/源；网盘源结果含 share_url/extract_code）
+- download_add(url, target=local|remote, extract_code?)  url|magnet|.torrent|
+       网盘分享链 直接入下载任务（网盘分享链走 pan_share 任务类型：提取码+
+       用户 Cookie→解析直链→HTTP 引擎；不破解会员限速/不打码/不绕风控）
 - download_task_status(task_id)             单任务进度回报
 - download_task_list(status?, origin?)      任务总览/进度回报
 
@@ -85,11 +88,22 @@ def _fmt_size(n) -> str:
 
 
 def _fmt_search_item(item: dict) -> str:
-    """候选行：标题 | 大小 | 做种数 | 源 | 可入任务链（契约形状 url|magnet）。"""
+    """候选行：标题 | 大小 | 做种数 | 源 | 可入任务链（契约形状 url|magnet|share_url）。"""
     title = str(_pick(item, ("title", "name")) or "(无标题)")
     size = _pick(item, ("size", "item_size", "length", "contentLength")) or 0
     seeders = _pick(item, ("seeders", "seeds", "mirrors"))
     source = str(_pick(item, ("source", "from")) or "(未知源)")
+    # 网盘候选（pan 源结果形状 title/size/share_url/extract_code/source）
+    share_url = str(_pick(item, ("share_url", "shareUrl")) or "")
+    if share_url:
+        extract_code = str(_pick(item, ("extract_code", "pwd")) or "")
+        line = (f"{title} | 大小 {_fmt_size(size)} | 源 {source}"
+                f" | 网盘分享: {share_url}")
+        if extract_code:
+            line += f" | 提取码 {extract_code}"
+        line += (" | 可入任务: download_add(url=该分享链, extract_code=提取码"
+                 "（若无则省略）)")
+        return line
     # 可入任务链（download_add 可直接消费）：magnet 优先，其次 http/.torrent URL
     url = str(_pick(item, ("magnet",))
               or _pick(item, ("url", "torrentUrl", "torrent_url", "torrent"))
@@ -278,14 +292,16 @@ class DownloadTools:
         if results:
             lines.append("→ 候选已呈现：多个候选有歧义先问用户要哪部（可用 clarify），"
                          "默认取最合适的一个；选定后 download_add(url=该候选的磁力/"
-                         ".torrent 链) 加任务，再用 download_task_status/list 回报进度")
+                         ".torrent 链；网盘候选则 url=分享链并带 extract_code=提取码)"
+                         " 加任务，再用 download_task_status/list 回报进度")
         return "\n".join(lines)
 
     async def download_add(self, params: dict) -> str:
         url = str(params.get("url", "") or "").strip()
         if not url:
             return ("错误: url 参数不能为空"
-                    "（http/https 链接、magnet: 磁力链或 .torrent 直链）")
+                    "（http/https 链接、magnet: 磁力链、.torrent 直链"
+                    "或网盘分享链 pan.baidu.com/s/...）")
         target = str(params.get("target", "") or "remote").strip().lower()
         if target not in ("local", "remote"):
             return f"错误: target 只支持 local|remote，收到: {target}"
@@ -296,6 +312,11 @@ class DownloadTools:
         dest = str(params.get("dest", "") or "").strip()
         if dest:
             body["dest"] = dest
+        # 网盘分享链（pan_share 任务）：提取码随任务走引擎解析直链
+        extract_code = str(params.get("extract_code", "")
+                           or params.get("pwd", "") or "").strip()
+        if extract_code:
+            body["extract_code"] = extract_code
         data, err = await self._request("POST", self._add_path, body=body)
         if err:
             return err

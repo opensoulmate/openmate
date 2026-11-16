@@ -3,7 +3,7 @@
   "tools": [
     {
       "name": "torrent_search",
-      "description": "Search torrents across pluggable sources (Internet Archive, Academic Torrents, and user-configured RSS/JSON sources). Returns a unified list of results. Short-TTL cached. Unreachable sources degrade gracefully and are reported in 'errors'.",
+      "description": "Search torrents and resources across pluggable sources (Internet Archive, Academic Torrents, user-configured RSS/JSON sources, and user-configured pan/网盘 index sources). Returns a unified list of results. Pan results carry share_url + extract_code (shape: title/size/share_url/extract_code/source). Short-TTL cached. Unreachable sources degrade gracefully and are reported in 'errors'.",
       "x-endpoint": "GET /api/download/search?query=&category=&limit=",
       "inputSchema": {
         "type": "object",
@@ -24,7 +24,9 @@
             "default": 20
           }
         },
-        "required": ["query"]
+        "required": [
+          "query"
+        ]
       },
       "outputSchema": {
         "type": "object",
@@ -34,24 +36,60 @@
             "items": {
               "type": "object",
               "properties": {
-                "title": { "type": "string" },
-                "size": { "type": "integer", "description": "Total bytes (0 if unknown)." },
-                "seeders": { "type": "integer" },
-                "source": { "type": "string", "description": "Which adapter produced this row." },
-                "url": { "type": "string", "description": "HTTP(S)/.torrent URL (present when not a magnet)." },
-                "magnet": { "type": "string", "description": "magnet: URI (present when it is one)." }
+                "title": {
+                  "type": "string"
+                },
+                "size": {
+                  "type": "integer",
+                  "description": "Total bytes (0 if unknown)."
+                },
+                "seeders": {
+                  "type": "integer"
+                },
+                "source": {
+                  "type": "string",
+                  "description": "Which adapter produced this row."
+                },
+                "url": {
+                  "type": "string",
+                  "description": "HTTP(S)/.torrent URL (present when not a magnet)."
+                },
+                "magnet": {
+                  "type": "string",
+                  "description": "magnet: URI (present when it is one)."
+                },
+                "share_url": {
+                  "type": "string",
+                  "description": "Pan share link (pan.baidu.com/s/...) — present on pan-source rows."
+                },
+                "extract_code": {
+                  "type": "string",
+                  "description": "Pan share extract code (提取码) — present on pan-source rows when known."
+                }
               },
-              "required": ["title", "size", "seeders", "source"]
+              "required": [
+                "title",
+                "size",
+                "seeders",
+                "source"
+              ]
             }
           },
-          "errors": { "type": "array", "items": { "type": "object" } },
-          "total": { "type": "integer" }
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "total": {
+            "type": "integer"
+          }
         }
       }
     },
     {
       "name": "download_add",
-      "description": "Add a download task. Accepts an HTTP(S) URL, a magnet link, or a .torrent URL. target='remote' downloads to the server backend; target='local' downloads to the user's own machine (handled by the desktop local engine, not the server). Returns the created DownloadTask.",
+      "description": "Add a download task. Accepts an HTTP(S) URL, magnet: URI, .torrent URL, or a pan share link (pan.baidu.com/s/...). For pan share links pass extract_code (提取码) and the engine resolves the real download URL (pan_share task type) using the user-configured pan Cookie, then downloads via the HTTP engine. Honesty boundary: no membership speed-limit circumvention, no captcha solving, no risk-control bypass — non-member pan downloads are throttled by the provider and this is reported as-is.",
       "x-endpoint": "POST /api/download/download (target=remote) | POST /api/download/remote/add",
       "inputSchema": {
         "type": "object",
@@ -62,7 +100,10 @@
           },
           "target": {
             "type": "string",
-            "enum": ["local", "remote"],
+            "enum": [
+              "local",
+              "remote"
+            ],
             "description": "Where to download to. 'remote' = the server backend (this service). 'local' = the user's machine (desktop local engine).",
             "default": "remote"
           },
@@ -73,23 +114,60 @@
           "dest": {
             "type": "string",
             "description": "Optional explicit absolute destination path (remote target only; defaults to the configured download_dir)."
+          },
+          "extract_code": {
+            "type": "string",
+            "description": "Pan share extract code (提取码) — required context for pan share links when the share needs one; omit otherwise."
           }
         },
-        "required": ["url"]
+        "required": [
+          "url"
+        ]
       },
       "outputSchema": {
         "type": "object",
         "properties": {
-          "id": { "type": "string" },
-          "url": { "type": "string" },
-          "filename": { "type": "string" },
-          "dest": { "type": "string" },
-          "status": { "type": "string", "enum": ["pending", "downloading", "paused", "done", "error"] },
-          "origin": { "type": "string", "enum": ["local", "remote"] },
-          "totalBytes": { "type": "integer" },
-          "downloadedBytes": { "type": "integer" },
-          "progress": { "type": "number" },
-          "addedAt": { "type": "number" }
+          "id": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "dest": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "downloading",
+              "paused",
+              "done",
+              "error"
+            ]
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "local",
+              "remote"
+            ]
+          },
+          "totalBytes": {
+            "type": "integer"
+          },
+          "downloadedBytes": {
+            "type": "integer"
+          },
+          "progress": {
+            "type": "number"
+          },
+          "addedAt": {
+            "type": "number"
+          }
         }
       }
     },
@@ -105,23 +183,52 @@
             "description": "The task id returned by download_add / download_task_list."
           }
         },
-        "required": ["task_id"]
+        "required": [
+          "task_id"
+        ]
       },
       "outputSchema": {
         "type": "object",
         "properties": {
-          "id": { "type": "string" },
-          "url": { "type": "string" },
-          "filename": { "type": "string" },
-          "dest": { "type": "string" },
-          "status": { "type": "string" },
-          "totalBytes": { "type": "integer" },
-          "downloadedBytes": { "type": "integer" },
-          "speed": { "type": "integer" },
-          "eta": { "type": "integer" },
-          "progress": { "type": "number" },
-          "origin": { "type": "string" },
-          "error": { "type": ["string", "null"] }
+          "id": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "dest": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "totalBytes": {
+            "type": "integer"
+          },
+          "downloadedBytes": {
+            "type": "integer"
+          },
+          "speed": {
+            "type": "integer"
+          },
+          "eta": {
+            "type": "integer"
+          },
+          "progress": {
+            "type": "number"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
         }
       }
     },
@@ -135,12 +242,21 @@
           "status": {
             "type": "string",
             "description": "Optional filter by status (pending|downloading|paused|done|error).",
-            "enum": ["pending", "downloading", "paused", "done", "error"]
+            "enum": [
+              "pending",
+              "downloading",
+              "paused",
+              "done",
+              "error"
+            ]
           },
           "origin": {
             "type": "string",
             "description": "Optional filter by origin (local|remote).",
-            "enum": ["local", "remote"]
+            "enum": [
+              "local",
+              "remote"
+            ]
           }
         }
       },
@@ -152,21 +268,45 @@
             "items": {
               "type": "object",
               "properties": {
-                "id": { "type": "string" },
-                "url": { "type": "string" },
-                "filename": { "type": "string" },
-                "dest": { "type": "string" },
-                "status": { "type": "string" },
-                "origin": { "type": "string" },
-                "totalBytes": { "type": "integer" },
-                "downloadedBytes": { "type": "integer" },
-                "progress": { "type": "number" },
-                "type": { "type": "string" },
-                "addedAt": { "type": "number" }
+                "id": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                },
+                "filename": {
+                  "type": "string"
+                },
+                "dest": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "origin": {
+                  "type": "string"
+                },
+                "totalBytes": {
+                  "type": "integer"
+                },
+                "downloadedBytes": {
+                  "type": "integer"
+                },
+                "progress": {
+                  "type": "number"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "addedAt": {
+                  "type": "number"
+                }
               }
             }
           },
-          "total": { "type": "integer" }
+          "total": {
+            "type": "integer"
+          }
         }
       }
     }
