@@ -2,6 +2,84 @@
 const { app, BrowserWindow, Tray, Menu, shell, nativeImage, nativeTheme, ipcMain, dialog, webContents } = require('electron');
 const path = require('path');
 
+// ── 下载引擎子进程（Python 引擎薄壳集成）────────────────────────────
+// 铁律：下载逻辑全部在 Python 引擎侧（python -m download_engine / PyInstaller 冻结单文件），
+// 本文件只做三件事：spawn 引擎子进程、读首行 JSON 握手（port/token）、IPC 转发给 renderer。
+// 禁在 JS 写任何下载逻辑（分段/续传/协议一律 Python）。
+const { spawn } = require('child_process');
+let engineProc = null;
+let engineInfo = null; // {event, port, token, pid, dataDir, origin, version} —— 握手行原样
+let engineInfoWaiters = []; // 等握手的 getInfo 调用方（页面加载可能快于 PyInstaller 解包+握手）
+
+function resolveEngineCmd() {
+  // 冻结单文件（PyInstaller）优先：env 指定 > 打包资源 > exe 旁 > 开发模式 core/dist
+  const frozenCandidates = [
+    process.env.OPENMATE_ENGINE_BIN || null,
+    process.resourcesPath ? path.join(process.resourcesPath, 'download-engine') : null,
+    path.join(path.dirname(process.execPath), 'download-engine'),
+    path.join(__dirname, '..', 'core', 'dist', 'download-engine'),
+  ].filter(Boolean);
+  for (const bin of frozenCandidates) {
+    try { if (fs.existsSync(bin)) return { cmd: bin, args: [], env: {} }; } catch (e) { /* 试下一个 */ }
+  }
+  // 开发模式回退：python -m download_engine（PYTHONPATH 指向 openmate/core）
+  const python = process.env.OPENMATE_ENGINE_PYTHON || 'python3';
+  return { cmd: python, args: ['-m', 'download_engine'], env: { PYTHONPATH: path.join(__dirname, '..', 'core') } };
+}
+
+function startDownloadEngine() {
+  const { cmd, args, env } = resolveEngineCmd();
+  const dataDir = path.join(app.getPath('userData'), 'download-engine');
+  const fullArgs = [
+    ...args,
+    '--dir', app.getPath('downloads'), // 本机默认下载目录=系统下载目录（禁手拼 ~/）
+    '--data-dir', dataDir,
+    '--port', '0',
+    '--origin', 'local',
+  ];
+  try {
+    engineProc = spawn(cmd, fullArgs, { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch (e) {
+    console.error('[download-engine] spawn failed:', e.message);
+    return;
+  }
+  engineProc.stderr.on('data', (d) => console.error('[download-engine]', String(d).trim()));
+  let buf = '';
+  engineProc.stdout.on('data', (d) => {
+    if (engineInfo) return; // 只吃握手行
+    buf += String(d);
+    const nl = buf.indexOf('\n');
+    if (nl < 0) return;
+    const line = buf.slice(0, nl).trim();
+    try {
+      engineInfo = JSON.parse(line); // {event:"listening", port, token, pid, ...}
+      console.log('[download-engine] listening on 127.0.0.1:' + engineInfo.port);
+    } catch (e) {
+      console.error('[download-engine] bad handshake line:', line.slice(0, 200));
+    }
+    for (const r of engineInfoWaiters) r(engineInfo);
+    engineInfoWaiters = [];
+  });
+  engineProc.on('exit', (code) => {
+    console.error('[download-engine] exited with code', code);
+    engineProc = null;
+    engineInfo = null;
+    for (const r of engineInfoWaiters) r(null);
+    engineInfoWaiters = [];
+  });
+}
+
+// renderer 取引擎端点（port/token）的唯一通道——转发握手结果，不含任何下载逻辑。
+// 页面加载可能快于引擎解包+握手：未就绪时等到握手行（30s 超时如实 null）。
+ipcMain.handle('download-engine-info', () => {
+  if (engineInfo) return engineInfo;
+  if (!engineProc) return null;
+  return new Promise((resolve) => {
+    engineInfoWaiters.push(resolve);
+    setTimeout(() => resolve(null), 30 * 1000);
+  });
+});
+
 // 地址解析：环境变量 > 同目录 config.json > 本机默认（Windows 免环境变量，改 config.json 即可）
 const fs = require('fs');
 function resolveUrl() {
@@ -276,11 +354,20 @@ app.on('second-instance', () => {
 });
 
 app.whenReady().then(() => {
+  startDownloadEngine(); // 拉起 Python 引擎子进程（首行 JSON 握手 → IPC 可取 port/token）
   createSplash();
   createWindow();
   createTray();
   initUpdater();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+});
+
+// 退出时优雅停引擎：SIGTERM → 引擎落盘自状态（断点续传数据不丢）
+app.on('will-quit', () => {
+  if (engineProc) {
+    try { engineProc.kill('SIGTERM'); } catch (e) { /* 已退出 */ }
+    engineProc = null;
+  }
 });
 
 app.on('window-all-closed', () => {

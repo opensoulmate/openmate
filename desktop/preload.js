@@ -20,4 +20,9 @@ contextBridge.exposeInMainWorld('openmateDesktop', {
   webviewInput: (tabId, event) => ipcRenderer.invoke('webview-input', { tabId, event }),
   webviewNav: (tabId, url) => ipcRenderer.invoke('webview-nav', { tabId, url }),
   webviewCapture: (tabId) => ipcRenderer.invoke('webview-capture', { tabId }),
+  // ── 下载引擎端点桥：转发 main 进程 spawn 的 Python 引擎握手结果（port/token）。
+  //    renderer 拿到端点后直连引擎 REST（127.0.0.1:port + token）；下载逻辑全在 Python 侧。──
+  downloadEngine: {
+    getInfo: () => ipcRenderer.invoke('download-engine-info'),
+  },
 });
