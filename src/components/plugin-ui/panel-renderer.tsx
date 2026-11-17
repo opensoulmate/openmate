@@ -21,6 +21,26 @@ import {
   DslReportPanel,
   normalizeDslPage,
 } from "@/lib/plugin-ui-dsl";
+import { HtmlPanelFrame, PanelRpcCall } from "./html-panel-frame";
+
+/** 清单页规格（to_frontend_manifest frontend.pages 消费形状） */
+export interface PluginPageSpec {
+  id: string;
+  title: string;
+  dsl?: string | null;
+  html?: string | null;
+}
+
+/** 纯函数：清单页列表 + 目标页 id → 活动页（命中优先，未命中回落首页）。 */
+export function selectActivePage(pages: PluginPageSpec[], pageId: string): PluginPageSpec | null {
+  if (!Array.isArray(pages) || pages.length === 0) return null;
+  return pages.find((p) => p.id === pageId) ?? pages[0] ?? null;
+}
+
+/** 纯函数：页型判定——DSL 声明优先，其次 HTML 面板（自由 HTML 逃生舱）。 */
+export function isHtmlPage(page: PluginPageSpec): boolean {
+  return !page.dsl && typeof page.html === "string" && page.html.length > 0;
+}
 
 /** 工具调用通道：(MCP 全名, 参数, 是否已审批) → 结果。UI 与对话共用同一后端工具。 */
 export type ToolCall = (
@@ -364,25 +384,68 @@ function getApiBase(): string {
 
 interface PluginDslViewProps {
   pluginId: string;
-  /** DSL 页面 id，默认 home */
+  /** 目标页 id；不传取清单首页 */
   pageId?: string;
 }
 
 /**
- * 按 pluginId 拉取 UI DSL 页面并渲染；DSL 不存在时回调 onMissing（保持"插件未找到"语义）。
- * 工具调用走 POST /plugins/{id}/tools/{tool}；审批闸 409 时弹确认后带 approved 重试。
+ * 清单驱动的插件页宿主：DSL 渲染页与 HTML 面板页从 frontend.pages 长出。
+ * - dsl 页：拉取 UI DSL 页面渲染；工具走 POST /plugins/{id}/tools/{tool}，
+ *   409 审批闸确认后带 approved 重试。
+ * - html 页：HtmlPanelFrame iframe 壳，动作走 POST /plugins/{id}/html-rpc（同一审批闸）。
+ * - 清单无页（legacy）：回落原 DSL 行为（pageId 默认 home）。
+ * - 插件不存在/未启用 → onMissing（"插件未找到"语义不变）。
  */
 export function PluginDslView({ pluginId, pageId = "home", onMissing }: PluginDslViewProps & { onMissing?: () => void }) {
+  const [pages, setPages] = useState<PluginPageSpec[] | null>(null);
+  const [activeId, setActiveId] = useState(pageId);
   const [page, setPage] = useState<DslPage | null>(null);
   const [missing, setMissing] = useState(false);
   const [error, setError] = useState("");
 
+  // 页清单（to_frontend_manifest frontend.pages）——dsl/html 页同形状长出
   useEffect(() => {
     let cancelled = false;
-    setPage(null);
+    setPages(null);
     setMissing(false);
     setError("");
-    fetch(`${getApiBase()}/plugins/${pluginId}/ui/${pageId}`)
+    fetch(`${getApiBase()}/plugins/${pluginId}/manifest`)
+      .then(async (res) => {
+        if (res.status === 404) {
+          if (!cancelled) {
+            setMissing(true);
+            onMissing?.();
+          }
+          return null;
+        }
+        if (!res.ok) throw new Error(`插件清单加载失败（${res.status}）`);
+        return res.json();
+      })
+      .then((raw) => {
+        if (cancelled) return;
+        const list = raw?.frontend?.pages;
+        setPages(Array.isArray(list) ? list : []);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pluginId]);
+
+  const activePage = pages ? selectActivePage(pages, activeId) : null;
+  const htmlPage = activePage && isHtmlPage(activePage) ? activePage : null;
+
+  // DSL 页数据流（html 页走 iframe 壳，不进此路）
+  useEffect(() => {
+    if (pages === null || htmlPage) return;
+    let cancelled = false;
+    setPage(null);
+    setError("");
+    const dslId = activePage?.id ?? pageId;
+    fetch(`${getApiBase()}/plugins/${pluginId}/ui/${dslId}`)
       .then(async (res) => {
         if (res.status === 404) {
           if (!cancelled) {
@@ -410,7 +473,7 @@ export function PluginDslView({ pluginId, pageId = "home", onMissing }: PluginDs
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pluginId, pageId]);
+  }, [pluginId, pageId, pages, activeId, htmlPage]);
 
   const toolCall = useCallback<ToolCall>(
     async (tool, args, approved = false) => {
@@ -440,6 +503,41 @@ export function PluginDslView({ pluginId, pageId = "home", onMissing }: PluginDs
     [pluginId]
   );
 
+  // HTML 面板页 RPC 通道：POST /plugins/{id}/html-rpc（与 DSL 工具同一审批闸：
+  // approval_required → 弹确认后带 approved=true 重发，拒绝则原样回错误）。
+  const htmlRpc = useCallback<PanelRpcCall>(
+    async (method, params, approved = false) => {
+      const call = async (isApproved: boolean) =>
+        fetch(`${getApiBase()}/plugins/${pluginId}/html-rpc`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            method,
+            params,
+            approved: isApproved,
+          }),
+        });
+      let res = await call(approved);
+      let payload = await res.json().catch(() => null);
+      if (payload?.error?.code === "approval_required" && !approved) {
+        const message = payload.error.message ?? "该动作需要用户审批后方可执行";
+        if (typeof window !== "undefined" && window.confirm(`${message}\n\n是否批准本次调用？`)) {
+          res = await call(true);
+          payload = await res.json().catch(() => null);
+        } else {
+          return { error: { code: "approval_required", message } };
+        }
+      }
+      return (
+        payload ?? {
+          error: { code: "rpc_failed", message: `RPC 调用失败（${res.status}）` },
+        }
+      );
+    },
+    [pluginId]
+  );
+
   if (missing) {
     return (
       <div className="flex flex-col items-center justify-center p-8 text-center">
@@ -452,12 +550,57 @@ export function PluginDslView({ pluginId, pageId = "home", onMissing }: PluginDs
   if (error) {
     return <p className="p-8 text-sm text-destructive">{error}</p>;
   }
+  if (pages === null) {
+    return <p className="p-8 text-sm text-muted-foreground">加载插件页面…</p>;
+  }
+
+  // 多页插件：页签切换（DSL 渲染页与 HTML 面板页同形状）
+  const tabs =
+    pages.length > 1 ? (
+      <div className="flex flex-wrap gap-2">
+        {pages.map((p) => (
+          <button
+            key={p.id}
+            type="button"
+            onClick={() => setActiveId(p.id)}
+            className={cn(
+              "rounded-full border px-3 py-1 text-sm",
+              p.id === (activePage?.id ?? activeId)
+                ? "border-primary text-primary"
+                : "text-muted-foreground"
+            )}
+          >
+            {p.title || p.id}
+          </button>
+        ))}
+      </div>
+    ) : null;
+
+  if (htmlPage) {
+    return (
+      <div className="h-full overflow-auto p-4">
+        <div className="mx-auto flex max-w-3xl flex-col gap-4">
+          <div>
+            <h2 className="text-lg font-semibold text-foreground">{htmlPage.title || htmlPage.id}</h2>
+          </div>
+          {tabs}
+          <HtmlPanelFrame
+            pluginId={pluginId}
+            file={htmlPage.html as string}
+            rpc={htmlRpc}
+            title={htmlPage.title || htmlPage.id}
+          />
+        </div>
+      </div>
+    );
+  }
   if (!page) {
     return <p className="p-8 text-sm text-muted-foreground">加载插件页面…</p>;
   }
   return (
     <div className="h-full overflow-auto p-4">
       <div className="mx-auto flex max-w-3xl flex-col gap-4">
+        {tabs}
         <div>
           <h2 className="text-lg font-semibold text-foreground">{page.page.title}</h2>
           {page.page.description ? (

@@ -50,6 +50,7 @@ compile('src/lib/plugin-ui-dsl.ts', 'lib/plugin-ui-dsl.js');
 compile('src/lib/plugin-nav.ts', 'lib/plugin-nav.js');
 compile('src/components/ui/button.tsx', 'components/ui/button.js');
 compile('src/components/ui/input.tsx', 'components/ui/input.js');
+compile('src/components/plugin-ui/html-panel-frame.tsx', 'components/plugin-ui/html-panel-frame.js');
 const rendererFile = compile('src/components/plugin-ui/panel-renderer.tsx', 'components/plugin-ui/panel-renderer.js');
 
 const { normalizeDslPage } = require(path.join(outDir, 'lib/plugin-ui-dsl.js'));
@@ -59,7 +60,7 @@ const { PanelRenderer } = require(rendererFile);
 const React = require('react');
 const { renderToStaticMarkup } = require('react-dom/server');
 
-const demoDsl = JSON.parse(fs.readFileSync(path.join(ROOT, 'plugins/demo-greeter/ui/home.json'), 'utf8'));
+const demoDsl = JSON.parse(fs.readFileSync(path.join(ROOT, 'examples/demo-greeter/ui/home.json'), 'utf8'));
 
 // ── ① normalizeDslPage 归一化/前向兼容 ──
 {

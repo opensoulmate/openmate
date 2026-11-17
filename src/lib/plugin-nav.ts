@@ -34,6 +34,51 @@ function getApiBase(): string {
 /**
  * 从后端获取所有已加载插件的导航配置
  */
+/** 清单页规格（to_frontend_manifest frontend.pages 消费形状：dsl/html 页型） */
+export interface PluginPageSpec {
+  id: string;
+  title: string;
+  dsl?: string | null;
+  html?: string | null;
+}
+
+/**
+ * 纯函数：插件 → 菜单项（清单驱动，动态插件页宿主导航长出）。
+ * - 有页清单（frontend.pages）→ **逐页长出**一项（DSL 渲染页与 HTML 面板页
+ *   同形状：href=/plugins/{id}/{pageId}）；
+ * - 无页清单 → 回落插件级 nav 项（legacy plugin.json 契约不变）；
+ * - 插件不在清单（未装/已卸载）或未启用 → []（菜单即收走）。
+ */
+export function derivePluginNavItems(plugin: {
+  status?: string;
+  manifest?: { id?: string; frontend?: { nav?: PluginNavConfig; pages?: PluginPageSpec[] } };
+}): PluginNavItem[] {
+  const status = plugin?.status;
+  if (status !== 'loaded' && status !== 'enabled') return [];
+  const id = plugin?.manifest?.id;
+  if (!id) return [];
+  const nav = plugin?.manifest?.frontend?.nav;
+  const pages = plugin?.manifest?.frontend?.pages;
+  const base = {
+    icon: nav?.icon || 'Puzzle',
+    pluginId: id,
+    position: nav?.position || 'end',
+  };
+  if (Array.isArray(pages) && pages.length > 0) {
+    return pages.map((p) => ({
+      href: `/plugins/${id}/${p.id}`,
+      label: p.title || p.id,
+      ...base,
+    }));
+  }
+  if (!nav) return [];
+  return [{
+    href: `/plugins/${id}`,
+    label: nav.label,
+    ...base,
+  }];
+}
+
 export async function fetchPluginNavItems(): Promise<PluginNavItem[]> {
   try {
     const res = await fetch(`${getApiBase()}/plugins`);
@@ -45,18 +90,8 @@ export async function fetchPluginNavItems(): Promise<PluginNavItem[]> {
     const navItems: PluginNavItem[] = [];
     
     for (const plugin of plugins) {
-      if (plugin.status !== 'loaded' || !plugin.manifest?.frontend?.nav) {
-        continue;
-      }
-      
-      const nav = plugin.manifest.frontend.nav;
-      navItems.push({
-        href: `/plugins/${plugin.manifest.id}`,
-        label: nav.label,
-        icon: nav.icon,
-        pluginId: plugin.manifest.id,
-        position: nav.position || 'end',
-      });
+      // 动态加载的插件：菜单从清单长出（页级：DSL/HTML 页同形状；卸载即收走）
+      navItems.push(...derivePluginNavItems(plugin));
     }
     
     cachedNavItems = navItems;
