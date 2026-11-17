@@ -125,6 +125,20 @@ const URL_FALLBACKS = Array.from(new Set([
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) app.quit();
 
+// Electron 麦克风修复之二：把应用自有 http 回退源标记为可信安全上下文（Chromium 开关）。
+// 无本机前端的 Windows 端最终落到 http://100.76.2.155:3000 托管版时，非安全上下文下
+// navigator.mediaDevices 直接不存在（Electron 45 实测：noflag secure:false/gum:false，
+// 带 flag secure:true/gum:true，getUserMedia 出真实音频轨）。只标记本应用回退链内的
+// http 源（config/env 指定 + 回退链），不做全域放开；localhost 类源本就可信，一并列入无害。
+{
+  const insecureOrigins = [...new Set(URL_FALLBACKS.map((u) => {
+    try { return new URL(u).protocol === 'http:' ? new URL(u).origin : null; } catch (e) { return null; }
+  }).filter(Boolean))];
+  if (insecureOrigins.length) {
+    app.commandLine.appendSwitch('unsafely-treat-insecure-origin-as-secure', insecureOrigins.join(','));
+  }
+}
+
 let win = null;
 let tray = null;
 let splash = null;

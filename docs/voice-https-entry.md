@@ -92,4 +92,10 @@ server {
    具体原因和本页指引。
 2. **权限放行**：`main.js` 在 `app.whenReady` 里 `session.defaultSession`
    显式放行 media/麦克风（`setPermissionRequestHandler` / `setPermissionCheckHandler`）。
-3. 验证口径：Electron 内点右下角麦克风 → 录一段中文 → 中文转写进输入框 → Enter 发送。
+3. **回退源安全上下文兜底（1.3.9）**：无本机前端的 Windows 端会落到托管版
+   `http://100.76.2.155:3000`——`main.js` 启动时把回退链内全部 `http:` 源经 Chromium 开关
+   `unsafely-treat-insecure-origin-as-secure` 标记为可信安全上下文（只标记本应用回退源）。
+   Electron 45 实测：不带该开关 `isSecureContext=false`、`navigator.mediaDevices` 不存在；
+   带开关 `isSecureContext=true`、`getUserMedia` 返回真实音频轨。浏览器访问不受此开关影响，
+   仍走本页两条方案（HTTPS 入口 / localhost）。
+4. 验证口径：Electron 内点右下角麦克风 → 录一段中文 → 中文转写进输入框 → Enter 发送。
