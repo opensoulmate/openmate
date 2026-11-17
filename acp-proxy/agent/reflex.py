@@ -147,6 +147,7 @@ class ReflexResponse:
             "verdict": self.verdict, "blocked": self.blocked,
             "reason": self.reason, "dropped": self.dropped,
             "latency_ms": round(self.latency_ms, 3),
+            "ts": self.event.ts,
             "text": self.event.text[:80],
             "payload": self.event.payload,
             "actions": [a.as_dict() for a in self.actions],

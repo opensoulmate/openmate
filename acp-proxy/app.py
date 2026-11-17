@@ -24,6 +24,8 @@ from routes.evolution import router as evolution_router
 from routes.gene_loop import router as gene_loop_router
 from routes.architecture import router as architecture_router
 from routes.routing import router as routing_router
+from routes.reflex import router as reflex_router
+from routes.pulse import router as pulse_router
 
 logger = logging.getLogger("acp-proxy.app")
 
@@ -269,7 +271,15 @@ async def lifespan(app: FastAPI):
             await wakeup_executor.start()
             logger.info("Wakeup executor started")
         except Exception as e:
-            logger.warning(f"Wakeup executor failed to start: {e}")
+            logger.warning("Wakeup executor failed to start: %s", e)
+
+    # ❤️Pulse 心跳宿主（/api/pulse 观察面数据源）：定时心跳/周期自检五类目/
+    # 僵尸回收/软预算记账。失败只记日志，不阻断启动。
+    try:
+        from routes.pulse import start_pulse
+        await start_pulse()
+    except Exception as e:
+        logger.warning("Pulse heartbeat failed to start: %s", e)
 
     yield
     if flow_scheduler:
@@ -282,7 +292,13 @@ async def lifespan(app: FastAPI):
         try:
             await wakeup_executor.stop()
         except Exception as e:
-            logger.warning(f"Wakeup executor stop error: {e}")
+            logger.warning("Wakeup executor stop error: %s", e)
+
+    try:
+        from routes.pulse import stop_pulse
+        await stop_pulse()
+    except Exception as e:
+        logger.warning("Pulse heartbeat stop error: %s", e)
 
     if evolution_task:
         evolution_task.cancel()
@@ -315,6 +331,8 @@ app.include_router(evolution_router)
 app.include_router(gene_loop_router)
 app.include_router(architecture_router)
 app.include_router(routing_router)
+app.include_router(reflex_router)
+app.include_router(pulse_router)
 
 
 # 流程引擎 + 插件锻造坊 API（docs/plugin-system-design.md §5/§7）

@@ -1,417 +1,328 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
-import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
-import { getApiBaseUrl } from "@/lib/api-client";
 import {
-  Heart, RefreshCw, Plus, Trash2, Play, Pause,
-  Activity, Settings, Clock, Zap, BarChart3,
-  Loader2, ChevronRight, Timer,
+  Heart, RefreshCw, Activity, Clock, Timer, ListChecks, Trash2, AlertTriangle,
 } from "lucide-react";
 import { PageLayout } from '@/components/page-layout';
 
-interface PulseSignal {
-  signal_id: string;
+/* ❤️Pulse 心跳层观察面板 — 对接 acp-proxy /api/pulse/*（只读观察面）
+ * 数据源：agent.pulse.PulseLoop.status()/recent_beats()（进程级心跳宿主）
+ * 展示：心跳计数 / 心跳漂移 / 自检清单（五类目）/ 僵尸回收计数 / 心跳流 */
+
+const API_BASE =
+  typeof window !== "undefined"
+    ? `http://${window.location.hostname}:8092`
+    : "http://127.0.0.1:8092";
+
+interface PulseCheckItem {
   name: string;
-  signal_type: string;
-  interval_ms: number;
+  category: string;
+  runs: number;
+  fail_streak: number;
+  ok?: boolean;
+  detail?: string;
+  severity?: string;
+  slow?: boolean;
+  ts?: number;
+}
+
+interface PulseTaskItem {
+  task_id: string;
+  name: string;
+  kind: string;
   status: string;
-  fire_count: number;
-  max_fires: number;
-  last_fired_at: number | null;
-  next_fire_at: number | null;
-  drift_correction: number;
-  created_at: number;
+  steps_done: number;
+  deferred: number;
+  recoveries: number;
+  errors: number;
+  last_error: string;
 }
 
-interface TickRecord {
-  tick_id: string;
-  signal_id: string;
-  timestamp: number;
-  expected_at: number;
-  drift_ms: number;
-  latency_ms: number;
+interface PulseStatus {
+  running: boolean;
+  beats: number;
+  missed_beats: number;
+  beat_errors: number;
+  last_beat_error: string;
+  last_beat_at: number;
+  interval_s: number;
+  avg_drift_ms: number;
+  max_drift_ms: number;
+  checks: PulseCheckItem[];
+  tasks: { total: number; by_status: Record<string, number>; items: PulseTaskItem[] };
+  reaped_total: number;
+  wakes_total: number;
+  deferred_total: number;
 }
 
-interface PulseStats {
-  uptime_seconds: number;
-  total_ticks: number;
-  total_signals: number;
-  by_type: Record<string, number>;
-  by_status: Record<string, number>;
-  precision: {
-    avg_drift_ms: number;
-    max_drift_ms: number;
-    sample_size: number;
-  };
+interface BeatReport {
+  beat: number;
+  ts: number;
+  checks: Array<{ check: string; ok: boolean; detail: string; severity: string }>;
+  findings: Array<{ check: string; detail: string; severity: string }>;
+  tasks_advanced: string[];
+  deferred: number;
+  overdue: string[];
+  zombies_reaped: Array<{ pid: number; reaped: boolean }>;
+  zombies_refused: Array<{ pid: number; detail: string }>;
+  wakes: Array<{ session_id: string; reason: string }>;
+  phase_errors: string[];
+  over_budget: boolean;
+  elapsed_ms: number;
 }
 
 function formatTime(ts: number): string {
   if (!ts) return "-";
-  return new Date(ts * 1000).toLocaleString('zh-CN', {
-    month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
-    fractionalSecondDigits: 3 });
+  return new Date(ts * 1000).toLocaleTimeString('zh-CN', {
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+    fractionalSecondDigits: 3,
+  });
 }
 
-function formatMs(ms: number): string {
-  if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
-  if (ms >= 1) return `${ms.toFixed(1)}ms`;
-  return `${(ms * 1000).toFixed(0)}μs`;
+function formatMs(ms?: number): string {
+  if (ms === undefined || ms === null) return "-";
+  if (ms >= 1000) return `${(ms / 1000).toFixed(2)}s`;
+  return `${ms.toFixed(2)}ms`;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  active: "text-emerald-500 bg-emerald-500/10",
-  paused: "text-yellow-500 bg-yellow-500/10",
-  completed: "text-blue-500 bg-blue-500/10",
-  cancelled: "text-red-500 bg-red-500/10",
+const CATEGORY_LABELS: Record<string, string> = {
+  backend_service: "后端服务",
+  connection_state: "连接状态",
+  task_queue: "任务队列",
+  work_order: "未完成工单",
+  memory_consistency: "记忆一致性",
 };
 
 export function PulseClient() {
-  const { t } = useTranslation();
-  const TYPE_LABELS: Record<string, string> = {
-    tick: t('pulse.t16785'),
-    interval: t('pulse.t55782'),
-    cron: t("pulse.cron"),
-    once: t('pulse.t10485'),
-  };
-  const [tab, setTab] = useState<"signals" | "ticks" | "config">("signals");
-  const [stats, setStats] = useState<PulseStats | null>(null);
-  const [signals, setSignals] = useState<PulseSignal[]>([]);
-  const [ticks, setTicks] = useState<TickRecord[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [selectedSignal, setSelectedSignal] = useState<string | null>(null);
+  const [status, setStatus] = useState<PulseStatus | null>(null);
+  const [checks, setChecks] = useState<PulseCheckItem[]>([]);
+  const [beats, setBeats] = useState<BeatReport[]>([]);
 
-  // Create form
-  const [newName, setNewName] = useState("");
-  const [newType, setNewType] = useState("interval");
-  const [newInterval, setNewInterval] = useState("1000");
-  const [newMaxFires, setNewMaxFires] = useState("0");
-
-  const apiBase = getApiBaseUrl();
-
-  const fetchStats = useCallback(async () => {
+  const fetchAll = useCallback(async () => {
     try {
-      const res = await fetch(`${apiBase}/api/pulse/health`);
-      setStats(await res.json());
+      const [sRes, cRes, bRes] = await Promise.all([
+        fetch(`${API_BASE}/api/pulse/status`),
+        fetch(`${API_BASE}/api/pulse/checks`),
+        fetch(`${API_BASE}/api/pulse/beats?limit=20`),
+      ]);
+      const s = await sRes.json();
+      const c = await cRes.json();
+      const b = await bRes.json();
+      if (s && typeof s.beats === "number") setStatus(s);
+      if (Array.isArray(c.checks)) setChecks(c.checks);
+      if (Array.isArray(b.beats)) setBeats([...b.beats].reverse()); // 最新在前
     } catch {}
-  }, [apiBase]);
+  }, []);
 
-  const fetchSignals = useCallback(async () => {
-    try {
-      const res = await fetch(`${apiBase}/api/pulse/signals`);
-      const data = await res.json();
-      setSignals(data.signals || []);
-    } catch {}
-  }, [apiBase]);
+  useEffect(() => {
+    fetchAll();
+    const timer = setInterval(fetchAll, 5000);
+    return () => clearInterval(timer);
+  }, [fetchAll]);
 
-  const fetchTicks = useCallback(async () => {
-    try {
-      const params = new URLSearchParams();
-      if (selectedSignal) params.set("signal_id", selectedSignal);
-      params.set("limit", "100");
-      const res = await fetch(`${apiBase}/api/pulse/ticks?${params}`);
-      const data = await res.json();
-      setTicks(data.ticks || []);
-    } catch {}
-  }, [apiBase, selectedSignal]);
-
-  useEffect(() => { fetchStats(); }, [fetchStats]);
-  useEffect(() => { if (tab === "signals") fetchSignals(); }, [tab, fetchSignals]);
-  useEffect(() => { if (tab === "ticks") fetchTicks(); }, [tab, fetchTicks]);
-
-  const handleCreate = async () => {
-    if (!newName.trim()) return;
-    setLoading(true);
-    try {
-      await fetch(`${apiBase}/api/pulse/signals`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: newName, signal_type: newType,
-          interval_ms: parseFloat(newInterval), max_fires: parseInt(newMaxFires) || 0,
-        }),
-      });
-      setNewName(""); setNewInterval("1000"); setNewMaxFires("0");
-      fetchSignals(); fetchStats();
-    } catch {} finally { setLoading(false); }
-  };
-
-  const handleTick = async (id: string) => {
-    try {
-      await fetch(`${apiBase}/api/pulse/signals/${id}/tick`, { method: "POST" });
-      fetchSignals(); fetchStats(); if (tab === "ticks") fetchTicks();
-    } catch {}
-  };
-
-  const handlePause = async (id: string) => {
-    try {
-      await fetch(`${apiBase}/api/pulse/signals/${id}/pause`, { method: "POST" });
-      fetchSignals();
-    } catch {}
-  };
-
-  const handleResume = async (id: string) => {
-    try {
-      await fetch(`${apiBase}/api/pulse/signals/${id}/resume`, { method: "POST" });
-      fetchSignals();
-    } catch {}
-  };
-
-  const handleDelete = async (id: string) => {
-    try {
-      await fetch(`${apiBase}/api/pulse/signals/${id}`, { method: "DELETE" });
-      fetchSignals(); fetchStats();
-    } catch {}
-  };
-
-  const tabs = [
-    { id: "signals" as const, label: t("pulse.signals") || t('pulse.text4'), icon: Heart },
-    { id: "ticks" as const, label: t("pulse.ticks") || t('pulse.text5'), icon: Timer },
-    { id: "config" as const, label: t("pulse.stats") || t('pulse.precisionStats'), icon: BarChart3 },
-  ];
+  const failedChecks = checks.filter(c => c.ok === false).length;
+  const lastBeat = beats[0];
 
   return (
-      <PageLayout title="脉搏">
-        
-    <div className="flex h-full flex-col overflow-hidden">
-      <div className="flex items-center justify-between border-b border-border px-3 lg:px-6 py-4">
-        <div className="flex items-center gap-3">
-          <Heart size={20} className="text-red-500 animate-pulse" />
-          <h1 className="text-lg font-semibold">{t("pulse.title") || t('pulse.text7')}</h1>
-          <span className="rounded-full bg-red-500/10 px-2 py-0.5 text-xs font-medium text-red-500">
-            {t("pulse.subtitle") || t('pulse.text8')}
-          </span>
-        </div>
-        <button onClick={() => { fetchStats(); tab === "signals" && fetchSignals(); tab === "ticks" && fetchTicks(); }}
-          className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs lg:text-sm hover:bg-muted transition-colors">
-          <RefreshCw size={14} /> {t("common.refresh") || t('pulse.refresh')}
-        </button>
-      </div>
-
-      <div className="flex-1 overflow-y-auto p-3 lg:p-6 space-y-3 lg:space-y-6">
-        {/* Stats */}
-        {stats && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 lg:gap-4">
-            <StatCard icon={Heart} label={t("pulse.signals") || t('pulse.text9')} value={String(stats.total_signals)}
-              sub={`${stats.by_status.active || 0} ${t("pulse.active") || t('pulse.active')}`} color="text-red-500" bg="bg-red-500/10" />
-            <StatCard icon={Zap} label={t("pulse.totalTicks") || t('pulse.text11')} value={String(stats.total_ticks)}
-              sub={t("pulse.fired") || t('pulse.fired')} color="text-yellow-500" bg="bg-yellow-500/10" />
-            <StatCard icon={Activity} label={t("pulse.avgDrift") || t('pulse.avgDrift')} value={formatMs(stats.precision.avg_drift_ms)}
-              sub={`${stats.precision.sample_size} ${t("pulse.samples") || t('pulse.text14')}`} color="text-blue-500" bg="bg-blue-500/10" />
-            <StatCard icon={Clock} label={t("pulse.uptime") || t('pulse.uptime')} value={`${Math.round(stats.uptime_seconds)}s`}
-              sub={t("pulse.engineUptime") || t('pulse.text15')} color="text-emerald-500" bg="bg-emerald-500/10" />
+    <PageLayout title="脉搏">
+      <div className="flex h-full flex-col overflow-hidden">
+        <div className="flex items-center justify-between border-b border-border px-3 lg:px-6 py-4">
+          <div className="flex items-center gap-3">
+            <Heart size={20} className="text-red-500 animate-pulse" />
+            <h1 className="text-lg font-semibold">Pulse · 心跳层观察面</h1>
+            <span className="rounded-full bg-red-500/10 px-2 py-0.5 text-xs font-medium text-red-500">
+              定时心跳 · 周期自检 · 僵尸回收 · 软预算禁硬杀
+            </span>
+            {status && (
+              <span className={cn("rounded-full px-2 py-0.5 text-[10px]",
+                status.running ? "text-emerald-500 bg-emerald-500/10" : "text-muted-foreground bg-muted")}>
+                {status.running ? "心跳运行中" : "心跳未运行"}
+              </span>
+            )}
           </div>
-        )}
-
-        {/* Tabs */}
-        <div className="flex gap-2">
-          {tabs.map((tabItem) => (
-            <button key={tabItem.id} onClick={() => setTab(tabItem.id)}
-              className={cn("flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs lg:text-sm transition-colors",
-                tab === tabItem.id ? "bg-red-500/10 text-red-600 font-medium" : "hover:bg-muted text-muted-foreground")}>
-              <tabItem.icon size={14} /> {tabItem.label}
-            </button>
-          ))}
+          <button onClick={fetchAll}
+            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs lg:text-sm hover:bg-muted transition-colors">
+            <RefreshCw size={14} /> 刷新
+          </button>
         </div>
 
-        {/* Signals Tab */}
-        {tab === "signals" && (
-          <div className="space-y-4">
-            {/* Create */}
-            <div className="rounded-xl border border-border p-3 lg:p-4 space-y-3">
-              <h3 className="text-xs lg:text-sm font-medium">{t("pulse.createSignal") || t('pulse.create')}</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-                <input value={newName} onChange={(e) => setNewName(e.target.value)}
-                  placeholder={t("pulse.signalName") || "Signal Name"}
-                  className="rounded-lg border border-border bg-background px-3 py-2 text-xs lg:text-sm outline-none focus:ring-2 focus:ring-red-500/20" />
-                <select value={newType} onChange={(e) => setNewType(e.target.value)}
-                  className="rounded-lg border border-border bg-background px-3 py-2 text-xs lg:text-sm outline-none">
-                  <option value="interval">{t("pulse.interval") || "Interval (ms)"}</option>
-                  <option value="tick">{t("pulse.tick") || "Tick"}</option>
-                  <option value="once">{t("pulse.once") || "Once"}</option>
-                </select>
-                <input value={newInterval} onChange={(e) => setNewInterval(e.target.value)}
-                  placeholder={t("pulse.intervalPlaceholder") || "e.g. 5m, 1h"}
-                  className="rounded-lg border border-border bg-background px-3 py-2 text-xs lg:text-sm outline-none focus:ring-2 focus:ring-red-500/20" />
-                <input value={newMaxFires} onChange={(e) => setNewMaxFires(e.target.value)}
-                  placeholder={t("pulse.maxCountPlaceholder") || "Max count"}
-                  className="rounded-lg border border-border bg-background px-3 py-2 text-xs lg:text-sm outline-none focus:ring-2 focus:ring-red-500/20" />
-                <button onClick={handleCreate} disabled={loading}
-                  className="flex items-center justify-center gap-1.5 rounded-lg bg-red-500 px-2 lg:px-4 py-2 text-xs lg:text-sm text-white hover:bg-red-600 disabled:opacity-50">
-                  {loading ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-                  {t("common.create") || t('pulse.text18')}
-                </button>
-              </div>
+        <div className="flex-1 overflow-y-auto p-3 lg:p-6 space-y-3 lg:space-y-6">
+          {/* Stats */}
+          {status && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 lg:gap-4">
+              <StatCard icon={Heart} label="心跳计数" value={String(status.beats)}
+                sub={`节拍 ${formatMs(status.interval_s * 1000)} · 最后一拍 ${formatTime(status.last_beat_at)}`}
+                color="text-red-500" bg="bg-red-500/10" />
+              <StatCard icon={Activity} label="心跳漂移（平均）" value={formatMs(status.avg_drift_ms)}
+                sub={`最大 ${formatMs(status.max_drift_ms)} · 漏拍 ${status.missed_beats} · 拍错 ${status.beat_errors}`}
+                color="text-blue-500" bg="bg-blue-500/10" />
+              <StatCard icon={Trash2} label="僵尸回收计数" value={String(status.reaped_total)}
+                sub={`只收尸体 · 唤醒 ${status.wakes_total} · 顺延 ${status.deferred_total}`}
+                color="text-violet-500" bg="bg-violet-500/10" />
+              <StatCard icon={ListChecks} label="自检清单" value={failedChecks > 0 ? `${failedChecks} 项异常` : "全部通过"}
+                sub={`五类目 · 最近一拍 #${lastBeat ? lastBeat.beat : "-"} · 发现 ${lastBeat ? lastBeat.findings.length : 0}`}
+                color={failedChecks > 0 ? "text-yellow-500" : "text-emerald-500"}
+                bg={failedChecks > 0 ? "bg-yellow-500/10" : "bg-emerald-500/10"} />
             </div>
+          )}
 
-            {/* Signal List */}
-            {signals.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-                <Heart size={40} className="mb-3 opacity-30" />
-                <p className="text-xs lg:text-sm">{t("pulse.noSignals") || t('pulse.empty')}</p>
+          {/* 自检清单（五类目） */}
+          <div className="rounded-xl border border-border bg-card p-3 lg:p-4 space-y-3">
+            <h3 className="text-xs lg:text-sm font-medium flex items-center gap-2">
+              <ListChecks size={14} className="text-red-500" /> 周期自检 · 五类目
+            </h3>
+            {checks.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-10 text-muted-foreground">
+                <ListChecks size={32} className="mb-3 opacity-30" />
+                <p className="text-xs lg:text-sm">等待第一拍自检结果…</p>
               </div>
             ) : (
               <div className="space-y-2">
-                {signals.map((s) => (
-                  <div key={s.signal_id}
-                    className={cn("rounded-xl border p-3 lg:p-4 transition-colors",
-                      selectedSignal === s.signal_id ? "border-red-500/50 bg-red-500/5" : "border-border bg-card hover:border-red-500/30")}>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <Heart size={16} className={cn(s.status === "active" ? "text-red-500 animate-pulse" : "text-muted-foreground")} />
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs lg:text-sm font-medium">{s.name}</span>
-                            <span className={cn("rounded-full px-2 py-0.5 text-[10px]", STATUS_COLORS[s.status] || "bg-muted")}>
-                              {s.status}
-                            </span>
-                            <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
-                              {TYPE_LABELS[s.signal_type] || s.signal_type}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-2 lg:gap-4 mt-1 text-xs text-muted-foreground">
-                            <span>{t("pulse.interval") || t('pulse.text19')}: {formatMs(s.interval_ms)}</span>
-                            <span>{t("pulse.fired") || t('pulse.fired')}: {s.fire_count}{s.max_fires > 0 ? `/${s.max_fires}` : ""}</span>
-                            <span>{t("pulse.drift") || t('pulse.text20')}: {formatMs(s.drift_correction)}</span>
-                            {s.last_fired_at && <span>{formatTime(s.last_fired_at)}</span>}
-                          </div>
-                        </div>
+                {checks.map((c) => (
+                  <div key={c.name} className="rounded-lg border border-border p-2.5 lg:p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        {c.ok === false
+                          ? <AlertTriangle size={14} className="text-yellow-500 shrink-0" />
+                          : <ListChecks size={14} className="text-emerald-500 shrink-0" />}
+                        <span className="text-xs lg:text-sm font-medium">{c.name}</span>
+                        <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground shrink-0">
+                          {CATEGORY_LABELS[c.category] || c.category}
+                        </span>
+                        {c.severity === "critical" && c.ok === false && (
+                          <span className="rounded-full bg-red-500/10 px-2 py-0.5 text-[10px] text-red-500 shrink-0">critical</span>
+                        )}
                       </div>
-                      <div className="flex items-center gap-1">
-                        <button onClick={() => handleTick(s.signal_id)}
-                          className="rounded-md p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 transition-colors"
-                          title={t('pulse.t41384')}>
-                          <Zap size={14} />
-                        </button>
-                        {s.status === "active" ? (
-                          <button onClick={() => handlePause(s.signal_id)}
-                            className="rounded-md p-1.5 text-muted-foreground hover:text-yellow-500 hover:bg-yellow-500/10 transition-colors"
-                            title={t('pulse.pause')}>
-                            <Pause size={14} />
-                          </button>
-                        ) : s.status === "paused" ? (
-                          <button onClick={() => handleResume(s.signal_id)}
-                            className="rounded-md p-1.5 text-muted-foreground hover:text-emerald-500 hover:bg-emerald-500/10 transition-colors"
-                            title={t('pulse.resume')}>
-                            <Play size={14} />
-                          </button>
-                        ) : null}
-                        <button onClick={() => handleDelete(s.signal_id)}
-                          className="rounded-md p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 transition-colors"
-                          title={t('pulse.delete')}>
-                          <Trash2 size={14} />
-                        </button>
+                      <div className="flex items-center gap-2 lg:gap-3 text-[10px] text-muted-foreground shrink-0">
+                        {c.slow && <span className="text-yellow-500">slow</span>}
+                        <span>运行 {c.runs}</span>
+                        {c.fail_streak > 0 && (
+                          <span className="text-red-500">连续失败 {c.fail_streak}</span>
+                        )}
+                        <span className={cn("rounded-full px-2 py-0.5",
+                          c.ok === false ? "text-red-500 bg-red-500/10"
+                            : c.ok === true ? "text-emerald-500 bg-emerald-500/10"
+                              : "text-muted-foreground bg-muted")}>
+                          {c.ok === false ? "FAIL" : c.ok === true ? "OK" : "待检"}
+                        </span>
                       </div>
                     </div>
+                    {c.detail && (
+                      <p className="mt-1.5 text-xs text-muted-foreground font-mono break-all">{c.detail}</p>
+                    )}
                   </div>
                 ))}
               </div>
             )}
           </div>
-        )}
 
-        {/* Ticks Tab */}
-        {tab === "ticks" && (
-          <div className="space-y-4">
-            <div className="flex items-center gap-3">
-              <select value={selectedSignal || ""} onChange={(e) => setSelectedSignal(e.target.value || null)}
-                className="rounded-lg border border-border bg-background px-3 py-2 text-xs lg:text-sm outline-none">
-                <option value="">{t("pulse.allSignals") || t('pulse.allSignals')}</option>
-                {signals.map((s) => (
-                  <option key={s.signal_id} value={s.signal_id}>{s.name}</option>
-                ))}
-              </select>
-              <span className="text-xs text-muted-foreground">{ticks.length} {t("pulse.tickRecords") || t('pulse.text23')}</span>
+          {/* 心跳流 */}
+          <div className="rounded-xl border border-border bg-card p-3 lg:p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs lg:text-sm font-medium flex items-center gap-2">
+                <Timer size={14} className="text-red-500" /> 心跳流（每拍六段）
+              </h3>
+              <span className="text-xs text-muted-foreground">{beats.length} 拍展示 / 共 {status?.beats ?? 0} 拍</span>
             </div>
-
-            {ticks.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-                <Timer size={40} className="mb-3 opacity-30" />
-                <p className="text-xs lg:text-sm">{t("pulse.noTicks") || t('pulse.noTicks')}</p>
+            {beats.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                <Heart size={36} className="mb-3 opacity-30 animate-pulse" />
+                <p className="text-xs lg:text-sm">等待心跳…</p>
               </div>
             ) : (
-              <div className="rounded-xl border border-border overflow-x-auto">
+              <div className="rounded-lg border border-border overflow-x-auto">
                 <table className="w-full text-xs lg:text-sm">
                   <thead>
                     <tr className="border-b border-border bg-muted/50">
-                      <th className="px-2 lg:px-4 py-2 text-left text-xs font-medium text-muted-foreground">{t("pulse.signal") || "Signal"}</th>
-                      <th className="px-2 lg:px-4 py-2 text-left text-xs font-medium text-muted-foreground">{t("pulse.time") || "Interval"}</th>
-                      <th className="px-2 lg:px-4 py-2 text-right text-xs font-medium text-muted-foreground">{t("pulse.drift") || "Drift"}</th>
-                      <th className="px-2 lg:px-4 py-2 text-right text-xs font-medium text-muted-foreground">{t("pulse.latency") || "Latency"}</th>
+                      <th className="px-2 lg:px-4 py-2 text-left text-xs font-medium text-muted-foreground">拍号</th>
+                      <th className="px-2 lg:px-4 py-2 text-left text-xs font-medium text-muted-foreground">时间</th>
+                      <th className="px-2 lg:px-4 py-2 text-right text-xs font-medium text-muted-foreground">耗时</th>
+                      <th className="px-2 lg:px-4 py-2 text-right text-xs font-medium text-muted-foreground">自检通过</th>
+                      <th className="px-2 lg:px-4 py-2 text-right text-xs font-medium text-muted-foreground">发现</th>
+                      <th className="px-2 lg:px-4 py-2 text-right text-xs font-medium text-muted-foreground">工单推进</th>
+                      <th className="px-2 lg:px-4 py-2 text-right text-xs font-medium text-muted-foreground">顺延</th>
+                      <th className="px-2 lg:px-4 py-2 text-right text-xs font-medium text-muted-foreground">僵尸回收</th>
+                      <th className="px-2 lg:px-4 py-2 text-left text-xs font-medium text-muted-foreground">备注</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {ticks.map((t) => (
-                      <tr key={t.tick_id} className="border-b border-border last:border-0 hover:bg-muted/30">
-                        <td className="px-2 lg:px-4 py-2 font-mono text-xs">{t.signal_id.slice(-8)}</td>
-                        <td className="px-2 lg:px-4 py-2 text-xs">{formatTime(t.timestamp)}</td>
-                        <td className={cn("px-2 lg:px-4 py-2 text-right text-xs font-mono",
-                          Math.abs(t.drift_ms) > 10 ? "text-red-500" : Math.abs(t.drift_ms) > 5 ? "text-yellow-500" : "text-emerald-500")}>
-                          {t.drift_ms > 0 ? "+" : ""}{t.drift_ms.toFixed(3)}ms
-                        </td>
-                        <td className="px-2 lg:px-4 py-2 text-right text-xs font-mono text-muted-foreground">
-                          {t.latency_ms.toFixed(3)}ms
-                        </td>
-                      </tr>
-                    ))}
+                    {beats.map((b) => {
+                      const okCount = (b.checks || []).filter(c => c.ok).length;
+                      const notes: string[] = [];
+                      if (b.over_budget) notes.push("软预算超支");
+                      if ((b.phase_errors || []).length) notes.push(`段错 ${b.phase_errors.length}`);
+                      if ((b.zombies_refused || []).length) notes.push(`拒收 ${b.zombies_refused.length}`);
+                      if ((b.wakes || []).length) notes.push(`唤醒 ${b.wakes.length}`);
+                      return (
+                        <tr key={b.beat} className="border-b border-border last:border-0 hover:bg-muted/30">
+                          <td className="px-2 lg:px-4 py-2 font-mono text-xs">#{b.beat}</td>
+                          <td className="px-2 lg:px-4 py-2 text-xs font-mono text-muted-foreground">{formatTime(b.ts)}</td>
+                          <td className={cn("px-2 lg:px-4 py-2 text-right text-xs font-mono",
+                            b.over_budget ? "text-yellow-500" : "text-emerald-500")}>
+                            {formatMs(b.elapsed_ms)}
+                          </td>
+                          <td className="px-2 lg:px-4 py-2 text-right text-xs">
+                            {okCount}/{(b.checks || []).length}
+                          </td>
+                          <td className={cn("px-2 lg:px-4 py-2 text-right text-xs",
+                            (b.findings || []).length > 0 ? "text-red-500" : "text-muted-foreground")}>
+                            {(b.findings || []).length}
+                          </td>
+                          <td className="px-2 lg:px-4 py-2 text-right text-xs">{(b.tasks_advanced || []).length}</td>
+                          <td className="px-2 lg:px-4 py-2 text-right text-xs">{b.deferred || 0}</td>
+                          <td className="px-2 lg:px-4 py-2 text-right text-xs">{(b.zombies_reaped || []).length}</td>
+                          <td className="px-2 lg:px-4 py-2 text-xs text-muted-foreground">
+                            {notes.join(" · ") || "-"}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
             )}
           </div>
-        )}
 
-        {/* Stats Tab */}
-        {tab === "config" && stats && (
-          <div className="space-y-4">
-            <div className="rounded-xl border border-border bg-card p-5 space-y-4">
-              <h3 className="text-xs lg:text-sm font-semibold">{t("pulse.precisionStats") || t('pulse.precisionStats')}</h3>
-              <div className="grid grid-cols-2 lg:grid-cols-3 gap-2 lg:gap-6">
-                <div>
-                  <label className="text-xs text-muted-foreground">{t("pulse.avgDrift") || t('pulse.avgDrift')}</label>
-                  <div className="mt-1 text-xl lg:text-2xl font-bold">{formatMs(stats.precision.avg_drift_ms)}</div>
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground">{t("pulse.maxDrift") || t('pulse.maxDrift')}</label>
-                  <div className="mt-1 text-xl lg:text-2xl font-bold">{formatMs(stats.precision.max_drift_ms)}</div>
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground">{t("pulse.samples") || t('pulse.samples')}</label>
-                  <div className="mt-1 text-xl lg:text-2xl font-bold">{stats.precision.sample_size}</div>
-                </div>
-              </div>
-            </div>
-
-            {/* Type breakdown */}
-            <div className="rounded-xl border border-border bg-card p-5 space-y-3">
-              <h3 className="text-xs lg:text-sm font-semibold">{t("pulse.byType") || t('pulse.byType')}</h3>
+          {/* 长任务工单账 */}
+          {status && status.tasks.total > 0 && (
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 space-y-3">
+              <h3 className="text-xs lg:text-sm font-medium flex items-center gap-2">
+                <Clock size={14} className="text-red-500" /> 长任务工单（软预算禁硬杀）
+              </h3>
               <div className="flex flex-wrap gap-2">
-                {Object.entries(stats.by_type).map(([type, count]) => (
-                  <span key={type} className="rounded-full bg-red-500/10 px-3 py-1 text-xs text-red-600">
-                    {TYPE_LABELS[type] || type}: {count}
+                {Object.entries(status.tasks.by_status).map(([st, n]) => (
+                  <span key={st} className="rounded-full bg-red-500/10 px-3 py-1 text-xs text-red-600">
+                    {st}: {n}
                   </span>
                 ))}
               </div>
-            </div>
-
-            {/* Status breakdown */}
-            <div className="rounded-xl border border-border bg-card p-5 space-y-3">
-              <h3 className="text-xs lg:text-sm font-semibold">{t("pulse.byStatus") || t('pulse.byStatus')}</h3>
-              <div className="flex flex-wrap gap-2">
-                {Object.entries(stats.by_status).map(([status, count]) => (
-                  <span key={status} className={cn("rounded-full px-3 py-1 text-xs", STATUS_COLORS[status] || "bg-muted")}>
-                    {status}: {count}
-                  </span>
+              <div className="space-y-2">
+                {status.tasks.items.map((t) => (
+                  <div key={t.task_id} className="rounded-lg border border-border p-2.5 lg:p-3 flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <span className="text-xs lg:text-sm font-medium">{t.name || t.task_id}</span>
+                      <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">{t.kind}</span>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        步进 {t.steps_done} · 顺延 {t.deferred} · 恢复 {t.recoveries} · 错误 {t.errors}
+                        {t.last_error && <span className="text-red-500"> · {t.last_error}</span>}
+                      </p>
+                    </div>
+                    <span className={cn("rounded-full px-2 py-0.5 text-[10px] shrink-0",
+                      t.status === "active" ? "text-emerald-500 bg-emerald-500/10"
+                        : t.status === "needs_attention" ? "text-red-500 bg-red-500/10"
+                          : "text-yellow-500 bg-yellow-500/10")}>
+                      {t.status}
+                    </span>
+                  </div>
                 ))}
               </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
-    </div>
-  
-      </PageLayout>
-    );
+    </PageLayout>
+  );
 }
 
 function StatCard({ icon: Icon, label, value, sub, color, bg }: {

@@ -1,411 +1,274 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
-import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
-import { getApiBaseUrl } from "@/lib/api-client";
 import {
-  Zap, RefreshCw, Plus, Trash2, Search,
-  Activity, Settings, Target, BarChart3,
-  CheckCircle, XCircle, Loader2, Edit3, Save,
+  Zap, RefreshCw, Activity, ShieldAlert, Timer, BarChart3, Radio,
 } from "lucide-react";
 import { PageLayout } from '@/components/page-layout';
 
-interface CacheEntry {
-  entry_id: string;
-  query: string;
-  response: string;
-  category: string;
-  tags: string[];
-  hit_count: number;
-  importance: number;
-  source: string;
-  created_at: number;
-  last_hit_at: number;
-  ttl_seconds: number;
+/* ⚡Reflex 反射层观察面板 — 对接 acp-proxy /api/reflex/*（只读观察面）
+ * 数据源：agent.reflex.ReflexHub.stats()/recent()（/ws_acp 双向事件源桥同源）
+ * 展示：事件延迟 / 熔断状态 / 事件流（实时轮询） */
+
+const API_BASE =
+  typeof window !== "undefined"
+    ? `http://${window.location.hostname}:8092`
+    : "http://127.0.0.1:8092";
+
+interface ReflexRuleStat {
+  name: string;
+  action: string;
+  enabled: boolean;
+  priority: number;
+  calls: number;
+  failures: number;
+  circuit: string;
+  circuit_trips: number;
 }
 
 interface ReflexStats {
-  cache: {
-    total_entries: number;
-    active_entries: number;
-    expired_entries: number;
-    usage_percent: number;
-    total_hits: number;
-    total_queries: number;
-    hit_rate_percent: number;
-    similarity_threshold: number;
-    by_category: Record<string, number>;
-    by_source: Record<string, number>;
-  };
+  total: number;
+  by_kind: Record<string, number>;
+  by_verdict: Record<string, number>;
+  callbacks: number;
+  routed: number;
+  blocked: number;
+  dropped: number;
+  dropped_by_kind: Record<string, number>;
+  error_storms: number;
+  avg_latency_ms: number;
+  max_latency_ms: number;
+  rules: ReflexRuleStat[];
+}
+
+interface ReflexEventRow {
+  event_id: string;
+  kind: string;
+  verdict: string;
+  reason?: string;
+  dropped?: boolean;
+  latency_ms?: number;
+  text?: string;
+  source?: string;
+  ts: number;
+  actions?: Array<{ rule: string; action: string; ok: boolean; circuit?: string }>;
 }
 
 function formatTime(ts: number): string {
   if (!ts) return "-";
-  return new Date(ts * 1000).toLocaleString('zh-CN', {
-    month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+  return new Date(ts * 1000).toLocaleTimeString('zh-CN', {
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+    fractionalSecondDigits: 3,
   });
 }
 
+function formatMs(ms?: number): string {
+  if (ms === undefined || ms === null) return "-";
+  if (ms >= 1000) return `${(ms / 1000).toFixed(2)}s`;
+  return `${ms.toFixed(3)}ms`;
+}
+
+const VERDICT_COLORS: Record<string, string> = {
+  handled: "text-emerald-500 bg-emerald-500/10",
+  routed: "text-blue-500 bg-blue-500/10",
+  blocked: "text-red-500 bg-red-500/10",
+  dropped: "text-yellow-500 bg-yellow-500/10",
+  pass: "text-muted-foreground bg-muted",
+  circuit: "text-orange-500 bg-orange-500/10",
+};
+
+const CIRCUIT_COLORS: Record<string, string> = {
+  closed: "text-emerald-500 bg-emerald-500/10",
+  open: "text-red-500 bg-red-500/10",
+  half_open: "text-yellow-500 bg-yellow-500/10",
+};
+
 export function ReflexClient() {
-  const { t } = useTranslation();
-  const [tab, setTab] = useState<"cache" | "lookup" | "config">("cache");
   const [stats, setStats] = useState<ReflexStats | null>(null);
-  const [entries, setEntries] = useState<CacheEntry[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [searchCategory, setSearchCategory] = useState("");
-  const [editId, setEditId] = useState<string | null>(null);
-  const [editResponse, setEditResponse] = useState("");
+  const [events, setEvents] = useState<ReflexEventRow[]>([]);
+  const [eventTotal, setEventTotal] = useState(0);
 
-  // Create form
-  const [newQuery, setNewQuery] = useState("");
-  const [newResponse, setNewResponse] = useState("");
-  const [newCategory, setNewCategory] = useState("");
-  const [newImportance, setNewImportance] = useState(0.5);
-
-  // Lookup form
-  const [lookupQuery, setLookupQuery] = useState("");
-  const [lookupResult, setLookupResult] = useState<any>(null);
-
-  const apiBase = getApiBaseUrl();
-
-  const fetchStats = useCallback(async () => {
+  const fetchAll = useCallback(async () => {
     try {
-      const res = await fetch(`${apiBase}/api/reflex/health`);
-      setStats(await res.json());
+      const [sRes, eRes] = await Promise.all([
+        fetch(`${API_BASE}/api/reflex/stats`),
+        fetch(`${API_BASE}/api/reflex/events?limit=50`),
+      ]);
+      const s = await sRes.json();
+      const e = await eRes.json();
+      if (s && typeof s.total === "number") setStats(s);
+      if (Array.isArray(e.events)) {
+        setEvents([...e.events].reverse()); // 最新在前
+        setEventTotal(e.total ?? e.events.length);
+      }
     } catch {}
-  }, [apiBase]);
-
-  const fetchEntries = useCallback(async () => {
-    try {
-      const params = new URLSearchParams();
-      if (searchCategory) params.set("category", searchCategory);
-      params.set("limit", "200");
-      const res = await fetch(`${apiBase}/api/reflex/cache?${params}`);
-      const data = await res.json();
-      setEntries(data.entries || []);
-    } catch {}
-  }, [apiBase, searchCategory]);
+  }, []);
 
   useEffect(() => {
-    fetchStats();
-  }, [fetchStats]);
+    fetchAll();
+    const timer = setInterval(fetchAll, 3000);
+    return () => clearInterval(timer);
+  }, [fetchAll]);
 
-  useEffect(() => {
-    if (tab === "cache") fetchEntries();
-  }, [tab, fetchEntries]);
-
-  const handleCreate = async () => {
-    if (!newQuery.trim() || !newResponse.trim()) return;
-    setLoading(true);
-    try {
-      await fetch(`${apiBase}/api/reflex/cache`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          query: newQuery, response: newResponse,
-          category: newCategory, importance: newImportance,
-        }),
-      });
-      setNewQuery(""); setNewResponse(""); setNewCategory("");
-      fetchEntries(); fetchStats();
-    } catch {} finally { setLoading(false); }
-  };
-
-  const handleLookup = async () => {
-    if (!lookupQuery.trim()) return;
-    setLoading(true);
-    try {
-      const res = await fetch(`${apiBase}/api/reflex/lookup`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: lookupQuery }),
-      });
-      setLookupResult(await res.json());
-    } catch {} finally { setLoading(false); }
-  };
-
-  const handleDelete = async (id: string) => {
-    try {
-      await fetch(`${apiBase}/api/reflex/cache/${id}`, { method: "DELETE" });
-      fetchEntries(); fetchStats();
-    } catch {}
-  };
-
-  const handleSaveEdit = async (id: string) => {
-    try {
-      await fetch(`${apiBase}/api/reflex/cache/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ response: editResponse }),
-      });
-      setEditId(null); setEditResponse(""); fetchEntries();
-    } catch {}
-  };
-
-  const handleCleanup = async () => {
-    try {
-      const res = await fetch(`${apiBase}/api/reflex/cleanup`, { method: "POST" });
-      const data = await res.json();
-      alert(t("reflex.cleanupComplete", { count: data.removed }));
-      fetchEntries(); fetchStats();
-    } catch {}
-  };
-
-  const tabs = [
-    { id: "cache" as const, label: t("reflex.cache") || "Cache", icon: Zap },
-    { id: "lookup" as const, label: t("reflex.lookup") || "Lookup", icon: Target },
-    { id: "config" as const, label: t("reflex.config") || "Configuration", icon: Settings },
-  ];
+  const openCircuits = (stats?.rules || []).filter(r => r.circuit === "open").length;
 
   return (
-      <PageLayout title="反射">
-        
-    <div className="flex h-full flex-col overflow-hidden">
-      <div className="flex items-center justify-between border-b border-border px-3 lg:px-6 py-4">
-        <div className="flex items-center gap-2 lg:gap-3">
-          <Zap size={20} className="text-yellow-500" />
-          <h1 className="text-lg font-semibold">{t("reflex.title") || "Reflex · High-Speed Response"}</h1>
-          <span className="rounded-full bg-yellow-500/10 px-2 py-0.5 text-xs font-medium text-yellow-500">
-            {t("reflex.subtitle") || "High-frequency question cache, fast reflex response, reduce repeated LLM inference"}
-          </span>
-        </div>
-        <button onClick={() => { fetchStats(); tab === "cache" && fetchEntries(); }}
-          className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs lg:text-sm hover:bg-muted transition-colors">
-          <RefreshCw size={14} /> {t("common.refresh") || "Refresh"}
-        </button>
-      </div>
-
-      <div className="flex-1 overflow-y-auto p-3 lg:p-6 space-y-3 lg:space-y-6">
-        {/* Stats */}
-        {stats && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 lg:gap-4">
-            <StatCard icon={Zap} label={t("reflex.activeEntries") || "Active Entries"} value={String(stats.cache.active_entries)}
-              sub={`${stats.cache.total_entries} ${t("reflex.total") || "Total Entries"}`} color="text-yellow-500" bg="bg-yellow-500/10" />
-            <StatCard icon={Target} label={t("reflex.hitRate") || "Hit Rate"} value={`${stats.cache.hit_rate_percent}%`}
-              sub={`${stats.cache.total_hits}/${stats.cache.total_queries} ${t("reflex.hits") || "Hits"}`} color="text-emerald-500" bg="bg-emerald-500/10" />
-            <StatCard icon={Activity} label={t("reflex.threshold") || "Threshold"} value={`${Math.round(stats.cache.similarity_threshold * 100)}%`}
-              sub={t("reflex.fuzzyMatch") || "Fuzzy Match"} color="text-blue-500" bg="bg-blue-500/10" />
-            <StatCard icon={BarChart3} label={t("reflex.usage") || "Usage"} value={`${stats.cache.usage_percent}%`}
-              sub={`${stats.cache.expired_entries} ${t("reflex.expired") || "Expired"}`} color="text-violet-500" bg="bg-violet-500/10" />
+    <PageLayout title="反射">
+      <div className="flex h-full flex-col overflow-hidden">
+        <div className="flex items-center justify-between border-b border-border px-3 lg:px-6 py-4">
+          <div className="flex items-center gap-2 lg:gap-3">
+            <Zap size={20} className="text-yellow-500" />
+            <h1 className="text-lg font-semibold">Reflex · 反射层观察面</h1>
+            <span className="rounded-full bg-yellow-500/10 px-2 py-0.5 text-xs font-medium text-yellow-500">
+              事件捕获 → 轻量规则 → 回调/路由/拦截 · 零 LLM
+            </span>
           </div>
-        )}
-
-        {/* Tabs */}
-        <div className="flex gap-2">
-          {tabs.map((tabItem) => (
-            <button key={tabItem.id} onClick={() => setTab(tabItem.id)}
-              className={cn("flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs lg:text-sm transition-colors",
-                tab === tabItem.id ? "bg-yellow-500/10 text-yellow-600 font-medium" : "hover:bg-muted text-muted-foreground")}>
-              <tabItem.icon size={14} /> {tabItem.label}
-            </button>
-          ))}
+          <button onClick={fetchAll}
+            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs lg:text-sm hover:bg-muted transition-colors">
+            <RefreshCw size={14} /> 刷新
+          </button>
         </div>
 
-        {/* Cache Management Tab */}
-        {tab === "cache" && (
-          <div className="space-y-4">
-            {/* Create */}
-            <div className="rounded-xl border border-border p-3 lg:p-4 space-y-3">
-              <h3 className="text-xs lg:text-sm font-medium">{t("reflex.addEntry") || "Add Entry"}</h3>
-              <div className="grid grid-cols-2 gap-2 lg:gap-3">
-                <input value={newQuery} onChange={(e) => setNewQuery(e.target.value)}
-                  placeholder={t("reflex.queryPlaceholder") || "Query pattern..."}
-                  className="rounded-lg border border-border bg-background px-3 py-2 text-xs lg:text-sm outline-none focus:ring-2 focus:ring-yellow-500/20" />
-                <input value={newResponse} onChange={(e) => setNewResponse(e.target.value)}
-                  placeholder={t("reflex.responsePlaceholder") || "Enter response content..."}
-                  className="rounded-lg border border-border bg-background px-3 py-2 text-xs lg:text-sm outline-none focus:ring-2 focus:ring-yellow-500/20" />
-              </div>
-              <div className="flex flex-col sm:flex-row gap-2 lg:gap-3">
-                <input value={newCategory} onChange={(e) => setNewCategory(e.target.value)}
-                  placeholder={t("reflex.category") || "Category"}
-                  className="w-32 rounded-lg border border-border bg-background px-3 py-2 text-xs lg:text-sm outline-none focus:ring-2 focus:ring-yellow-500/20" />
-                <div className="flex items-center gap-2">
-                  <label className="text-xs text-muted-foreground">{t("reflex.importance") || "Importance"}</label>
-                  <input type="range" min="0" max="1" step="0.1" value={newImportance}
-                    onChange={(e) => setNewImportance(parseFloat(e.target.value))} className="w-20" />
-                  <span className="text-xs w-6">{newImportance}</span>
-                </div>
-                <button onClick={handleCreate} disabled={loading}
-                  className="flex items-center gap-1.5 rounded-lg bg-yellow-500 px-4 py-2 text-xs lg:text-sm text-white hover:bg-yellow-600 disabled:opacity-50">
-                  {loading ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-                  {t("common.add") || "Add"}
-                </button>
+        <div className="flex-1 overflow-y-auto p-3 lg:p-6 space-y-3 lg:space-y-6">
+          {/* Stats */}
+          {stats && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 lg:gap-4">
+              <StatCard icon={Zap} label="事件总数" value={String(stats.total)}
+                sub={`handled ${stats.callbacks} · routed ${stats.routed} · blocked ${stats.blocked}`}
+                color="text-yellow-500" bg="bg-yellow-500/10" />
+              <StatCard icon={Timer} label="事件延迟（平均）" value={formatMs(stats.avg_latency_ms)}
+                sub={`最大 ${formatMs(stats.max_latency_ms)}`}
+                color="text-blue-500" bg="bg-blue-500/10" />
+              <StatCard icon={ShieldAlert} label="熔断状态" value={openCircuits > 0 ? `${openCircuits} 开路` : "全部闭合"}
+                sub={`规则 ${stats.rules.length} · 开路次数 ${stats.rules.reduce((a, r) => a + r.circuit_trips, 0)} · 报错风暴 ${stats.error_storms}`}
+                color={openCircuits > 0 ? "text-red-500" : "text-emerald-500"}
+                bg={openCircuits > 0 ? "bg-red-500/10" : "bg-emerald-500/10"} />
+              <StatCard icon={Activity} label="风暴护栏丢弃" value={String(stats.dropped)}
+                sub={Object.entries(stats.dropped_by_kind).map(([k, v]) => `${k}:${v}`).join(" ") || "无丢弃"}
+                color="text-violet-500" bg="bg-violet-500/10" />
+            </div>
+          )}
+
+          {/* 熔断状态 · 规则表 */}
+          {stats && stats.rules.length > 0 && (
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 space-y-3">
+              <h3 className="text-xs lg:text-sm font-medium flex items-center gap-2">
+                <ShieldAlert size={14} className="text-yellow-500" /> 熔断状态 · 规则
+              </h3>
+              <div className="rounded-lg border border-border overflow-x-auto">
+                <table className="w-full text-xs lg:text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/50">
+                      <th className="px-2 lg:px-4 py-2 text-left text-xs font-medium text-muted-foreground">规则</th>
+                      <th className="px-2 lg:px-4 py-2 text-left text-xs font-medium text-muted-foreground">动作</th>
+                      <th className="px-2 lg:px-4 py-2 text-right text-xs font-medium text-muted-foreground">优先级</th>
+                      <th className="px-2 lg:px-4 py-2 text-right text-xs font-medium text-muted-foreground">调用</th>
+                      <th className="px-2 lg:px-4 py-2 text-right text-xs font-medium text-muted-foreground">失败</th>
+                      <th className="px-2 lg:px-4 py-2 text-left text-xs font-medium text-muted-foreground">熔断</th>
+                      <th className="px-2 lg:px-4 py-2 text-right text-xs font-medium text-muted-foreground">开路次数</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stats.rules.map((r) => (
+                      <tr key={r.name} className="border-b border-border last:border-0 hover:bg-muted/30">
+                        <td className="px-2 lg:px-4 py-2 font-mono text-xs">
+                          {r.name}
+                          {!r.enabled && <span className="ml-2 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">停用</span>}
+                        </td>
+                        <td className="px-2 lg:px-4 py-2 text-xs">{r.action}</td>
+                        <td className="px-2 lg:px-4 py-2 text-right text-xs">{r.priority}</td>
+                        <td className="px-2 lg:px-4 py-2 text-right text-xs">{r.calls}</td>
+                        <td className={cn("px-2 lg:px-4 py-2 text-right text-xs", r.failures > 0 ? "text-red-500" : "text-muted-foreground")}>{r.failures}</td>
+                        <td className="px-2 lg:px-4 py-2">
+                          <span className={cn("rounded-full px-2 py-0.5 text-[10px]", CIRCUIT_COLORS[r.circuit] || "bg-muted")}>
+                            {r.circuit === "open" ? "开路" : r.circuit === "half_open" ? "半开" : "闭合"}
+                          </span>
+                        </td>
+                        <td className="px-2 lg:px-4 py-2 text-right text-xs">{r.circuit_trips}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
+          )}
 
-            {/* Filters */}
-            <div className="flex items-center gap-2 lg:gap-3">
-              <div className="relative flex-1 max-w-xs">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <input value={searchCategory} onChange={(e) => setSearchCategory(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && fetchEntries()}
-                  placeholder={t("reflex.filterCategory") || "Filter Category"}
-                  className="w-full rounded-lg border border-border bg-background py-2 pl-9 pr-3 text-xs lg:text-sm outline-none focus:ring-2 focus:ring-yellow-500/20" />
-              </div>
-              <button onClick={handleCleanup}
-                className="flex items-center gap-1 rounded-lg border border-border px-3 py-2 text-xs lg:text-sm text-muted-foreground hover:bg-muted">
-                <Trash2 size={14} /> {t("reflex.cleanup") || "Cleanup"}
-              </button>
-              <span className="text-xs text-muted-foreground">{entries.length} {t("reflex.entries") || "Entries"}</span>
+          {/* 事件流 */}
+          <div className="rounded-xl border border-border bg-card p-3 lg:p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs lg:text-sm font-medium flex items-center gap-2">
+                <Radio size={14} className="text-yellow-500" /> 事件流（实时）
+              </h3>
+              <span className="text-xs text-muted-foreground">
+                {events.length} 条展示 / 共 {eventTotal} 条
+              </span>
             </div>
-
-            {/* Entry List */}
-            {entries.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-                <Zap size={40} className="mb-3 opacity-30" />
-                <p className="text-xs lg:text-sm">{t("reflex.noEntries") || "No cache entries yet"}</p>
+            {events.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                <Radio size={36} className="mb-3 opacity-30" />
+                <p className="text-xs lg:text-sm">暂无事件——通过 /ws_acp 发送真实信号即刻上屏</p>
               </div>
             ) : (
-              <div className="space-y-2">
-                {entries.map((e) => (
-                  <div key={e.entry_id} className="rounded-xl border border-border bg-card p-3 lg:p-4">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1 min-w-0 space-y-2">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs lg:text-sm font-medium">{e.query}</span>
-                          {e.category && (
-                            <span className="rounded-full bg-yellow-500/10 px-2 py-0.5 text-[10px] text-yellow-600">
-                              {e.category}
-                            </span>
-                          )}
-                          <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
-                            {e.source}
+              <div className="rounded-lg border border-border overflow-x-auto">
+                <table className="w-full text-xs lg:text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/50">
+                      <th className="px-2 lg:px-4 py-2 text-left text-xs font-medium text-muted-foreground">时间</th>
+                      <th className="px-2 lg:px-4 py-2 text-left text-xs font-medium text-muted-foreground">事件</th>
+                      <th className="px-2 lg:px-4 py-2 text-left text-xs font-medium text-muted-foreground">终态</th>
+                      <th className="px-2 lg:px-4 py-2 text-right text-xs font-medium text-muted-foreground">延迟</th>
+                      <th className="px-2 lg:px-4 py-2 text-left text-xs font-medium text-muted-foreground">来源</th>
+                      <th className="px-2 lg:px-4 py-2 text-left text-xs font-medium text-muted-foreground">预览</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {events.map((e) => (
+                      <tr key={e.event_id} className="border-b border-border last:border-0 hover:bg-muted/30">
+                        <td className="px-2 lg:px-4 py-2 text-xs font-mono text-muted-foreground">{formatTime(e.ts)}</td>
+                        <td className="px-2 lg:px-4 py-2">
+                          <span className="rounded-full bg-yellow-500/10 px-2 py-0.5 text-[10px] text-yellow-600 font-mono">{e.kind}</span>
+                        </td>
+                        <td className="px-2 lg:px-4 py-2">
+                          <span className={cn("rounded-full px-2 py-0.5 text-[10px]", VERDICT_COLORS[e.verdict] || "bg-muted")}>
+                            {e.verdict}
                           </span>
-                        </div>
-                        {editId === e.entry_id ? (
-                          <div className="flex gap-2">
-                            <input value={editResponse} onChange={(ev) => setEditResponse(ev.target.value)}
-                              className="flex-1 rounded-lg border border-border bg-background px-3 py-1.5 text-xs lg:text-sm" />
-                            <button onClick={() => handleSaveEdit(e.entry_id)}
-                              className="rounded-md p-1.5 text-emerald-500 hover:bg-emerald-500/10"><Save size={14} /></button>
-                            <button onClick={() => setEditId(null)}
-                              className="rounded-md p-1.5 text-muted-foreground hover:bg-muted"><XCircle size={14} /></button>
-                          </div>
-                        ) : (
-                          <p className="text-xs lg:text-sm text-muted-foreground">{e.response}</p>
-                        )}
-                        <div className="flex items-center gap-2 lg:gap-4 text-xs text-muted-foreground">
-                          <span>{t("reflex.hits") || "Hits"}: <strong>{e.hit_count}</strong></span>
-                          <span>{t("reflex.importance") || "Importance"}: {e.importance}</span>
-                          <span>{t("reflex.created") || "Created"}: {formatTime(e.created_at)}</span>
-                          {e.last_hit_at > 0 && <span>{t("reflex.lastHit") || "Last Hit"}: {formatTime(e.last_hit_at)}</span>}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1 shrink-0 ml-4">
-                        <button onClick={() => { setEditId(e.entry_id); setEditResponse(e.response); }}
-                          className="rounded-md p-1.5 text-muted-foreground hover:text-blue-500 hover:bg-blue-500/10 transition-colors">
-                          <Edit3 size={14} />
-                        </button>
-                        <button onClick={() => handleDelete(e.entry_id)}
-                          className="rounded-md p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 transition-colors">
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                        </td>
+                        <td className={cn("px-2 lg:px-4 py-2 text-right text-xs font-mono",
+                          (e.latency_ms ?? 0) > 5 ? "text-yellow-500" : "text-emerald-500")}>
+                          {formatMs(e.latency_ms)}
+                        </td>
+                        <td className="px-2 lg:px-4 py-2 text-xs text-muted-foreground">{e.source || "-"}</td>
+                        <td className="px-2 lg:px-4 py-2 text-xs text-muted-foreground max-w-[280px] truncate"
+                          title={e.text || e.reason || ""}>
+                          {e.text || e.reason || "-"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>
-        )}
 
-        {/* Lookup Tab */}
-        {tab === "lookup" && (
-          <div className="space-y-4">
-            <div className="rounded-xl border border-border bg-card p-5 space-y-4">
-              <h3 className="text-xs lg:text-sm font-semibold">{t("reflex.testLookup") || "Test Lookup"}</h3>
-              <p className="text-xs text-muted-foreground">{t("reflex.lookupDesc") || "Test the reflex cache with a query"}</p>
-              <div className="flex flex-col sm:flex-row gap-2 lg:gap-3">
-                <input value={lookupQuery} onChange={(e) => setLookupQuery(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleLookup()}
-                  placeholder={t("reflex.lookupPlaceholder") || "Enter query to look up..."}
-                  className="flex-1 rounded-lg border border-border bg-background px-4 py-3 text-xs lg:text-sm outline-none focus:ring-2 focus:ring-yellow-500/20" />
-                <button onClick={handleLookup} disabled={loading}
-                  className="flex items-center gap-1.5 rounded-lg bg-yellow-500 px-5 py-3 text-xs lg:text-sm text-white hover:bg-yellow-600 disabled:opacity-50">
-                  {loading ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
-                  {t("reflex.lookup") || "Lookup"}
-                </button>
+          {/* 事件分类计数 */}
+          {stats && Object.keys(stats.by_kind).length > 0 && (
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 space-y-3">
+              <h3 className="text-xs lg:text-sm font-medium flex items-center gap-2">
+                <BarChart3 size={14} className="text-yellow-500" /> 按事件类目
+              </h3>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(stats.by_kind).map(([kind, count]) => (
+                  <span key={kind} className="rounded-full bg-yellow-500/10 px-3 py-1 text-xs text-yellow-600">
+                    {kind}: {count}
+                  </span>
+                ))}
               </div>
-
-              {lookupResult && (
-                <div className={cn("rounded-xl border p-5 space-y-3", lookupResult.hit ? "border-emerald-500/30 bg-emerald-500/5" : "border-red-500/30 bg-red-500/5")}>
-                  <div className="flex items-center gap-2">
-                    {lookupResult.hit ? <CheckCircle size={18} className="text-emerald-500" /> : <XCircle size={18} className="text-red-500" />}
-                    <span className="font-medium">{lookupResult.hit ? (t("reflex.cacheHit") || "Cache Hit") : (t("reflex.cacheMiss") || "Cache Miss")}</span>
-                  </div>
-                  {lookupResult.hit && (
-                    <>
-                      <div className="flex gap-2 lg:gap-4 text-xs text-muted-foreground">
-                        <span>{t("reflex.matchedQuery") || "Matched Query"}: {lookupResult.query}</span>
-                        <span>{t("reflex.hitCount") || "Hit Count"}: {lookupResult.hit_count}</span>
-                        {lookupResult.category && <span>{t("reflex.category") || "Category"}: {lookupResult.category}</span>}
-                      </div>
-                      <div className="rounded-lg bg-muted p-3 lg:p-4">
-                        <p className="text-xs lg:text-sm">{lookupResult.response}</p>
-                      </div>
-                    </>
-                  )}
-                </div>
-              )}
             </div>
-          </div>
-        )}
-
-        {/* Config Tab */}
-        {tab === "config" && stats && (
-          <div className="space-y-4">
-            <div className="rounded-xl border border-border bg-card p-5 space-y-4">
-              <h3 className="text-xs lg:text-sm font-semibold">{t("reflex.cacheConfig") || "Cache Configuration"}</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 lg:gap-4 sm:gap-6">
-                <div>
-                  <label className="text-xs text-muted-foreground">{t("reflex.maxEntries") || "Max Entries"}</label>
-                  <div className="mt-1 text-xl lg:text-2xl font-bold">{stats.cache.total_entries}<span className="text-xs lg:text-sm font-normal text-muted-foreground"> / 5000</span></div>
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground">{t("reflex.similarityThreshold") || "Similarity Threshold"}</label>
-                  <div className="mt-1 text-xl lg:text-2xl font-bold">{Math.round(stats.cache.similarity_threshold * 100)}%</div>
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground">{t("reflex.defaultTTL") || "Default TTL (seconds)"}</label>
-                  <div className="mt-1 text-xl lg:text-2xl font-bold">24h</div>
-                </div>
-              </div>
-
-              {/* Category breakdown */}
-              {Object.keys(stats.cache.by_category).length > 0 && (
-                <div>
-                  <h4 className="text-xs text-muted-foreground mb-2">{t("reflex.byCategory") || "By Category"}</h4>
-                  <div className="flex flex-wrap gap-2">
-                    {Object.entries(stats.cache.by_category).map(([cat, count]) => (
-                      <span key={cat} className="rounded-full bg-yellow-500/10 px-3 py-1 text-xs text-yellow-600">
-                        {cat}: {count}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Source breakdown */}
-              {Object.keys(stats.cache.by_source).length > 0 && (
-                <div>
-                  <h4 className="text-xs text-muted-foreground mb-2">{t("reflex.bySource") || "By Source"}</h4>
-                  <div className="flex flex-wrap gap-2">
-                    {Object.entries(stats.cache.by_source).map(([src, count]) => (
-                      <span key={src} className="rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">
-                        {src}: {count}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
-    </div>
-  
-      </PageLayout>
-    );
+    </PageLayout>
+  );
 }
 
 function StatCard({ icon: Icon, label, value, sub, color, bg }: {
