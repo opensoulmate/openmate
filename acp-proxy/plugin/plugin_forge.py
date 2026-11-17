@@ -23,6 +23,8 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import zipfile
 from pathlib import Path
 from typing import Any, Callable
 
@@ -509,6 +511,9 @@ class PluginForge:
             "version": manifest.version,
             "description": manifest.description,
             "permissions": list(manifest.permissions),
+            # hooks：plugin.yaml 侧未建模 hooks 声明（同 to_frontend_manifest 占位
+            # []）；models.PluginManifest 的 hooks 声明在 loader 侧校验
+            "hooks": list(getattr(manifest, "hooks", ()) or ()),
             "nav": {"label": manifest.nav.label, "icon": manifest.nav.icon} if manifest.nav else None,
             "pages": [{"id": p.id, "title": p.title} for p in manifest.pages],
             "tools": [
@@ -517,3 +522,210 @@ class PluginForge:
                 for t in manifest.tools
             ],
         }
+
+    # ── 市场 step 1：打包/导入导出（Sprint C）────────────────────────
+    #
+    # 来源：next-sprints 插件市场三步走 step 1——插件打包/导入导出（S）：目录→
+    # zip + 清单校验 + 权限预览，**安装复用 forge 确认链**（生成≠安装铁律不变）。
+    # zip-slip 必拒（越界/绝对路径/盘符/反斜杠/符号链接/超限显式报因）。
+
+    def export_zip(self, plugin_id: str, dest: str | Path) -> dict[str, Any]:
+        """插件打包导出：plugins/<id>/ → zip（成员名 <id>/<rel>，垃圾文件不入包）。
+
+        导出前跑清单校验（非法清单不导出——包必须是可导入的合法插件）。
+        """
+        src = self.plugins_dir / plugin_id
+        if not src.is_dir():
+            raise ForgeError(f"插件不存在: {plugin_id}")
+        try:
+            manifest = load_yaml_manifest(src)
+        except ManifestError as e:
+            raise ForgeError(f"清单非法，拒绝导出: {e}") from e
+        dest = Path(dest)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        entries: list[str] = []
+        with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zf:
+            for p in sorted(src.rglob("*")):
+                if not p.is_file():
+                    continue
+                rel = p.relative_to(src)
+                if any(part in _ZIP_SKIP_NAMES or part.endswith(".pyc")
+                       for part in rel.parts):
+                    continue
+                zf.write(p, f"{plugin_id}/{rel.as_posix()}")
+                entries.append(rel.as_posix())
+        return {
+            "plugin_id": plugin_id,
+            "version": manifest.version,
+            "zip": str(dest),
+            "files": entries,
+            "count": len(entries),
+        }
+
+    def preview_zip(self, zip_path: str | Path) -> dict[str, Any]:
+        """导入预览（零落盘）：zip-slip 拒绝 + 清单校验 + 权限预览（hooks/permissions
+        白描）+ 文件清单。深度校验（entry/DSL/自带测试）在 install_zip 的 dry-run。"""
+        with tempfile.TemporaryDirectory(prefix="plugin-preview-") as td:
+            root = _stage_zip(zip_path, Path(td))
+            try:
+                manifest = load_yaml_manifest(root)
+            except ManifestError as e:
+                raise ForgeError(f"清单非法，拒绝导入: {e}") from e
+            preview = self._preview_manifest(root)
+            return {
+                "ok": True,
+                "manifest": preview,
+                "permission_preview": {
+                    "permissions": preview["permissions"],
+                    "hooks": preview["hooks"],
+                    "tools_requiring_approval": [
+                        t["name"] for t in preview["tools"] if t["approval"]
+                    ],
+                },
+                "files": sorted(
+                    str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()),
+            }
+
+    def install_zip(self, zip_path: str | Path, *, confirmed: bool,
+                    hot_load: Callable[[str], dict[str, Any]] | None = None,
+                    decided_by: str = "用户") -> dict[str, Any]:
+        """导入安装（复用 forge 确认链）：解包→.drafts/<id> 暂存→dry_run→install。
+
+        - zip-slip 必拒（解包阶段显式报因，零落盘残留）；
+        - dry-run 不过→拒绝导入并清掉暂存（照 forge「dry-run 不过不能安装」）；
+        - confirmed=false→只回确认所需信息（权限预览+dry-run 报告），暂存保留
+          （同 forge 草稿语义，plugins/<id> 绝不出现——铁律：生成≠安装）；
+        - confirmed=true→走 self.install 确认链（内部重跑 dry-run，不信任旧报告）。
+        """
+        with tempfile.TemporaryDirectory(prefix="plugin-import-") as td:
+            root = _stage_zip(zip_path, Path(td))
+            try:
+                manifest = load_yaml_manifest(root)
+            except ManifestError as e:
+                raise ForgeError(f"清单非法，拒绝导入: {e}") from e
+            plugin_id = manifest.id
+            if not ID_PATTERN.match(plugin_id):
+                raise ForgeError(f"id 非法: {plugin_id!r}")
+            if (self.plugins_dir / plugin_id).exists():
+                raise ForgeError(f"插件已存在: {plugin_id}（升级请先显式卸载）")
+            draft_dir = self.drafts_dir / plugin_id
+            if draft_dir.exists():
+                shutil.rmtree(draft_dir)   # 同 id 旧暂存覆盖（与 forge.draft 同语义）
+            self.drafts_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(root, draft_dir)
+        try:
+            report = self.dry_run(plugin_id)   # 完整深度校验（清单/DSL/entry/自带测试）
+            if not report["ok"]:
+                shutil.rmtree(draft_dir, ignore_errors=True)   # 垃圾暂存不留
+                raise ForgeError(
+                    f"dry-run 未通过，拒绝导入: {plugin_id}（见 checks）")
+            preview = self._preview_manifest(draft_dir)
+            if not confirmed:
+                return {
+                    "installed": False,
+                    "needs_confirmation": True,
+                    "draft_id": plugin_id,
+                    "decided_by": decided_by,
+                    "manifest": preview,
+                    "permission_preview": {
+                        "permissions": preview["permissions"],
+                        "hooks": preview["hooks"],
+                        "tools_requiring_approval": [
+                            t["name"] for t in preview["tools"] if t["approval"]
+                        ],
+                    },
+                    "dry_run": report,
+                    "message": ("导入需要用户确认（铁律：生成≠安装）。"
+                                "确认后带 confirmed=true 再次调用。"),
+                }
+            result = self.install(plugin_id, confirmed=True, hot_load=hot_load)
+            result["decided_by"] = decided_by
+            result["permission_preview"] = {
+                "permissions": preview["permissions"],
+                "hooks": preview["hooks"],
+                "tools_requiring_approval": [
+                    t["name"] for t in preview["tools"] if t["approval"]
+                ],
+            }
+            return result
+        except Exception:
+            if not confirmed:
+                raise
+            shutil.rmtree(draft_dir, ignore_errors=True)   # 确认失败不留悬空暂存
+            raise
+
+
+# ---- zip 解包安全面（Sprint C 市场 step 1：zip-slip 必拒）----
+
+ZIP_MAX_MEMBERS = 2000            # 成员数上限（防压缩炸弹铺量）
+ZIP_MAX_TOTAL_BYTES = 50 * 1024 * 1024   # 解包总量上限
+ZIP_MAX_FILE_BYTES = 10 * 1024 * 1024    # 单文件上限
+_ZIP_SKIP_NAMES = {"__pycache__", "dry-run-report.json", ".DS_Store"}
+
+
+def _safe_extract_zip(zip_path: str | Path, dest: Path) -> list[str]:
+    """安全解包（zip-slip 必拒）：越界/绝对路径/盘符/反斜杠/符号链接/超限 →
+    ForgeError 显式报因，绝不落半包。返回解出的成员名列表。"""
+    dest_res = dest.resolve()
+    extracted: list[str] = []
+    try:
+        zf_ctx = zipfile.ZipFile(zip_path)
+    except (OSError, zipfile.BadZipFile) as e:
+        raise ForgeError(f"zip 无法读取: {e}") from e
+    with zf_ctx as zf:
+        infos = zf.infolist()
+        if len(infos) > ZIP_MAX_MEMBERS:
+            raise ForgeError(
+                f"zip-slip/炸弹拒绝：成员数 {len(infos)} 超上限 {ZIP_MAX_MEMBERS}")
+        total = 0
+        for info in infos:
+            name = info.filename
+            # ① 绝对路径 / 盘符 / 反斜杠 / 空名
+            if (not name or name.startswith(("/", "\\")) or "\\" in name
+                    or (len(name) > 1 and name[1] == ":")):
+                raise ForgeError(f"zip-slip 拒绝（非法成员名）: {name!r}")
+            # ② 符号链接成员（外链逃逸面）
+            mode = (info.external_attr >> 16) & 0o170000
+            if mode == 0o120000:
+                raise ForgeError(f"zip-slip 拒绝（符号链接成员）: {name!r}")
+            # ③ 逐段 .. 越界 + 解析后必须留在 dest 内
+            parts = Path(name).parts
+            if any(p == ".." for p in parts):
+                raise ForgeError(f"zip-slip 拒绝（越界成员）: {name!r}")
+            target = (dest / name).resolve()
+            if target != dest_res and dest_res not in target.parents:
+                raise ForgeError(f"zip-slip 拒绝（越界成员）: {name!r}")
+            if info.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            # ④ 体积上限（成员/总量）
+            if info.file_size > ZIP_MAX_FILE_BYTES:
+                raise ForgeError(
+                    f"zip 炸弹拒绝：{name!r} 解压后 {info.file_size}B 超单文件上限")
+            total += info.file_size
+            if total > ZIP_MAX_TOTAL_BYTES:
+                raise ForgeError(
+                    f"zip 炸弹拒绝：累计 {total}B 超总量上限 {ZIP_MAX_TOTAL_BYTES}")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with zf.open(info) as src, open(target, "wb") as out:
+                shutil.copyfileobj(src, out)
+            extracted.append(name)
+    return extracted
+
+
+def _stage_zip(zip_path: str | Path, dest: Path) -> Path:
+    """安全解包并定位插件根（约定：成员共享单一顶层目录 <id>/）。
+
+    返回插件根目录（<dest>/<id>）。顶层混杂/无目录结构 → 显式报因。
+    """
+    extracted = _safe_extract_zip(zip_path, dest)
+    if not extracted:
+        raise ForgeError("zip 为空，拒绝导入")
+    tops = {Path(n).parts[0] for n in extracted if Path(n).parts}
+    if len(tops) != 1:
+        raise ForgeError(
+            f"zip 结构非法：成员必须共享单一顶层目录 <id>/（实际顶层: {sorted(tops)}）")
+    root = (dest / tops.pop()).resolve()
+    if root == dest.resolve() or not root.is_dir():
+        raise ForgeError("zip 结构非法：顶层必须是插件目录")
+    return root
