@@ -268,8 +268,9 @@ class TestWiring:
         # 主循环收口 + code-mode批内两处都接
         assert src.count("_tool_recovery_execute(") >= 3  # 定义1 + 调用2
         # 主循环调用在 tool_results.append 之前
+        # （窗口含 Pi #1 after_tool_call 钩子块——插在收口与入结果之间）
         main_call = src.index("result = await self._tool_recovery_execute(")
-        tail = src[main_call:main_call + 600]
+        tail = src[main_call:main_call + 1400]
         assert "tool_results.append({" in tail  # 收口后就近入结果（比对全文首匹配会命中更早分支）
         # code-mode批内调用紧跟 _code_mode_tool_call
         cm_call = src.index("_r = await self._tool_recovery_execute(")

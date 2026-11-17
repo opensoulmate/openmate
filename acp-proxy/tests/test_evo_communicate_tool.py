@@ -121,7 +121,8 @@ def test_error_paths_visible(tmp_path, monkeypatch):
 class TestRegistrationWiring:
     def test_five_registration_points(self):
         run_src = inspect.getsource(SoulMateAgent._run_llm_with_tools)
-        code_src = inspect.getsource(SoulMateAgent._code_mode_tool_call)
+        # Pi #1 拆钩子面包裹层后执行体=_code_mode_tool_call_inner（接线不变）
+        code_src = inspect.getsource(SoulMateAgent._code_mode_tool_call_inner)
         file_src = Path(inspect.getsourcefile(SoulMateAgent)).read_text(encoding="utf-8")
         assert '"name": "evo_communicate"' in run_src            # ① schema 登记
         assert '"enum": ["set_goal", "query_status", "explain"]' in run_src

@@ -274,7 +274,16 @@ class TestToolDefs:
 
 
 def _load_mcp_client_modules():
+    """装载 mcp-client 侧模块（模块名遮蔽防护，同
+    tests/test_mcp_registry_persist._load_mcp_client_modules——acp-proxy 的
+    routes/main 同名占位会遮蔽 mcp-client 侧导入，导入期让位、导完恢复）。"""
     sys.path.insert(0, MCP_CLIENT_DIR)
+    saved = {}
+    for name in ("routes", "main", "models", "registry"):
+        mod = sys.modules.get(name)
+        if mod is not None and not str(
+                getattr(mod, "__file__", "") or "").startswith(MCP_CLIENT_DIR):
+            saved[name] = sys.modules.pop(name)
     try:
         registry_mod = importlib.import_module("registry")
         models_mod = importlib.import_module("models")
@@ -285,6 +294,12 @@ def _load_mcp_client_modules():
             sys.path.remove(MCP_CLIENT_DIR)
         except ValueError:
             pass
+        for name in ("routes", "main", "models", "registry"):
+            mod = sys.modules.get(name)
+            if mod is not None and str(
+                    getattr(mod, "__file__", "") or "").startswith(MCP_CLIENT_DIR):
+                sys.modules.pop(name, None)
+        sys.modules.update(saved)
 
 
 class FakeConn:
@@ -427,7 +442,8 @@ class TestRouteAndAgentWiring:
     def test_soulmate_dispatch_and_tool_face_wiring(self):
         import agent.soulmate_agent as sma
         run_src = inspect.getsource(sma.SoulMateAgent._run_llm_with_tools)
-        code_src = inspect.getsource(sma.SoulMateAgent._code_mode_tool_call)
+        # Pi #1 拆钩子面包裹层后执行体=_code_mode_tool_call_inner（接线不变）
+        code_src = inspect.getsource(sma.SoulMateAgent._code_mode_tool_call_inner)
         call_src = inspect.getsource(sma.SoulMateAgent._call_mcp_resource_tool)
         fetch_src = inspect.getsource(sma.SoulMateAgent._fetch_mcp_tools)
         # 工具面门（hasMcpResourceServer）：无resource能力Server时不暴露

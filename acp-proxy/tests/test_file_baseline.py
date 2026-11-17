@@ -214,7 +214,8 @@ class TestGuardToolsBaseline:
     def test_tool_names_and_defs(self):
         assert "file_baseline" in TOOL_NAMES
         names = [d["function"]["name"] for d in tool_defs()]
-        assert names == ["run_guard", "repair_loop", "file_baseline"]
+        # Pi #11 后治理组四件套（json_validation 验收校验器入列）
+        assert names == ["run_guard", "repair_loop", "file_baseline", "json_validation"]
 
     def _tools(self, tmp_path):
         return GuardTools(baseline_root=tmp_path / "baseline_root")

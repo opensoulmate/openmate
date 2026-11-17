@@ -231,7 +231,8 @@ class TestSoulmateWiring:
     def test_code_mode_calls_guarded_flow(self):
         from agent.soulmate_agent import SoulMateAgent
 
-        src = inspect.getsource(SoulMateAgent._code_mode_tool_call)
+        # Pi #1 拆钩子面包裹层后执行体=_code_mode_tool_call_inner（接线不变）
+        src = inspect.getsource(SoulMateAgent._code_mode_tool_call_inner)
         assert "session_recall.foreign_read_context(" in src
         assert "foreign_read_approved=" in src
 

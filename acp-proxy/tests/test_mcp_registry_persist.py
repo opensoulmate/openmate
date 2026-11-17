@@ -35,9 +35,25 @@ MCP_CLIENT_DIR = str(Path(__file__).resolve().parents[2] / "mcp-client")
 
 from agent import mcp_resources, retention
 
+# 顶层同名模块冲突面（acp-proxy 与 mcp-client 各有一份 routes/main）
+_TOP_LEVEL_COLLIDE = ("routes", "main", "models", "registry", "persistence")
+
 
 def _load_mcp_client_modules():
+    """装载 mcp-client 侧模块（模块名遮蔽防护）。
+
+    外部同名顶层模块（如 acp-proxy 的 routes——tests/test_reflex_pulse_routes
+    顶层 import routes.pulse 会先行占位 sys.modules）会遮蔽 mcp-client 的
+    `from routes import servers`。导入期临时让位、导完恢复原位并清掉 mcp-client
+    侧缓存（模块对象由返回值持有）——两侧测试互不污染。
+    """
     sys.path.insert(0, MCP_CLIENT_DIR)
+    saved = {}
+    for name in _TOP_LEVEL_COLLIDE:
+        mod = sys.modules.get(name)
+        if mod is not None and not str(
+                getattr(mod, "__file__", "") or "").startswith(MCP_CLIENT_DIR):
+            saved[name] = sys.modules.pop(name)
     try:
         persistence_mod = importlib.import_module("persistence")
         registry_mod = importlib.import_module("registry")
@@ -49,6 +65,12 @@ def _load_mcp_client_modules():
             sys.path.remove(MCP_CLIENT_DIR)
         except ValueError:
             pass
+        for name in _TOP_LEVEL_COLLIDE:
+            mod = sys.modules.get(name)
+            if mod is not None and str(
+                    getattr(mod, "__file__", "") or "").startswith(MCP_CLIENT_DIR):
+                sys.modules.pop(name, None)
+        sys.modules.update(saved)
 
 
 # ── persistence 快照层 ───────────────────────────────────────────

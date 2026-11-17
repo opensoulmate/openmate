@@ -392,7 +392,8 @@ class TestWiring:
         assert src.count("record_file_change(") >= 2, "write_file/patch分支必须记录快照diff"
 
     def test_code_mode_records(self):
-        src = inspect.getsource(SoulMateAgent._code_mode_tool_call)
+        # Pi #1 拆钩子面包裹层后执行体=_code_mode_tool_call_inner（接线不变）
+        src = inspect.getsource(SoulMateAgent._code_mode_tool_call_inner)
         assert src.count("record_file_change(") >= 2, "code_mode内层write_file/patch同样记录"
         src2 = inspect.getsource(SoulMateAgent._run_llm_with_tools)
         assert 'via="code_mode"' in src2, "批内调用轮廓必须标注来源"
@@ -410,7 +411,7 @@ class TestWiring:
 
     def test_write_file_reads_prev_for_diff(self):
         src = inspect.getsource(SoulMateAgent._run_llm_with_tools) + \
-            inspect.getsource(SoulMateAgent._code_mode_tool_call)
+            inspect.getsource(SoulMateAgent._code_mode_tool_call_inner)
         assert src.count("_read_prev_for_diff(") >= 2
 
     def test_digest_collector_consumes_sections(self):

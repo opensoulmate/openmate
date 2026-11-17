@@ -304,7 +304,8 @@ class TestSoulmateWiring:
     def test_code_mode_dispatches(self):
         from agent.soulmate_agent import SoulMateAgent
 
-        src = inspect.getsource(SoulMateAgent._code_mode_tool_call)
+        # Pi #1 拆钩子面包裹层后执行体=_code_mode_tool_call_inner（接线不变）
+        src = inspect.getsource(SoulMateAgent._code_mode_tool_call_inner)
         assert 'if func_name == "search_chat_history":' in src
         assert "session_recall.execute_tool(" in src
         assert "search_chat_history" in SoulMateAgent._CODE_MODE_BUILTIN_TOOLS

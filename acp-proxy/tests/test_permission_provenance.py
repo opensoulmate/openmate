@@ -330,7 +330,8 @@ class TestSoulmateWiring:
         assert "tool_calls_log.append" not in src
 
     def test_code_mode_inner_calls_build_provenance(self):
-        src = inspect.getsource(SoulMateAgent._code_mode_tool_call)
+        # Pi #1 拆钩子面包裹层后执行体=_code_mode_tool_call_inner（接线不变）
+        src = inspect.getsource(SoulMateAgent._code_mode_tool_call_inner)
         assert "build_provenance(" in src
         assert 'via="code_mode"' in src
 
