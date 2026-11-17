@@ -270,6 +270,10 @@ export function WorkspacePanel({
 
   // Self-contained state — no external store dependency
   const [workspaceMap, setWorkspaceMap] = useState<Record<string, WorkspaceState>>({});
+  // pending* 一次性消费标记（见下方两个 effect）：同一 pending 对象只处理一次，
+  // 切会话（sessionId 变）绝不重放——否则陈旧文档 URL 反复触发下载弹窗。
+  const lastHandledPreviewRef = useRef<typeof pendingFilePreview>(null);
+  const lastHandledWebUrlRef = useRef<typeof pendingWebUrl>(null);
 
   // Initialize default tab for this session
   useEffect(() => {
@@ -280,8 +284,14 @@ export function WorkspacePanel({
   }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Handle external file preview requests
+  // 一次性消费 + 不随 sessionId 重放（2026-11-17 修"点会话列表弹下载文档对话框"）：
+  // 修前 deps 含 sessionId 且 pendingFilePreview 消费后不清——切任何会话都用陈旧值
+  // 重开文档预览标签；文档 URL 若进 web 帧（webview/iframe 装载 docx）还会触发
+  // 浏览器/Electron 下载保存对话框。语义归正：仅在预览请求【到来时】开一次标签。
   useEffect(() => {
     if (!pendingFilePreview) return;
+    if (lastHandledPreviewRef.current === pendingFilePreview) return;
+    lastHandledPreviewRef.current = pendingFilePreview;
     setWorkspaceMap(prev => {
       const current = prev[sessionId] ?? { tabs: [createTab('new-tab')], activeTabId: '' };
       // Update the active tab if it's a new-tab, otherwise create a new one
@@ -306,14 +316,41 @@ export function WorkspacePanel({
         return { ...prev, [sessionId]: { tabs: [...current.tabs, newTab], activeTabId: newTab.id } };
       }
     });
-  }, [pendingFilePreview, sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingFilePreview]);
 
   // 桌面壳桥注入：外链/新窗口 → workspace 新 web-browser 标签页
+  // 同样一次性消费 + 不随 sessionId 重放（同上根因）。
+  // 文件端点 URL（/api/file?path=…，文档产物）绝不进 web 帧：帧导航到 docx/xlsx
+  // 等不可渲染类型即触发下载保存对话框（正是本 bug 的弹窗来源）——改走 file-preview
+  // 标签（docx-preview 渲染，不产生下载）。
   useEffect(() => {
     if (!pendingWebUrl) return;
+    if (lastHandledWebUrlRef.current === pendingWebUrl) return;
+    lastHandledWebUrlRef.current = pendingWebUrl;
+    if (/\/api\/file(\?|$)/.test(pendingWebUrl)) {
+      let name = 'file';
+      try {
+        const p = new URL(pendingWebUrl).searchParams.get('path') || '';
+        name = p.split('/').pop() || name;
+      } catch { /* 非法 URL 兜底文件名 */ }
+      setWorkspaceMap(prev => {
+        const current = prev[sessionId] ?? { tabs: [createTab('new-tab')], activeTabId: '' };
+        const newTab: WorkspaceTab = {
+          id: `tab-${Date.now()}-file`,
+          type: 'file-preview',
+          title: name,
+          filePath: pendingWebUrl,
+          history: [],
+          historyIndex: -1,
+        };
+        return { ...prev, [sessionId]: { tabs: [...current.tabs, newTab], activeTabId: newTab.id } };
+      });
+      return;
+    }
     addTab('web-browser', { url: pendingWebUrl });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingWebUrl, sessionId]);
+  }, [pendingWebUrl]);
 
   const wsState = workspaceMap[sessionId] ?? { tabs: [createTab('new-tab')], activeTabId: '' };
   const tabs = wsState.tabs;

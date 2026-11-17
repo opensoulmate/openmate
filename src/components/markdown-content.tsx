@@ -256,9 +256,32 @@ function MediaFileCard({ filePath }: { filePath: string }) {
           <Eye className="w-3 h-3" />
           预览
         </button>
+        {/* 下载入口必须 handler 驱动（fetch→blob→a.click），禁止裸 <a href> 主导航：
+            download 属性跨域（:8092）会被浏览器忽略 → 点击=页面导航到 docx URL，
+            Electron 壳 will-navigate 会把它转成 workspace web-browser 标签页，
+            webview 帧装载 docx 触发"下载文档"保存对话框（用户报障：点会话列表就弹下载）。
+            blob 下载三端一致静默落盘，下载只由本按钮触发。 */}
         <a
           href={downloadUrl}
           download={fileName}
+          role="button"
+          onClick={async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            try {
+              const resp = await fetch(downloadUrl);
+              if (!resp.ok) return;
+              const blob = await resp.blob();
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = fileName;
+              a.click();
+              URL.revokeObjectURL(url);
+            } catch (err) {
+              console.warn('[media-download] Failed:', err);
+            }
+          }}
           className="flex items-center gap-1 px-2 py-1 rounded text-xs text-muted-foreground hover:bg-muted/50 transition-colors"
         >
           <Download className="w-3 h-3" />

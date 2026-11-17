@@ -197,7 +197,7 @@ export function ConversationTree({
                     return (
                       <div key={session.id}
                         role="button" tabIndex={0}
-                        onClick={() => onSelectSession(session, agent)}
+                        onClick={(e) => { e.stopPropagation(); onSelectSession(session, agent); }}
                         onKeyDown={(e) => { if (e.key === 'Enter') onSelectSession(session, agent); }}
                         className={cn(
                           "group w-full text-left pl-8 lg:pl-12 pr-3 py-2.5 lg:py-2 hover:bg-muted/80 active:bg-muted transition-colors cursor-pointer touch-manipulation",
@@ -239,7 +239,7 @@ export function ConversationTree({
                 return (
                   <div key={session.id}
                     role="button" tabIndex={0}
-                    onClick={() => onSelectSession(session, agent)}
+                    onClick={(e) => { e.stopPropagation(); onSelectSession(session, agent); }}
                     onKeyDown={(e) => { if (e.key === 'Enter') onSelectSession(session, agent); }}
                     className={cn(
                       "group w-full text-left pl-8 pr-3 py-2.5 lg:py-2 hover:bg-muted/80 active:bg-muted transition-colors cursor-pointer touch-manipulation",
