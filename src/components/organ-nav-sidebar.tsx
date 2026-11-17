@@ -69,6 +69,9 @@ const SECTIONS: NavSection[] = [
     hasHealth: true,
     items: [
       { key: "hippo", labelKey: "nav.hippo", fallback: "海马体", href: "/hippo", icon: Brain },
+      { key: "reflex", labelKey: "nav.reflex", fallback: "反射", href: "/reflex", icon: Bolt },
+      { key: "nest", labelKey: "nav.nest", fallback: "巢穴", href: "/nest", icon: Home },
+      { key: "pulse", labelKey: "nav.pulse", fallback: "脉搏", href: "/pulse", icon: Heart },
       { key: "limb", labelKey: "nav.limb", fallback: "四肢", href: "/limb", icon: MousePointer },
       { key: "voice", labelKey: "nav.voice", fallback: "声带", href: "/voice", icon: Mic },
       { key: "vision", labelKey: "nav.vision", fallback: "视觉", href: "/vision", icon: ImageIcon },

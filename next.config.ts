@@ -54,7 +54,6 @@ const nextConfig: NextConfig = {
       // 流程 → /workflow（流程/定时/流水线/运行观测）
       { source: "/cron/:path*", destination: "/workflow", permanent: true },
       { source: "/pipeline", destination: "/workflow", permanent: true },
-      { source: "/pulse", destination: "/workflow", permanent: true },
       // 知识文档 → /knowledge + /docs
       { source: "/tags", destination: "/knowledge", permanent: true },
       { source: "/knowledge-requests", destination: "/knowledge", permanent: true },
@@ -62,9 +61,12 @@ const nextConfig: NextConfig = {
       { source: "/devlog", destination: "/docs", permanent: true },
       // 市场合一 → 能力市场（/skills）
       { source: "/marketplace", destination: "/skills", permanent: true },
-      // ── 无用器官删除（有用性判定=删，301 保无断链）────────────────
-      { source: "/reflex", destination: "/chat", permanent: true },
-      { source: "/nest", destination: "/body-map", permanent: true },
+      // ── 器官处置（用户两轮反例改判）───────────────────────────
+      // nest（企业/多租户）、reflex（事件驱动快速应激层）、pulse（时间驱动后台自主循环）
+      // 均为**战略核心/战略能力**，改判「留」：路由已恢复为活页（子系统观察面板），不再 301。
+      // reflex=被动触发求快、pulse=主动轮询求持续；页面只是观察窗，功能实现在另一路。
+      // 企业权限体系（多用户/RBAC/资源级权限/租户隔离/审计）排 P2 首位。
+      // （无器官级删除；仅 will/mate 为死链，见上。）
     ];
   },
   images: {
