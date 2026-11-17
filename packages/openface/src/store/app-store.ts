@@ -75,7 +75,7 @@ export const useAppStore = create<AppLayoutState>((set, get) => ({
     const state = get();
     const existing = state.workspaceTabsBySession[sessionId];
     if (existing) return existing;
-    const defaultTab: WorkspaceTab = { id: `tab-${Date.now()}-0`, type: 'new-tab', title: 'New Tab', history: [], historyIndex: -1 };
+    const defaultTab: WorkspaceTab = { id: `tab-${Date.now()}-0`, type: 'new-tab', title: '新标签页', history: [], historyIndex: -1 };
     return { tabs: [defaultTab], activeTabId: defaultTab.id };
   },
 

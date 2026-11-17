@@ -580,7 +580,7 @@ function ResponseTimeChart({ organs }: { organs: OrganResult[] }) {
     <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
       <div className="flex items-center gap-2 mb-3">
         <TrendingUp size={14} className="text-orange-500" />
-        <h4 className="text-xs font-medium">Response Time Distribution</h4>
+        <h4 className="text-xs font-medium">响应时间分布</h4>
       </div>
       <EChart option={option as any} style={{ height: 200 }} opts={{ renderer: 'svg' }} />
     </div>
@@ -592,8 +592,8 @@ function OrganStatusPieChart({ organs }: { organs: OrganResult[] }) {
     const ok = organs.filter(o => o.status === 'ok').length;
     const err = organs.filter(o => o.status === 'error').length;
     const values = [
-      { status: 'Healthy', count: ok },
-      { status: 'Error', count: err },
+      { status: '正常', count: ok },
+      { status: '异常', count: err },
     ];
     return assembleECharts({
       data: { values },
@@ -612,7 +612,7 @@ function OrganStatusPieChart({ organs }: { organs: OrganResult[] }) {
     <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
       <div className="flex items-center gap-2 mb-3">
         <BarChart3 size={14} className="text-emerald-500" />
-        <h4 className="text-xs font-medium">Organ Status</h4>
+        <h4 className="text-xs font-medium">器官状态</h4>
       </div>
       <EChart option={option as any} style={{ height: 200 }} opts={{ renderer: 'svg' }} />
     </div>
@@ -641,7 +641,7 @@ function HttpRequestRateChart({ httpRequests }: { httpRequests: { path: string; 
     <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
       <div className="flex items-center gap-2 mb-3">
         <TrendingUp size={14} className="text-blue-500" />
-        <h4 className="text-xs font-medium">HTTP Request Rate</h4>
+        <h4 className="text-xs font-medium">HTTP 请求速率</h4>
       </div>
       <EChart option={option as any} style={{ height: 200 }} opts={{ renderer: 'svg' }} />
     </div>
@@ -668,7 +668,7 @@ function ErrorRateChart({ httpErrors }: { httpErrors: { status: string; count: n
     <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
       <div className="flex items-center gap-2 mb-3">
         <BarChart3 size={14} className="text-red-500" />
-        <h4 className="text-xs font-medium">Error Rate</h4>
+        <h4 className="text-xs font-medium">错误率</h4>
       </div>
       <EChart option={option as any} style={{ height: 200 }} opts={{ renderer: 'svg' }} />
     </div>
@@ -695,7 +695,7 @@ function BenchmarkLatencyChart({ results }: { results: BenchmarkResultItem[] }) 
     <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
       <div className="flex items-center gap-2 mb-3">
         <BarChart3 size={14} className="text-primary" />
-        <h4 className="text-xs font-medium">Latency Comparison</h4>
+        <h4 className="text-xs font-medium">延迟对比</h4>
       </div>
       <EChart option={option as any} style={{ height: 250 }} opts={{ renderer: 'svg' }} />
     </div>
@@ -1104,12 +1104,12 @@ export function MonitoringClient() {
   // ── Tab definitions ────────────────────────────────────────
 
   const tabs: { id: MonitoringTab; label: string; icon: React.ElementType; color: string }[] = [
-    { id: 'overview', label: 'Overview', icon: Activity, color: 'text-orange-500' },
-    { id: 'system', label: 'System', icon: BarChart3, color: 'text-blue-500' },
-    { id: 'benchmark', label: 'Benchmark', icon: Gauge, color: 'text-primary' },
-    { id: 'activity', label: 'Activity', icon: Zap, color: 'text-emerald-500' },
-    { id: 'agents', label: 'Agents & Jobs', icon: Bot, color: 'text-cyan-500' },
-    { id: 'architecture', label: 'Architecture', icon: Layers, color: 'text-purple-500' },
+    { id: 'overview', label: '概览', icon: Activity, color: 'text-orange-500' },
+    { id: 'system', label: '系统', icon: BarChart3, color: 'text-blue-500' },
+    { id: 'benchmark', label: '基准测试', icon: Gauge, color: 'text-primary' },
+    { id: 'activity', label: '活动', icon: Zap, color: 'text-emerald-500' },
+    { id: 'agents', label: 'Agent 与任务', icon: Bot, color: 'text-cyan-500' },
+    { id: 'architecture', label: '架构', icon: Layers, color: 'text-purple-500' },
   ];
 
   // ── Register sidebar content (LeftPanel) ───────────────────
@@ -1149,7 +1149,7 @@ export function MonitoringClient() {
                 className="flex items-center justify-center gap-1.5 rounded-lg bg-orange-500/10 border border-orange-500/30 px-3 py-1.5 text-xs font-medium text-orange-500 hover:bg-orange-500/20 transition-colors w-full"
               >
                 <RefreshCw size={12} className={diagLoading ? 'animate-spin' : ''} />
-                {diagLoading ? 'Checking...' : 'Refresh'}
+                {diagLoading ? '检查中...' : '刷新'}
               </button>
             </div>
           }
@@ -1157,7 +1157,7 @@ export function MonitoringClient() {
           emptyState={
             <div className="px-2 py-8 text-center text-muted-foreground/50">
               <Server className="w-8 h-8 mx-auto mb-1.5" />
-              <p className="text-xs">No organs</p>
+              <p className="text-xs">无器官</p>
             </div>
           }
         />
@@ -1195,7 +1195,7 @@ export function MonitoringClient() {
                 )}
               >
                 <div className={cn('w-1.5 h-1.5 rounded-full', autoRefreshMetrics ? 'bg-green-500 animate-pulse' : 'bg-muted-foreground')} />
-                {autoRefreshMetrics ? 'Auto-refresh ON' : 'Auto-refresh OFF'}
+                {autoRefreshMetrics ? '自动刷新已开' : '自动刷新已关'}
               </button>
             </div>
           }
@@ -1203,7 +1203,7 @@ export function MonitoringClient() {
           emptyState={
             <div className="px-2 py-8 text-center text-muted-foreground/50">
               <BarChart3 className="w-8 h-8 mx-auto mb-1.5" />
-              <p className="text-xs">No metrics data</p>
+              <p className="text-xs">无指标数据</p>
             </div>
           }
         />
@@ -1260,7 +1260,7 @@ export function MonitoringClient() {
           emptyState={
             <div className="px-2 py-8 text-center text-muted-foreground/50">
               <Gauge className="w-8 h-8 mx-auto mb-1.5" />
-              <p className="text-xs">No targets</p>
+              <p className="text-xs">无监控目标</p>
             </div>
           }
         />
@@ -1306,7 +1306,7 @@ export function MonitoringClient() {
                 )}
               >
                 <div className={cn('w-1.5 h-1.5 rounded-full', autoRefreshActivity ? 'bg-green-500 animate-pulse' : 'bg-muted-foreground')} />
-                {autoRefreshActivity && sseConnected ? 'SSE Live' : 'Live'}
+                {autoRefreshActivity && sseConnected ? 'SSE 实时' : 'Live'}
               </button>
               <button
                 onClick={handleActivityRefresh}
@@ -1341,13 +1341,13 @@ export function MonitoringClient() {
           title={selectedOrganDetail.label}
           subtitle={selectedOrganDetail.key}
           icon={<Server className="w-5 h-5 text-orange-500" />}
-          badge={selectedOrganDetail.status === 'ok' ? 'Healthy' : 'Error'}
+          badge={selectedOrganDetail.status === 'ok' ? '正常' : '错误'}
           onClose={() => setSelectedOrganDetail(null)}
           sections={[
             {
               title: t('diagnostics.details') || 'Details',
               items: [
-                { label: 'Key', value: selectedOrganDetail.key },
+                { label: '键', value: selectedOrganDetail.key },
                 { label: t('diagnostics.category') || 'Category', value: categoryLabels[selectedOrganDetail.category] || selectedOrganDetail.category },
                 { label: t('diagnostics.status') || 'Status', value: selectedOrganDetail.status.toUpperCase(), icon: selectedOrganDetail.status === 'ok' ? <CheckCircle className="w-3.5 h-3.5 text-emerald-500" /> : <XCircle className="w-3.5 h-3.5 text-red-500" /> },
                 { label: t('diagnostics.statusCode') || 'Status Code', value: String(selectedOrganDetail.status_code) },
@@ -1399,7 +1399,7 @@ export function MonitoringClient() {
 
   return (
     <PageLayout
-      title="Monitoring"
+      title="监控"
       icon={<Activity size={16} className="text-orange-500" />}
     >
       <div className="h-full overflow-y-auto">
@@ -1608,7 +1608,7 @@ export function MonitoringClient() {
                           : 'bg-muted border-border text-muted-foreground',
                       )}
                     >
-                      {autoRefreshMetrics ? t('metrics.autoRefresh', 'Auto-refresh ON') : t('metrics.autoRefreshOff', 'Auto-refresh OFF')}
+                      {autoRefreshMetrics ? t('metrics.autoRefresh', '自动刷新已开') : t('metrics.autoRefreshOff', '自动刷新已关')}
                     </button>
                     <button onClick={fetchMetrics} className="px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-accent">
                       {t('metrics.refresh', 'Refresh')}
@@ -1732,9 +1732,9 @@ export function MonitoringClient() {
                   <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
                     <div className="text-xs lg:text-sm font-medium mb-3">ℹ️ {t('metrics.instanceInfo', 'Instance Info')}</div>
                     <div className="flex gap-2 lg:gap-6 text-xs">
-                      <div><span className="text-muted-foreground">Version: </span><span className="font-mono">{metrics.info.version}</span></div>
+                      <div><span className="text-muted-foreground">版本： </span><span className="font-mono">{metrics.info.version}</span></div>
                       <div><span className="text-muted-foreground">Python: </span><span className="font-mono">{metrics.info.python}</span></div>
-                      <div><span className="text-muted-foreground">OS: </span><span className="font-mono">{metrics.info.os}</span></div>
+                      <div><span className="text-muted-foreground">操作系统： </span><span className="font-mono">{metrics.info.os}</span></div>
                     </div>
                   </div>
                 )}
@@ -2226,15 +2226,15 @@ export function MonitoringClient() {
             <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
               <div className="flex items-center gap-2 mb-3">
                 <Bot size={14} className="text-cyan-500" />
-                <h4 className="text-xs font-medium">Agent Sessions (goose peek)</h4>
+                <h4 className="text-xs font-medium">Agent 会话（goose peek）</h4>
               </div>
               {peekErr ? (
                 <p className="text-xs text-red-500">{peekErr}</p>
               ) : !agentPeek || agentPeek.sessions.length === 0 ? (
                 <div className="py-8 text-center text-muted-foreground/50">
                   <Bot className="w-8 h-8 mx-auto mb-1.5" />
-                  <p className="text-xs">No agent sessions recorded</p>
-                  <p className="text-[10px] mt-1">Sessions appear after a chat task runs via ACP proxy</p>
+                  <p className="text-xs">暂无 Agent 会话记录</p>
+                  <p className="text-[10px] mt-1">通过 ACP 代理运行聊天任务后出现会话</p>
                 </div>
               ) : (
                 <div className="divide-y divide-border">
@@ -2252,16 +2252,16 @@ export function MonitoringClient() {
                         )}
                       </div>
                       <div className="flex items-center gap-3 flex-wrap text-[10px] text-muted-foreground">
-                        <span>turns <span className="font-mono text-foreground">{s.durable_turns}</span></span>
-                        <span>idle <span className="font-mono text-foreground">{formatUptime(Math.floor(s.idle_seconds))}</span></span>
-                        <span>buffered <span className="font-mono text-foreground">{s.buffered}</span></span>
+                        <span>轮 <span className="font-mono text-foreground">{s.durable_turns}</span></span>
+                        <span>空闲 <span className="font-mono text-foreground">{formatUptime(Math.floor(s.idle_seconds))}</span></span>
+                        <span>已缓冲 <span className="font-mono text-foreground">{s.buffered}</span></span>
                         <span>
                           steer <span className="font-mono text-foreground">{s.steer_queued}→{s.steer_injected}</span>
                         </span>
                         <span className={cn('font-mono', s.noop_streak >= 3 ? 'text-amber-500' : 'text-foreground')}>
                           noop {s.noop_streak} (total {s.total_noops}, max {s.max_noop_streak})
                         </span>
-                        <span>tools <span className="font-mono text-foreground">{s.tool_calls_total}</span></span>
+                        <span>工具 <span className="font-mono text-foreground">{s.tool_calls_total}</span></span>
                       </div>
                     </div>
                   ))}
@@ -2273,7 +2273,7 @@ export function MonitoringClient() {
             <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
               <div className="flex items-center gap-2 mb-3 flex-wrap">
                 <Sparkles size={14} className="text-amber-500" />
-                <h4 className="text-xs font-medium">Background Jobs (will job_queue)</h4>
+                <h4 className="text-xs font-medium">后台任务（will job_queue）</h4>
                 {jobsHealth && Object.entries(jobsHealth.by_status).map(([status, count]) => (
                   <span key={status} className={cn('rounded px-1.5 py-0.5 text-[10px] font-medium', jobStatusColor(status))}>
                     {status}: {count}
@@ -2288,8 +2288,8 @@ export function MonitoringClient() {
               {jobsList.length === 0 ? (
                 <div className="py-8 text-center text-muted-foreground/50">
                   <History className="w-8 h-8 mx-auto mb-1.5" />
-                  <p className="text-xs">No background jobs yet</p>
-                  <p className="text-[10px] mt-1">Submit via POST /api/will/jobs/submit or dream background=true</p>
+                  <p className="text-xs">暂无后台任务</p>
+                  <p className="text-[10px] mt-1">通过 POST /api/will/jobs/submit 或 dream background=true 提交</p>
                 </div>
               ) : (
                 <div className="divide-y divide-border max-h-72 overflow-y-auto">
@@ -2320,7 +2320,7 @@ export function MonitoringClient() {
             <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
               <div className="flex items-center gap-2 mb-3 flex-wrap">
                 <Target size={14} className="text-purple-500" />
-                <h4 className="text-xs font-medium">Evolution Pipeline (heredity)</h4>
+                <h4 className="text-xs font-medium">进化流水线（heredity）</h4>
                 {evoStats ? (
                   <>
                     {evoStats.breaker?.open ? (
@@ -2337,7 +2337,7 @@ export function MonitoringClient() {
                     </span>
                   </>
                 ) : (
-                  <span className="text-[10px] text-muted-foreground ml-auto">unavailable</span>
+                  <span className="text-[10px] text-muted-foreground ml-auto">不可用</span>
                 )}
               </div>
               {evoStats ? (
@@ -2372,7 +2372,7 @@ export function MonitoringClient() {
                   )}
                 </div>
               ) : (
-                <p className="text-xs text-muted-foreground/50 py-4 text-center">Evolution stats unavailable</p>
+                <p className="text-xs text-muted-foreground/50 py-4 text-center">进化统计不可用</p>
               )}
             </div>
 
@@ -2380,13 +2380,13 @@ export function MonitoringClient() {
             <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
               <div className="flex items-center gap-2 mb-3">
                 <Zap size={14} className="text-blue-500" />
-                <h4 className="text-xs font-medium">Model Chain Trace (gland)</h4>
+                <h4 className="text-xs font-medium">模型链路追踪（gland）</h4>
               </div>
               {chainTrace.length === 0 ? (
                 <div className="py-6 text-center text-muted-foreground/50">
                   <Zap className="w-8 h-8 mx-auto mb-1.5" />
-                  <p className="text-xs">No LLM chain trace recorded yet</p>
-                  <p className="text-[10px] mt-1">Appears after the first gland chat/embed call</p>
+                  <p className="text-xs">暂无 LLM 链路记录</p>
+                  <p className="text-[10px] mt-1">首次 gland chat/embed 调用后出现</p>
                 </div>
               ) : (
                 <div className="divide-y divide-border">
@@ -2420,7 +2420,7 @@ export function MonitoringClient() {
             <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
               <div className="flex items-center gap-2 mb-3">
                 <Bot size={14} className="text-amber-500" />
-                <h4 className="text-xs font-medium">Context Attribution (SDKContextUsage)</h4>
+                <h4 className="text-xs font-medium">上下文归因（SDKContextUsage）</h4>
                 {tokenAttr?.summary?.latest?.over_limit && (
                   <span className="text-[10px] text-amber-500 bg-amber-500/10 rounded px-1.5 py-0.5">
                     over_limit: {tokenAttr.summary.latest.over_limit.kind} +{tokenAttr.summary.latest.over_limit.tokens_over}
@@ -2430,8 +2430,8 @@ export function MonitoringClient() {
               {!tokenAttr || (tokenAttr.total_records ?? 0) === 0 ? (
                 <div className="py-6 text-center text-muted-foreground/50">
                   <Bot className="w-8 h-8 mx-auto mb-1.5" />
-                  <p className="text-xs">No context attribution recorded yet</p>
-                  <p className="text-[10px] mt-1">Appears after a chat task runs — per-item tokens (tools/memory/skills/system prompt)</p>
+                  <p className="text-xs">暂无上下文归因记录</p>
+                  <p className="text-[10px] mt-1">聊天任务运行后出现——逐项 tokens（工具/记忆/技能/系统提示）</p>
                 </div>
               ) : (
                 <div className="space-y-1.5">
@@ -2469,7 +2469,7 @@ export function MonitoringClient() {
             <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
               <div className="flex items-center gap-2 mb-3 flex-wrap">
                 <Clock size={14} className="text-cyan-500" />
-                <h4 className="text-xs font-medium">Wakeup Executor (ScheduleWakeup)</h4>
+                <h4 className="text-xs font-medium">唤醒执行器（ScheduleWakeup）</h4>
                 {wakeupOverview ? (
                   <>
                     <span
@@ -2487,7 +2487,7 @@ export function MonitoringClient() {
                     )}
                   </>
                 ) : (
-                  <span className="text-[10px] text-muted-foreground ml-auto">unavailable</span>
+                  <span className="text-[10px] text-muted-foreground ml-auto">不可用</span>
                 )}
               </div>
 
@@ -2515,10 +2515,10 @@ export function MonitoringClient() {
                     {snap ? (
                       <>
                         <div className="flex items-center gap-2 flex-wrap text-[10px] text-muted-foreground">
-                          <span>claimed <span className="font-mono text-foreground">{snap.claimed}</span></span>
-                          <span title="CAS输给对端实例（at-most-once正常路径）">lost <span className="font-mono text-foreground">{snap.claim_lost}</span></span>
-                          <span>fire ok <span className="font-mono text-emerald-500">{snap.fire_ok}</span></span>
-                          <span>failed <span className={cn('font-mono', snap.fire_failed > 0 ? 'text-red-500' : 'text-foreground')}>{snap.fire_failed}</span></span>
+                          <span>已认领 <span className="font-mono text-foreground">{snap.claimed}</span></span>
+                          <span title="CAS输给对端实例（at-most-once正常路径）">已丢失 <span className="font-mono text-foreground">{snap.claim_lost}</span></span>
+                          <span>触发成功 <span className="font-mono text-emerald-500">{snap.fire_ok}</span></span>
+                          <span>失败 <span className={cn('font-mono', snap.fire_failed > 0 ? 'text-red-500' : 'text-foreground')}>{snap.fire_failed}</span></span>
                           {(snap.claim_errors + snap.ack_errors) > 0 && (
                             <span className="text-red-400">errors {snap.claim_errors + snap.ack_errors}</span>
                           )}
@@ -2529,11 +2529,11 @@ export function MonitoringClient() {
                             {snap.last_error}
                           </p>
                         ) : (
-                          <p className="text-[10px] text-muted-foreground/50 mt-1">no recent errors</p>
+                          <p className="text-[10px] text-muted-foreground/50 mt-1">近期无错误</p>
                         )}
                       </>
                     ) : (
-                      <p className="text-[10px] text-muted-foreground/50">unreachable</p>
+                      <p className="text-[10px] text-muted-foreground/50">不可达</p>
                     )}
                   </div>
                 ))}
@@ -2543,10 +2543,10 @@ export function MonitoringClient() {
               <div className="mb-3">
                 <div className="flex items-center gap-2 mb-1.5">
                   <History size={11} className="text-muted-foreground" />
-                  <span className="text-[10px] text-muted-foreground">Recent Activity</span>
+                  <span className="text-[10px] text-muted-foreground">近期活动</span>
                 </div>
                 {wakeupActivityFeed.length === 0 ? (
-                  <p className="text-[10px] text-muted-foreground/50">no executor activity yet</p>
+                  <p className="text-[10px] text-muted-foreground/50">暂无执行器活动</p>
                 ) : (
                   <div className="space-y-0.5 max-h-32 overflow-y-auto font-mono">
                     {wakeupActivityFeed.map((a, i) => (
@@ -2568,8 +2568,8 @@ export function MonitoringClient() {
               {!wakeupOverview || wakeupOverview.loops.length === 0 ? (
                 <div className="py-6 text-center text-muted-foreground/50">
                   <Clock className="w-8 h-8 mx-auto mb-1.5" />
-                  <p className="text-xs">No wakeup loops scheduled</p>
-                  <p className="text-[10px] mt-1">Agent calls schedule_wakeup to start a loop (claude-code ScheduleWakeup)</p>
+                  <p className="text-xs">未安排唤醒循环</p>
+                  <p className="text-[10px] mt-1">Agent 调用 schedule_wakeup 启动循环（claude-code ScheduleWakeup）</p>
                 </div>
               ) : (
                 <div className="divide-y divide-border max-h-72 overflow-y-auto">
@@ -2585,14 +2585,14 @@ export function MonitoringClient() {
                         >
                           <div className="flex items-center gap-2 mb-1">
                             {loop.fire.due_now ? (
-                              <span className="rounded px-1.5 py-0.5 text-[10px] font-medium text-amber-500 bg-amber-500/10">due now</span>
+                              <span className="rounded px-1.5 py-0.5 text-[10px] font-medium text-amber-500 bg-amber-500/10">现在到期</span>
                             ) : loop.active ? (
-                              <span className="rounded px-1.5 py-0.5 text-[10px] font-medium text-emerald-500 bg-emerald-500/10">active</span>
+                              <span className="rounded px-1.5 py-0.5 text-[10px] font-medium text-emerald-500 bg-emerald-500/10">活跃</span>
                             ) : (
-                              <span className="rounded px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground bg-muted">stopped</span>
+                              <span className="rounded px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground bg-muted">已停止</span>
                             )}
                             {loop.fire.exhausted > 0 && (
-                              <span className="rounded px-1.5 py-0.5 text-[10px] font-medium text-red-500 bg-red-500/10">exhausted</span>
+                              <span className="rounded px-1.5 py-0.5 text-[10px] font-medium text-red-500 bg-red-500/10">已耗尽</span>
                             )}
                             <span className="text-xs font-mono truncate flex-1">{key}</span>
                             {expanded ? <ChevronUp size={12} className="text-muted-foreground shrink-0" /> : <ChevronDown size={12} className="text-muted-foreground shrink-0" />}
@@ -2601,14 +2601,14 @@ export function MonitoringClient() {
                             <span className={cn('font-mono', loop.current_streak >= 3 ? 'text-amber-500' : 'text-foreground')}>
                               noop streak {loop.current_streak}
                             </span>
-                            <span>events <span className="font-mono text-foreground">{loop.total_events}</span></span>
+                            <span>事件 <span className="font-mono text-foreground">{loop.total_events}</span></span>
                             <span>
                               countdown{' '}
                               <span className="font-mono text-foreground">
                                 {loop.countdown_s == null ? '—' : loop.countdown_s > 0 ? formatUptime(Math.round(loop.countdown_s)) : 'overdue'}
                               </span>
                             </span>
-                            <span>fire <span className="font-mono text-foreground">{loop.fire.fired}</span></span>
+                            <span>触发 <span className="font-mono text-foreground">{loop.fire.fired}</span></span>
                             {loop.last_event?.reason && (
                               <span className="truncate max-w-[220px]" title={loop.last_event.reason}>
                                 {loop.last_event.noop ? 'noop: ' : ''}{loop.last_event.reason}
@@ -2619,7 +2619,7 @@ export function MonitoringClient() {
                         {expanded && (
                           <div className="mt-2 ml-2 border-l-2 border-border pl-2.5 space-y-1">
                             {(wakeupFolded[key] || []).length === 0 ? (
-                              <p className="text-[10px] text-muted-foreground/50">no events</p>
+                              <p className="text-[10px] text-muted-foreground/50">无事件</p>
                             ) : (
                               (wakeupFolded[key] || []).map((item, i) =>
                                 item.kind === 'noop_streak' ? (

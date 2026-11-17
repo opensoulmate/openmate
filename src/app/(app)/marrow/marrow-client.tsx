@@ -303,7 +303,7 @@ export function MarrowClient() {
   ]
 
   return (
-      <PageLayout title="Marrow">
+      <PageLayout title="骨髓">
         
     <div className="flex flex-col h-full overflow-hidden">
       {/* Header */}

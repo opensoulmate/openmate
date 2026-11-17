@@ -157,7 +157,7 @@ export function LinkClient() {
   };
 
   return (
-      <PageLayout title="Link">
+      <PageLayout title="突触">
         
     <div className="flex h-full flex-col overflow-hidden">
       <div className="flex items-center justify-between border-b border-border px-4 md:px-3 lg:px-6 py-3 md:py-4">
@@ -342,7 +342,7 @@ export function LinkClient() {
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 lg:gap-4 text-xs lg:text-sm">
                         <div><span className="text-muted-foreground">{t("link.t10867")}</span> {selected.type}</div>
                         <div><span className="text-muted-foreground">{t("link.t50013")}</span> {selected.status}</div>
-                        <div className="col-span-2"><span className="text-muted-foreground">Endpoint:</span> <span className="font-mono text-xs">{selected.endpoint}</span></div>
+                        <div className="col-span-2"><span className="text-muted-foreground">端点：</span> <span className="font-mono text-xs">{selected.endpoint}</span></div>
                       </div>
                       <div>
                         <label className="text-xs text-muted-foreground">{t("link.t90867")}</label>
@@ -384,7 +384,7 @@ export function LinkClient() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 lg:gap-4 text-xs lg:text-sm">
                   <div><span className="text-muted-foreground">{t("link.t10867")}</span> {selected.type}</div>
                   <div><span className="text-muted-foreground">{t("link.t50013")}</span> {selected.status}</div>
-                  <div className="col-span-2"><span className="text-muted-foreground">Endpoint:</span> <span className="font-mono text-xs">{selected.endpoint}</span></div>
+                  <div className="col-span-2"><span className="text-muted-foreground">端点：</span> <span className="font-mono text-xs">{selected.endpoint}</span></div>
                 </div>
                 <div>
                   <label className="text-xs text-muted-foreground">{t("link.t90867")}</label>

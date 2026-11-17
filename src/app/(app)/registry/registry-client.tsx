@@ -130,7 +130,7 @@ export function RegistryClient() {
   const phases = Object.keys(stats?.by_phase || {});
 
   return (
-      <PageLayout title="Registry">
+      <PageLayout title="注册表">
         
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
@@ -152,7 +152,7 @@ export function RegistryClient() {
             <button
               onClick={() => setViewMode(viewMode === "grid" ? "list" : "grid")}
               className="rounded-lg border border-border p-2 hover:bg-accent transition-colors"
-              title={viewMode === "grid" ? "List view" : "Grid view"}
+              title={viewMode === "grid" ? "列表视图" : "网格视图"}
             >
               {viewMode === "grid" ? <List className="h-4 w-4" /> : <Grid3X3 className="h-4 w-4" />}
             </button>
@@ -369,7 +369,7 @@ export function RegistryClient() {
                     <div className="border-t border-border px-4 py-3 space-y-2">
                       <div className="grid grid-cols-2 gap-2 lg:gap-4">
                         <div>
-                          <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Capabilities</div>
+                          <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">能力</div>
                           <div className="flex flex-wrap gap-1">
                             {comp.capabilities.map((cap) => (
                               <span key={cap} className="rounded bg-accent px-1.5 py-0.5 text-[10px]">{cap}</span>
@@ -377,7 +377,7 @@ export function RegistryClient() {
                           </div>
                         </div>
                         <div>
-                          <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Dependencies</div>
+                          <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">依赖</div>
                           <div className="flex flex-wrap gap-1">
                             {comp.dependencies.length > 0 ? comp.dependencies.map((dep) => (
                               <span key={dep} className="flex items-center gap-1 rounded bg-accent px-1.5 py-0.5 text-[10px]">

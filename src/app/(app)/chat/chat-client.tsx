@@ -1979,7 +1979,7 @@ export function ChatClient() {
     <>
       <div className="flex flex-col shrink-0">
           <div className="h-12 flex items-center gap-1.5 lg:gap-2 min-w-0 px-3 lg:px-4">
-            <button onClick={(e) => { e.stopPropagation(); toggleSidebar(); if (isMobile) { setRightPanelOpen(false); setShowCheckpoints(false); } }} className="shrink-0 p-2 hover:bg-muted/50 active:bg-muted transition-colors text-muted-foreground touch-manipulation" aria-label="Toggle Sidebar">
+            <button onClick={(e) => { e.stopPropagation(); toggleSidebar(); if (isMobile) { setRightPanelOpen(false); setShowCheckpoints(false); } }} className="shrink-0 p-2 hover:bg-muted/50 active:bg-muted transition-colors text-muted-foreground touch-manipulation" aria-label="切换侧边栏">
               <PanelLeft className="w-4 h-4" />
             </button>
             {(selectedAgent || storeAgentIcon) && (
@@ -2004,7 +2004,7 @@ export function ChatClient() {
                 <span
                   className={`font-medium text-sm truncate block ${selectedSession?.id ? 'cursor-pointer hover:text-primary' : ''}`}
                   onClick={startEditTitle}
-                  title={selectedSession?.id ? 'Click to rename' : undefined}
+                  title={selectedSession?.id ? '点击重命名' : undefined}
                 >
                   {(() => { const fallbackTitle = messages.find(m => m.role === 'user')?.parts?.find((p: any) => p.type === 'text')?.text?.slice(0, 30) || ''; return storeSessionName || selectedSession?.name || selectedSession?.title || fallbackTitle || (selectedAgent || storeAgentName ? `${selectedAgent?.name || storeAgentName} ${t('chat.newSession')}` : t('chat.newChat')); })()}
                 </span>
@@ -2015,12 +2015,12 @@ export function ChatClient() {
             <button
               onClick={(e) => { e.stopPropagation(); const next = !showCheckpoints; setShowCheckpoints(next); if (next) { setRightPanelOpen(false); if (isMobile && sidebarOpen) toggleSidebar(); } }}
               className={`shrink-0 flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-muted/50 active:bg-muted transition-colors touch-manipulation ${showCheckpoints ? 'text-primary' : 'text-muted-foreground'}`}
-              aria-label="Toggle Checkpoints"
+              aria-label="切换检查点"
               title="检查点">
               <Bookmark className="w-4 h-4" />
               <span className="text-[10px] font-medium">{checkpoints.length}</span>
             </button>
-            <button onClick={(e) => { e.stopPropagation(); toggleRightPanel(); setShowCheckpoints(false); if (isMobile && sidebarOpen) toggleSidebar(); }} className="shrink-0 p-2 hover:bg-muted/50 active:bg-muted transition-colors text-muted-foreground touch-manipulation" aria-label="Toggle Workspace">
+            <button onClick={(e) => { e.stopPropagation(); toggleRightPanel(); setShowCheckpoints(false); if (isMobile && sidebarOpen) toggleSidebar(); }} className="shrink-0 p-2 hover:bg-muted/50 active:bg-muted transition-colors text-muted-foreground touch-manipulation" aria-label="切换工作区">
               <PanelLeft className="w-4 h-4 scale-x-[-1]" />
             </button>
           </div>
@@ -2248,7 +2248,7 @@ export function ChatClient() {
             <button
               onClick={() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })}
               className="sticky bottom-2 left-1/2 -translate-x-1/2 flex items-center justify-center w-8 h-8 rounded-full bg-background border border-border shadow-md hover:bg-muted active:scale-95 transition-all z-10"
-              aria-label="Scroll to bottom"
+              aria-label="滚动到底部"
             >
               <ChevronDown className="w-4 h-4 text-muted-foreground" />
             </button>

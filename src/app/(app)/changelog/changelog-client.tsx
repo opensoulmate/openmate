@@ -104,7 +104,7 @@ export function ChangelogClient() {
   ];
 
   return (
-      <PageLayout title="Changelog">
+      <PageLayout title="变更日志">
         
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}

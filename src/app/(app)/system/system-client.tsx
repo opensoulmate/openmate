@@ -23,7 +23,7 @@ export function SystemClient() {
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
 
   return (
-    <PageLayout title="System">
+    <PageLayout title="系统">
       <div className="flex h-full flex-col overflow-hidden">
         {/* Tab bar */}
         <div className="shrink-0 border-b border-border px-3 lg:px-6">

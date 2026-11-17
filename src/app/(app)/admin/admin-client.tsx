@@ -24,7 +24,7 @@ export function AdminClient() {
   const [activeTab, setActiveTab] = useState<AdminTabId>("system");
 
   return (
-    <PageLayout title="Admin">
+    <PageLayout title="管理">
       <div className="flex h-full flex-col overflow-hidden">
         {/* Unified Tab Bar */}
         <div className="flex items-center gap-1 border-b border-border px-3 lg:px-6 py-2 overflow-x-auto">

@@ -217,7 +217,7 @@ export function DiscoveryClient() {
   };
 
   return (
-      <PageLayout title="Discovery">
+      <PageLayout title="发现引擎">
         
     <div className="flex flex-col h-full overflow-hidden">
       {/* Header */}
@@ -227,13 +227,13 @@ export function DiscoveryClient() {
             <Search className="w-5 h-5 text-cyan-400" />
           </div>
           <div>
-            <h1 className="text-lg lg:text-xl font-bold">Discovery Engine</h1>
-            <p className="text-xs text-muted-foreground">Local software scanning & adapter management</p>
+            <h1 className="text-lg lg:text-xl font-bold">发现引擎</h1>
+            <p className="text-xs text-muted-foreground">本地软件扫描与适配器管理</p>
           </div>
         </div>
         <button onClick={runFullScan} disabled={scanning} className={cn("flex items-center gap-2 px-2 lg:px-4 py-2 rounded-lg text-xs lg:text-sm font-medium transition-all touch-manipulation", scanning ? "bg-muted text-muted-foreground" : "bg-gradient-to-r from-cyan-600 to-blue-600 text-white hover:from-cyan-500 hover:to-blue-500 shadow-lg shadow-cyan-500/20")}>
           <RefreshCw className={cn("w-4 h-4", scanning && "animate-spin")} />
-          {scanning ? "Scanning..." : "Full Scan"}
+          {scanning ? "扫描中..." : "完整扫描"}
         </button>
       </div>
 
@@ -253,7 +253,7 @@ export function DiscoveryClient() {
       <div className="flex gap-1 px-3 lg:px-6 pt-3 border-b border-border">
         {(["scan", "adapters"] as Tab[]).map(t => (
           <button key={t} onClick={() => setTab(t)} className={cn("px-2 lg:px-4 py-2 text-xs lg:text-sm font-medium rounded-lg transition-colors touch-manipulation", tab === t ? "bg-cyan-500/10 text-cyan-400" : "text-muted-foreground hover:text-foreground hover:bg-muted/30")}>
-            {t === "scan" ? <><Monitor className="w-4 h-4 inline mr-1.5" />System Scan</> : <><Plug className="w-4 h-4 inline mr-1.5" />Adapters</>}
+            {t === "scan" ? <><Monitor className="w-4 h-4 inline mr-1.5" />系统扫描</> : <><Plug className="w-4 h-4 inline mr-1.5" />适配器</>}
           </button>
         ))}
       </div>
@@ -265,10 +265,10 @@ export function DiscoveryClient() {
             {/* Stats Cards */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2 lg:gap-4">
               {[
-                { icon: Cpu, label: "Processes", value: processes.length, color: "cyan" },
-                { icon: Terminal, label: "CLI Tools", value: cliTools.length, color: "emerald" },
-                { icon: Network, label: "Services", value: services.length, color: "violet" },
-                { icon: Plug, label: "Adapters", value: adapters.length, color: "amber" },
+                { icon: Cpu, label: "进程", value: processes.length, color: "cyan" },
+                { icon: Terminal, label: "CLI 工具", value: cliTools.length, color: "emerald" },
+                { icon: Network, label: "服务", value: services.length, color: "violet" },
+                { icon: Plug, label: "适配器", value: adapters.length, color: "amber" },
               ].map(s => (
                 <div key={s.label} className="p-4 rounded-xl border border-border bg-card/50 hover:bg-card/80 transition-colors">
                   <div className="flex items-center gap-2 mb-2">
@@ -283,19 +283,19 @@ export function DiscoveryClient() {
             {/* Running Processes */}
             <div className="rounded-xl border border-border bg-card/30">
               <div className="flex items-center justify-between px-2 lg:px-4 py-2 lg:py-3 border-b border-border">
-                <h3 className="font-semibold flex items-center gap-2"><Cpu className="w-4 h-4 text-cyan-400" /> Running Processes ({filteredProcesses.length})</h3>
-                <input value={processFilter} onChange={e => setProcessFilter(e.target.value)} placeholder="Filter processes..." className="w-full sm:w-64 px-3 py-1.5 rounded-lg border border-border bg-background text-xs lg:text-sm" />
+                <h3 className="font-semibold flex items-center gap-2"><Cpu className="w-4 h-4 text-cyan-400" /> 运行中的进程 ({filteredProcesses.length})</h3>
+                <input value={processFilter} onChange={e => setProcessFilter(e.target.value)} placeholder="过滤进程..." className="w-full sm:w-64 px-3 py-1.5 rounded-lg border border-border bg-background text-xs lg:text-sm" />
               </div>
               <div className="max-h-80 overflow-y-auto overflow-x-auto">
                 <table className="w-full text-xs lg:text-sm min-w-[550px]">
                   <thead className="sticky top-0 bg-card/90 backdrop-blur">
                     <tr className="text-left text-muted-foreground">
                       <th className="px-2 lg:px-4 py-2">PID</th>
-                      <th className="px-2 lg:px-4 py-2">Name</th>
-                      <th className="px-2 lg:px-4 py-2">User</th>
+                      <th className="px-2 lg:px-4 py-2">名称</th>
+                      <th className="px-2 lg:px-4 py-2">用户</th>
                       <th className="px-2 lg:px-4 py-2 text-right">CPU%</th>
                       <th className="px-2 lg:px-4 py-2 text-right">MEM%</th>
-                      <th className="px-2 lg:px-4 py-2">Command</th>
+                      <th className="px-2 lg:px-4 py-2">命令</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -318,8 +318,8 @@ export function DiscoveryClient() {
             {/* CLI Tools */}
             <div className="rounded-xl border border-border bg-card/30">
               <div className="flex items-center justify-between px-2 lg:px-4 py-2 lg:py-3 border-b border-border">
-                <h3 className="font-semibold flex items-center gap-2"><Terminal className="w-4 h-4 text-emerald-400" /> CLI Tools ({filteredTools.length})</h3>
-                <input value={toolFilter} onChange={e => setToolFilter(e.target.value)} placeholder="Filter tools..." className="w-full sm:w-64 px-3 py-1.5 rounded-lg border border-border bg-background text-xs lg:text-sm" />
+                <h3 className="font-semibold flex items-center gap-2"><Terminal className="w-4 h-4 text-emerald-400" /> CLI 工具 ({filteredTools.length})</h3>
+                <input value={toolFilter} onChange={e => setToolFilter(e.target.value)} placeholder="过滤工具..." className="w-full sm:w-64 px-3 py-1.5 rounded-lg border border-border bg-background text-xs lg:text-sm" />
               </div>
               <div className="max-h-60 overflow-y-auto p-3 lg:p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                 {filteredTools.map(tool => (
@@ -335,17 +335,17 @@ export function DiscoveryClient() {
             {/* Network Services */}
             <div className="rounded-xl border border-border bg-card/30">
               <div className="px-2 lg:px-4 py-2 lg:py-3 border-b border-border">
-                <h3 className="font-semibold flex items-center gap-2"><Network className="w-4 h-4 text-violet-400" /> Listening Services ({services.length})</h3>
+                <h3 className="font-semibold flex items-center gap-2"><Network className="w-4 h-4 text-violet-400" /> 监听中的服务 ({services.length})</h3>
               </div>
               <div className="max-h-60 overflow-y-auto overflow-x-auto">
                 <table className="w-full text-xs lg:text-sm min-w-[500px]">
                   <thead className="sticky top-0 bg-card/90 backdrop-blur">
                     <tr className="text-left text-muted-foreground">
-                      <th className="px-2 lg:px-4 py-2">Protocol</th>
-                      <th className="px-2 lg:px-4 py-2">Address</th>
-                      <th className="px-2 lg:px-4 py-2">Port</th>
-                      <th className="px-2 lg:px-4 py-2">State</th>
-                      <th className="px-2 lg:px-4 py-2">Process</th>
+                      <th className="px-2 lg:px-4 py-2">协议</th>
+                      <th className="px-2 lg:px-4 py-2">地址</th>
+                      <th className="px-2 lg:px-4 py-2">端口</th>
+                      <th className="px-2 lg:px-4 py-2">状态</th>
+                      <th className="px-2 lg:px-4 py-2">进程</th>
                       <th className="px-2 lg:px-4 py-2">PID</th>
                     </tr>
                   </thead>
@@ -380,8 +380,8 @@ export function DiscoveryClient() {
               {adapters.length === 0 ? (
                 <div className="p-8 text-center text-muted-foreground">
                   <Plug className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                  <p>No adapters configured yet.</p>
-                  <p className="text-xs mt-1">Add a REST, Database, or Filesystem adapter to get started.</p>
+                  <p>尚未配置适配器。</p>
+                  <p className="text-xs mt-1">添加 REST、数据库或文件系统适配器以开始使用。</p>
                 </div>
               ) : (
                 <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-2 lg:gap-3">
@@ -406,11 +406,11 @@ export function DiscoveryClient() {
             {/* Add Adapter Form */}
             {showAddAdapter && (
               <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-5 space-y-4">
-                <h3 className="font-semibold flex items-center gap-2"><Plus className="w-4 h-4 text-amber-400" /> Configure New Adapter</h3>
+                <h3 className="font-semibold flex items-center gap-2"><Plus className="w-4 h-4 text-amber-400" /> 配置新适配器</h3>
                 <div className="flex gap-2">
                   {(["rest", "database", "filesystem"] as const).map(t => (
                     <button key={t} onClick={() => setAdapterType(t)} className={cn("px-2 lg:px-4 py-2 rounded-lg text-xs lg:text-sm font-medium transition-colors touch-manipulation", adapterType === t ? "bg-amber-600 text-white" : "bg-muted text-muted-foreground hover:text-foreground")}>
-                      {t === "rest" ? <><Globe className="w-3.5 h-3.5 inline mr-1" />REST</> : t === "database" ? <><Database className="w-3.5 h-3.5 inline mr-1" />Database</> : <><FolderOpen className="w-3.5 h-3.5 inline mr-1" />Filesystem</>}
+                      {t === "rest" ? <><Globe className="w-3.5 h-3.5 inline mr-1" />REST</> : t === "database" ? <><Database className="w-3.5 h-3.5 inline mr-1" />数据库</> : <><FolderOpen className="w-3.5 h-3.5 inline mr-1" />文件系统</>}
                     </button>
                   ))}
                 </div>
@@ -418,23 +418,23 @@ export function DiscoveryClient() {
                 {adapterType === "rest" && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 lg:gap-3">
                     <div>
-                      <label className="text-xs text-muted-foreground mb-1 block">Base URL</label>
+                      <label className="text-xs text-muted-foreground mb-1 block">基础 URL</label>
                       <input value={adapterConfig.url || ""} onChange={e => setAdapterConfig({...adapterConfig, url: e.target.value})} placeholder="https://api.example.com" className="w-full px-3 py-2 rounded-lg border border-border bg-background text-xs lg:text-sm" />
                     </div>
                     <div>
-                      <label className="text-xs text-muted-foreground mb-1 block">Auth Type</label>
+                      <label className="text-xs text-muted-foreground mb-1 block">认证方式</label>
                       <select value={adapterConfig.auth_type || "none"} onChange={e => setAdapterConfig({...adapterConfig, auth_type: e.target.value})} className="w-full px-3 py-2 rounded-lg border border-border bg-background text-xs lg:text-sm">
                         <option value="none">None</option>
                         <option value="bearer">Bearer Token</option>
-                        <option value="basic">Basic Auth</option>
+                        <option value="basic">Basic 认证</option>
                       </select>
                     </div>
                     <div className="col-span-2">
-                      <label className="text-xs text-muted-foreground mb-1 block">Auth Token (if needed)</label>
-                      <input value={adapterConfig.auth_token || ""} onChange={e => setAdapterConfig({...adapterConfig, auth_token: e.target.value})} placeholder="Bearer token or base64 credentials" className="w-full px-3 py-2 rounded-lg border border-border bg-background text-xs lg:text-sm" type="password" />
+                      <label className="text-xs text-muted-foreground mb-1 block">认证 Token（如需要）</label>
+                      <input value={adapterConfig.auth_token || ""} onChange={e => setAdapterConfig({...adapterConfig, auth_token: e.target.value})} placeholder="Bearer token 或 base64 凭据" className="w-full px-3 py-2 rounded-lg border border-border bg-background text-xs lg:text-sm" type="password" />
                     </div>
                     <div className="col-span-2">
-                      <label className="text-xs text-muted-foreground mb-1 block">Extra Headers (JSON)</label>
+                      <label className="text-xs text-muted-foreground mb-1 block">附加请求头（JSON）</label>
                       <input value={adapterConfig.headers || ""} onChange={e => setAdapterConfig({...adapterConfig, headers: e.target.value})} placeholder='{"X-Custom": "value"}' className="w-full px-3 py-2 rounded-lg border border-border bg-background text-xs lg:text-sm font-mono" />
                     </div>
                   </div>
@@ -443,7 +443,7 @@ export function DiscoveryClient() {
                 {adapterType === "database" && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 lg:gap-3">
                     <div>
-                      <label className="text-xs text-muted-foreground mb-1 block">Database Type</label>
+                      <label className="text-xs text-muted-foreground mb-1 block">数据库类型</label>
                       <select value={adapterConfig.db_type || "sqlite"} onChange={e => setAdapterConfig({...adapterConfig, db_type: e.target.value})} className="w-full px-3 py-2 rounded-lg border border-border bg-background text-xs lg:text-sm">
                         <option value="sqlite">SQLite</option>
                         <option value="postgresql">PostgreSQL</option>
@@ -451,7 +451,7 @@ export function DiscoveryClient() {
                       </select>
                     </div>
                     <div>
-                      <label className="text-xs text-muted-foreground mb-1 block">Connection String</label>
+                      <label className="text-xs text-muted-foreground mb-1 block">连接字符串</label>
                       <input value={adapterConfig.connection_string || ""} onChange={e => setAdapterConfig({...adapterConfig, connection_string: e.target.value})} placeholder="sqlite:///path/to/db.sqlite" className="w-full px-3 py-2 rounded-lg border border-border bg-background text-xs lg:text-sm" />
                     </div>
                   </div>
@@ -460,18 +460,18 @@ export function DiscoveryClient() {
                 {adapterType === "filesystem" && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 lg:gap-3">
                     <div>
-                      <label className="text-xs text-muted-foreground mb-1 block">Root Path</label>
+                      <label className="text-xs text-muted-foreground mb-1 block">根路径</label>
                       <input value={adapterConfig.root_path || ""} onChange={e => setAdapterConfig({...adapterConfig, root_path: e.target.value})} placeholder="/home/user/documents" className="w-full px-3 py-2 rounded-lg border border-border bg-background text-xs lg:text-sm" />
                     </div>
                     <div>
-                      <label className="text-xs text-muted-foreground mb-1 block">File Patterns (comma-separated)</label>
+                      <label className="text-xs text-muted-foreground mb-1 block">文件匹配模式（逗号分隔）</label>
                       <input value={adapterConfig.patterns || ""} onChange={e => setAdapterConfig({...adapterConfig, patterns: e.target.value})} placeholder="*.md, *.txt, *.json" className="w-full px-3 py-2 rounded-lg border border-border bg-background text-xs lg:text-sm" />
                     </div>
                     <div>
-                      <label className="text-xs text-muted-foreground mb-1 block">Watch for Changes</label>
+                      <label className="text-xs text-muted-foreground mb-1 block">监听变更</label>
                       <select value={adapterConfig.watch || "false"} onChange={e => setAdapterConfig({...adapterConfig, watch: e.target.value})} className="w-full px-3 py-2 rounded-lg border border-border bg-background text-xs lg:text-sm">
-                        <option value="false">No</option>
-                        <option value="true">Yes</option>
+                        <option value="false">否</option>
+                        <option value="true">是</option>
                       </select>
                     </div>
                   </div>
@@ -491,9 +491,9 @@ export function DiscoveryClient() {
 
             {/* Quick Actions */}
             <div className="grid grid-cols-2 md:grid-cols-3 gap-2 lg:gap-4">
-              {/* REST Probe */}
+              {/* REST 探测 */}
               <div className="rounded-xl border border-border bg-card/30 p-3 lg:p-4 space-y-3">
-                <h4 className="font-medium flex items-center gap-2 text-xs lg:text-sm"><Globe className="w-4 h-4 text-blue-400" /> REST Probe</h4>
+                <h4 className="font-medium flex items-center gap-2 text-xs lg:text-sm"><Globe className="w-4 h-4 text-blue-400" /> REST 探测</h4>
                 <input value={restProbeUrl} onChange={e => setRestProbeUrl(e.target.value)} placeholder="https://httpbin.org/get" className="w-full px-3 py-2 rounded-lg border border-border bg-background text-xs lg:text-sm" />
                 <button onClick={probeRest} disabled={testingAdapter || !restProbeUrl} className="w-full px-3 py-2 rounded-lg bg-blue-600 text-white text-xs lg:text-sm hover:bg-blue-500 disabled:opacity-50 transition-colors touch-manipulation">
                   {testingAdapter ? <RefreshCw className="w-3.5 h-3.5 animate-spin inline" /> : <Play className="w-3.5 h-3.5 inline" />} Probe
@@ -503,7 +503,7 @@ export function DiscoveryClient() {
 
               {/* DB Query */}
               <div className="rounded-xl border border-border bg-card/30 p-3 lg:p-4 space-y-3">
-                <h4 className="font-medium flex items-center gap-2 text-xs lg:text-sm"><Database className="w-4 h-4 text-purple-400" /> Database Query</h4>
+                <h4 className="font-medium flex items-center gap-2 text-xs lg:text-sm"><Database className="w-4 h-4 text-purple-400" /> 数据库查询</h4>
                 <input value={dbQueryInput} onChange={e => setDbQueryInput(e.target.value)} placeholder="SELECT * FROM table LIMIT 10" className="w-full px-3 py-2 rounded-lg border border-border bg-background text-xs lg:text-sm font-mono" onKeyDown={e => e.key === "Enter" && queryDb()} />
                 <div className="flex gap-2">
                   <button onClick={() => queryDb()} disabled={testingAdapter || !dbQueryInput} className="flex-1 px-3 py-2 rounded-lg bg-purple-600 text-white text-xs lg:text-sm hover:bg-purple-500 disabled:opacity-50 transition-colors touch-manipulation">
@@ -516,9 +516,9 @@ export function DiscoveryClient() {
                 {dbQueryResult && <pre className="p-2 rounded bg-background border border-border text-xs font-mono overflow-x-auto max-h-32">{dbQueryResult}</pre>}
               </div>
 
-              {/* Filesystem Browse */}
+              {/* 文件系统浏览 */}
               <div className="rounded-xl border border-border bg-card/30 p-3 lg:p-4 space-y-3">
-                <h4 className="font-medium flex items-center gap-2 text-xs lg:text-sm"><FolderOpen className="w-4 h-4 text-emerald-400" /> Filesystem Browse</h4>
+                <h4 className="font-medium flex items-center gap-2 text-xs lg:text-sm"><FolderOpen className="w-4 h-4 text-emerald-400" /> 文件系统浏览</h4>
                 <div className="flex gap-2">
                   <input value={fsPath} onChange={e => setFsPath(e.target.value)} placeholder="/" className="flex-1 px-3 py-2 rounded-lg border border-border bg-background text-xs lg:text-sm" onKeyDown={e => e.key === "Enter" && listFs()} />
                   <button onClick={() => listFs()} disabled={testingAdapter} className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-xs lg:text-sm hover:bg-emerald-500 disabled:opacity-50 transition-colors touch-manipulation">

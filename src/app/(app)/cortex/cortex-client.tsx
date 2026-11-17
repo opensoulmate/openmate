@@ -407,7 +407,7 @@ export function CortexClient() {
   ];
 
   return (
-      <PageLayout title="Cortex">
+      <PageLayout title="皮层">
         
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}

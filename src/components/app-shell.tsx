@@ -478,7 +478,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       .catch(() => {});
   }, 30000, []);
 
-  const userId = getUserName() || getUserId() || "User";
+  const userId = getUserName() || getUserId() || "用户";
 
   // Close menu on outside click
   useEffect(() => {

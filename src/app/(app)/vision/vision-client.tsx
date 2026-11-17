@@ -62,7 +62,7 @@ export function VisionClient() {
   }, [fetchStats]);
 
   return (
-      <PageLayout title="Vision">
+      <PageLayout title="视觉">
         
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}

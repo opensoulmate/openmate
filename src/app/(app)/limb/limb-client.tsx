@@ -184,7 +184,7 @@ export function LimbClient() {
   ];
 
   return (
-      <PageLayout title="Limb">
+      <PageLayout title="四肢">
         
     <div className="flex h-full flex-col overflow-hidden">
       <div className="flex items-center justify-between border-b border-border px-3 lg:px-6 py-4">

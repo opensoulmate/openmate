@@ -233,7 +233,7 @@ export function MirrorClient() {
   ];
 
   return (
-      <PageLayout title="Mirror">
+      <PageLayout title="镜像">
         
     <div className="flex h-full flex-col overflow-hidden">
       <div className="flex items-center justify-between border-b border-border px-3 lg:px-6 py-3 lg:py-4 gap-2">
@@ -562,8 +562,8 @@ export function MirrorClient() {
                   </div>
                   <p className="text-xs text-muted-foreground mb-3">{tpl.description}</p>
                   <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
-                    <span>{t("mirror.variableLabel") || "Variables:"} {Object.keys(tpl.variables).length}</span>
-                    <span>{t("mirror.usageLabel") || "Usage:"} {tpl.usage_count}</span>
+                    <span>{t("mirror.variableLabel") || "变量："} {Object.keys(tpl.variables).length}</span>
+                    <span>{t("mirror.usageLabel") || "用法："} {tpl.usage_count}</span>
                     <span>TTL: {tpl.config?.ttl_seconds || 3600}s</span>
                   </div>
                   {tpl.tags.length > 0 && (
@@ -583,7 +583,7 @@ export function MirrorClient() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="text-lg">{selectedTemplate.icon}</span>
-                    <h4 className="font-medium">{t("mirror.createSandboxFromTemplate") || "Create sandbox from template:"} {selectedTemplate.name}</h4>
+                    <h4 className="font-medium">{t("mirror.createSandboxFromTemplate") || "从模板创建沙盒："} {selectedTemplate.name}</h4>
                   </div>
                   <button onClick={() => setSelectedTemplate(null)} className="text-xs text-muted-foreground hover:text-foreground">✕</button>
                 </div>

@@ -483,7 +483,7 @@ function NoteListContent({
           </div>
           <div className="flex gap-1.5">
             <button onClick={() => { fetchNotes(); fetchTags(); fetchStats(); }}
-              className="p-1.5 rounded-lg hover:bg-muted transition-colors" title="Refresh">
+              className="p-1.5 rounded-lg hover:bg-muted transition-colors" title="刷新">
               <RefreshCw size={14} className="text-muted-foreground" />
             </button>
             <button onClick={openCreate}

@@ -203,7 +203,7 @@ export function SkirtTabs({
             <button
               onClick={onAddTab}
               className="p-1 rounded hover:bg-muted text-muted-foreground transition-colors touch-manipulation"
-              title="New tab"
+              title="新建标签页"
             >
               <Plus className="w-3.5 h-3.5" />
             </button>

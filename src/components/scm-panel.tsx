@@ -175,7 +175,7 @@ function FileItem({
           <button
             onClick={onUnstage}
             className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-            title="Unstage"
+            title="取消暂存"
           >
             <Minus size={10} />
           </button>
@@ -183,7 +183,7 @@ function FileItem({
           <button
             onClick={onStage}
             className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-            title="Stage"
+            title="暂存"
           >
             <Plus size={10} />
           </button>
@@ -436,7 +436,7 @@ export function SCMPanel({ workspacePath, className }: SCMPanelProps) {
           onClick={refresh}
           disabled={loading}
           className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
-          title="Refresh"
+          title="刷新"
         >
           <RotateCw
             size={12}
@@ -492,7 +492,7 @@ export function SCMPanel({ workspacePath, className }: SCMPanelProps) {
           <textarea
             value={commitMsg}
             onChange={(e) => setCommitMsg(e.target.value)}
-            placeholder="Commit message..."
+            placeholder="提交信息..."
             rows={2}
             className="w-full rounded-md border border-border bg-background px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary resize-none"
             onKeyDown={(e) => {
@@ -556,7 +556,7 @@ export function SCMPanel({ workspacePath, className }: SCMPanelProps) {
                   handleUnstageAll();
                 }}
                 className="ml-1 flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-                title="Unstage All"
+                title="全部取消暂存"
               >
                 <Minus size={10} />
               </button>
@@ -588,7 +588,7 @@ export function SCMPanel({ workspacePath, className }: SCMPanelProps) {
             ) : (
               <ChevronRight size={12} className="text-muted-foreground" />
             )}
-            <span className="font-medium text-foreground">Changes</span>
+            <span className="font-medium text-foreground">变更</span>
             <span className="ml-auto text-muted-foreground">
               {unstagedFiles.length}
             </span>
@@ -599,7 +599,7 @@ export function SCMPanel({ workspacePath, className }: SCMPanelProps) {
                   handleStageAll();
                 }}
                 className="ml-1 flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-                title="Stage All"
+                title="全部暂存"
               >
                 <Plus size={10} />
               </button>

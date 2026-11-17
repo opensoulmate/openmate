@@ -557,7 +557,7 @@ export function SmartPrompt({
             }`}
           >
             {controls.mode.value === 'plan' ? <Brain className="w-4 h-4" /> : <Zap className="w-4 h-4" />}
-            <span className="hidden lg:inline">{controls.mode.value === 'plan' ? 'Plan' : 'Act'}</span>
+            <span className="hidden lg:inline">{controls.mode.value === 'plan' ? '计划' : '执行'}</span>
           </button>
         )}
         {controls?.thinking && (

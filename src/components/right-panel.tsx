@@ -41,11 +41,11 @@ let tabCounter = 0;
 function createTab(type: TabType, extra?: { url?: string; filePath?: string }): Tab {
   tabCounter += 1;
   const titles: Record<TabType, string> = {
-    'new-tab': 'New Tab',
-    'web-browser': 'Web Browser',
-    'file-preview': 'File Preview',
+    'new-tab': '新标签页',
+    'web-browser': '网页浏览器',
+    'file-preview': '文件预览',
     terminal: 'Terminal',
-    details: 'Details',
+    details: '详情',
   };
   return {
     id: `tab-${Date.now()}-${tabCounter}`,
@@ -94,37 +94,37 @@ function NewTabView({ onOpenBrowser, onOpenFile, onOpenTerminal, onOpenDetails }
 
   return (
     <div className="flex flex-col items-center justify-center h-full gap-4 lg:gap-6 p-3 lg:p-6 text-center">
-      <div className="text-lg lg:text-2xl font-bold text-foreground/80">OpenMate Workspace</div>
+      <div className="text-lg lg:text-2xl font-bold text-foreground/80">OpenMate 工作区</div>
       <p className="text-xs lg:text-sm text-muted-foreground max-w-xs">
-        Open a webpage, preview a file, or launch a terminal.
+        打开网页、预览文件或启动终端。
       </p>
 
       <div className="w-full max-w-sm space-y-4">
         {/* Browse URL */}
         <form onSubmit={handleBrowse} className="flex gap-2">
           <Input
-            placeholder="Enter URL to browse..."
+            placeholder="输入网址浏览..."
             value={urlInput}
             onChange={(e) => setUrlInput(e.target.value)}
             className="flex-1 text-sm"
           />
           <Button type="submit" size="sm" disabled={!urlInput.trim()}>
             <Globe className="w-4 h-4 mr-1" />
-            Go
+            前往
           </Button>
         </form>
 
         {/* Open File */}
         <form onSubmit={handleOpenFile} className="flex gap-2">
           <Input
-            placeholder="Enter file path to preview..."
+            placeholder="输入文件路径预览..."
             value={fileInput}
             onChange={(e) => setFileInput(e.target.value)}
             className="flex-1 text-sm"
           />
           <Button type="submit" size="sm" variant="outline" disabled={!fileInput.trim()}>
             <FileText className="w-4 h-4 mr-1" />
-            Open
+            打开
           </Button>
         </form>
 
@@ -136,7 +136,7 @@ function NewTabView({ onOpenBrowser, onOpenFile, onOpenTerminal, onOpenDetails }
           size="sm"
         >
           <TerminalIcon className="w-4 h-4 mr-2" />
-          Open Terminal
+          打开终端
         </Button>
 
         {/* Session Details */}
@@ -147,7 +147,7 @@ function NewTabView({ onOpenBrowser, onOpenFile, onOpenTerminal, onOpenDetails }
           size="sm"
         >
           <Info className="w-4 h-4 mr-2" />
-          Session Details
+          会话详情
         </Button>
       </div>
     </div>
@@ -186,7 +186,7 @@ function WebBrowserView({ tab, onNavigate, onBack, onForward, onRefresh }: {
           size="icon-xs"
           onClick={onBack}
           disabled={!canBack}
-          title="Back"
+          title="后退"
         >
           <ChevronLeft className="w-3.5 h-3.5" />
         </Button>
@@ -195,7 +195,7 @@ function WebBrowserView({ tab, onNavigate, onBack, onForward, onRefresh }: {
           size="icon-xs"
           onClick={onForward}
           disabled={!canForward}
-          title="Forward"
+          title="前进"
         >
           <ChevronRight className="w-3.5 h-3.5" />
         </Button>
@@ -203,7 +203,7 @@ function WebBrowserView({ tab, onNavigate, onBack, onForward, onRefresh }: {
           variant="ghost"
           size="icon-xs"
           onClick={onRefresh}
-          title="Refresh"
+          title="刷新"
         >
           <RotateCw className="w-3.5 h-3.5" />
         </Button>
@@ -224,7 +224,7 @@ function WebBrowserView({ tab, onNavigate, onBack, onForward, onRefresh }: {
           src={tab.url}
           className="flex-1 min-w-0 border-0 bg-white"
           style={{ width: '100%', height: '100%' }}
-          title="Web Browser"
+          title="网页浏览器"
         />
       ) : (
         <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
@@ -264,7 +264,7 @@ function FilePreviewView({ filePath }: { filePath: string }) {
         <div className="flex items-center justify-center h-full p-4 bg-muted/20">
           <img
             src={filePath}
-            alt="Preview"
+            alt="预览"
             className="max-w-full max-h-full object-contain rounded-md"
           />
         </div>
@@ -276,7 +276,7 @@ function FilePreviewView({ filePath }: { filePath: string }) {
         <iframe
           src={filePath}
           className="w-full h-full border-0"
-          title="PDF Preview"
+          title="PDF 预览"
         />
       );
     }
@@ -287,7 +287,7 @@ function FilePreviewView({ filePath }: { filePath: string }) {
         src={filePath}
         className="w-full h-full border-0 bg-white"
         sandbox="allow-same-origin allow-scripts"
-        title="File Preview"
+        title="文件预览"
       />
     );
   }
@@ -324,7 +324,7 @@ function FilePreviewView({ filePath }: { filePath: string }) {
   return (
     <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground">
       <FileText className="w-8 h-8" />
-      <p className="text-sm">No file loaded</p>
+      <p className="text-sm">未加载文件</p>
       <p className="text-xs font-mono break-all">{filePath}</p>
     </div>
   );
@@ -354,7 +354,7 @@ function TerminalPlaceholder() {
 
     if (cmd === 'help') {
       newLines.push(
-        'Available commands:',
+        '可用命令：',
         '  help    - Show this help',
         '  clear   - Clear terminal',
         '  echo    - Echo text',
@@ -392,7 +392,7 @@ function TerminalPlaceholder() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           className="flex-1 bg-transparent outline-none text-xs text-foreground placeholder:text-muted-foreground/50"
-          placeholder="Type a command..."
+          placeholder="输入命令..."
           autoFocus
         />
       </form>
@@ -409,8 +409,8 @@ function SessionDetailsView() {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-3 p-6 text-center">
         <Info className="w-8 h-8 text-muted-foreground/30" />
-        <p className="text-sm text-muted-foreground">No active session</p>
-        <p className="text-xs text-muted-foreground/60">Select a conversation to view details</p>
+        <p className="text-sm text-muted-foreground">无活动会话</p>
+        <p className="text-xs text-muted-foreground/60">选择会话查看详情</p>
       </div>
     );
   }
@@ -436,25 +436,25 @@ function SessionDetailsView() {
       {/* Session Info */}
       {details.sessionName && (
         <div className="space-y-2">
-          <div className="text-xs text-muted-foreground">Session</div>
+          <div className="text-xs text-muted-foreground">会话</div>
           <div className="text-sm font-medium">{details.sessionName}</div>
           {details.lastActive && (
-            <div className="text-xs text-muted-foreground">Last active: {details.lastActive}</div>
+            <div className="text-xs text-muted-foreground">最近活跃：{details.lastActive}</div>
           )}
         </div>
       )}
 
       {/* Statistics */}
       <div>
-        <div className="text-xs text-muted-foreground mb-2">Statistics</div>
+        <div className="text-xs text-muted-foreground mb-2">统计</div>
         <div className="grid grid-cols-2 gap-2">
           <div className="p-2 rounded bg-muted/50 text-center">
             <div className="text-lg font-bold">{details.imageCount}</div>
-            <div className="text-[10px] text-muted-foreground">Images</div>
+            <div className="text-[10px] text-muted-foreground">图片</div>
           </div>
           <div className="p-2 rounded bg-muted/50 text-center">
             <div className="text-lg font-bold">{details.fileCount}</div>
-            <div className="text-[10px] text-muted-foreground">Files</div>
+            <div className="text-[10px] text-muted-foreground">文件</div>
           </div>
         </div>
       </div>
@@ -492,12 +492,12 @@ export function RightPanel({ open, onToggle }: RightPanelProps) {
   // Persist default workspace for new sessionId
   useEffect(() => {
     if (!wsBySession[sessionId]) {
-      const defaultTab = { id: `tab-${sessionId}-0`, type: 'new-tab' as const, title: 'New Tab', history: [] as string[], historyIndex: -1 };
+      const defaultTab = { id: `tab-${sessionId}-0`, type: 'new-tab' as const, title: '新标签页', history: [] as string[], historyIndex: -1 };
       storeSetWorkspaceTabs(sessionId, { tabs: [defaultTab], activeTabId: defaultTab.id });
     }
   }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const wsState = wsBySession[sessionId] ?? { tabs: [{ id: `tab-${sessionId}-0`, type: 'new-tab' as const, title: 'New Tab', history: [], historyIndex: -1 }], activeTabId: `tab-${sessionId}-0` };
+  const wsState = wsBySession[sessionId] ?? { tabs: [{ id: `tab-${sessionId}-0`, type: 'new-tab' as const, title: '新标签页', history: [], historyIndex: -1 }], activeTabId: `tab-${sessionId}-0` };
   const storeAddWorkspaceTab = useAppStore((s) => s.addWorkspaceTab);
   const storeRemoveWorkspaceTab = useAppStore((s) => s.removeWorkspaceTab);
   const storeUpdateWorkspaceTab = useAppStore((s) => s.updateWorkspaceTab);
@@ -599,7 +599,7 @@ export function RightPanel({ open, onToggle }: RightPanelProps) {
               updateTab(activeTab.id, {
                 type: 'web-browser',
                 url: ensureProtocol(url),
-                title: (() => { try { return new URL(ensureProtocol(url)).hostname; } catch { return 'Web Browser'; } })(),
+                title: (() => { try { return new URL(ensureProtocol(url)).hostname; } catch { return '网页浏览器'; } })(),
                 history: [ensureProtocol(url)],
                 historyIndex: 0,
               });
@@ -608,7 +608,7 @@ export function RightPanel({ open, onToggle }: RightPanelProps) {
               updateTab(activeTab.id, {
                 type: 'file-preview',
                 filePath: path,
-                title: path.split('/').pop() || 'File Preview',
+                title: path.split('/').pop() || '文件预览',
               });
             }}
             onOpenTerminal={() => {
@@ -620,7 +620,7 @@ export function RightPanel({ open, onToggle }: RightPanelProps) {
             onOpenDetails={() => {
               updateTab(activeTab.id, {
                 type: 'details',
-                title: 'Details',
+                title: '详情',
               });
             }}
           />

@@ -45,7 +45,7 @@ export function SettingsPanel({ sections, defaultSection, className }: SettingsP
           <div className="fixed inset-0 bg-black/50 z-40 lg:hidden" onClick={() => setShowSidebar(false)} />
           <aside className="fixed left-0 top-0 bottom-0 w-64 bg-card border-r border-border z-50 lg:hidden flex flex-col">
             <div className="flex items-center justify-between p-3 border-b border-border">
-              <span className="text-sm font-medium">Settings</span>
+              <span className="text-sm font-medium">设置</span>
               <button onClick={() => setShowSidebar(false)} className="p-1 hover:bg-muted/50 rounded"><X size={16} /></button>
             </div>
             <div className="flex-1 overflow-y-auto p-2 space-y-0.5">

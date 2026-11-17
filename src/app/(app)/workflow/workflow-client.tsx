@@ -73,20 +73,20 @@ interface WorkflowItem {
 }
 
 const statusConfig: Record<string, { variant: "default" | "success" | "warning" | "destructive"; label: string }> = {
-  active: { variant: "success", label: "Active" },
-  draft: { variant: "default", label: "Draft" },
-  paused: { variant: "warning", label: "Paused" },
-  completed: { variant: "success", label: "Completed" },
-  failed: { variant: "destructive", label: "Failed" },
+  active: { variant: "success", label: "启用" },
+  draft: { variant: "default", label: "草稿" },
+  paused: { variant: "warning", label: "已暂停" },
+  completed: { variant: "success", label: "已完成" },
+  failed: { variant: "destructive", label: "失败" },
 };
 
 const filters: { value: string; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "active", label: "Active" },
-  { value: "draft", label: "Draft" },
-  { value: "paused", label: "Paused" },
-  { value: "completed", label: "Completed" },
-  { value: "failed", label: "Failed" },
+  { value: "all", label: "全部" },
+  { value: "active", label: "启用" },
+  { value: "draft", label: "草稿" },
+  { value: "paused", label: "已暂停" },
+  { value: "completed", label: "已完成" },
+  { value: "failed", label: "失败" },
 ];
 
 const defaultNodes: Node<WorkflowNodeData>[] = [
@@ -94,7 +94,7 @@ const defaultNodes: Node<WorkflowNodeData>[] = [
     id: "start-1",
     type: "startNode",
     position: { x: 400, y: 80 },
-    data: { label: "Start", type: "start", triggerType: "manual" },
+    data: { label: "开始", type: "start", triggerType: "manual" },
   },
 ];
 

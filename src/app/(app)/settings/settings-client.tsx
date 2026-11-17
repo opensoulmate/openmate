@@ -911,7 +911,7 @@ export function SettingsClient() {
   );
 
   return (
-      <PageLayout title="Settings">
+      <PageLayout title="设置">
         
     <div className="flex h-full flex-col lg:flex-row">
       {/* Mobile: top bar with hamburger + current section */}
@@ -1289,11 +1289,11 @@ export function SettingsClient() {
                 </div>
               </SettingCard>
 
-              <SettingCard title="Temperature" description={`${t("settings.temperatureDesc")}: ${settings.temperature}`}>
+              <SettingCard title="温度" description={`${t("settings.temperatureDesc")}: ${settings.temperature}`}>
                 <Slider value={settings.temperature} onChange={(v) => update("temperature", v)} min={0} max={2} step={0.1} />
               </SettingCard>
 
-              <SettingCard title="Max Tokens" description={t("settings.maxTokensDesc")}>
+              <SettingCard title="最大 Token 数" description={t("settings.maxTokensDesc")}>
                 <Slider value={settings.maxTokens} onChange={(v) => update("maxTokens", v)} min={256} max={131072} step={256} />
               </SettingCard>
             </>
@@ -1519,7 +1519,7 @@ export function SettingsClient() {
 
               <SettingCard title={t("settings.logLevel")} description={t("settings.logLevelDesc")}>
                 <ButtonGroup value={settings.logLevel} onChange={(v) => update("logLevel", v)}
-                  options={[{ value: "debug", label: "Debug" }, { value: "info", label: "Info" }, { value: "warn", label: "Warn" }, { value: "error", label: "Error" }]} />
+                  options={[{ value: "debug", label: "调试" }, { value: "info", label: "信息" }, { value: "warn", label: "警告" }, { value: "error", label: "错误" }]} />
               </SettingCard>
             </>
           )}
@@ -1595,7 +1595,7 @@ export function SettingsClient() {
                     {(getUserName() || getUserId() || "U")[0].toUpperCase()}
                   </div>
                   <div>
-                    <div className="text-xs lg:text-sm font-medium">{getUserName() || getUserId() || "User"}</div>
+                    <div className="text-xs lg:text-sm font-medium">{getUserName() || getUserId() || "用户"}</div>
                     <div className="text-xs text-muted-foreground">{t("settings.signedIn")}</div>
                   </div>
                 </div>

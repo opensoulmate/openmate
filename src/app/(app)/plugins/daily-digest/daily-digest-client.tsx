@@ -176,7 +176,7 @@ export function DailyDigestClient() {
             <Newspaper className="w-6 h-6 text-violet-400" />
           </div>
           <div>
-            <h1 className="text-xl lg:text-2xl font-bold">Daily Digest</h1>
+            <h1 className="text-xl lg:text-2xl font-bold">每日摘要</h1>
             <p className="text-xs lg:text-sm text-muted-foreground">{t("plugins.digestSubtitle") || "Cross-organ data aggregation · System health trends · Daily insights"}</p>
           </div>
         </div>
@@ -218,12 +218,12 @@ export function DailyDigestClient() {
         <div className="space-y-3 lg:space-y-6">
           {/* Score & Quick Stats */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-2 lg:gap-4">
-            {/* Health Score */}
+            {/* 健康评分 */}
             <div className={cn(
               'relative p-3 lg:p-6 rounded-2xl border border-border bg-gradient-to-br from-card to-card/50 shadow-lg',
               scoreGlow(score)
             )}>
-              <div className="text-xs text-muted-foreground uppercase tracking-wider mb-2">Health Score</div>
+              <div className="text-xs text-muted-foreground uppercase tracking-wider mb-2">健康评分</div>
               <div className={cn('text-5xl font-black tabular-nums', scoreColor(score))}>
                 {score.toFixed(0)}
               </div>

@@ -282,7 +282,7 @@ function TerminalPanel({
           onKeyDown={(e) => {
             if (e.key === "Enter") handleSubmit();
           }}
-          placeholder="Enter command..."
+          placeholder="输入命令..."
           className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground focus:outline-none"
         />
         <button
@@ -311,7 +311,7 @@ export function WorkspaceDetailClient() {
     {
       id: "welcome",
       type: "output",
-      content: `Welcome to ${workspace?.name ?? "Workspace"} terminal`,
+      content: `欢迎使用 ${workspace?.name ?? "工作区"} 终端`,
       timestamp: Date.now(),
     },
   ]);
@@ -485,7 +485,7 @@ export function WorkspaceDetailClient() {
               {fileTree.length === 0 ? (
                 <div className="flex flex-col items-center py-8 text-center">
                   <FolderOpen size={24} className="mb-2 text-muted-foreground" />
-                  <p className="text-[10px] text-muted-foreground">No files loaded</p>
+                  <p className="text-[10px] text-muted-foreground">未加载文件</p>
                 </div>
               ) : (
                 fileTree.map((node) => (
@@ -517,7 +517,7 @@ export function WorkspaceDetailClient() {
                   className="mb-2 text-muted-foreground"
                 />
                 <p className="text-[10px] text-muted-foreground">
-                  No files loaded
+                  未加载文件
                 </p>
               </div>
             ) : (
@@ -543,7 +543,7 @@ export function WorkspaceDetailClient() {
             <button
               onClick={() => setShowFileTree(true)}
               className="p-1.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-              title="File tree"
+              title="文件树"
             >
               <PanelLeft size={16} />
             </button>
@@ -575,7 +575,7 @@ export function WorkspaceDetailClient() {
                 Select a file to view
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                {isMobile ? "Tap the file icon to browse files" : "Click on a file in the tree to open it"}
+                {isMobile ? "点击文件图标浏览文件" : "Click on a file in the tree to open it"}
               </p>
             </div>
           )}
@@ -640,7 +640,7 @@ export function WorkspaceDetailClient() {
           <button
             onClick={() => setScmOpen(true)}
             className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-            title="Open SCM Panel"
+            title="打开源代码管理面板"
           >
             <PanelRightOpen size={16} />
           </button>

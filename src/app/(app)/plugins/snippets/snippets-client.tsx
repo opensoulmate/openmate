@@ -267,7 +267,7 @@ export function SnippetsClient() {
             <FileCode className="h-5 w-5 text-primary" />
           </div>
           <div>
-            <h1 className="text-lg font-semibold">Code Snippets</h1>
+            <h1 className="text-lg font-semibold">代码片段</h1>
             <p className="text-xs text-muted-foreground">{t('plugins.snippetsManage', { count: stats?.total || 0 })}</p>
           </div>
         </div>

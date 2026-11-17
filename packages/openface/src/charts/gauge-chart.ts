@@ -140,7 +140,7 @@ export function buildDualGaugeOption(
           offsetCenter: [0, '20%'],
           formatter: '{value}%',
         },
-        data: [{ value: mem, name: 'Memory' }],
+        data: [{ value: mem, name: '内存' }],
       },
     ],
   } as EChartsOption;

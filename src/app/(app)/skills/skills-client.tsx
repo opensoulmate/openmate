@@ -111,7 +111,7 @@ export function SkillsClient() {
       } else {
         setToast({ message: data.error || t('skills.uninstall'), type: 'error' });
       }
-    } catch { setToast({ message: 'Error', type: 'error' }); }
+    } catch { setToast({ message: '出错了', type: 'error' }); }
   };
 
   const handleUninstall = async (skill: Skill) => {
@@ -124,7 +124,7 @@ export function SkillsClient() {
         setToast({ message: `${skill.name} ${t('skills.uninstall')}`, type: 'success' });
         fetchSkills();
       }
-    } catch { setToast({ message: 'Error', type: 'error' }); }
+    } catch { setToast({ message: '出错了', type: 'error' }); }
   };
 
   // Get unique categories
@@ -231,13 +231,13 @@ export function SkillsClient() {
           {
             title: t('skills.title') || 'Details',
             items: [
-              { label: 'Name', value: selectedSkill.name },
+              { label: '名称', value: selectedSkill.name },
               ...(selectedSkill.description ? [{ label: t('skills.description') || 'Description', value: selectedSkill.description }] : []),
-              ...(selectedSkill.category ? [{ label: 'Category', value: selectedSkill.category, icon: <Tag className="w-3.5 h-3.5" /> }] : []),
+              ...(selectedSkill.category ? [{ label: '分类', value: selectedSkill.category, icon: <Tag className="w-3.5 h-3.5" /> }] : []),
             ],
           },
           {
-            title: 'Status',
+            title: '状态',
             items: [
               {
                 label: 'Installed',
@@ -246,8 +246,8 @@ export function SkillsClient() {
                   ? <CheckCircle2 className="w-3.5 h-3.5 text-green-500" />
                   : <XCircle className="w-3.5 h-3.5 text-muted-foreground" />,
               },
-              ...(selectedSkill.version ? [{ label: 'Version', value: `v${selectedSkill.version}` }] : []),
-              ...(selectedSkill.path ? [{ label: 'Path', value: selectedSkill.path }] : []),
+              ...(selectedSkill.version ? [{ label: '版本', value: `v${selectedSkill.version}` }] : []),
+              ...(selectedSkill.path ? [{ label: '路径', value: selectedSkill.path }] : []),
             ],
           },
         ]}
@@ -276,7 +276,7 @@ export function SkillsClient() {
   if (loading) return <div className="flex items-center justify-center h-full"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
 
   return (
-    <PageLayout title="Skills">
+    <PageLayout title="技能">
 
       {/* Toast */}
       {toast && (
@@ -382,7 +382,7 @@ export function SkillsClient() {
         {!selectedSkill && (
           <div className="text-center py-12 text-muted-foreground/50">
             <Puzzle className="w-10 h-10 mx-auto mb-2" />
-            <p className="text-sm">Select a skill from the sidebar to view details</p>
+            <p className="text-sm">从左侧边栏选择技能查看详情</p>
           </div>
         )}
       </div>

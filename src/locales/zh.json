@@ -86,7 +86,12 @@
     "enterprise": "企业管理",
     "sessions": "会话管理",
     "tags": "标签管理",
-    "permission": "权限管理"
+    "permission": "权限管理",
+    "evolution": "进化",
+    "advancedTier": "高级",
+    "baseTier": "底座",
+    "mate": "伙伴",
+    "spending": "开销"
   },
   "dashboard": {
     "title": "系统概览",
@@ -132,7 +137,16 @@
     "disk": "磁盘",
     "latency": "延迟",
     "totalRequests": "总请求",
-    "activeAlerts": "活跃告警"
+    "activeAlerts": "活跃告警",
+    "costTrend": "成本趋势",
+    "endpoint": "端点",
+    "healthStatus": "健康",
+    "lastCheck": "上次检查",
+    "organStatus": "状态",
+    "searchOrgans": "搜索器官...",
+    "systemHealth": "系统健康",
+    "tokenUsageTrend": "Token 用量趋势",
+    "viewFullPage": "查看完整页面"
   },
   "chat": {
     "newChat": "新建对话",
@@ -219,7 +233,16 @@
     "sessionExpired": "登录已过期，请重新登录",
     "deleteSessionTitle": "删除会话",
     "deleteSessionDesc": "确定要删除「{{name}}」吗？",
-    "sessionNotAccessible": "无法查看该会话：不存在或无权访问"
+    "sessionNotAccessible": "无法查看该会话：不存在或无权访问",
+    "deleteSessionConfirm": "确定删除此会话？",
+    "viewAudio": "音频",
+    "viewDates": "日期",
+    "viewDocs": "文档",
+    "viewImages": "图片",
+    "viewLinks": "链接",
+    "viewOthers": "其他",
+    "viewSessions": "会话",
+    "viewVideos": "视频"
   },
   "knowledge": {
     "title": "知识库",
@@ -350,7 +373,17 @@
     "text27": "先申请创建知识库，审批通过后即可添加知识",
     "text28": "字符",
     "text29": "共享到企业知识库",
-    "text30": "已共享到企业知识库"
+    "text30": "已共享到企业知识库",
+    "details": "详情",
+    "pendingRequests": "待审请求",
+    "pinned": "已置顶",
+    "searchPlaceholder": "搜索知识库...",
+    "starred": "已收藏",
+    "status": "状态",
+    "tabKnowledge": "知识库",
+    "tabRequests": "共享请求",
+    "tabSharing": "知识共享",
+    "totalItems": "全部条目"
   },
   "learn": {
     "title": "学习中心",
@@ -428,7 +461,13 @@
     "policyRetry": "未通过可重新作答",
     "save": "保存",
     "saving": "保存中...",
-    "cancel": "取消"
+    "cancel": "取消",
+    "chapter": "章节",
+    "chaptersCompleted": "章节已完成",
+    "completionRate": "完成率",
+    "continue": "继续",
+    "continueLearning": "继续学习",
+    "totalCourses": "全部课程"
   },
   "agents": {
     "title": "Agent管理",
@@ -485,7 +524,8 @@
     "pleaseSelectProviderAndModel": "请选择provider和model",
     "useGlandGlobalConfig": "使用Gland全局配置",
     "selectProviderAndModel": "请选择provider和model",
-    "usingGlobalConfig": "使用Gland全局配置"
+    "usingGlobalConfig": "使用Gland全局配置",
+    "searchPlaceholder": "搜索 Agent..."
   },
   "settings": {
     "title": "设置",
@@ -713,7 +753,12 @@
     },
     "localDeploy": "本地部署",
     "backToList": "返回列表",
-    "customModelName": "自定义模型名称"
+    "customModelName": "自定义模型名称",
+    "agentBinding": "Agent 绑定",
+    "agentBindingDesc": "绑定后消息只走指定 agent/profile（Ekko 式分配路由）",
+    "followSystem": "跟随系统",
+    "thirdPartyBinding": "第三方登录绑定",
+    "thirdPartyBindingDesc": "绑定微信/QQ 后可一键登录"
   },
   "search": {
     "title": "搜索一切",
@@ -749,7 +794,13 @@
     "sourceGene": "模板",
     "sourceEcho": "消息",
     "all": "全部",
-    "sourceAgents": "Agent"
+    "sourceAgents": "Agent",
+    "allSources": "全部来源",
+    "emptyHint": "输入查询内容，搜索知识、文档等",
+    "emptyTitle": "搜索你的数据",
+    "filters": "筛选",
+    "results": "条结果",
+    "searchBtn": "搜索"
   },
   "command": {
     "searchCommands": "搜索命令...",
@@ -1807,7 +1858,7 @@
     "priority": "优先级",
     "enable": "启用",
     "disable": "禁用",
-    "endpoint": "Endpoint",
+    "endpoint": "端点",
     "token": "Token",
     "noHistory": "暂无发送记录",
     "sent": "已发送",
@@ -1949,7 +2000,7 @@
     "t72588": "发送",
     "t69735": "双向集成",
     "createConnector": "新建连接器",
-    "endpointUrl": "Endpoint URL",
+    "endpointUrl": "端点 URL",
     "secretOptional": "密钥（可选）",
     "confirmDelete": "确定删除此连接器？",
     "test": "测试",
@@ -2040,8 +2091,8 @@
     "noProviders": "暂无提供商",
     "noKeys": "暂无API密钥",
     "selectProvider": "选择提供商",
-    "promptTokens": "Prompt Tokens",
-    "completionTokens": "Completion Tokens",
+    "promptTokens": "提示 Tokens",
+    "completionTokens": "补全 Tokens",
     "totalCost": "总费用",
     "requests": "请求数",
     "byProvider": "按提供商",
@@ -2906,7 +2957,12 @@
     "synthesize": "合成",
     "profiles": "语音配置",
     "voices": "语音",
-    "outputs": "输出",
+    "outputs": {
+      "delete": "删除",
+      "download": "下载",
+      "empty": "暂无合成结果，先合成一段文字吧",
+      "title": "合成结果"
+    },
     "inputText": "输入文本",
     "textPlaceholder": "输入要合成的文本...",
     "selectVoice": "选择语音",
@@ -3060,7 +3116,21 @@
     "totalProfiles": "总角色数",
     "unavailable": "不可用",
     "user": "用户",
-    "voiceProfiles": "声音角色"
+    "voiceProfiles": "声音角色",
+    "kb": {
+      "empty": "知识库暂无内容",
+      "read": "朗读",
+      "title": "知识库有声朗读"
+    },
+    "synth": {
+      "button": "合成",
+      "defaultVoice": "默认",
+      "placeholder": "输入要合成的文字…",
+      "rate": "语速",
+      "running": "合成中…",
+      "title": "语音合成",
+      "voice": "音色"
+    }
   },
   "vision": {
     "title": "视觉 · 图像可视化引擎",
@@ -3076,7 +3146,16 @@
     "chartData": "图表数据",
     "labels": "标签",
     "values": "数值",
-    "generate": "生成",
+    "generate": {
+      "button": "生成可视化",
+      "manualInput": "手动输入文本",
+      "pickKnowledge": "选择知识",
+      "placeholder": "粘贴知识文本：标题/要点/步骤/数字序列均可被抽取",
+      "running": "生成中…",
+      "sourceText": "知识内容",
+      "title": "生成",
+      "usingKnowledge": "已选知识条目，将读取其正文"
+    },
     "download": "下载",
     "noOutputs": "暂无输出",
     "mindmapTopic": "主题",
@@ -3127,7 +3206,30 @@
     "recentOutputs": "最近输出",
     "savedOutputs": "已保存输出",
     "totalGenerated": "总生成数",
-    "unavailable": "不可用"
+    "unavailable": "不可用",
+    "canvas": {
+      "badChart": "图表数据缺少 labels/values",
+      "empty": "暂无内容——先在「生成」区生成，或从「历史」回看",
+      "exportPng": "导出 PNG",
+      "exportSvg": "导出 SVG",
+      "fit": "适配屏幕",
+      "renderFailed": "渲染失败",
+      "specRaw": "spec 原文",
+      "title": "画布",
+      "zoomIn": "放大",
+      "zoomOut": "缩小"
+    },
+    "history": {
+      "delete": "删除",
+      "empty": "暂无生成记录",
+      "title": "历史"
+    },
+    "kind": {
+      "chart": "数据图",
+      "diagram": "示意图",
+      "flowchart": "流程图",
+      "mindmap": "思维导图"
+    }
   },
   "mind": {
     "title": "心智 · 人格调节层",
@@ -3495,7 +3597,10 @@
     "badge": "深度检查",
     "organLayer": "器官层",
     "serviceLayer": "服务层",
-    "systemGauges": "系统仪表"
+    "systemGauges": "系统仪表",
+    "details": "详情",
+    "searchOrgans": "搜索器官...",
+    "status": "状态"
   },
   "cortex": {
     "title": "OpenCortex",
@@ -3760,7 +3865,13 @@
     "byType": "按类型",
     "justNow": "刚刚",
     "minutesAgo": "{{count}}分钟前",
-    "hoursAgo": "{{count}}小时前"
+    "hoursAgo": "{{count}}小时前",
+    "details": "详情",
+    "organ": "器官",
+    "payload": "载荷",
+    "searchEvents": "搜索事件...",
+    "time": "时间",
+    "type": "类型"
   },
   "skills": {
     "title": "技能市场",
@@ -3814,7 +3925,55 @@
     "qqdlDecode": "QQ旋风解码",
     "btMagnet": "BT/磁力链",
     "torrent": "种子文件",
-    "videoExtract": "视频提取"
+    "videoExtract": "视频提取",
+    "addPartialFailed": "有 {{n}} 个任务添加失败",
+    "addSource": "添加源",
+    "allSources": "全部源",
+    "allTasks": "全部任务",
+    "chooseTarget": "选择下载目标",
+    "chooseTorrent": "选择 .torrent 文件（自动解析为磁力链）",
+    "copyPath": "复制文件路径",
+    "customSources": "自定义搜索源（RSS / JSON）",
+    "delete": "删除",
+    "deleteSource": "删除源",
+    "downloadDirLocal": "本机下载目录",
+    "downloadDirRemote": "后端下载目录",
+    "hasMagnet": "磁力",
+    "linksLabel": "下载链接（每行一个，可批量）",
+    "localDirHint": "本机目录仅桌面端（Electron）可设置，浏览器/移动端只走后端",
+    "noActive": "没有进行中的任务，点右上角「新建下载」开始",
+    "noError": "没有出错的任务",
+    "pause": "暂停",
+    "resume": "继续",
+    "retry": "重试",
+    "search": "搜索",
+    "searchAddFailed": "添加任务失败，请检查引擎连接",
+    "searchAdded": "已添加到下载任务：{{title}}",
+    "searchEmpty": "输入关键词搜索公共种子源",
+    "searchNoResults": "没有匹配结果（各源错误见下）",
+    "searchPlaceholder": "搜索种子 / 数据集（Internet Archive、Academic Torrents…）",
+    "searching": "搜索中…",
+    "seeders": "做种",
+    "sourceName": "源名称",
+    "sourceUrl": "URL 模板（含 {query} 占位符）",
+    "startDownload": "开始下载",
+    "statusDone": "已完成",
+    "statusDownloading": "下载中",
+    "statusError": "失败",
+    "statusPaused": "已暂停",
+    "statusPending": "等待中",
+    "tabActive": "进行中",
+    "tabAll": "全部",
+    "tabDone": "已完成",
+    "tabError": "错误",
+    "targetLabel": "下载目标",
+    "targetLocal": "本机",
+    "targetRemote": "后端",
+    "torrentFile": ".torrent 文件",
+    "torrentParseFailed": "无法解析该 .torrent（需要安全上下文），请改用磁力链",
+    "torrentSearch": "种子搜索",
+    "urlCount": "{{n}} 个 URL · {{m}} 个有效",
+    "urlPlaceholderMulti": "https://example.com/file.zip\\nmagnet:?xt=urn:btih:...\\nthunder://..."
   },
   "bodyMap": {
     "title": "躯体地图",
@@ -3962,7 +4121,15 @@
     "executePrompt": "执行提示词",
     "promptPlaceholder": "任务指令...",
     "deliverTarget": "投递目标",
-    "tasksCount": "{{count}} 个任务 · {{active}} 运行中"
+    "tasksCount": "{{count}} 个任务 · {{active}} 运行中",
+    "active": "启用",
+    "agent": "Agent",
+    "basicInfo": "基本信息",
+    "createNew": "新建任务",
+    "lastStatus": "上次状态",
+    "scheduleInfo": "调度",
+    "searchPlaceholder": "搜索任务...",
+    "statusInfo": "状态"
   },
   "cronDetail": {
     "backToList": "返回列表",
@@ -4254,7 +4421,8 @@
     "justNow": "刚刚",
     "noSources": "暂无来源",
     "items": "项目",
-    "close": "关闭"
+    "close": "关闭",
+    "lastSyncFailed": "上次同步失败"
   },
   "aiGroups": {
     "title": "AI群组",
@@ -4299,7 +4467,9 @@
     "status": "状态",
     "temperature": "温度",
     "noAgents": "暂无Agent",
-    "addAgentHint": "点击上方\"添加\"按钮添加Agent"
+    "addAgentHint": "点击上方\"添加\"按钮添加Agent",
+    "mentionAll": "所有人",
+    "searchPlaceholder": "搜索群组..."
   },
   "workflowBuilder": {
     "title": "工作流编排",
@@ -4447,7 +4617,32 @@
     "info": "信息",
     "warning": "警告",
     "error": "错误",
-    "success": "成功"
+    "success": "成功",
+    "category": {
+      "agent": "Agent",
+      "system": "系统"
+    },
+    "confirmClearAll": "清除全部通知？",
+    "delete": "删除",
+    "detail": {
+      "content": "通知内容",
+      "info": "通知信息",
+      "message": "消息",
+      "severity": "级别",
+      "status": "状态",
+      "time": "时间"
+    },
+    "emptyFilter": "没有 {{filter}} 通知",
+    "emptyHint": "已全部处理完！",
+    "fetchError": "加载通知失败：{{error}}",
+    "filter": {
+      "all": "全部"
+    },
+    "noApiBase": "未配置 API base URL",
+    "read": "已读",
+    "today": "今天",
+    "total": "总计",
+    "yesterday": "昨天"
   },
   "health": {
     "title": "系统健康",
@@ -4526,7 +4721,21 @@
     "loginFailed": "登录失败",
     "invalidCredentials": "用户名或密码错误",
     "usernameExists": "用户名已存在",
-    "connectionError": "无法连接到服务器，请检查地址"
+    "connectionError": "无法连接到服务器，请检查地址",
+    "backToLogin": "返回登录",
+    "codeInvalid": "验证码错误或已过期",
+    "codeRequired": "请输入验证码",
+    "oauthNotConfigured": "该登录方式未配置",
+    "orLoginWith": "或使用以下方式登录",
+    "pendingResent": "该账号已注册但未验证，验证码已重新发送",
+    "qqLogin": "QQ登录",
+    "resendCode": "重新发送验证码",
+    "resendFailed": "重发失败，请稍后再试",
+    "verifyAndLogin": "验证并登录",
+    "verifyCode": "6 位验证码",
+    "verifyFirst": "邮箱未验证，请输入邮箱收到的验证码",
+    "verifyTip": "验证码已发送至你的邮箱（10 分钟内有效）",
+    "wechatLogin": "微信登录"
   },
   "account": {
     "loggedIn": "已登录",
@@ -4740,7 +4949,12 @@
     "pause": "暂停",
     "delete": "删除",
     "confirmDeleteText": "确定删除 \"{{name}}\"？此操作不可撤销。",
-    "deleteAction": "删除"
+    "deleteAction": "删除",
+    "newWorkflow": "新建",
+    "noResults": "没有匹配的工作流",
+    "noWorkflows": "暂无工作流",
+    "searchPlaceholder": "搜索工作流...",
+    "selectHint": "从左侧面板选择，或点工具栏「新建」"
   },
   "mcp": {
     "connectionStatus": "{{name}} {{connected}}",
@@ -4780,7 +4994,18 @@
     "descriptionPlaceholder": "描述",
     "noMatch": "没有匹配的服务器",
     "disabledBadge": "已禁用",
-    "noToolsMessage": "暂无已注册工具。连接服务器后将自动发现工具。"
+    "noToolsMessage": "暂无已注册工具。连接服务器后将自动发现工具。",
+    "arguments": "参数",
+    "connection": "连接",
+    "enabledStatus": "已启用",
+    "error": "错误",
+    "execute": "执行",
+    "lastConnected": "最近连接",
+    "result": "执行结果",
+    "serverInfo": "服务器信息",
+    "status": "状态",
+    "test": "测试",
+    "transport": "传输方式"
   },
   "timeline": {
     "allOrgans": "全部器官",
@@ -4860,7 +5085,8 @@
     "noHistory": "暂无历史记录",
     "time": "时间",
     "iterShort": "迭代",
-    "testing": "测试中..."
+    "testing": "测试中...",
+    "searchOrgans": "搜索器官..."
   },
   "admin": {
     "veinFileStorage": "Vein 文件存储",
@@ -4901,7 +5127,11 @@
     "healthy": "正常",
     "unhealthy": "异常",
     "refresh": "刷新",
-    "willVolition": "意志 · 意志系统"
+    "willVolition": "意志 · 意志系统",
+    "tabEnterprise": "企业管理",
+    "tabPermission": "权限管理",
+    "tabSoma": "Soma管理",
+    "tabSystem": "系统管理"
   },
   "plugins": {
     "loadFailed": "加载失败",
@@ -5105,7 +5335,15 @@
     "promoted": "已提升到知识库",
     "promoteWarning": "已提升（有警告）",
     "promoteError": "提升笔记出错",
-    "generating": "生成中..."
+    "generating": "生成中...",
+    "author": "作者",
+    "available": "可用",
+    "details": "详情",
+    "installed": "已安装",
+    "state": "状态",
+    "status": "状态",
+    "type": "类型",
+    "version": "版本"
   },
   "team-detail": {
     "text1": "刚刚",
@@ -5420,7 +5658,13 @@
     "error": "异常",
     "autoRefreshOff": "关闭自动刷新",
     "autoRefreshOn": "开启自动刷新",
-    "live": "实时"
+    "live": "实时",
+    "tabs": {
+      "overview": "概览",
+      "registry": "注册表",
+      "topology": "拓扑",
+      "trajectory": "轨迹"
+    }
   },
   "diff": {
     "filesModified": "{{count}} 个文件修改",
@@ -5665,7 +5909,7 @@
     "llmConfig": "LLM配置",
     "llmProvider": "提供商",
     "llmModel": "模型",
-    "llmBaseUrl": "Base URL",
+    "llmBaseUrl": "基础 URL",
     "settingsTitle": "系统设置",
     "systemUptime": "运行时间",
     "systemVersion": "版本",
@@ -5722,7 +5966,8 @@
     "minutesAgo": "{{minutes}}分钟前",
     "hoursAgo": "{{hours}}小时前",
     "enableConnector": "启用连接器",
-    "disableConnector": "禁用连接器"
+    "disableConnector": "禁用连接器",
+    "connectors": "连接器"
   },
   "ai-groups": {
     "add": "添加",
@@ -5847,7 +6092,9 @@
     "systemMemory": "系统内存",
     "topEndpoints": "热门端点",
     "updated": "更新时间",
-    "used": "已使用"
+    "used": "已使用",
+    "searchOrgans": "搜索器官...",
+    "subtitle": "兼容 OpenTelemetry 的指标，可用于 Grafana 仪表板"
   },
   "bookmarks": {
     "updated": "书签已更新",
@@ -5966,7 +6213,17 @@
     "myOnly": "仅我的申请",
     "empty": "暂无知识库申请",
     "requester": "申请人",
-    "reviewNote": "审核备注（可选）"
+    "reviewNote": "审核备注（可选）",
+    "approved": "已通过",
+    "createFirst": "创建第一个请求 →",
+    "details": "详情",
+    "pending": "待审核",
+    "rejected": "已拒绝",
+    "review": "审核",
+    "search": "搜索请求...",
+    "status": "状态",
+    "statusInfo": "状态",
+    "total": "全部请求"
   },
   "enterprise": {
     "title": "企业管理",
@@ -6023,7 +6280,13 @@
     "noFavorites": "暂无收藏会话",
     "showAll": "显示全部会话",
     "addFavorite": "添加收藏",
-    "removeFavorite": "取消收藏"
+    "removeFavorite": "取消收藏",
+    "addTag": "添加标签",
+    "openChat": "在对话中打开",
+    "removeTag": "移除标签",
+    "selectSession": "选择一个会话查看",
+    "tagPlaceholder": "标签名称...",
+    "tags": "标签"
   },
   "registry": {
     "title": "组件注册表",
@@ -6036,5 +6299,80 @@
     "results": "条结果",
     "capabilities": "能力",
     "dependencies": "依赖"
+  },
+  "agentBinding": {
+    "adminTitle": "管理员：给用户分配 agent",
+    "assign": "分配",
+    "bind": "绑定",
+    "current": "当前绑定",
+    "none": "未绑定——可使用全部 agent",
+    "profile": "profile（可选）",
+    "saveFailed": "保存失败",
+    "saved": "已保存",
+    "selectAgent": "选择 agent…",
+    "selectUser": "选择用户…",
+    "unbind": "解除"
+  },
+  "bindings": {
+    "bind": "绑定",
+    "bindFailed": "发起绑定失败",
+    "boundTo": "已绑定：{{n}}",
+    "notBound": "未绑定",
+    "notConfigured": "该登录方式未配置",
+    "qq": "QQ",
+    "unbind": "解绑",
+    "unbindFailed": "解绑失败",
+    "wechat": "微信",
+    "wechatShort": "微"
+  },
+  "oauth": {
+    "backToLogin": "返回登录",
+    "bound": "绑定成功！",
+    "loginSuccess": "登录成功，正在进入…",
+    "missingParams": "授权回跳参数缺失，请重新发起登录",
+    "processing": "正在处理授权…"
+  },
+  "organNav": {
+    "refreshHealth": "刷新健康状态",
+    "searchPlaceholder": "搜索导航..."
+  },
+  "permission": {
+    "action": "操作",
+    "assign": "分配",
+    "assignRole": "分配角色",
+    "createPolicy": "创建访问策略",
+    "description": "管理角色和访问控制策略",
+    "effect": "效果",
+    "emptyPolicies": "暂无访问策略",
+    "lookupRoles": "查询用户角色",
+    "newPolicy": "新建策略",
+    "noRoles": "该用户暂无角色",
+    "policies": "访问策略",
+    "resource": "资源",
+    "role": "角色",
+    "roleName": "角色名",
+    "roles": "角色管理",
+    "searchPolicies": "搜索策略...",
+    "username": "用户名",
+    "usernamePlaceholder": "输入用户名"
+  },
+  "sidebar": {
+    "newChat": "新建会话",
+    "searchPlaceholder": "搜索会话..."
+  },
+  "tags": {
+    "addTag": "添加标签",
+    "colorLabel": "颜色",
+    "createBtn": "创建",
+    "createTag": "创建标签",
+    "edit": "编辑",
+    "editTag": "编辑标签",
+    "empty": "暂无标签，创建第一个标签开始使用。",
+    "nameLabel": "标签名称",
+    "namePlaceholder": "输入标签名称...",
+    "subtitle": "用标签整理你的内容",
+    "title": "标签",
+    "updateBtn": "更新",
+    "uses": "次使用"
   }
 }

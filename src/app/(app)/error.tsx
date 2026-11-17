@@ -26,15 +26,15 @@ export default function AppError({
         </div>
 
         {/* Title */}
-        <h2 className="text-xl font-bold text-foreground">Something went wrong</h2>
+        <h2 className="text-xl font-bold text-foreground">出错了</h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          An unexpected error occurred. You can try reloading the page or go back to the dashboard.
+          发生未知错误。你可以重新加载页面或返回仪表板。
         </p>
 
         {/* Error digest */}
         {error.digest && (
           <p className="mt-2 font-mono text-xs text-muted-foreground">
-            Error ID: {error.digest}
+            错误 ID： {error.digest}
           </p>
         )}
 
@@ -44,7 +44,7 @@ export default function AppError({
           className="mt-4 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors mx-auto"
         >
           {showDetails ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-          {showDetails ? "Hide" : "Show"} error details
+          {showDetails ? "隐藏" : "显示"} 错误详情
         </button>
 
         {showDetails && (

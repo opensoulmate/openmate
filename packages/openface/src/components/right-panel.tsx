@@ -78,7 +78,7 @@ export function RightPanel({
             <button
               onClick={onClose}
               className="p-1.5 rounded-md hover:bg-muted/50 transition-colors text-muted-foreground"
-              aria-label="Close"
+              aria-label="关闭"
             >
               <X className="w-4 h-4" />
             </button>

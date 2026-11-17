@@ -60,7 +60,7 @@ export function MainHeader({
           <button
             onClick={onToggleLeft}
             className="shrink-0 p-2 rounded-md hover:bg-zinc-800 active:bg-zinc-700 transition-colors text-zinc-400 hover:text-zinc-200 touch-manipulation cursor-pointer"
-            aria-label="Toggle Left Panel"
+            aria-label="切换左面板"
           >
             <PanelLeft className="w-4 h-4" />
           </button>
@@ -83,7 +83,7 @@ export function MainHeader({
           <button
             onClick={onToggleRight}
             className="shrink-0 p-2 rounded-md hover:bg-zinc-800 active:bg-zinc-700 transition-colors text-zinc-400 hover:text-zinc-200 touch-manipulation cursor-pointer"
-            aria-label="Toggle Right Panel"
+            aria-label="切换右面板"
           >
             <PanelLeft className="w-4 h-4 scale-x-[-1]" />
           </button>

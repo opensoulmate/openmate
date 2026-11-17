@@ -20,9 +20,9 @@ export default function NotFound() {
         </div>
 
         {/* Message */}
-        <h2 className="text-xl font-bold text-foreground">Page not found</h2>
+        <h2 className="text-xl font-bold text-foreground">页面未找到</h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          The page you&apos;re looking for doesn&apos;t exist or has been moved.
+          你访问的页面不存在或已被移动。
         </p>
 
         {/* Quick links */}
@@ -33,8 +33,8 @@ export default function NotFound() {
           >
             <Home size={16} className="text-muted-foreground" />
             <div className="text-left">
-              <p className="font-medium">Dashboard</p>
-              <p className="text-[10px] text-muted-foreground">System overview</p>
+              <p className="font-medium">仪表盘</p>
+              <p className="text-[10px] text-muted-foreground">系统总览</p>
             </div>
           </Link>
           <Link
@@ -43,8 +43,8 @@ export default function NotFound() {
           >
             <Search size={16} className="text-muted-foreground" />
             <div className="text-left">
-              <p className="font-medium">Chat</p>
-              <p className="text-[10px] text-muted-foreground">Start a conversation</p>
+              <p className="font-medium">对话</p>
+              <p className="text-[10px] text-muted-foreground">开始对话</p>
             </div>
           </Link>
           <Link
@@ -53,8 +53,8 @@ export default function NotFound() {
           >
             <Map size={16} className="text-muted-foreground" />
             <div className="text-left">
-              <p className="font-medium">Knowledge</p>
-              <p className="text-[10px] text-muted-foreground">Browse knowledge base</p>
+              <p className="font-medium">知识库</p>
+              <p className="text-[10px] text-muted-foreground">浏览知识库</p>
             </div>
           </Link>
           <Link
@@ -63,8 +63,8 @@ export default function NotFound() {
           >
             <Map size={16} className="text-muted-foreground" />
             <div className="text-left">
-              <p className="font-medium">Topology</p>
-              <p className="text-[10px] text-muted-foreground">System topology</p>
+              <p className="font-medium">系统拓扑</p>
+              <p className="text-[10px] text-muted-foreground">系统拓扑</p>
             </div>
           </Link>
         </div>
@@ -76,7 +76,7 @@ export default function NotFound() {
             className="flex items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted transition-colors mx-auto"
           >
             <ArrowLeft size={14} />
-            Go back
+            返回上一页
           </button>
         </div>
       </div>

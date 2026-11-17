@@ -241,7 +241,7 @@ export function LearnClient() {
         });
         if (res.ok) await fetchCourses();
       } catch {
-        alert('Import failed: invalid JSON');
+        alert('导入失败：JSON 格式无效');
       }
     };
     input.click();
@@ -368,7 +368,7 @@ export function LearnClient() {
             <button
               onClick={handleImport}
               className="flex items-center justify-center rounded-lg border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-muted transition-colors"
-              title="Import"
+              title="导入"
             >
               <Upload className="w-3.5 h-3.5" />
             </button>
@@ -406,7 +406,7 @@ export function LearnClient() {
             <button
               onClick={() => setShowQuiz(!showQuiz)}
               className="p-1.5 rounded-md hover:bg-muted/50 text-muted-foreground"
-              title={showQuiz ? 'Hide Quiz' : 'Take Quiz'}
+              title={showQuiz ? '隐藏测验' : '开始测验'}
             >
               <BrainCircuit className="w-4 h-4" />
             </button>
@@ -526,7 +526,7 @@ export function LearnClient() {
   // ── Main content ───────────────────────────────────────────
 
   return (
-    <PageLayout title="Learn" icon={<GraduationCap size={16} className="text-primary" />}>
+    <PageLayout title="学习" icon={<GraduationCap size={16} className="text-primary" />}>
       <div className="h-full overflow-y-auto">
         {!selectedCourseId ? (
           /* No course selected — dashboard overview */
@@ -631,14 +631,14 @@ export function LearnClient() {
                     }
                   }}
                   className="p-1.5 rounded-md hover:bg-muted text-muted-foreground"
-                  title="Edit"
+                  title="编辑"
                 >
                   <Edit3 size={14} />
                 </button>
                 <button
                   onClick={() => handleDelete(selectedCourseId!)}
                   className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-red-500"
-                  title="Delete"
+                  title="删除"
                 >
                   <Trash2 size={14} />
                 </button>
@@ -646,7 +646,7 @@ export function LearnClient() {
                   <button
                     onClick={() => setShowLearningCard(true)}
                     className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-amber-500"
-                    title="Learning Card"
+                    title="学习卡片"
                   >
                     <Award size={14} />
                   </button>
@@ -724,14 +724,14 @@ export function LearnClient() {
             <div className="space-y-4">
               <div>
                 <label className="mb-1 block text-xs font-medium">{t('learn.courseTitle') || 'Title'}</label>
-                <input value={formTitle} onChange={(e) => setFormTitle(e.target.value)} placeholder="Enter course title..." className="w-full rounded-md border border-border bg-muted px-3 py-2 text-sm outline-none focus:border-primary" autoFocus />
+                <input value={formTitle} onChange={(e) => setFormTitle(e.target.value)} placeholder="输入课程标题..." className="w-full rounded-md border border-border bg-muted px-3 py-2 text-sm outline-none focus:border-primary" autoFocus />
               </div>
               <div>
-                <label className="mb-1 block text-xs font-medium">{t('learn.description') || 'Description'} <span className="text-muted-foreground">(optional)</span></label>
-                <textarea value={formDescription} onChange={(e) => setFormDescription(e.target.value)} placeholder="Brief description..." rows={2} className="w-full resize-none rounded-md border border-border bg-muted px-3 py-2 text-sm outline-none focus:border-primary" />
+                <label className="mb-1 block text-xs font-medium">{t('learn.description') || 'Description'} <span className="text-muted-foreground">（可选）</span></label>
+                <textarea value={formDescription} onChange={(e) => setFormDescription(e.target.value)} placeholder="简要描述..." rows={2} className="w-full resize-none rounded-md border border-border bg-muted px-3 py-2 text-sm outline-none focus:border-primary" />
               </div>
               <div>
-                <label className="mb-1 block text-xs font-medium">{t('learn.tags') || 'Tags'} <span className="text-muted-foreground">(comma separated)</span></label>
+                <label className="mb-1 block text-xs font-medium">{t('learn.tags') || 'Tags'} <span className="text-muted-foreground">（逗号分隔）</span></label>
                 <input value={formTags} onChange={(e) => setFormTags(e.target.value)} placeholder="python, machine-learning, ..." className="w-full rounded-md border border-border bg-muted px-3 py-2 text-sm outline-none focus:border-primary" />
               </div>
               <div className="flex gap-2">
@@ -745,26 +745,26 @@ export function LearnClient() {
               {genMode === 'ai' && (
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="mb-1 block text-xs text-muted-foreground">Chapters</label>
+                    <label className="mb-1 block text-xs text-muted-foreground">章节</label>
                     <select value={numChapters} onChange={(e) => setNumChapters(parseInt(e.target.value))} className="w-full rounded-md border border-border bg-muted px-3 py-2 text-sm outline-none">
                       {[3, 4, 5, 6, 7, 8, 10].map((n) => <option key={n} value={n}>{n}</option>)}
                     </select>
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs text-muted-foreground">Difficulty</label>
+                    <label className="mb-1 block text-xs text-muted-foreground">难度</label>
                     <select value={difficulty} onChange={(e) => setDifficulty(e.target.value)} className="w-full rounded-md border border-border bg-muted px-3 py-2 text-sm outline-none">
-                      <option value="beginner">Beginner</option>
-                      <option value="intermediate">Intermediate</option>
-                      <option value="advanced">Advanced</option>
+                      <option value="beginner">初级</option>
+                      <option value="intermediate">中级</option>
+                      <option value="advanced">高级</option>
                     </select>
                   </div>
                 </div>
               )}
             </div>
             <div className="mt-6 flex justify-end gap-2">
-              <button onClick={() => { setShowCreateModal(false); resetForm(); }} className="rounded-md border border-border px-4 py-2 text-sm hover:bg-accent">Cancel</button>
+              <button onClick={() => { setShowCreateModal(false); resetForm(); }} className="rounded-md border border-border px-4 py-2 text-sm hover:bg-accent">取消</button>
               <button onClick={handleCreate} disabled={!formTitle.trim() || generating} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
-                {generating ? <><Loader2 size={14} className="animate-spin" /> Creating...</> : <><Plus size={14} /> Create</>}
+                {generating ? <><Loader2 size={14} className="animate-spin" /> 创建中...</> : <><Plus size={14} /> 创建</>}
               </button>
             </div>
           </div>
@@ -781,22 +781,22 @@ export function LearnClient() {
             </div>
             <div className="space-y-4">
               <div>
-                <label className="mb-1 block text-xs font-medium">Title</label>
+                <label className="mb-1 block text-xs font-medium">标题</label>
                 <input value={formTitle} onChange={(e) => setFormTitle(e.target.value)} className="w-full rounded-md border border-border bg-muted px-3 py-2 text-sm outline-none focus:border-primary" autoFocus />
               </div>
               <div>
-                <label className="mb-1 block text-xs font-medium">Description</label>
+                <label className="mb-1 block text-xs font-medium">描述</label>
                 <textarea value={formDescription} onChange={(e) => setFormDescription(e.target.value)} rows={3} className="w-full resize-none rounded-md border border-border bg-muted px-3 py-2 text-sm outline-none focus:border-primary" />
               </div>
               <div>
-                <label className="mb-1 block text-xs font-medium">Tags</label>
+                <label className="mb-1 block text-xs font-medium">标签</label>
                 <input value={formTags} onChange={(e) => setFormTags(e.target.value)} className="w-full rounded-md border border-border bg-muted px-3 py-2 text-sm outline-none focus:border-primary" />
               </div>
             </div>
             <div className="mt-6 flex justify-end gap-2">
-              <button onClick={() => { setShowEditModal(false); resetForm(); }} className="rounded-md border border-border px-4 py-2 text-sm hover:bg-accent">Cancel</button>
+              <button onClick={() => { setShowEditModal(false); resetForm(); }} className="rounded-md border border-border px-4 py-2 text-sm hover:bg-accent">取消</button>
               <button onClick={handleEdit} disabled={!formTitle.trim() || generating} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
-                {generating ? <><Loader2 size={14} className="animate-spin" /> Saving...</> : <><CheckCircle2 size={14} /> Save</>}
+                {generating ? <><Loader2 size={14} className="animate-spin" /> 保存中...</> : <><CheckCircle2 size={14} /> 保存</>}
               </button>
             </div>
           </div>
@@ -810,13 +810,13 @@ export function LearnClient() {
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-base font-semibold flex items-center gap-2">
                 <Award size={18} className="text-amber-500" />
-                {t('learn.learningCard') || 'Learning Card'}
+                {t('learn.learningCard') || '学习卡片'}
               </h2>
               <button onClick={() => setShowLearningCard(false)} className="rounded-md p-1 hover:bg-accent"><X size={16} /></button>
             </div>
             <div className="relative overflow-hidden rounded-lg border-2 border-amber-400 bg-gradient-to-br from-amber-50 via-white to-blue-50 p-3 lg:p-6">
               <div className="absolute right-4 top-4 text-6xl opacity-10">🎓</div>
-              <div className="mb-1 text-xs font-medium uppercase tracking-wider text-amber-600">Certificate of Completion</div>
+              <div className="mb-1 text-xs font-medium uppercase tracking-wider text-amber-600">结业证书</div>
               <div className="mb-4 text-lg font-bold">{selectedCourse.title}</div>
               <div className="mb-3 text-xs text-muted-foreground/80">{selectedCourse.description}</div>
               <div className="mb-4 flex items-center gap-4 text-xs text-muted-foreground">
@@ -846,24 +846,24 @@ export function LearnClient() {
             </div>
             <div className="space-y-3 rounded-lg border border-border bg-muted/50 p-3 text-sm">
               <div>
-                <h3 className="font-medium">📋 Course Management</h3>
+                <h3 className="font-medium">📋 课程管理</h3>
                 <ul className="mt-1 list-inside list-disc text-xs text-muted-foreground">
-                  <li>Supports create, edit, delete, and import</li>
-                  <li>AI generation requires Gland gateway</li>
+                  <li>支持创建、编辑、删除与导入</li>
+                  <li>AI 生成需要 Gland 网关</li>
                 </ul>
               </div>
               <div>
-                <h3 className="font-medium">📊 Learning Progress</h3>
+                <h3 className="font-medium">📊 学习进度</h3>
                 <ul className="mt-1 list-inside list-disc text-xs text-muted-foreground">
-                  <li>Each chapter tracked independently</li>
-                  <li>Course auto-marks complete when all chapters done</li>
+                  <li>每章独立跟踪</li>
+                  <li>全部章节完成后课程自动标记完成</li>
                 </ul>
               </div>
               <div>
-                <h3 className="font-medium">🔒 Data Security</h3>
+                <h3 className="font-medium">🔒 数据安全</h3>
                 <ul className="mt-1 list-inside list-disc text-xs text-muted-foreground">
-                  <li>All data stored locally</li>
-                  <li>No data uploaded to cloud</li>
+                  <li>所有数据本地存储</li>
+                  <li>数据不上传云端</li>
                 </ul>
               </div>
             </div>

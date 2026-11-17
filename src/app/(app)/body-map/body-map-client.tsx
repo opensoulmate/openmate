@@ -33,51 +33,51 @@ const ORGAN_LAYOUT: Array<{
   system: string;
 }> = [
   // Brain area (head)
-  { key: "soul", label: "Soul", emoji: "🧠", category: "core", x: 50, y: 6, href: "/dashboard", system: "brain" },
-  { key: "cortex", label: "Cortex", emoji: "🧩", category: "core", x: 38, y: 10, href: "/cortex", system: "brain" },
-  { key: "hippo", label: "Hippocampus", emoji: "🧠", category: "organ", x: 62, y: 10, href: "/hippo", system: "brain" },
-  { key: "mind", label: "Mind", emoji: "💭", category: "organ", x: 50, y: 13, href: "/mind", system: "brain" },
-  { key: "reflex", label: "Reflex", emoji: "⚡", category: "organ", x: 30, y: 13, href: "/reflex", system: "brain" },
+  { key: "soul", label: "灵魂", emoji: "🧠", category: "core", x: 50, y: 6, href: "/dashboard", system: "brain" },
+  { key: "cortex", label: "皮层", emoji: "🧩", category: "core", x: 38, y: 10, href: "/cortex", system: "brain" },
+  { key: "hippo", label: "海马体", emoji: "🧠", category: "organ", x: 62, y: 10, href: "/hippo", system: "brain" },
+  { key: "mind", label: "心智", emoji: "💭", category: "organ", x: 50, y: 13, href: "/mind", system: "brain" },
+  { key: "reflex", label: "反射", emoji: "⚡", category: "organ", x: 30, y: 13, href: "/reflex", system: "brain" },
 
   // Eyes/Sense (face)
-  { key: "sense", label: "Sense", emoji: "👁", category: "service", x: 42, y: 17, href: "/sense", system: "sensory" },
-  { key: "vision", label: "Vision", emoji: "🎨", category: "organ", x: 58, y: 17, href: "/vision", system: "sensory" },
-  { key: "capture", label: "Capture", emoji: "📸", category: "service", x: 35, y: 19, href: "/capture", system: "sensory" },
+  { key: "sense", label: "感官", emoji: "👁", category: "service", x: 42, y: 17, href: "/sense", system: "sensory" },
+  { key: "vision", label: "视觉", emoji: "🎨", category: "organ", x: 58, y: 17, href: "/vision", system: "sensory" },
+  { key: "capture", label: "捕获", emoji: "📸", category: "service", x: 35, y: 19, href: "/capture", system: "sensory" },
 
   // Voice (throat)
-  { key: "voice", label: "Voice", emoji: "🎤", category: "organ", x: 50, y: 22, href: "/voice", system: "sensory" },
-  { key: "echo", label: "Echo", emoji: "🔊", category: "service", x: 40, y: 24, href: "/echo", system: "sensory" },
+  { key: "voice", label: "声带", emoji: "🎤", category: "organ", x: 50, y: 22, href: "/voice", system: "sensory" },
+  { key: "echo", label: "回声", emoji: "🔊", category: "service", x: 40, y: 24, href: "/echo", system: "sensory" },
 
   // Chest area
-  { key: "vital", label: "Vital", emoji: "📊", category: "service", x: 45, y: 32, href: "/vital", system: "circulatory" },
-  { key: "pulse", label: "Pulse", emoji: "💓", category: "organ", x: 55, y: 30, href: "/pulse", system: "circulatory" },
-  { key: "immune", label: "Immune", emoji: "🛡", category: "service", x: 38, y: 36, href: "/immune", system: "immune" },
+  { key: "vital", label: "体征", emoji: "📊", category: "service", x: 45, y: 32, href: "/vital", system: "circulatory" },
+  { key: "pulse", label: "脉搏", emoji: "💓", category: "organ", x: 55, y: 30, href: "/pulse", system: "circulatory" },
+  { key: "immune", label: "免疫", emoji: "🛡", category: "service", x: 38, y: 36, href: "/immune", system: "immune" },
 
   // Arms (Nerve/Will)
-  { key: "nerve", label: "Nerve", emoji: "⚡", category: "service", x: 20, y: 32, href: "/nerve", system: "nervous" },
-  { key: "will", label: "Will", emoji: "✨", category: "core", x: 80, y: 32, href: "/workflow", system: "nervous" },
+  { key: "nerve", label: "神经", emoji: "⚡", category: "service", x: 20, y: 32, href: "/nerve", system: "nervous" },
+  { key: "will", label: "意志", emoji: "✨", category: "core", x: 80, y: 32, href: "/workflow", system: "nervous" },
 
   // Core (torso center)
-  { key: "gland", label: "Gland", emoji: "🧪", category: "service", x: 50, y: 40, href: "/gland", system: "endocrine" },
-  { key: "heredity", label: "Heredity", emoji: "🔗", category: "organ", x: 58, y: 38, href: "/heredity", system: "endocrine" },
+  { key: "gland", label: "腺体", emoji: "🧪", category: "service", x: 50, y: 40, href: "/gland", system: "endocrine" },
+  { key: "heredity", label: "遗传链", emoji: "🔗", category: "organ", x: 58, y: 38, href: "/heredity", system: "endocrine" },
 
   // Vein (vascular system - spread across body)
-  { key: "vein", label: "Vein", emoji: "🩸", category: "core", x: 30, y: 40, href: "/vein", system: "circulatory" },
+  { key: "vein", label: "血管", emoji: "🩸", category: "core", x: 30, y: 40, href: "/vein", system: "circulatory" },
 
   // Hands (Limb/Link)
-  { key: "limb", label: "Limb", emoji: "💪", category: "organ", x: 15, y: 44, href: "/limb", system: "motor" },
-  { key: "link", label: "Link", emoji: "🔗", category: "service", x: 85, y: 44, href: "/link", system: "motor" },
+  { key: "limb", label: "四肢", emoji: "💪", category: "organ", x: 15, y: 44, href: "/limb", system: "motor" },
+  { key: "link", label: "突触", emoji: "🔗", category: "service", x: 85, y: 44, href: "/link", system: "motor" },
 
   // Abdomen
-  { key: "marrow", label: "Marrow", emoji: "🦴", category: "service", x: 42, y: 48, href: "/marrow", system: "immune" },
-  { key: "gene", label: "Gene", emoji: "🧬", category: "service", x: 58, y: 48, href: "/gene", system: "endocrine" },
+  { key: "marrow", label: "骨髓", emoji: "🦴", category: "service", x: 42, y: 48, href: "/marrow", system: "immune" },
+  { key: "gene", label: "基因", emoji: "🧬", category: "service", x: 58, y: 48, href: "/gene", system: "endocrine" },
 
   // Lower torso
-  { key: "nest", label: "Nest", emoji: "🏠", category: "organ", x: 50, y: 55, href: "/nest", system: "isolation" },
-  { key: "mirror", label: "Mirror", emoji: "🪞", category: "service", x: 38, y: 58, href: "/mirror", system: "isolation" },
+  { key: "nest", label: "巢穴", emoji: "🏠", category: "organ", x: 50, y: 55, href: "/nest", system: "isolation" },
+  { key: "mirror", label: "镜像", emoji: "🪞", category: "service", x: 38, y: 58, href: "/mirror", system: "isolation" },
 
   // Legs (Foundation)
-  { key: "trajectory", label: "Trajectory", emoji: "📊", category: "system", x: 42, y: 68, href: "/trajectory", system: "foundation" },
+  { key: "trajectory", label: "轨迹", emoji: "📊", category: "system", x: 42, y: 68, href: "/trajectory", system: "foundation" },
   { key: "mcp", label: "MCP", emoji: "🔌", category: "system", x: 58, y: 68, href: "/mcp", system: "foundation" },
 
   // Feet (Infrastructure)
@@ -317,7 +317,7 @@ export function BodyMapClient() {
   const selectedStatus = selectedOrgan ? organStatuses[selectedOrgan] : null;
 
   return (
-      <PageLayout title="Body Map">
+      <PageLayout title="身体地图">
         
     <div ref={containerRef} className="flex h-full flex-col overflow-hidden bg-background">
       {/* Header */}

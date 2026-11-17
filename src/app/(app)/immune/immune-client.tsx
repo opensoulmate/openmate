@@ -257,7 +257,7 @@ export function ImmuneClient() {
   ]
 
   return (
-      <PageLayout title="Immune">
+      <PageLayout title="免疫">
         
     <div className="p-4 sm:p-3 lg:p-6 max-w-6xl mx-auto space-y-3 lg:space-y-6">
       {/* Header */}
@@ -732,7 +732,7 @@ export function ImmuneClient() {
                       ? <CheckCircle className="w-5 h-5" />
                       : <XCircle className="w-5 h-5" />}
                     <span className="font-semibold">
-                      {(inspectResult.threats_found as number) === 0 ? "Clean — No threats detected" : `${inspectResult.threats_found} threat(s) detected`}
+                      {(inspectResult.threats_found as number) === 0 ? "安全——未检测到威胁" : `${inspectResult.threats_found} threat(s) detected`}
                     </span>
                   </div>
                   {(inspectResult.threats as Array<Record<string, unknown>>)?.map((threat, i) => (

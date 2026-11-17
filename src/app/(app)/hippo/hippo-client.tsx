@@ -226,7 +226,7 @@ export function HippoClient() {
   ];
 
   return (
-      <PageLayout title="Hippo">
+      <PageLayout title="海马体">
         
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}

@@ -188,7 +188,7 @@ export function HeredityClient() {
   ];
 
   return (
-      <PageLayout title="Heredity">
+      <PageLayout title="遗传链">
         
     <div className="flex h-full flex-col overflow-hidden">
       <div className="flex items-center justify-between border-b border-border px-3 lg:px-6 py-3 lg:py-4 gap-2">
@@ -390,7 +390,7 @@ export function HeredityClient() {
                         <span className="font-mono text-xs lg:text-sm text-muted-foreground">
                           {m.from_version} → {m.to_version}
                         </span>
-                        {m.dry_run && <span className="rounded-full bg-yellow-500/10 px-2 py-0.5 text-[10px] text-yellow-600">Dry Run</span>}
+                        {m.dry_run && <span className="rounded-full bg-yellow-500/10 px-2 py-0.5 text-[10px] text-yellow-600">试运行</span>}
                       </div>
                       <div className="flex items-center gap-2">
                         {(m.status === "pending") && (

@@ -108,7 +108,7 @@ export function SystemTab() {
       <div className="flex items-center justify-between border-b border-border px-3 lg:px-6 py-3 lg:py-4">
         <div className="flex items-center gap-2">
           <Shield size={20} className="text-primary" />
-          <h1 className="text-lg font-semibold">System Admin</h1>
+          <h1 className="text-lg font-semibold">系统管理</h1>
         </div>
         <button
           onClick={fetchOverview}
@@ -129,46 +129,46 @@ export function SystemTab() {
               ) : (
                 <XCircle size={16} className="text-red-500" />
               )}
-              <span className="text-xs lg:text-sm font-medium">System Health</span>
+              <span className="text-xs lg:text-sm font-medium">系统健康</span>
             </div>
             <p className="text-xl lg:text-2xl font-bold">{healthyOrgans}/{totalOrgans}</p>
-            <p className="text-xs text-muted-foreground">organs online</p>
+            <p className="text-xs text-muted-foreground">器官在线</p>
           </div>
 
           <div className="rounded-lg border border-border bg-card p-3 lg:p-4">
             <div className="flex items-center gap-2 mb-2">
               <HardDrive size={16} className="text-blue-500" />
-              <span className="text-xs lg:text-sm font-medium">File Store</span>
+              <span className="text-xs lg:text-sm font-medium">文件存储</span>
             </div>
             <p className="text-xl lg:text-2xl font-bold">{veinStats?.store?.total_files ?? 0}</p>
-            <p className="text-xs text-muted-foreground">files stored</p>
+            <p className="text-xs text-muted-foreground">个文件已存储</p>
           </div>
 
           <div className="rounded-lg border border-border bg-card p-3 lg:p-4">
             <div className="flex items-center gap-2 mb-2">
               <Zap size={16} className="text-amber-500" />
-              <span className="text-xs lg:text-sm font-medium">LLM Usage</span>
+              <span className="text-xs lg:text-sm font-medium">LLM 用量</span>
             </div>
             <p className="text-xl lg:text-2xl font-bold">{glandStats?.total_tokens?.toLocaleString() ?? 0}</p>
-            <p className="text-xs text-muted-foreground">tokens used</p>
+            <p className="text-xs text-muted-foreground">个 tokens 已用</p>
           </div>
 
           <div className="rounded-lg border border-border bg-card p-3 lg:p-4">
             <div className="flex items-center gap-2 mb-2">
               <Activity size={16} className="text-violet-500" />
-              <span className="text-xs lg:text-sm font-medium">Trajectories</span>
+              <span className="text-xs lg:text-sm font-medium">轨迹</span>
             </div>
             <p className="text-xl lg:text-2xl font-bold">{trajectoryStats?.total_sessions ?? 0}</p>
-            <p className="text-xs text-muted-foreground">sessions recorded</p>
+            <p className="text-xs text-muted-foreground">个会话已记录</p>
           </div>
         </div>
 
-        {/* Quick Actions */}
-        <h2 className="mb-4 text-xs lg:text-sm font-semibold text-muted-foreground uppercase tracking-wider">Quick Actions</h2>
+        {/* 快捷操作 */}
+        <h2 className="mb-4 text-xs lg:text-sm font-semibold text-muted-foreground uppercase tracking-wider">快捷操作</h2>
         <div className="grid gap-2 lg:gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <ActionCard
             icon={<Trash2 size={18} />}
-            title="Clear All Caches"
+            title="清空所有缓存"
             description="Clear cached data across Vein, Reflex, and Voice components"
             color="text-red-500"
             bg="bg-red-500/10"
@@ -178,7 +178,7 @@ export function SystemTab() {
           />
           <ActionCard
             icon={<RefreshCw size={18} />}
-            title="Cleanup Expired Data"
+            title="清理过期数据"
             description="Remove expired sessions, uploads, sandboxes, and cache entries"
             color="text-amber-500"
             bg="bg-amber-500/10"
@@ -188,7 +188,7 @@ export function SystemTab() {
           />
           <ActionCard
             icon={<Database size={18} />}
-            title="Run Backup Now"
+            title="立即备份"
             description="Create an immediate backup of knowledge bases and configuration"
             color="text-blue-500"
             bg="bg-blue-500/10"
@@ -204,7 +204,7 @@ export function SystemTab() {
           />
           <ActionCard
             icon={<Download size={18} />}
-            title="Export System Config"
+            title="导出系统配置"
             description="Download current system configuration as JSON"
             color="text-green-500"
             bg="bg-green-500/10"
@@ -230,7 +230,7 @@ export function SystemTab() {
           />
           <ActionCard
             icon={<Download size={18} />}
-            title="Download System Report"
+            title="下载系统报告"
             description="Generate and download a comprehensive system report with all component statuses and stats"
             color="text-cyan-500"
             bg="bg-cyan-500/10"
@@ -256,7 +256,7 @@ export function SystemTab() {
           />
           <ActionCard
             icon={<Activity size={18} />}
-            title="Full Health Check"
+            title="完整健康检查"
             description="Run comprehensive health check on all 25+ components"
             color="text-violet-500"
             bg="bg-violet-500/10"
@@ -266,7 +266,7 @@ export function SystemTab() {
           />
           <ActionCard
             icon={<Clock size={18} />}
-            title="Refresh Overview"
+            title="刷新概览"
             description="Force refresh system overview data from all components"
             color="text-cyan-500"
             bg="bg-cyan-500/10"
@@ -348,7 +348,7 @@ export function SystemTab() {
                   items={[
                     { label: "Templates", value: overview.stats.gene.total_templates ?? 0 },
                     { label: "Built-in", value: overview.stats.gene.builtin_count ?? 0 },
-                    { label: "User", value: overview.stats.gene.user_count ?? 0 },
+                    { label: "用户", value: overview.stats.gene.user_count ?? 0 },
                     { label: "Categories", value: Object.keys(overview.stats.gene.by_category ?? {}).length },
                   ]}
                 />
@@ -359,7 +359,7 @@ export function SystemTab() {
                   emoji="🧠"
                   items={[
                     { label: "Memories", value: overview.stats.hippo.memory?.total_memories ?? 0 },
-                    { label: "Active", value: overview.stats.hippo.memory?.active ?? 0 },
+                    { label: "活跃", value: overview.stats.hippo.memory?.active ?? 0 },
                     { label: "Sessions", value: overview.stats.hippo.sessions?.total_sessions ?? 0 },
                     { label: "Strategy", value: overview.stats.hippo.decay_config?.strategy ?? "N/A" },
                   ]}
@@ -371,7 +371,7 @@ export function SystemTab() {
                   emoji="📊"
                   items={[
                     { label: "CPU", value: `${overview.stats.vital.system?.cpu_percent ?? 0}%` },
-                    { label: "Memory", value: `${overview.stats.vital.system?.memory_percent ?? 0}%` },
+                    { label: "内存", value: `${overview.stats.vital.system?.memory_percent ?? 0}%` },
                     { label: "Disk", value: `${overview.stats.vital.system?.disk_percent ?? 0}%` },
                     { label: "Alerts", value: overview.stats.vital.alerts?.active ?? 0 },
                   ]}
@@ -383,7 +383,7 @@ export function SystemTab() {
                   emoji="💭"
                   items={[
                     { label: "Personalities", value: overview.stats.mind.personality?.total_personalities ?? 0 },
-                    { label: "Active", value: overview.stats.mind.active_personality ?? "N/A" },
+                    { label: "活跃", value: overview.stats.mind.active_personality ?? "N/A" },
                     { label: "Emotions Analyzed", value: overview.stats.mind.emotion?.total_analyzed ?? 0 },
                   ]}
                 />
@@ -438,7 +438,7 @@ export function SystemTab() {
                   emoji="🪞"
                   items={[
                     { label: "Sandboxes", value: overview.stats.mirror.total_sandboxes ?? 0 },
-                    { label: "Active", value: overview.stats.mirror.active ?? 0 },
+                    { label: "活跃", value: overview.stats.mirror.active ?? 0 },
                   ]}
                 />
               )}
@@ -449,7 +449,7 @@ export function SystemTab() {
                   items={[
                     { label: "Messages", value: overview.stats.echo.total_messages ?? 0 },
                     { label: "Sent", value: overview.stats.echo.sent ?? 0 },
-                    { label: "Failed", value: overview.stats.echo.failed ?? 0 },
+                    { label: "失败", value: overview.stats.echo.failed ?? 0 },
                     { label: "Channels", value: overview.stats.echo.channels_enabled ?? 0 },
                   ]}
                 />
@@ -460,7 +460,7 @@ export function SystemTab() {
                   emoji="🔗"
                   items={[
                     { label: "Connectors", value: overview.stats.link.total_connectors ?? 0 },
-                    { label: "Active", value: overview.stats.link.active ?? 0 },
+                    { label: "活跃", value: overview.stats.link.active ?? 0 },
                     { label: "Events", value: overview.stats.link.total_events ?? 0 },
                   ]}
                 />
@@ -471,7 +471,7 @@ export function SystemTab() {
                   emoji="🦴"
                   items={[
                     { label: "Backups", value: overview.stats.marrow.backup?.total_backups ?? 0 },
-                    { label: "Size", value: `${((overview.stats.marrow.backup?.total_size_bytes ?? 0) / 1024).toFixed(1)}KB` },
+                    { label: "大小", value: `${((overview.stats.marrow.backup?.total_size_bytes ?? 0) / 1024).toFixed(1)}KB` },
                     { label: "Schedules", value: overview.stats.marrow.scheduler?.total_schedules ?? 0 },
                   ]}
                 />
@@ -494,7 +494,7 @@ export function SystemTab() {
                   items={[
                     { label: "Events", value: overview.stats.nerve.total_events ?? 0 },
                     { label: "Nodes", value: overview.stats.nerve.total_nodes ?? 0 },
-                    { label: "Online", value: overview.stats.nerve.online_nodes ?? 0 },
+                    { label: "在线", value: overview.stats.nerve.online_nodes ?? 0 },
                     { label: "Subscriptions", value: overview.stats.nerve.total_subscriptions ?? 0 },
                   ]}
                 />
@@ -505,7 +505,7 @@ export function SystemTab() {
                   emoji="✨"
                   items={[
                     { label: "Workflows", value: overview.stats.will.total_workflows ?? 0 },
-                    { label: "Active", value: overview.stats.will.active_workflows ?? 0 },
+                    { label: "活跃", value: overview.stats.will.active_workflows ?? 0 },
                     { label: "Executions", value: overview.stats.will.total_executions ?? 0 },
                     { label: "Success Rate", value: `${overview.stats.will.success_rate ?? 0}%` },
                   ]}
@@ -518,7 +518,7 @@ export function SystemTab() {
                   items={[
                     { label: "Tasks", value: overview.stats.limb.total_tasks ?? 0 },
                     { label: "Executed", value: overview.stats.limb.total_executed ?? 0 },
-                    { label: "Running", value: overview.stats.limb.running ?? 0 },
+                    { label: "运行中", value: overview.stats.limb.running ?? 0 },
                     { label: "Templates", value: overview.stats.limb.templates ?? 0 },
                   ]}
                 />
@@ -539,7 +539,7 @@ export function SystemTab() {
                   title={t("admin.heredityGenetic") || "Heredity Genetic"}
                   emoji="🔗"
                   items={[
-                    { label: "Status", value: overview.stats.heredity.status ?? "ok" },
+                    { label: "状态", value: overview.stats.heredity.status ?? "ok" },
                   ]}
                 />
               )}
@@ -649,7 +649,7 @@ export function SystemTab() {
                   emoji="⚙"
                   items={[
                     { label: "Tasks", value: overview.stats.workflow.total_tasks ?? 0 },
-                    { label: "Active", value: overview.stats.workflow.active_tasks ?? 0 },
+                    { label: "活跃", value: overview.stats.workflow.active_tasks ?? 0 },
                     { label: "Types", value: Object.keys(overview.stats.workflow.by_type ?? {}).length },
                   ]}
                 />
@@ -712,12 +712,12 @@ function ActionCard({
                   ? `Cleared ${result.cleared}/${result.total}`
                   : result.cleaned !== undefined
                   ? `Cleaned ${result.cleaned}/${result.total}`
-                  : "Done"}
+                  : "完成"}
               </>
             ) : (
               <>
                 <XCircle size={12} className="inline mr-1" />
-                {result.error || "Failed"}
+                {result.error || "失败"}
               </>
             )}
           </span>

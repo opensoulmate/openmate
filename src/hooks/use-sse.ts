@@ -93,7 +93,7 @@ export function useSSE(options: UseSSEOptions = {}): UseSSEReturn {
 
     es.onerror = () => {
       setConnected(false);
-      setError("Connection lost — reconnecting...");
+      setError("连接中断——正在重连...");
       // EventSource auto-reconnects
     };
   }, [enabled, organ, maxEvents]);

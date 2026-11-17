@@ -252,7 +252,7 @@ export default function AIGroupsClient() {
           {/* 侧边栏切换按钮 */}
           <button onClick={(e) => { e.stopPropagation(); toggleSidebar(); if (isMobile) { setRightPanelOpen(false); setShowGroupPanel(false); } }}
             className="shrink-0 p-2 hover:bg-muted/50 active:bg-muted transition-colors text-muted-foreground touch-manipulation"
-            aria-label="Toggle Sidebar">
+            aria-label="切换侧边栏">
             <PanelLeft className="w-4 h-4" />
           </button>
           {/* 群组图标和名称 */}
@@ -287,7 +287,7 @@ export default function AIGroupsClient() {
           {selectedGroup && (
             <button onClick={(e) => { e.stopPropagation(); const next = !tasksPanelOpen; setTasksPanelOpen(next); if (next) { setShowGroupPanel(false); setRightPanelOpen(false); } }}
               className={`shrink-0 flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-muted/50 active:bg-muted transition-colors touch-manipulation ${tasksPanelOpen ? 'text-primary' : 'text-muted-foreground'}`}
-              aria-label="Toggle Task Board"
+              aria-label="切换任务板"
               title="任务看板">
               <ListChecks className="w-4 h-4" />
               <span className="text-[10px] font-medium">{tasks.length}</span>
@@ -297,7 +297,7 @@ export default function AIGroupsClient() {
           {selectedGroup && (
             <button onClick={(e) => { e.stopPropagation(); const next = !showGroupPanel; setShowGroupPanel(next); if (next) { setTasksPanelOpen(false); setRightPanelOpen(false); } }}
               className={`shrink-0 flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-muted/50 active:bg-muted transition-colors touch-manipulation ${showGroupPanel ? 'text-primary' : 'text-muted-foreground'}`}
-              aria-label="Group Settings"
+              aria-label="群组设置"
               title="群组管理">
               <Settings className="w-4 h-4" />
               <span className="text-[10px] font-medium">{selectedGroup.agents?.length || 0}</span>
@@ -306,7 +306,7 @@ export default function AIGroupsClient() {
           {/* 工作区面板切换 */}
           <button onClick={(e) => { e.stopPropagation(); toggleRightPanel(); setTasksPanelOpen(false); setShowGroupPanel(false); }}
             className="shrink-0 p-2 hover:bg-muted/50 active:bg-muted transition-colors text-muted-foreground touch-manipulation"
-            aria-label="Toggle Workspace">
+            aria-label="切换工作区">
             <PanelLeft className="w-4 h-4 scale-x-[-1]" />
           </button>
         </div>
@@ -584,10 +584,10 @@ function AgentMemberList({
                   <div className="flex gap-2">
                     <select value={editRole} onChange={e => setEditRole(e.target.value)}
                       className="flex-1 px-2 py-1 bg-background border border-border rounded text-xs focus:outline-none focus:ring-1 focus:ring-primary">
-                      <option value="advisor">advisor</option>
-                      <option value="executor">executor</option>
-                      <option value="verifier">verifier</option>
-                      <option value="human">human</option>
+                      <option value="advisor">顾问</option>
+                      <option value="executor">执行者</option>
+                      <option value="verifier">验证者</option>
+                      <option value="human">人工</option>
                     </select>
                     <input value={editModel} onChange={e => setEditModel(e.target.value)}
                       placeholder="模型"

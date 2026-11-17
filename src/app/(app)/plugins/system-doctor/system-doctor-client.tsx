@@ -155,10 +155,10 @@ export function SystemDoctorClient() {
   };
 
   const tabs: Array<{ id: ActiveTab; label: string; icon: React.ElementType }> = [
-    { id: 'overview', label: 'Overview', icon: Gauge },
+    { id: 'overview', label: '概览', icon: Gauge },
     { id: 'organs', label: 'Organs', icon: Activity },
     { id: 'integrations', label: 'Integrations', icon: Zap },
-    { id: 'storage', label: 'Storage', icon: HardDrive },
+    { id: 'storage', label: '存储', icon: HardDrive },
     { id: 'cleanup', label: 'Cleanup', icon: Trash2 },
   ];
 
@@ -168,7 +168,7 @@ export function SystemDoctorClient() {
       <div className="flex items-center justify-between border-b border-border px-3 lg:px-6 py-4">
         <div className="flex items-center gap-2 lg:gap-3">
           <Stethoscope size={20} className="text-rose-500" />
-          <h1 className="text-lg font-semibold">System Doctor</h1>
+          <h1 className="text-lg font-semibold">系统医生</h1>
           {report && (
             <span className={cn(
               'rounded-full border px-2.5 py-0.5 text-xs lg:text-sm font-bold',
@@ -219,7 +219,7 @@ export function SystemDoctorClient() {
         {loading && !report && (
           <div className="flex flex-col items-center justify-center py-20">
             <Loader2 size={32} className="animate-spin text-rose-500 mb-3" />
-            <p className="text-xs lg:text-sm text-muted-foreground">Running comprehensive diagnostics...</p>
+            <p className="text-xs lg:text-sm text-muted-foreground">正在运行全面诊断...</p>
           </div>
         )}
 
@@ -229,7 +229,7 @@ export function SystemDoctorClient() {
             {/* Score Cards */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2 lg:gap-4">
               <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
-                <span className="text-xs text-muted-foreground">Health Score</span>
+                <span className="text-xs text-muted-foreground">健康评分</span>
                 <p className="text-2xl lg:text-3xl font-bold mt-1">{report.health_score}<span className="text-base text-muted-foreground">/100</span></p>
                 <div className="mt-2 h-1.5 rounded-full bg-muted overflow-hidden">
                   <div
@@ -243,7 +243,7 @@ export function SystemDoctorClient() {
                 </div>
               </div>
               <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
-                <span className="text-xs text-muted-foreground">Organs OK</span>
+                <span className="text-xs text-muted-foreground">器官正常</span>
                 <p className="text-2xl lg:text-3xl font-bold mt-1">
                   <span className="text-emerald-500">{report.summary.organs.ok}</span>
                   <span className="text-base text-muted-foreground">/{report.summary.organs.total}</span>
@@ -253,7 +253,7 @@ export function SystemDoctorClient() {
                 )}
               </div>
               <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
-                <span className="text-xs text-muted-foreground">Integrations</span>
+                <span className="text-xs text-muted-foreground">集成</span>
                 <p className="text-2xl lg:text-3xl font-bold mt-1">
                   <span className="text-emerald-500">{report.summary.integrations.ok}</span>
                   <span className="text-base text-muted-foreground">/{report.summary.integrations.total}</span>
@@ -263,9 +263,9 @@ export function SystemDoctorClient() {
                 )}
               </div>
               <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
-                <span className="text-xs text-muted-foreground">Storage Used</span>
+                <span className="text-xs text-muted-foreground">存储占用</span>
                 <p className="text-xl lg:text-2xl font-bold mt-1">{report.summary.storage.total_human}</p>
-                <p className="text-xs text-muted-foreground mt-1">Managed data</p>
+                <p className="text-xs text-muted-foreground mt-1">托管数据</p>
               </div>
             </div>
 
@@ -293,9 +293,9 @@ export function SystemDoctorClient() {
               </div>
             )}
 
-            {/* Slowest Organs */}
+            {/* 最慢器官 */}
             <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
-              <h3 className="text-xs lg:text-sm font-medium mb-3">Slowest Organs</h3>
+              <h3 className="text-xs lg:text-sm font-medium mb-3">最慢器官</h3>
               <div className="space-y-1">
                 {report.organs
                   .filter((o) => o.status !== 'ok')
@@ -366,7 +366,7 @@ export function SystemDoctorClient() {
                         </pre>
                       )}
                       {!organ.error && Object.keys(organ.details).length === 0 && (
-                        <p className="text-xs text-muted-foreground">No additional details available.</p>
+                        <p className="text-xs text-muted-foreground">暂无更多详情。</p>
                       )}
                     </div>
                   )}
@@ -434,7 +434,7 @@ export function SystemDoctorClient() {
                 ))}
               </div>
               <div className="mt-3 pt-3 border-t border-border flex justify-between">
-                <span className="text-xs text-muted-foreground">Total managed storage</span>
+                <span className="text-xs text-muted-foreground">托管存储总量</span>
                 <span className="text-xs lg:text-sm font-bold">{report.summary.storage.total_human}</span>
               </div>
             </div>
@@ -477,7 +477,7 @@ export function SystemDoctorClient() {
                   ) : (
                     <Trash2 size={14} />
                   )}
-                  {dryRun ? 'Preview Cleanup' : 'Run Cleanup'}
+                  {dryRun ? '预览清理' : '执行清理'}
                 </button>
               </div>
 
@@ -486,8 +486,8 @@ export function SystemDoctorClient() {
                   <div className="flex items-center gap-2 text-xs lg:text-sm">
                     <FileText size={14} className="text-muted-foreground" />
                     <span>
-                      {cleanupResult.dry_run ? 'Preview' : 'Cleanup'} complete —
-                      freed <strong>{cleanupResult.total_freed_human}</strong>
+                      {cleanupResult.dry_run ? '预览' : '清理'} 完成——
+                      释放 <strong>{cleanupResult.total_freed_human}</strong>
                     </span>
                   </div>
                   {cleanupResult.results.map((r, i) => (

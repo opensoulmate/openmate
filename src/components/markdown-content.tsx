@@ -128,7 +128,7 @@ const CodeBlock = memo(function CodeBlock({
       {/* Editor or SyntaxHighlighter */}
       {isEditing ? (
         <div className="border-t border-border/50">
-          <Suspense fallback={<div className="p-4 text-muted-foreground">Loading editor...</div>}>
+          <Suspense fallback={<div className="p-4 text-muted-foreground">加载编辑器...</div>}>
             <MonacoEditor
               height="300px"
               defaultLanguage={language || 'text'}

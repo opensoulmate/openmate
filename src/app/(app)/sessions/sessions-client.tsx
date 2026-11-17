@@ -93,11 +93,11 @@ function SessionTrendChart({ sessions }: { sessions: Session[] }) {
       cumulative.push(total);
     }
     return assembleECharts({
-      data: { values: dates.map((d, i) => ({ date: d, cumulative: cumulative[i], daily: daily[i] })) },
-      semantic_types: { date: 'Temporal', cumulative: 'Quantity', daily: 'Quantity' },
+      data: { values: dates.map((d, i) => ({ '日期': d, '累计': cumulative[i], '每日': daily[i] })) },
+      semantic_types: { '日期': 'Temporal', '累计': 'Quantity', '每日': 'Quantity' },
       chart_spec: {
         chartType: 'Area Chart',
-        encodings: { x: { field: 'date' }, y: { field: 'cumulative' } },
+        encodings: { x: { field: '日期' }, y: { field: '累计' } },
         canvasSize: { width: 500, height: 200 },
       },
     });
@@ -106,7 +106,7 @@ function SessionTrendChart({ sessions }: { sessions: Session[] }) {
     <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
       <div className="flex items-center gap-2 mb-3">
         <TrendingUp size={14} className="text-cyan-400" />
-        <h4 className="text-xs font-medium">Session Trend (30 days)</h4>
+        <h4 className="text-xs font-medium">会话趋势（30 天）</h4>
       </div>
       <EChart option={option as any} style={{ height: 200 }} opts={{ renderer: 'svg' }} />
     </div>
@@ -137,7 +137,7 @@ function TokenUsageChart({ sessions }: { sessions: Session[] }) {
     <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
       <div className="flex items-center gap-2 mb-3">
         <BarChart3 size={14} className="text-blue-400" />
-        <h4 className="text-xs font-medium">Top Sessions by Messages</h4>
+        <h4 className="text-xs font-medium">消息最多的会话</h4>
       </div>
       <EChart option={option as any} style={{ height: 200 }} opts={{ renderer: 'svg' }} />
     </div>
@@ -174,7 +174,7 @@ function ResponseTimeChart({ sessions }: { sessions: Session[] }) {
     <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
       <div className="flex items-center gap-2 mb-3">
         <Activity size={14} className="text-green-400" />
-        <h4 className="text-xs font-medium">Session Duration Distribution</h4>
+        <h4 className="text-xs font-medium">会话时长分布</h4>
       </div>
       <EChart option={option as any} style={{ height: 200 }} opts={{ renderer: 'svg' }} />
     </div>
@@ -204,7 +204,7 @@ function StatusPieChart({ sessions }: { sessions: Session[] }) {
     <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
       <div className="flex items-center gap-2 mb-3">
         <PieChartIcon size={14} className="text-amber-400" />
-        <h4 className="text-xs font-medium">Status Distribution</h4>
+        <h4 className="text-xs font-medium">状态分布</h4>
       </div>
       <EChart option={option as any} style={{ height: 200 }} opts={{ renderer: 'svg' }} />
     </div>
@@ -333,7 +333,7 @@ export function SessionsClient() {
         const data = await res.json()
         setSessions(Array.isArray(data) ? data : data.sessions || [])
       } else {
-        setError(`Failed to load sessions: ${res.status}`)
+        setError(`加载会话失败：${res.status}`)
       }
     } catch (e: unknown) {
       setError(`Sessions error: ${e instanceof Error ? e.message : String(e)}`)
@@ -532,7 +532,7 @@ export function SessionsClient() {
     } else {
       const lines = [`# ${title}`, "", `Session: \`${selectedSession.session_id}\``, `Exported: ${new Date().toLocaleString('zh-CN', { fractionalSecondDigits: 3 })}`, "", "---", ""]
       for (const msg of selectedSession.messages) {
-        const roleLabel = msg.role === "user" ? "**You**" : msg.role === "assistant" ? "**AI**" : `**${msg.role}**`
+        const roleLabel = msg.role === "user" ? "**你**" : msg.role === "assistant" ? "**AI**" : `**${msg.role}**`
         const ts = msg.timestamp ? ` _(${new Date(msg.timestamp).toLocaleString('zh-CN', { fractionalSecondDigits: 3 })})_` : ""
         lines.push(`### ${roleLabel}${ts}`, "", msg.content, "")
       }
@@ -581,13 +581,13 @@ export function SessionsClient() {
   const activeFilterCount = (showFavoritesOnly ? 1 : 0) + (activeSourceFilter ? 1 : 0) + (activeTagFilter ? 1 : 0)
 
   return (
-      <PageLayout title="Sessions">
+      <PageLayout title="会话">
         
     <div className="flex flex-col h-full overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-2 lg:px-6 h-12 border-b border-border">
         <div className="flex items-center gap-3">
-          <button onClick={() => isMobile ? setSidebarOpen(true) : setDesktopSidebarOpen(v => !v)} className="shrink-0 p-1.5 -ml-1 rounded-lg hover:bg-muted touch-manipulation" aria-label="Toggle Sidebar">
+          <button onClick={() => isMobile ? setSidebarOpen(true) : setDesktopSidebarOpen(v => !v)} className="shrink-0 p-1.5 -ml-1 rounded-lg hover:bg-muted touch-manipulation" aria-label="切换侧边栏">
             <PanelLeft className="w-4 h-4 text-muted-foreground" />
           </button>
           <History className="w-6 h-6 text-cyan-400" />
@@ -1216,12 +1216,12 @@ export function SessionsClient() {
                     </button>
                     <button onClick={() => exportSession("json")}
                       className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors touch-manipulation"
-                      title="Export as JSON">
+                      title="导出为 JSON">
                       <FileJson className="w-3.5 h-3.5" />
                     </button>
                     <button onClick={() => exportSession("markdown")}
                       className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors touch-manipulation"
-                      title="Export as Markdown">
+                      title="导出为 Markdown">
                       <FileText className="w-3.5 h-3.5" />
                     </button>
                   </div>
@@ -1251,12 +1251,12 @@ export function SessionsClient() {
                   </button>
                   <button onClick={() => exportSession("json")}
                     className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                    title="Export as JSON">
+                    title="导出为 JSON">
                     <FileJson className="w-3.5 h-3.5" />
                   </button>
                   <button onClick={() => exportSession("markdown")}
                     className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                    title="Export as Markdown">
+                    title="导出为 Markdown">
                     <FileText className="w-3.5 h-3.5" />
                   </button>
                   <button onClick={() => setSelectedSession(null)}

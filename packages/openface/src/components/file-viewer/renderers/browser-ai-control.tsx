@@ -428,7 +428,7 @@ export function BrowserAIControl({ initialUrl }: BrowserAIControlProps) {
             ref={iframeRef}
             src={url}
             className="w-full h-full border-0"
-            title="Browser"
+            title="浏览器"
             sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
             onLoad={() => setLoading(false)}
           />

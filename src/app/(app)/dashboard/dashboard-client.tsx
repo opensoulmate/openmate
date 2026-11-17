@@ -278,7 +278,7 @@ export function DashboardClient() {
         title={selectedOrgan.label}
         subtitle={selectedOrgan.endpoint}
         icon={selectedOrgan.label.split(" ")[0]}
-        badge={status === "ok" ? "Healthy" : status === "error" ? "Error" : "Checking..."}
+        badge={status === "ok" ? "正常" : status === "error" ? "异常" : "检查中..."}
         onClose={() => setSelectedOrganKey(null)}
         sections={[
           {
@@ -286,7 +286,7 @@ export function DashboardClient() {
             items: [
               {
                 label: t("dashboard.healthStatus", "Health"),
-                value: status === "ok" ? "✅ Healthy" : status === "error" ? "❌ Error" : "⏳ Checking...",
+                value: status === "ok" ? "✅ 正常" : status === "error" ? "❌ 异常" : "⏳ 检查中...",
                 icon: status === "ok" ? <CheckCircle className="w-3.5 h-3.5 text-emerald-500" /> : status === "error" ? <XCircle className="w-3.5 h-3.5 text-red-500" /> : <Loader2 className="w-3.5 h-3.5 animate-spin" />,
               },
               {
@@ -553,7 +553,7 @@ export function DashboardClient() {
   // ── Render ───────────────────────────────────────────────────
 
   return (
-    <PageLayout title="Dashboard" showSidebarToggle showWorkspaceToggle>
+    <PageLayout title="仪表盘" showSidebarToggle showWorkspaceToggle>
       <div className="h-full overflow-y-auto">
         <div className="mx-auto max-w-6xl px-3 lg:px-6 py-4 lg:py-6 space-y-6">
 

@@ -65,7 +65,7 @@ function HealthBadge({ health }: { health: string }) {
   }
   return (
     <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-500">
-      <Clock size={10} /> {health || "Unknown"}
+      <Clock size={10} /> {health || "未知"}
     </span>
   );
 }
@@ -137,7 +137,7 @@ export function TopologyClient() {
   };
 
   return (
-      <PageLayout title="Topology">
+      <PageLayout title="系统拓扑">
         
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}

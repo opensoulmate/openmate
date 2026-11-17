@@ -277,7 +277,7 @@ function CodeConfig({ data, update }: ConfigProps) {
           value={data.code || ""}
           onChange={(e) => update("code", e.target.value)}
           rows={10}
-          placeholder="// Access input variables via the input object\nreturn input;"
+          placeholder="// 通过 input 对象访问输入变量\nreturn input;"
           className={cn(inputCls, "resize-none font-mono text-[11px]")}
         />
       </Field>

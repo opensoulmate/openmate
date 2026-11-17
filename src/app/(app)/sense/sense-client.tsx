@@ -241,7 +241,7 @@ export function SenseClient() {
   ]
 
   return (
-      <PageLayout title="Sense">
+      <PageLayout title="感官">
         
     <div className="p-4 sm:p-3 lg:p-6 max-w-6xl mx-auto space-y-3 lg:space-y-6">
       {/* Header */}
@@ -325,7 +325,7 @@ export function SenseClient() {
                 }}
               >
                 {ocrPreview ? (
-                  <img src={ocrPreview} alt="Preview" className="max-h-48 mx-auto rounded-lg object-contain" />
+                  <img src={ocrPreview} alt="预览" className="max-h-48 mx-auto rounded-lg object-contain" />
                 ) : (
                   <div className="space-y-2">
                     <Upload className="w-10 h-10 mx-auto text-muted-foreground" />
@@ -360,7 +360,7 @@ export function SenseClient() {
                     className="w-full bg-card border border-border rounded-lg px-3 py-2 text-xs lg:text-sm"
                   >
                     <option value="chi_sim+eng">{t("sense.t14168")}</option>
-                    <option value="eng">English</option>
+                    <option value="eng">英语</option>
                     <option value="chi_sim">{t("sense.t10852")}</option>
                     <option value="chi_tra">{t("sense.t52961")}</option>
                     <option value="jpn">{t("sense.t33558")}</option>
@@ -487,7 +487,7 @@ export function SenseClient() {
                 >
                   <option value="">{t("sense.text30")}</option>
                   <option value="zh">{t("sense.text31")}</option>
-                  <option value="en">English</option>
+                  <option value="en">英语</option>
                   <option value="ja">日本語</option>
                   <option value="ko">한국어</option>
                 </select>
@@ -571,7 +571,7 @@ export function SenseClient() {
                 }}
               >
                 {analyzePreview ? (
-                  <img src={analyzePreview} alt="Preview" className="max-h-48 mx-auto rounded-lg object-contain" />
+                  <img src={analyzePreview} alt="预览" className="max-h-48 mx-auto rounded-lg object-contain" />
                 ) : (
                   <div className="space-y-2">
                     <ImageIcon className="w-10 h-10 mx-auto text-muted-foreground" />

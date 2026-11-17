@@ -179,7 +179,7 @@ export function PomodoroClient() {
           <Timer size={20} className="text-red-500" />
         </div>
         <div>
-          <h1 className="text-lg font-semibold">Pomodoro Timer</h1>
+          <h1 className="text-lg font-semibold">番茄钟</h1>
           <p className="text-xs text-muted-foreground">{tr("plugins.pomodoroSubtitle") || "Pomodoro Technique — Focus 25min, Break 5min"}</p>
         </div>
       </div>

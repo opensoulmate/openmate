@@ -510,7 +510,7 @@ function GoalItem({ goal, onUpdate, onDelete }: { goal: EvolutionGoal; onUpdate:
               <input value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} className="w-full rounded border border-border bg-background px-1.5 py-0.5 text-[11px]" placeholder="描述" />
               <div className="flex items-center gap-1.5">
                 <select value={form.priority} onChange={e => setForm(p => ({ ...p, priority: e.target.value }))} className="rounded border border-border bg-background px-1 py-0.5 text-[11px]">
-                  <option value="high">high</option><option value="medium">medium</option><option value="low">low</option>
+                  <option value="high">高</option><option value="medium">中</option><option value="low">低</option>
                 </select>
                 <input type="number" min={0} max={1} step={0.1} value={form.progress} onChange={e => setForm(p => ({ ...p, progress: parseFloat(e.target.value) || 0 }))} className="w-14 rounded border border-border bg-background px-1 py-0.5 text-[11px]" />
               </div>

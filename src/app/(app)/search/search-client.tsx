@@ -118,7 +118,7 @@ export function SearchClient() {
   }
 
   return (
-      <PageLayout title="Search">
+      <PageLayout title="搜索">
         
     <div className="px-3 lg:px-6 py-4 lg:py-6 max-w-6xl mx-auto space-y-4 lg:space-y-6 h-full overflow-y-auto">
       {/* Header */}

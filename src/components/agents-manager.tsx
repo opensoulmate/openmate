@@ -397,7 +397,7 @@ export function AgentsClient() {
                     : testing[agent.id] === 'ok' ? <CheckCircle className="w-3 h-3 text-green-500" />
                     : testing[agent.id] === 'fail' ? <XCircle className="w-3 h-3 text-red-500" />
                     : null}
-                  {testing[agent.id] === 'ok' ? 'OK' : testing[agent.id] === 'fail' ? 'FAIL' : t('agents.testConnection')}
+                  {testing[agent.id] === 'ok' ? '成功' : testing[agent.id] === 'fail' ? '失败' : t('agents.testConnection')}
                 </button>
                 <button onClick={(e) => { e.stopPropagation(); setConfiguringAgent(configuringAgent === agent.id ? null : agent.id); }}
                   className="px-2.5 py-1.5 rounded-lg text-xs border hover:bg-muted shrink-0 touch-manipulation" title={t('agents.modelConfig')}>
@@ -483,7 +483,7 @@ export function AgentsClient() {
                   {agentConfigs[agent.id]?.custom && (
                     <>
                       <div className="flex gap-2 items-center">
-                        <label className="text-xs text-muted-foreground w-16">Provider</label>
+                        <label className="text-xs text-muted-foreground w-16">服务商</label>
                         <select
                           value={agentConfigs[agent.id]?.provider || ''}
                           onChange={e => {
@@ -501,7 +501,7 @@ export function AgentsClient() {
                         </select>
                       </div>
                       <div className="flex gap-2 items-center">
-                        <label className="text-xs text-muted-foreground w-16">Model</label>
+                        <label className="text-xs text-muted-foreground w-16">模型</label>
                         <select
                           value={agentConfigs[agent.id]?.model || ''}
                           onChange={e => {

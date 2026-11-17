@@ -236,7 +236,7 @@ export function MarketplaceClient() {
   const filteredAgents = filterSources(agentSources);
 
   return (
-      <PageLayout title="Marketplace">
+      <PageLayout title="市场">
         
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}

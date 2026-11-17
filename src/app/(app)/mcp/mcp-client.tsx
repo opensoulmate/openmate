@@ -451,7 +451,7 @@ export function McpClient() {
   // ── Render ─────────────────────────────────────────────
 
   return (
-    <PageLayout title="Mcp">
+    <PageLayout title="MCP 客户端">
       <div className="flex flex-col h-full overflow-hidden">
         {/* Toast */}
         {toast && (
@@ -470,7 +470,7 @@ export function McpClient() {
               <Plug size={18} className="text-primary" />
             </div>
             <div>
-              <h1 className="text-base lg:text-lg font-semibold">MCP Servers</h1>
+              <h1 className="text-base lg:text-lg font-semibold">MCP 服务器</h1>
               <p className="text-[10px] lg:text-xs text-muted-foreground">{t("mcp.serviceManagement") || "Model Context Protocol service management"}</p>
             </div>
           </div>
@@ -517,7 +517,7 @@ export function McpClient() {
                 <input value={newName} onChange={(e) => setNewName(e.target.value)}
                   placeholder={t("mcp.serverNamePlaceholder") || "Server Name *"} className="rounded-lg border border-border bg-background px-3 py-2 text-xs lg:text-sm outline-none focus:ring-2 focus:ring-primary/30" />
                 <input value={newUrl} onChange={(e) => setNewUrl(e.target.value)}
-                  placeholder="URL (e.g. stdio://server-name) *" className="rounded-lg border border-border bg-background px-3 py-2 text-xs lg:text-sm outline-none focus:ring-2 focus:ring-primary/30" />
+                  placeholder="URL（如 stdio://server-name）*" className="rounded-lg border border-border bg-background px-3 py-2 text-xs lg:text-sm outline-none focus:ring-2 focus:ring-primary/30" />
                 <input value={newDesc} onChange={(e) => setNewDesc(e.target.value)}
                   placeholder={t("mcp.descriptionPlaceholder") || "Description"} className="rounded-lg border border-border bg-background px-3 py-2 text-xs lg:text-sm outline-none focus:ring-2 focus:ring-primary/30" />
                 <select value={newTransport} onChange={(e) => setNewTransport(e.target.value)}
@@ -608,9 +608,9 @@ export function McpClient() {
                         {/* Server info */}
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
                           <div><span className="text-muted-foreground">URL:</span> <span className="font-mono">{server.url}</span></div>
-                          <div><span className="text-muted-foreground">Transport:</span> {server.transport}</div>
+                          <div><span className="text-muted-foreground">传输方式：</span> {server.transport}</div>
                           <div><span className="text-muted-foreground">ID:</span> <span className="font-mono">{server.id}</span></div>
-                          <div><span className="text-muted-foreground">{t("mcp.registeredAt") || "Registered:"}</span> {new Date(server.created_at * 1000).toLocaleDateString()}</div>
+                          <div><span className="text-muted-foreground">{t("mcp.registeredAt") || "注册于："}</span> {new Date(server.created_at * 1000).toLocaleDateString()}</div>
                         </div>
 
                         {/* Error */}

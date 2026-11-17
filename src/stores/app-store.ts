@@ -476,12 +476,12 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   // Agent Nodes
   agentNodes: [
-    { id: "soma-1", name: "Collector-Beijing", type: "soma", status: "online", lastSeen: "Just now", nodeId: "soma-bj-01", endpoint: "ws://10.0.1.12:8900" },
-    { id: "soma-2", name: "Collector-Shanghai", type: "soma", status: "offline", lastSeen: "1 hour ago", nodeId: "soma-sh-01", endpoint: "ws://10.0.2.12:8900" },
-    { id: "ai-1", name: "GPT-4o", type: "ai", status: "online", lastSeen: "Just now", provider: "OpenAI", model: "gpt-4o", baseUrl: "https://api.openai.com/v1" },
-    { id: "ai-2", name: "Claude Sonnet", type: "ai", status: "online", lastSeen: "3 min ago", provider: "Claude", model: "claude-sonnet-4-20250514", baseUrl: "https://api.anthropic.com/v1" },
-    { id: "mcp-1", name: "File System MCP", type: "mcp", status: "online", lastSeen: "5 min ago", serverUrl: "http://localhost:3001", tools: ["read_file", "write_file", "list_dir"] },
-    { id: "mcp-2", name: "Database MCP", type: "mcp", status: "error", lastSeen: "30 min ago", serverUrl: "http://localhost:3002", tools: ["query", "execute", "schema"] },
+    { id: "soma-1", name: "Collector-Beijing", type: "soma", status: "online", lastSeen: "刚刚", nodeId: "soma-bj-01", endpoint: "ws://10.0.1.12:8900" },
+    { id: "soma-2", name: "Collector-Shanghai", type: "soma", status: "offline", lastSeen: "1 小时前", nodeId: "soma-sh-01", endpoint: "ws://10.0.2.12:8900" },
+    { id: "ai-1", name: "GPT-4o", type: "ai", status: "online", lastSeen: "刚刚", provider: "OpenAI", model: "gpt-4o", baseUrl: "https://api.openai.com/v1" },
+    { id: "ai-2", name: "Claude Sonnet", type: "ai", status: "online", lastSeen: "3 分钟前", provider: "Claude", model: "claude-sonnet-4-20250514", baseUrl: "https://api.anthropic.com/v1" },
+    { id: "mcp-1", name: "File System MCP", type: "mcp", status: "online", lastSeen: "5 分钟前", serverUrl: "http://localhost:3001", tools: ["read_file", "write_file", "list_dir"] },
+    { id: "mcp-2", name: "Database MCP", type: "mcp", status: "error", lastSeen: "30 分钟前", serverUrl: "http://localhost:3002", tools: ["query", "execute", "schema"] },
   ],
   setAgentNodes: (nodes) => set({ agentNodes: nodes }),
 
@@ -642,7 +642,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const id = Math.random().toString(36).slice(2, 10);
     const conv: Conversation = {
       id,
-      title: "New conversation",
+      title: "新对话",
       messages: [],
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -760,7 +760,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       lastModified: Date.now() - 3600000,
       fileCount: 156,
       size: 2457600,
-      description: "OpenMate main frontend codebase",
+      description: "OpenMate 主前端代码库",
     },
     {
       id: "ws-2",
@@ -769,7 +769,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       lastModified: Date.now() - 86400000,
       fileCount: 89,
       size: 1536000,
-      description: "Agent backend service",
+      description: "Agent 后端服务",
     },
     {
       id: "ws-3",
@@ -797,7 +797,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const existing = state.workspaceTabsBySession[sessionId];
     if (existing && existing.tabs.length > 0) return existing;
     // Default: one empty new-tab
-    const defaultTab: WorkspaceTab = { id: `tab-${Date.now()}-0`, type: 'new-tab', title: 'New Tab', history: [], historyIndex: -1 };
+    const defaultTab: WorkspaceTab = { id: `tab-${Date.now()}-0`, type: 'new-tab', title: '新标签页', history: [], historyIndex: -1 };
     return { tabs: [defaultTab], activeTabId: defaultTab.id };
   },
   setWorkspaceTabs: (sessionId, wsState) =>

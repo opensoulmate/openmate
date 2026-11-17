@@ -279,7 +279,7 @@ export function TrajectoryClient() {
   // ── Render ─────────────────────────────────────────────────
 
   return (
-      <PageLayout title="Trajectory">
+      <PageLayout title="轨迹">
         
     <div className="px-3 lg:px-5 py-4 lg:py-5 h-full overflow-auto">
       {/* Title bar */}

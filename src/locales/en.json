@@ -86,7 +86,12 @@
     "enterprise": "Enterprise",
     "sessions": "Sessions",
     "tags": "Tags",
-    "permission": "Permissions"
+    "permission": "Permissions",
+    "evolution": "Evolution",
+    "advancedTier": "Advanced",
+    "baseTier": "Base",
+    "mate": "Mate",
+    "spending": "Spending"
   },
   "dashboard": {
     "title": "System Overview",
@@ -132,7 +137,16 @@
     "disk": "Disk",
     "latency": "Latency",
     "totalRequests": "Total Requests",
-    "activeAlerts": "Active Alerts"
+    "activeAlerts": "Active Alerts",
+    "costTrend": "Cost Trend",
+    "endpoint": "Endpoint",
+    "healthStatus": "Health",
+    "lastCheck": "Last Check",
+    "organStatus": "Status",
+    "searchOrgans": "Search organs...",
+    "systemHealth": "System Health",
+    "tokenUsageTrend": "Token Usage Trend",
+    "viewFullPage": "View Full Page"
   },
   "chat": {
     "newChat": "New Chat",
@@ -219,7 +233,16 @@
     "sessionExpired": "Login expired, please sign in again",
     "deleteSessionTitle": "Delete Session",
     "deleteSessionDesc": "Are you sure you want to delete \"{{name}}\"?",
-    "sessionNotAccessible": "Cannot view this session: it does not exist or you have no access"
+    "sessionNotAccessible": "Cannot view this session: it does not exist or you have no access",
+    "deleteSessionConfirm": "Delete this session?",
+    "viewAudio": "Audio",
+    "viewDates": "Dates",
+    "viewDocs": "Docs",
+    "viewImages": "Images",
+    "viewLinks": "Links",
+    "viewOthers": "Others",
+    "viewSessions": "Sessions",
+    "viewVideos": "Videos"
   },
   "knowledge": {
     "title": "Knowledge Base",
@@ -350,7 +373,17 @@
     "text27": "Request a knowledge base first. You can add entries after approval.",
     "text28": "characters",
     "text29": "Share to Enterprise",
-    "text30": "Shared to Enterprise"
+    "text30": "Shared to Enterprise",
+    "details": "Details",
+    "pendingRequests": "Pending Requests",
+    "pinned": "Pinned",
+    "searchPlaceholder": "Search knowledge base...",
+    "starred": "Starred",
+    "status": "Status",
+    "tabKnowledge": "Knowledge",
+    "tabRequests": "Sharing Requests",
+    "tabSharing": "Knowledge Sharing",
+    "totalItems": "All items"
   },
   "learn": {
     "title": "Learning Center",
@@ -428,7 +461,13 @@
     "policyRetry": "Failed attempts can be retried",
     "save": "Save",
     "saving": "Saving...",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "chapter": "Chapter",
+    "chaptersCompleted": "chapters completed",
+    "completionRate": "Completion rate",
+    "continue": "Continue",
+    "continueLearning": "Continue Learning",
+    "totalCourses": "All courses"
   },
   "agents": {
     "title": "Agent Management",
@@ -485,7 +524,8 @@
     "pleaseSelectProviderAndModel": "Please select provider and model",
     "useGlandGlobalConfig": "Using Gland global config",
     "selectProviderAndModel": "Please select provider and model",
-    "usingGlobalConfig": "Using Gland global config"
+    "usingGlobalConfig": "Using Gland global config",
+    "searchPlaceholder": "Search agents..."
   },
   "settings": {
     "title": "Settings",
@@ -714,7 +754,11 @@
     },
     "localDeploy": "Local Deploy",
     "backToList": "Back to list",
-    "customModelName": "Custom model name"
+    "customModelName": "Custom model name",
+    "agentBinding": "Agent Binding",
+    "agentBindingDesc": "Once bound, messages route only to the assigned agent/profile (Ekko-style routing)",
+    "thirdPartyBinding": "Third-party Login Binding",
+    "thirdPartyBindingDesc": "Bind WeChat/QQ for one-click login"
   },
   "search": {
     "title": "Search Everything",
@@ -750,7 +794,13 @@
     "sourceGene": "Templates",
     "sourceEcho": "Messages",
     "all": "All",
-    "sourceAgents": "Agent"
+    "sourceAgents": "Agent",
+    "allSources": "All sources",
+    "emptyHint": "Enter a query to search across knowledge, documents, and more",
+    "emptyTitle": "Search your data",
+    "filters": "Filters",
+    "results": "results",
+    "searchBtn": "Search"
   },
   "command": {
     "searchCommands": "Search commands...",
@@ -2901,7 +2951,12 @@
     "synthesize": "Synthesize",
     "profiles": "Profiles",
     "voices": "Voices",
-    "outputs": "Outputs",
+    "outputs": {
+      "delete": "Delete",
+      "download": "Download",
+      "empty": "No synthesis results yet",
+      "title": "Synthesis Results"
+    },
     "inputText": "Input Text",
     "textPlaceholder": "Enter text to synthesize...",
     "selectVoice": "Select Voice",
@@ -3055,7 +3110,21 @@
     "totalProfiles": "Total Profiles",
     "unavailable": "Unavailable",
     "user": "User",
-    "voiceProfiles": "Voice Profiles"
+    "voiceProfiles": "Voice Profiles",
+    "kb": {
+      "empty": "Knowledge base is empty",
+      "read": "Read aloud",
+      "title": "Knowledge base read-aloud"
+    },
+    "synth": {
+      "button": "Synthesize",
+      "defaultVoice": "Default",
+      "placeholder": "Enter text to synthesize…",
+      "rate": "Rate",
+      "running": "Synthesizing…",
+      "title": "Speech Synthesis",
+      "voice": "Voice"
+    }
   },
   "vision": {
     "title": "Vision · Image Visualization",
@@ -3071,7 +3140,16 @@
     "chartData": "Chart Data",
     "labels": "Labels",
     "values": "Values",
-    "generate": "Generate",
+    "generate": {
+      "button": "Generate Visualization",
+      "manualInput": "Enter text manually",
+      "pickKnowledge": "Pick Knowledge",
+      "placeholder": "Paste knowledge text: titles/key points/steps/number sequences can be extracted",
+      "running": "Generating…",
+      "sourceText": "Knowledge content",
+      "title": "Generate",
+      "usingKnowledge": "Knowledge item selected, its content will be read"
+    },
     "download": "Download",
     "noOutputs": "No outputs yet",
     "mindmapTopic": "Topic",
@@ -3122,7 +3200,30 @@
     "recentOutputs": "Recent Outputs",
     "savedOutputs": "Saved Outputs",
     "totalGenerated": "Total Generated",
-    "unavailable": "Unavailable"
+    "unavailable": "Unavailable",
+    "canvas": {
+      "badChart": "Chart data missing labels/values",
+      "empty": "Nothing here yet — generate in the Generate panel or revisit History",
+      "exportPng": "Export PNG",
+      "exportSvg": "Export SVG",
+      "fit": "Fit to screen",
+      "renderFailed": "Render failed",
+      "specRaw": "Raw spec",
+      "title": "Canvas",
+      "zoomIn": "Zoom in",
+      "zoomOut": "Zoom out"
+    },
+    "history": {
+      "delete": "Delete",
+      "empty": "No generation history",
+      "title": "History"
+    },
+    "kind": {
+      "chart": "Chart",
+      "diagram": "Diagram",
+      "flowchart": "Flowchart",
+      "mindmap": "Mind Map"
+    }
   },
   "mind": {
     "title": "Mind · Personality Center",
@@ -3490,7 +3591,10 @@
     "badge": "Deep Inspection",
     "organLayer": "Organ Layer",
     "serviceLayer": "Service Layer",
-    "systemGauges": "System Gauges"
+    "systemGauges": "System Gauges",
+    "details": "Details",
+    "searchOrgans": "Search organs...",
+    "status": "Status"
   },
   "cortex": {
     "title": "OpenCortex",
@@ -3752,7 +3856,13 @@
     "byType": "By Type",
     "justNow": "just now",
     "minutesAgo": "{{count}}m ago",
-    "hoursAgo": "{{count}}h ago"
+    "hoursAgo": "{{count}}h ago",
+    "details": "Details",
+    "organ": "Organ",
+    "payload": "Payload",
+    "searchEvents": "Search events...",
+    "time": "Time",
+    "type": "Type"
   },
   "skills": {
     "title": "Skills Marketplace",
@@ -3806,7 +3916,55 @@
     "qqdlDecode": "QQ Xuanfeng decode",
     "btMagnet": "BT/Magnet",
     "torrent": "Torrent file",
-    "videoExtract": "Video extraction"
+    "videoExtract": "Video extraction",
+    "addPartialFailed": "Failed to add {{n}} tasks",
+    "addSource": "Add Source",
+    "allSources": "All Sources",
+    "allTasks": "All Tasks",
+    "chooseTarget": "Choose download target",
+    "chooseTorrent": "Choose .torrent file (auto-parsed to magnet)",
+    "copyPath": "Copy file path",
+    "customSources": "Custom search sources (RSS / JSON)",
+    "delete": "Delete",
+    "deleteSource": "Delete Source",
+    "downloadDirLocal": "Local download directory",
+    "downloadDirRemote": "Backend download directory",
+    "hasMagnet": "Magnet",
+    "linksLabel": "Download links (one per line, batch supported)",
+    "localDirHint": "Local directory is desktop (Electron) only; browser/mobile uses backend",
+    "noActive": "No active tasks. Click \"New Download\" at top right to start",
+    "noError": "No failed tasks",
+    "pause": "Pause",
+    "resume": "Resume",
+    "retry": "Retry",
+    "search": "Search",
+    "searchAddFailed": "Failed to add task, check engine connection",
+    "searchAdded": "Added to downloads: {{title}}",
+    "searchEmpty": "Enter keywords to search public torrent sources",
+    "searchNoResults": "No matching results (per-source errors below)",
+    "searchPlaceholder": "Search torrents / datasets (Internet Archive, Academic Torrents…)",
+    "searching": "Searching…",
+    "seeders": "Seeders",
+    "sourceName": "Source name",
+    "sourceUrl": "URL template (with {query} placeholder)",
+    "startDownload": "Start Download",
+    "statusDone": "Done",
+    "statusDownloading": "Downloading",
+    "statusError": "Failed",
+    "statusPaused": "Paused",
+    "statusPending": "Pending",
+    "tabActive": "Active",
+    "tabAll": "All",
+    "tabDone": "Done",
+    "tabError": "Error",
+    "targetLabel": "Download target",
+    "targetLocal": "Local",
+    "targetRemote": "Backend",
+    "torrentFile": ".torrent file",
+    "torrentParseFailed": "Cannot parse this .torrent (secure context required), use a magnet link instead",
+    "torrentSearch": "Torrent Search",
+    "urlCount": "{{n}} URLs · {{m}} valid",
+    "urlPlaceholderMulti": "https://example.com/file.zip\\nmagnet:?xt=urn:btih:...\\nthunder://..."
   },
   "bodyMap": {
     "title": "Body Map",
@@ -3954,7 +4112,15 @@
     "executePrompt": "Execution Prompt",
     "promptPlaceholder": "Task instructions...",
     "deliverTarget": "Deliver Target",
-    "tasksCount": "{{count}} tasks · {{active}} running"
+    "tasksCount": "{{count}} tasks · {{active}} running",
+    "active": "Active",
+    "agent": "Agent",
+    "basicInfo": "Basic Info",
+    "createNew": "Create New Job",
+    "lastStatus": "Last Status",
+    "scheduleInfo": "Schedule",
+    "searchPlaceholder": "Search jobs...",
+    "statusInfo": "Status"
   },
   "cronDetail": {
     "backToList": "Back to List",
@@ -4246,7 +4412,8 @@
     "justNow": "Just now",
     "noSources": "No sources configured",
     "items": "Items",
-    "close": "Close"
+    "close": "Close",
+    "lastSyncFailed": "Last sync failed"
   },
   "aiGroups": {
     "title": "AI Groups",
@@ -4291,7 +4458,9 @@
     "status": "Status",
     "temperature": "Temperature",
     "noAgents": "No Agents",
-    "addAgentHint": "Click \"Add\" above to add an Agent"
+    "addAgentHint": "Click \"Add\" above to add an Agent",
+    "mentionAll": "Everyone",
+    "searchPlaceholder": "Search groups..."
   },
   "workflowBuilder": {
     "title": "Workflow Builder",
@@ -4439,7 +4608,32 @@
     "info": "Info",
     "warning": "Warning",
     "error": "Error",
-    "success": "Success"
+    "success": "Success",
+    "category": {
+      "agent": "Agent",
+      "system": "System"
+    },
+    "confirmClearAll": "Delete all notifications?",
+    "delete": "Delete",
+    "detail": {
+      "content": "Content",
+      "info": "Info",
+      "message": "Message",
+      "severity": "Severity",
+      "status": "Status",
+      "time": "Time"
+    },
+    "emptyFilter": "No {{filter}} notifications",
+    "emptyHint": "You're all caught up!",
+    "fetchError": "Failed to load notifications: {{error}}",
+    "filter": {
+      "all": "All"
+    },
+    "noApiBase": "API base URL not configured",
+    "read": "Read",
+    "today": "Today",
+    "total": "Total",
+    "yesterday": "Yesterday"
   },
   "health": {
     "title": "System Health",
@@ -4518,7 +4712,21 @@
     "loginFailed": "Login failed",
     "invalidCredentials": "Invalid username or password",
     "usernameExists": "Username already exists",
-    "connectionError": "Cannot connect to server, please check the address"
+    "connectionError": "Cannot connect to server, please check the address",
+    "backToLogin": "Back to Login",
+    "codeInvalid": "Invalid or expired code",
+    "codeRequired": "Please enter the code",
+    "oauthNotConfigured": "This login method is not configured",
+    "orLoginWith": "Or log in with",
+    "pendingResent": "Account registered but unverified; code resent",
+    "qqLogin": "QQ Login",
+    "resendCode": "Resend code",
+    "resendFailed": "Resend failed, try again later",
+    "verifyAndLogin": "Verify and Log In",
+    "verifyCode": "6-digit code",
+    "verifyFirst": "Email not verified, enter the code sent to your inbox",
+    "verifyTip": "Code sent to your email (valid for 10 minutes)",
+    "wechatLogin": "WeChat Login"
   },
   "account": {
     "loggedIn": "Signed in",
@@ -4732,7 +4940,12 @@
     "pause": "Pause",
     "delete": "Delete",
     "confirmDeleteText": "Delete \"{{name}}\"? This cannot be undone.",
-    "deleteAction": "Delete"
+    "deleteAction": "Delete",
+    "newWorkflow": "New",
+    "noResults": "No matching workflows",
+    "noWorkflows": "No workflows yet",
+    "searchPlaceholder": "Search workflows...",
+    "selectHint": "Select from the left panel, or click \"New\" in the toolbar"
   },
   "mcp": {
     "connectionStatus": "{{name}} {{connected}}",
@@ -4772,7 +4985,18 @@
     "descriptionPlaceholder": "Description",
     "noMatch": "No matching servers",
     "disabledBadge": "Disabled",
-    "noToolsMessage": "No registered tools. Tools will be auto-discovered after connecting."
+    "noToolsMessage": "No registered tools. Tools will be auto-discovered after connecting.",
+    "arguments": "Arguments",
+    "connection": "Connection",
+    "enabledStatus": "Enabled",
+    "error": "Error",
+    "execute": "Execute",
+    "lastConnected": "Last Connected",
+    "result": "Result",
+    "serverInfo": "Server Info",
+    "status": "Status",
+    "test": "Test",
+    "transport": "Transport"
   },
   "timeline": {
     "allOrgans": "All Organs",
@@ -4852,7 +5076,8 @@
     "noHistory": "No history",
     "time": "Time",
     "iterShort": "Iter",
-    "testing": "Testing..."
+    "testing": "Testing...",
+    "searchOrgans": "Search organs..."
   },
   "admin": {
     "veinFileStorage": "Vein File Storage",
@@ -4893,7 +5118,11 @@
     "healthy": "Healthy",
     "unhealthy": "Unhealthy",
     "refresh": "Refresh",
-    "willVolition": "Will · Volition System"
+    "willVolition": "Will · Volition System",
+    "tabEnterprise": "Enterprise",
+    "tabPermission": "Permissions",
+    "tabSoma": "Soma Admin",
+    "tabSystem": "System"
   },
   "plugins": {
     "loadFailed": "Load failed",
@@ -5097,7 +5326,15 @@
     "promoted": "Promoted to knowledge base",
     "promoteWarning": "Promoted with warnings",
     "promoteError": "Error promoting note",
-    "generating": "Generating..."
+    "generating": "Generating...",
+    "author": "Author",
+    "available": "Available",
+    "details": "Details",
+    "installed": "Installed",
+    "state": "State",
+    "status": "Status",
+    "type": "Type",
+    "version": "Version"
   },
   "team-detail": {
     "text1": "just now",
@@ -5412,7 +5649,13 @@
     "error": "Error",
     "autoRefreshOff": "Auto Refresh Off",
     "autoRefreshOn": "Auto Refresh On",
-    "live": "Live"
+    "live": "Live",
+    "tabs": {
+      "overview": "Overview",
+      "registry": "Registry",
+      "topology": "Topology",
+      "trajectory": "Trajectory"
+    }
   },
   "diff": {
     "filesModified": "{{count}} files modified",
@@ -5714,7 +5957,8 @@
     "minutesAgo": "{{minutes}}m ago",
     "hoursAgo": "{{hours}}h ago",
     "enableConnector": "Enable Connector",
-    "disableConnector": "Disable Connector"
+    "disableConnector": "Disable Connector",
+    "connectors": "Connectors"
   },
   "ai-groups": {
     "add": "Add",
@@ -5839,7 +6083,9 @@
     "systemMemory": "System Memory",
     "topEndpoints": "Top Endpoints",
     "updated": "Updated",
-    "used": "Used"
+    "used": "Used",
+    "searchOrgans": "Search organs...",
+    "subtitle": "OpenTelemetry-compatible metrics for Grafana dashboards"
   },
   "bookmarks": {
     "updated": "Bookmark updated",
@@ -5958,7 +6204,17 @@
     "myOnly": "My Requests Only",
     "empty": "No knowledge requests found",
     "requester": "Requester",
-    "reviewNote": "Review note (optional)"
+    "reviewNote": "Review note (optional)",
+    "approved": "Approved",
+    "createFirst": "Create the first request →",
+    "details": "Details",
+    "pending": "Pending",
+    "rejected": "Rejected",
+    "review": "Review",
+    "search": "Search requests...",
+    "status": "Status",
+    "statusInfo": "Status",
+    "total": "All requests"
   },
   "enterprise": {
     "title": "Enterprise Management",
@@ -6015,7 +6271,13 @@
     "noFavorites": "No favorite sessions yet",
     "showAll": "Show all sessions",
     "addFavorite": "Add to favorites",
-    "removeFavorite": "Remove from favorites"
+    "removeFavorite": "Remove from favorites",
+    "addTag": "Add tag",
+    "openChat": "Open in Chat",
+    "removeTag": "Remove tag",
+    "selectSession": "Select a session to view",
+    "tagPlaceholder": "tag name...",
+    "tags": "Tags"
   },
   "registry": {
     "title": "Component Registry",
@@ -6028,5 +6290,80 @@
     "results": "results",
     "capabilities": "Capabilities",
     "dependencies": "Dependencies"
+  },
+  "agentBinding": {
+    "adminTitle": "Admin: assign agents to users",
+    "assign": "Assign",
+    "bind": "Bind",
+    "current": "Current binding",
+    "none": "Unbound — all agents available",
+    "profile": "profile (optional)",
+    "saveFailed": "Save failed",
+    "saved": "Saved",
+    "selectAgent": "Select agent…",
+    "selectUser": "Select user…",
+    "unbind": "Unbind"
+  },
+  "bindings": {
+    "bind": "Bind",
+    "bindFailed": "Failed to start binding",
+    "boundTo": "Bound: {{n}}",
+    "notBound": "Not bound",
+    "notConfigured": "This login method is not configured",
+    "qq": "QQ",
+    "unbind": "Unbind",
+    "unbindFailed": "Unbind failed",
+    "wechat": "WeChat",
+    "wechatShort": "微"
+  },
+  "oauth": {
+    "backToLogin": "Back to Login",
+    "bound": "Bound successfully!",
+    "loginSuccess": "Logged in, entering…",
+    "missingParams": "Missing OAuth callback params, please log in again",
+    "processing": "Processing authorization…"
+  },
+  "organNav": {
+    "refreshHealth": "Refresh health",
+    "searchPlaceholder": "Search navigation..."
+  },
+  "permission": {
+    "action": "Action",
+    "assign": "Assign",
+    "assignRole": "Assign Role",
+    "createPolicy": "Create Access Policy",
+    "description": "Manage roles and access control policies",
+    "effect": "Effect",
+    "emptyPolicies": "No access policies",
+    "lookupRoles": "Look up user roles",
+    "newPolicy": "New Policy",
+    "noRoles": "This user has no roles",
+    "policies": "Access Policies",
+    "resource": "Resource",
+    "role": "Role",
+    "roleName": "Role name",
+    "roles": "Roles",
+    "searchPolicies": "Search policies...",
+    "username": "Username",
+    "usernamePlaceholder": "Enter username"
+  },
+  "sidebar": {
+    "newChat": "New Chat",
+    "searchPlaceholder": "Search sessions..."
+  },
+  "tags": {
+    "addTag": "Add Tag",
+    "colorLabel": "Color",
+    "createBtn": "Create",
+    "createTag": "Create Tag",
+    "edit": "Edit",
+    "editTag": "Edit Tag",
+    "empty": "No tags yet. Create your first tag to get started.",
+    "nameLabel": "Tag name",
+    "namePlaceholder": "Enter tag name...",
+    "subtitle": "Organize your content with tags",
+    "title": "Tags",
+    "updateBtn": "Update",
+    "uses": "uses"
   }
 }

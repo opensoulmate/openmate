@@ -664,7 +664,7 @@ export function VeinClient() {
   ];
 
   return (
-      <PageLayout title="Vein">
+      <PageLayout title="血管">
         
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}

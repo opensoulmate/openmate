@@ -147,7 +147,7 @@ export function PipelineClient() {
   };
 
   return (
-      <PageLayout title="Pipeline">
+      <PageLayout title="流水线">
         
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
@@ -271,7 +271,7 @@ export function PipelineClient() {
                       value={tags}
                       onChange={e => setTags(e.target.value)}
                       className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs"
-                      placeholder="tag1, tag2"
+                      placeholder="标签1, 标签2"
                     />
                   </div>
                 </div>

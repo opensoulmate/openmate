@@ -45,13 +45,13 @@ function LearningCurve({ courses }: { courses: Course[] }) {
     }
 
     const result = assembleECharts({
-      data: { values: dates.map((d, i) => ({ date: d, cumulative: cumulative[i], daily: daily[i] })) },
-      semantic_types: { date: 'Temporal', cumulative: 'Quantity', daily: 'Quantity' },
+      data: { values: dates.map((d, i) => ({ '日期': d, '累计': cumulative[i], '每日': daily[i] })) },
+      semantic_types: { '日期': 'Temporal', '累计': 'Quantity', '每日': 'Quantity' },
       chart_spec: {
         chartType: 'Area Chart',
         encodings: {
-          x: { field: 'date' },
-          y: { field: 'cumulative' },
+          x: { field: '日期' },
+          y: { field: '累计' },
         },
         canvasSize: { width: 500, height: 200 },
       },
@@ -75,18 +75,18 @@ function LearningCurve({ courses }: { courses: Course[] }) {
 function CourseComparison({ courses }: { courses: Course[] }) {
   const option = useMemo(() => {
     const values = courses.map(c => ({
-      course: c.title.length > 10 ? c.title.slice(0, 10) + '…' : c.title,
-      completion: c.totalChapters > 0 ? Math.round((c.completedChapters / c.totalChapters) * 100) : 0,
+      '课程': c.title.length > 10 ? c.title.slice(0, 10) + '…' : c.title,
+      '完成率': c.totalChapters > 0 ? Math.round((c.completedChapters / c.totalChapters) * 100) : 0,
     }));
 
     return assembleECharts({
       data: { values },
-      semantic_types: { course: 'Nominal', completion: 'Percentage' },
+      semantic_types: { '课程': 'Nominal', '完成率': 'Percentage' },
       chart_spec: {
         chartType: 'Bar Chart',
         encodings: {
-          x: { field: 'course' },
-          y: { field: 'completion' },
+          x: { field: '课程' },
+          y: { field: '完成率' },
         },
         canvasSize: { width: 500, height: 200 },
       },
@@ -116,27 +116,31 @@ function LearningHeatmap({ courses }: { courses: Course[] }) {
         dateMap.set(key, (dateMap.get(key) ?? 0) + 1);
       });
 
-    const values: { date: string; count: number }[] = [];
+    const values: Record<string, string | number>[] = [];
     const today = new Date();
     for (let i = 89; i >= 0; i--) {
       const d = new Date(today);
       d.setDate(d.getDate() - i);
       const key = d.toISOString().slice(0, 10);
-      values.push({ date: key, count: dateMap.get(key) ?? 0 });
+      values.push({ '日期': key, '次数': dateMap.get(key) ?? 0 });
     }
 
-    return assembleECharts({
+    const opt = assembleECharts({
       data: { values },
-      semantic_types: { date: 'Temporal', count: 'Quantity' },
+      semantic_types: { '日期': 'Temporal', '次数': 'Quantity' },
       chart_spec: {
         chartType: 'Calendar Heatmap',
         encodings: {
-          x: { field: 'date' },
-          y: { field: 'count' },
+          x: { field: '日期' },
+          y: { field: '次数' },
         },
         canvasSize: { width: 500, height: 120 },
       },
-    });
+    }) as Record<string, unknown>;
+    // 视觉映射图例默认 high/low → 中文
+    const vm = opt.visualMap as { text?: string[] } | undefined;
+    if (vm) vm.text = ['高', '低'];
+    return opt;
   }, [courses]);
 
   return (

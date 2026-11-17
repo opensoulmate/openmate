@@ -67,7 +67,7 @@ function timeAgo(ts: string): string {
 }
 
 const requestStatusConfig: Record<string, { label: string; color: string; dot: string; icon: typeof CheckCircle }> = {
-  pending: { label: 'Pending', color: 'text-yellow-500', dot: 'bg-yellow-500', icon: Clock },
+  pending: { label: '待审', color: 'text-yellow-500', dot: 'bg-yellow-500', icon: Clock },
   approved: { label: 'Approved', color: 'text-green-500', dot: 'bg-green-500', icon: CheckCircle },
   rejected: { label: 'Rejected', color: 'text-red-500', dot: 'bg-red-500', icon: XCircle },
 };
@@ -178,13 +178,13 @@ function ActivityTimelineChart({ items }: { items: KnowledgeItem[] }) {
     }
 
     return assembleECharts({
-      data: { values: dates.map((d, i) => ({ date: d, cumulative: cumulative[i], daily: daily[i] })) },
-      semantic_types: { date: 'Temporal', cumulative: 'Quantity', daily: 'Quantity' },
+      data: { values: dates.map((d, i) => ({ '日期': d, '累计': cumulative[i], '每日': daily[i] })) },
+      semantic_types: { '日期': 'Temporal', '累计': 'Quantity', '每日': 'Quantity' },
       chart_spec: {
         chartType: 'Area Chart',
         encodings: {
-          x: { field: 'date' },
-          y: { field: 'cumulative' },
+          x: { field: '日期' },
+          y: { field: '累计' },
         },
         canvasSize: { width: 500, height: 200 },
       },
@@ -451,7 +451,7 @@ export function KnowledgeClient() {
                 <div className="ml-3.5 mt-1">
                   <p className="text-[10px] text-muted-foreground truncate">{req.kb_description}</p>
                   <div className="flex items-center gap-2 mt-0.5">
-                    <span className="text-[10px] text-muted-foreground">{req.requester_name || 'Unknown'}</span>
+                    <span className="text-[10px] text-muted-foreground">{req.requester_name || '未知'}</span>
                     <span className="text-[10px] text-muted-foreground">{timeAgo(req.created_at)}</span>
                   </div>
                 </div>
@@ -508,7 +508,7 @@ export function KnowledgeClient() {
               <button
                 onClick={() => handlePin(selectedItem.id)}
                 className="p-1.5 rounded-md hover:bg-muted/50 text-muted-foreground"
-                title={selectedItem.pinned ? 'Unpin' : 'Pin'}
+                title={selectedItem.pinned ? '取消置顶' : '置顶'}
               >
                 {selectedItem.pinned ? <Pin className="w-4 h-4 text-amber-400" /> : <PinOff className="w-4 h-4" />}
               </button>
@@ -522,7 +522,7 @@ export function KnowledgeClient() {
               <button
                 onClick={() => handleDelete(selectedItem.id)}
                 className="p-1.5 rounded-md hover:bg-muted/50 text-muted-foreground hover:text-red-500"
-                title="Delete"
+                title="删除"
               >
                 <Trash2 className="w-4 h-4" />
               </button>
@@ -757,7 +757,7 @@ export function KnowledgeClient() {
                     <button
                       onClick={() => handlePin(selectedItem.id)}
                       className="p-1.5 rounded-md hover:bg-muted text-muted-foreground"
-                      title={selectedItem.pinned ? 'Unpin' : 'Pin'}
+                      title={selectedItem.pinned ? '取消置顶' : '置顶'}
                     >
                       {selectedItem.pinned ? <Pin className="w-4 h-4 text-amber-400" /> : <PinOff className="w-4 h-4" />}
                     </button>
@@ -771,7 +771,7 @@ export function KnowledgeClient() {
                     <button
                       onClick={() => handleDelete(selectedItem.id)}
                       className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-red-500"
-                      title="Delete"
+                      title="删除"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -943,7 +943,7 @@ export function KnowledgeClient() {
                 <div className="rounded-lg border border-border bg-card p-4 space-y-3">
                   <div className="flex items-center gap-2 text-xs">
                     <span className="text-muted-foreground">{t('knowledgeRequests.requester', 'Requester')}:</span>
-                    <span className="font-medium">{selectedRequest.requester_name || 'Unknown'}</span>
+                    <span className="font-medium">{selectedRequest.requester_name || '未知'}</span>
                   </div>
                   <div className="flex items-center gap-2 text-xs">
                     <span className="text-muted-foreground">{t('knowledgeRequests.status', 'Status')}:</span>

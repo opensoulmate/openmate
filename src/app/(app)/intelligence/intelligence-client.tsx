@@ -117,7 +117,7 @@ export function IntelligenceClient() {
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
   return (
-      <PageLayout title="Intelligence">
+      <PageLayout title="智能分析">
         
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -267,7 +267,7 @@ export function IntelligenceClient() {
                         </div>
                         {Object.keys(c.custom).length > 0 && (
                           <div className="mt-2 p-2 bg-muted/30 rounded text-xs">
-                            <div className="text-muted-foreground mb-1">Custom Data:</div>
+                            <div className="text-muted-foreground mb-1">自定义数据：</div>
                             <pre className="whitespace-pre-wrap break-all">{JSON.stringify(c.custom, null, 2).slice(0, 500)}</pre>
                           </div>
                         )}

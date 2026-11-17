@@ -195,21 +195,21 @@ export function CronClient() {
                 <button
                   onClick={(e) => { e.stopPropagation(); handleAction(jobId, isActive ? 'pause' : 'resume'); }}
                   className={cn('p-1 rounded hover:bg-muted shrink-0', isActive ? 'text-amber-500' : 'text-green-500')}
-                  title={isActive ? 'Pause' : 'Resume'}
+                  title={isActive ? '暂停' : '继续'}
                 >
                   {isActive ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
                 </button>
                 <button
                   onClick={(e) => { e.stopPropagation(); handleAction(jobId, 'run'); }}
                   className="p-1 rounded hover:bg-muted text-primary shrink-0"
-                  title="Run Now"
+                  title="立即运行"
                 >
                   <Zap className="w-3 h-3" />
                 </button>
                 <button
                   onClick={(e) => { e.stopPropagation(); handleAction(jobId, 'delete'); }}
                   className="p-1 rounded hover:bg-muted text-destructive shrink-0"
-                  title="Delete"
+                  title="删除"
                 >
                   <Trash2 className="w-3 h-3" />
                 </button>
@@ -314,7 +314,7 @@ export function CronClient() {
   }
 
   return (
-      <PageLayout title="Cron">
+      <PageLayout title="定时任务">
         
     <div className="h-full flex flex-col overflow-hidden">
       {/* View tabs + Legend */}
@@ -338,11 +338,11 @@ export function CronClient() {
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-green-500" />
-            <span className="text-[10px] text-muted-foreground">Active</span>
+            <span className="text-[10px] text-muted-foreground">启用</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-amber-500" />
-            <span className="text-[10px] text-muted-foreground">Paused</span>
+            <span className="text-[10px] text-muted-foreground">已暂停</span>
           </div>
         </div>
       </div>

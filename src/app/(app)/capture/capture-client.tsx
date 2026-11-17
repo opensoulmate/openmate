@@ -120,7 +120,7 @@ export function CaptureClient() {
   });
 
   return (
-      <PageLayout title="Capture">
+      <PageLayout title="采集">
         
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}

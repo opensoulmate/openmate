@@ -135,7 +135,7 @@ const defaultStartNode: Node<WorkflowNodeData> = {
   id: "start-1",
   type: "startNode",
   position: { x: 250, y: 80 },
-  data: { label: "Start", type: "start", triggerType: "manual" },
+  data: { label: "开始", type: "start", triggerType: "manual" },
 };
 
 // Map frontend node types to backend node types
@@ -309,7 +309,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       const wf: WorkflowDefinition = {
         ...parsed,
         id,
-        name: `${parsed.name || "Imported Workflow"} (imported)`,
+        name: `${parsed.name || "导入的工作流"} (imported)`,
         createdAt: now,
         updatedAt: now,
         version: 1,
@@ -471,7 +471,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
           completed_at: new Date().toISOString(),
           steps: [],
           variables,
-          error: err instanceof Error ? err.message : "Unknown error",
+          error: err instanceof Error ? err.message : "未知错误",
         },
       });
     }

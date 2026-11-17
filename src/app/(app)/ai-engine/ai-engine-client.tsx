@@ -209,7 +209,7 @@ export function AiEngineClient() {
   const successPct = engineStatus ? Math.round(engineStatus.success_rate * 100) : 0;
 
   return (
-      <PageLayout title="Ai Engine">
+      <PageLayout title="AI 引擎">
         
     <div className="h-full overflow-y-auto p-3 lg:p-6 space-y-3 lg:space-y-6">
       {/* Header */}
@@ -226,7 +226,7 @@ export function AiEngineClient() {
             onClick={() => setAutoRefresh(!autoRefresh)}
             className={cn("rounded-lg px-3 py-1.5 text-xs border", autoRefresh ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground")}
           >
-            <Clock size={12} className="inline mr-1" />{autoRefresh ? "Auto" : "Manual"}
+            <Clock size={12} className="inline mr-1" />{autoRefresh ? "自动" : "手动"}
           </button>
           <button onClick={() => fetchAll()} className="rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-muted">
             <RefreshCw size={12} />
@@ -259,7 +259,7 @@ export function AiEngineClient() {
         <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
           <div className="text-xs text-muted-foreground mb-1">{t("aiEngine.agents", "Agents")}</div>
           <div className="text-xl lg:text-2xl font-bold">{graphStatus?.total_agents ?? 0}</div>
-          <div className="text-[10px] text-muted-foreground">{graphStatus?.running_tasks ?? 0} running</div>
+          <div className="text-[10px] text-muted-foreground">{graphStatus?.running_tasks ?? 0} 运行中</div>
         </div>
       </div>
 
@@ -268,11 +268,11 @@ export function AiEngineClient() {
         <div>
           <h2 className="text-xs lg:text-sm font-semibold mb-3 flex items-center gap-2"><Layers size={14} />{t("aiEngine.layers", "Engine Layers")}</h2>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-            <LayerCard name="Prompt" icon={Brain} layer={engineStatus.layers.prompt} />
-            <LayerCard name="Context" icon={BarChart3} layer={engineStatus.layers.context} />
-            <LayerCard name="Harness" icon={Shield} layer={engineStatus.layers.harness} />
-            <LayerCard name="Loop" icon={Activity} layer={engineStatus.layers.loop} />
-            <LayerCard name="Graph" icon={GitBranch} layer={engineStatus.layers.graph} />
+            <LayerCard name="提示" icon={Brain} layer={engineStatus.layers.prompt} />
+            <LayerCard name="上下文" icon={BarChart3} layer={engineStatus.layers.context} />
+            <LayerCard name="编排" icon={Shield} layer={engineStatus.layers.harness} />
+            <LayerCard name="循环" icon={Activity} layer={engineStatus.layers.loop} />
+            <LayerCard name="图谱" icon={GitBranch} layer={engineStatus.layers.graph} />
           </div>
         </div>
       )}
@@ -330,23 +330,23 @@ export function AiEngineClient() {
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-5 mb-4">
             <div className="text-center">
               <div className="text-lg font-bold">{graphStatus.active_groups}</div>
-              <div className="text-[10px] text-muted-foreground">Groups</div>
+              <div className="text-[10px] text-muted-foreground">群组</div>
             </div>
             <div className="text-center">
               <div className="text-lg font-bold">{graphStatus.total_agents}</div>
-              <div className="text-[10px] text-muted-foreground">Agents</div>
+              <div className="text-[10px] text-muted-foreground">Agent</div>
             </div>
             <div className="text-center">
               <div className="text-lg font-bold text-blue-500">{graphStatus.running_tasks}</div>
-              <div className="text-[10px] text-muted-foreground">Running</div>
+              <div className="text-[10px] text-muted-foreground">运行中</div>
             </div>
             <div className="text-center">
               <div className="text-lg font-bold text-emerald-500">{graphStatus.completed_tasks}</div>
-              <div className="text-[10px] text-muted-foreground">Completed</div>
+              <div className="text-[10px] text-muted-foreground">已完成</div>
             </div>
             <div className="text-center">
               <div className="text-lg font-bold text-red-500">{graphStatus.failed_tasks}</div>
-              <div className="text-[10px] text-muted-foreground">Failed</div>
+              <div className="text-[10px] text-muted-foreground">失败</div>
             </div>
           </div>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
@@ -357,7 +357,7 @@ export function AiEngineClient() {
                   <span className="text-xs font-medium capitalize">{role}</span>
                 </div>
                 <div className="text-xs text-muted-foreground">
-                  <span className="font-mono">{data.count}</span> total · <span className="font-mono text-yellow-500">{data.busy}</span> busy
+                  <span className="font-mono">{data.count}</span> 共 · <span className="font-mono text-yellow-500">{data.busy}</span> 忙碌
                 </div>
               </div>
             ))}
@@ -379,10 +379,10 @@ export function AiEngineClient() {
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-border">
-                  <th className="pb-2 text-left font-medium text-muted-foreground">Tool</th>
-                  <th className="pb-2 text-left font-medium text-muted-foreground">Mode</th>
-                  <th className="pb-2 text-left font-medium text-muted-foreground">Permissions</th>
-                  <th className="pb-2 text-left font-medium text-muted-foreground">Guardrails</th>
+                  <th className="pb-2 text-left font-medium text-muted-foreground">工具</th>
+                  <th className="pb-2 text-left font-medium text-muted-foreground">模式</th>
+                  <th className="pb-2 text-left font-medium text-muted-foreground">权限</th>
+                  <th className="pb-2 text-left font-medium text-muted-foreground">护栏</th>
                 </tr>
               </thead>
               <tbody>

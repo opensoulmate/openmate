@@ -22,10 +22,10 @@ const SEVERITY_COLORS: Record<string, string> = {
 };
 
 const SEVERITY_LABELS: Record<string, string> = {
-  info: 'Info',
-  warning: 'Warning',
-  error: 'Error',
-  success: 'Success',
+  info: '信息',
+  warning: '警告',
+  error: '错误',
+  success: '成功',
 };
 
 // ── Severity Distribution (Pie/Donut) ─────────────────────
@@ -58,7 +58,7 @@ function SeverityPie({ notifications }: { notifications: Notification[] }) {
     <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
       <div className="flex items-center gap-2 mb-3">
         <PieChart size={14} className="text-amber-500" />
-        <h4 className="text-xs font-medium">Type Distribution</h4>
+        <h4 className="text-xs font-medium">类型分布</h4>
       </div>
       <EChart option={option as any} style={{ height: 200 }} opts={{ renderer: 'svg' }} />
     </div>
@@ -104,14 +104,14 @@ function NotificationTimeline({ notifications }: { notifications: Notification[]
     <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
       <div className="flex items-center gap-2 mb-3">
         <TrendingUp size={14} className="text-primary" />
-        <h4 className="text-xs font-medium">Timeline (7 days)</h4>
+        <h4 className="text-xs font-medium">时间线（7 天）</h4>
       </div>
       <EChart option={option as any} style={{ height: 200 }} opts={{ renderer: 'svg' }} />
     </div>
   );
 }
 
-// ── Priority Distribution (Bar Chart) ─────────────────────
+// ── 优先级分布 (Bar Chart) ─────────────────────
 
 function PriorityBar({ notifications }: { notifications: Notification[] }) {
   const option = useMemo(() => {
@@ -144,14 +144,14 @@ function PriorityBar({ notifications }: { notifications: Notification[] }) {
     <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
       <div className="flex items-center gap-2 mb-3">
         <BarChart3 size={14} className="text-blue-500" />
-        <h4 className="text-xs font-medium">Priority Distribution</h4>
+        <h4 className="text-xs font-medium">优先级分布</h4>
       </div>
       <EChart option={option as any} style={{ height: 200 }} opts={{ renderer: 'svg' }} />
     </div>
   );
 }
 
-// ── Source Distribution (Horizontal Bar) ──────────────────
+// ── 来源分布 (Horizontal Bar) ──────────────────
 
 function SourceBar({ notifications }: { notifications: Notification[] }) {
   const option = useMemo(() => {
@@ -159,7 +159,7 @@ function SourceBar({ notifications }: { notifications: Notification[] }) {
     // or group by first word of title as a proxy for source
     const sourceMap = new Map<string, number>();
     notifications.forEach(n => {
-      let source = 'Unknown';
+      let source = '未知';
       const title = n.title || '';
       const colonIdx = title.indexOf(':');
       if (colonIdx > 0 && colonIdx < 20) {
@@ -167,7 +167,7 @@ function SourceBar({ notifications }: { notifications: Notification[] }) {
       } else {
         // Use first word as source
         const words = title.split(/\s+/);
-        source = words[0]?.slice(0, 15) || 'Unknown';
+        source = words[0]?.slice(0, 15) || '未知';
       }
       sourceMap.set(source, (sourceMap.get(source) ?? 0) + 1);
     });
@@ -196,7 +196,7 @@ function SourceBar({ notifications }: { notifications: Notification[] }) {
     <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
       <div className="flex items-center gap-2 mb-3">
         <Layers size={14} className="text-green-500" />
-        <h4 className="text-xs font-medium">Source Distribution</h4>
+        <h4 className="text-xs font-medium">来源分布</h4>
       </div>
       <EChart option={option as any} style={{ height: 200 }} opts={{ renderer: 'svg' }} />
     </div>

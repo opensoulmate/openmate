@@ -227,7 +227,7 @@ export function EchoClient() {
   ];
 
   return (
-      <PageLayout title="Echo">
+      <PageLayout title="回声">
         
     <div className="flex h-full flex-col overflow-hidden">
       <div className="flex items-center justify-between border-b border-border px-3 lg:px-6 py-4">
@@ -437,7 +437,7 @@ export function EchoClient() {
                           <div className="flex flex-col sm:flex-row gap-2 lg:gap-3">
                             <select value={sendChannel} onChange={(e) => setSendChannel(e.target.value)}
                               className="rounded-lg border border-border bg-background px-3 py-2 text-xs lg:text-sm">
-                              <option value="console">Console</option>
+                              <option value="console">控制台</option>
                               <option value="webhook">Webhook</option>
                               <option value="dingtalk">{t("echo.t83975") || "DingTalk"}</option>
                               <option value="wechat_work">{t("echo.t19991") || "WeCom"}</option>
@@ -539,7 +539,7 @@ export function EchoClient() {
                     <div className="flex flex-col sm:flex-row gap-2 lg:gap-3">
                       <select value={sendChannel} onChange={(e) => setSendChannel(e.target.value)}
                         className="rounded-lg border border-border bg-background px-3 py-2 text-xs lg:text-sm">
-                        <option value="console">Console</option>
+                        <option value="console">控制台</option>
                         <option value="webhook">Webhook</option>
                         <option value="dingtalk">{t("echo.t83975") || "DingTalk"}</option>
                         <option value="wechat_work">{t("echo.t19991") || "WeCom"}</option>
@@ -632,19 +632,19 @@ export function EchoClient() {
           <div className="space-y-4">
             <div className="flex gap-2 lg:gap-3 items-end">
               <div>
-                <label className="text-xs text-muted-foreground">Endpoint</label>
+                <label className="text-xs text-muted-foreground">端点</label>
                 <input value={chEndpoint} onChange={(e) => setChEndpoint(e.target.value)}
-                  placeholder="Webhook URL / SMTP host"
+                  placeholder="Webhook URL / SMTP 主机"
                   className="block rounded-lg border border-border bg-background px-3 py-2 text-xs lg:text-sm w-full sm:w-80" />
               </div>
               <div>
-                <label className="text-xs text-muted-foreground">Token / Password</label>
+                <label className="text-xs text-muted-foreground">Token / 密码</label>
                 <input value={chToken} onChange={(e) => setChToken(e.target.value)}
-                  placeholder="API Token / SMTP password" type="password"
+                  placeholder="API Token / SMTP 密码" type="password"
                   className="block rounded-lg border border-border bg-background px-3 py-2 text-xs lg:text-sm w-48" />
               </div>
               <div>
-                <label className="text-xs text-muted-foreground">Extra (JSON)</label>
+                <label className="text-xs text-muted-foreground">附加参数（JSON）</label>
                 <input value={chExtra} onChange={(e) => setChExtra(e.target.value)}
                   placeholder='{"smtp_port":587,"username":"..."}'
                   className="block rounded-lg border border-border bg-background px-3 py-2 text-xs lg:text-sm w-full sm:w-64" />

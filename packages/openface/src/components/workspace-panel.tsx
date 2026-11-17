@@ -41,11 +41,11 @@ let tabCounter = 0;
 function createTab(type: WorkspaceTabType, extra?: { url?: string; filePath?: string }): WorkspaceTab {
   tabCounter += 1;
   const titles: Record<WorkspaceTabType, string> = {
-    'new-tab': 'New Tab',
+    'new-tab': '新标签页',
     'web-browser': 'Web Browser',
     'file-preview': 'File Preview',
     terminal: 'Terminal',
-    details: 'Details',
+    details: '详情',
   };
   return {
     id: `tab-${Date.now()}-${tabCounter}`,
@@ -92,15 +92,15 @@ function NewTabView({ onOpenBrowser, onOpenFile, onOpenTerminal, onOpenDetails, 
 
   return (
     <div className="flex flex-col items-center justify-center h-full gap-4 lg:gap-6 p-3 lg:p-6 text-center">
-      <div className="text-lg lg:text-2xl font-bold text-foreground/80">{title || 'Workspace'}</div>
+      <div className="text-lg lg:text-2xl font-bold text-foreground/80">{title || '工作区'}</div>
       <p className="text-xs lg:text-sm text-muted-foreground max-w-xs">
-        Open a webpage, preview a file, or launch a terminal.
+        打开网页、预览文件或启动终端。
       </p>
 
       <div className="w-full max-w-sm space-y-4">
         <form onSubmit={handleBrowse} className="flex gap-2">
           <input
-            placeholder="Enter URL to browse..."
+            placeholder="输入网址浏览..."
             value={urlInput}
             onChange={(e) => setUrlInput(e.target.value)}
             className="flex-1 text-sm h-9 px-3 rounded-md border border-border bg-background outline-none focus:border-primary/50 transition-colors"
@@ -113,16 +113,16 @@ function NewTabView({ onOpenBrowser, onOpenFile, onOpenTerminal, onOpenDetails, 
         <div className="flex gap-2">
           <input ref={fileInputRef} type="file" className="hidden" onChange={handleFileSelect} />
           <button onClick={() => fileInputRef.current?.click()} className="flex-1 h-9 rounded-md border border-border text-sm font-medium hover:bg-muted/50 transition-colors flex items-center justify-center gap-2">
-            <FileText className="w-4 h-4" /> Open File
+            <FileText className="w-4 h-4" /> 打开文件
           </button>
         </div>
 
         <button onClick={onOpenTerminal} className="w-full h-9 rounded-md border border-border text-sm font-medium hover:bg-muted/50 transition-colors flex items-center justify-center gap-2">
-          <TerminalIcon className="w-4 h-4" /> Open Terminal
+          <TerminalIcon className="w-4 h-4" /> 打开终端
         </button>
 
         <button onClick={onOpenDetails} className="w-full h-9 rounded-md border border-border text-sm font-medium hover:bg-muted/50 transition-colors flex items-center justify-center gap-2">
-          <Info className="w-4 h-4" /> Details
+          <Info className="w-4 h-4" /> 详情
         </button>
       </div>
     </div>
@@ -147,7 +147,7 @@ function TerminalPlaceholder() {
     if (!cmd) return;
     const newLines = [...lines, `$ ${cmd}`];
     if (cmd === 'help') {
-      newLines.push('Available commands:', '  help    - Show this help', '  clear   - Clear terminal', '  echo    - Echo text', '  date    - Show current date', '');
+      newLines.push('可用命令：', '  help    - Show this help', '  clear   - Clear terminal', '  echo    - Echo text', '  date    - Show current date', '');
     } else if (cmd === 'clear') {
       setLines([]); setInput(''); return;
     } else if (cmd.startsWith('echo ')) {
@@ -169,7 +169,7 @@ function TerminalPlaceholder() {
       </div>
       <form onSubmit={handleCommand} className="flex items-center gap-2 px-3 py-2 border-t border-border/20">
         <span className="text-green-500 shrink-0">$</span>
-        <input value={input} onChange={(e) => setInput(e.target.value)} className="flex-1 bg-transparent outline-none text-xs text-foreground placeholder:text-muted-foreground/50" placeholder="Type a command..." autoFocus />
+        <input value={input} onChange={(e) => setInput(e.target.value)} className="flex-1 bg-transparent outline-none text-xs text-foreground placeholder:text-muted-foreground/50" placeholder="输入命令..." autoFocus />
       </form>
     </div>
   );
@@ -204,7 +204,7 @@ export interface WorkspacePanelProps {
 
 export function WorkspacePanel({
   sessionId = '__default__',
-  workspaceTitle = 'Workspace',
+  workspaceTitle = '工作区',
   pageWorkspace,
   sessionDetails,
   onBrowserAIAction,
@@ -455,7 +455,7 @@ export function WorkspacePanel({
               updateTab(activeTab.id, { type: 'terminal', title: 'Terminal' });
             }}
             onOpenDetails={() => {
-              updateTab(activeTab.id, { type: 'details', title: 'Details' });
+              updateTab(activeTab.id, { type: 'details', title: '详情' });
             }}
           />
         );
@@ -489,21 +489,21 @@ export function WorkspacePanel({
             </div>
             {sessionDetails.sessionName && (
               <div className="space-y-2">
-                <div className="text-xs text-muted-foreground">Session</div>
+                <div className="text-xs text-muted-foreground">会话</div>
                 <div className="text-sm font-medium">{sessionDetails.sessionName}</div>
-                {sessionDetails.lastActive && <div className="text-xs text-muted-foreground">Last active: {sessionDetails.lastActive}</div>}
+                {sessionDetails.lastActive && <div className="text-xs text-muted-foreground">最近活跃：{sessionDetails.lastActive}</div>}
               </div>
             )}
             <div>
-              <div className="text-xs text-muted-foreground mb-2">Statistics</div>
+              <div className="text-xs text-muted-foreground mb-2">统计</div>
               <div className="grid grid-cols-2 gap-2">
                 <div className="p-2 rounded bg-muted/50 text-center">
                   <div className="text-lg font-bold">{sessionDetails.imageCount ?? 0}</div>
-                  <div className="text-[10px] text-muted-foreground">Images</div>
+                  <div className="text-[10px] text-muted-foreground">图片</div>
                 </div>
                 <div className="p-2 rounded bg-muted/50 text-center">
                   <div className="text-lg font-bold">{sessionDetails.fileCount ?? 0}</div>
-                  <div className="text-[10px] text-muted-foreground">Files</div>
+                  <div className="text-[10px] text-muted-foreground">文件</div>
                 </div>
               </div>
             </div>
@@ -511,7 +511,7 @@ export function WorkspacePanel({
         ) : (
           <div className="flex flex-col items-center justify-center h-full gap-3 p-6 text-center">
             <Info className="w-8 h-8 text-muted-foreground/30" />
-            <p className="text-sm text-muted-foreground">No active session</p>
+            <p className="text-sm text-muted-foreground">无活动会话</p>
           </div>
         );
 

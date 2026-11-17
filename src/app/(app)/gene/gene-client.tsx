@@ -390,7 +390,7 @@ export function GeneClient() {
   ]
 
   return (
-      <PageLayout title="Gene">
+      <PageLayout title="基因">
         
     <div className="p-3 lg:p-6 max-w-6xl mx-auto space-y-3 lg:space-y-6 h-full overflow-y-auto">
       {/* Header */}

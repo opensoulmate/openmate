@@ -233,7 +233,7 @@ export function NerveClient() {
   ]
 
   return (
-      <PageLayout title="Nerve">
+      <PageLayout title="神经">
         
     <div className="p-4 sm:p-3 lg:p-6 max-w-6xl mx-auto space-y-3 lg:space-y-6">
       {/* Header */}
@@ -564,7 +564,7 @@ export function NerveClient() {
                 <option value="sense">Sense</option>
                 <option value="vein">Vein</option>
                 <option value="will">Will</option>
-                <option value="custom">Custom</option>
+                <option value="custom">自定义</option>
               </select>
               <button
                 onClick={handleRegisterNode}
@@ -631,7 +631,7 @@ export function NerveClient() {
           <div className="space-y-4">
             <h3 className="font-semibold">{t('nerve.text5')}</h3>
             <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Topic *</label>
+              <label className="text-xs text-muted-foreground mb-1 block">主题 *</label>
               <input
                 type="text"
                 value={pubTopic}
@@ -684,7 +684,7 @@ export function NerveClient() {
                       <span className="font-mono">{pubResult.id}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-muted-foreground">Topic</span>
+                      <span className="text-muted-foreground">主题</span>
                       <span className="font-mono text-blue-400">{pubResult.topic}</span>
                     </div>
                     <div className="flex justify-between">

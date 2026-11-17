@@ -209,7 +209,7 @@ export function MetricsClient() {
       : 0;
 
   return (
-      <PageLayout title="Metrics">
+      <PageLayout title="指标">
         
     <div className="px-3 lg:px-6 py-4 lg:py-6 space-y-4 lg:space-y-6 max-w-7xl mx-auto">
       {/* Header */}
@@ -464,7 +464,7 @@ export function MetricsClient() {
           </div>
           <div className="flex gap-2 lg:gap-6 text-xs">
             <div>
-              <span className="text-muted-foreground">Version:</span>{" "}
+              <span className="text-muted-foreground">版本：</span>{" "}
               <span className="font-mono">{metrics.info.version}</span>
             </div>
             <div>
@@ -472,7 +472,7 @@ export function MetricsClient() {
               <span className="font-mono">{metrics.info.python}</span>
             </div>
             <div>
-              <span className="text-muted-foreground">OS:</span>{" "}
+              <span className="text-muted-foreground">操作系统：</span>{" "}
               <span className="font-mono">{metrics.info.os}</span>
             </div>
           </div>

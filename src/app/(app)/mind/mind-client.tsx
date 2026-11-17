@@ -136,7 +136,7 @@ export function MindClient() {
   };
 
   return (
-      <PageLayout title="Mind">
+      <PageLayout title="心智">
         
     <div className="flex h-full flex-col overflow-hidden">
       <div className="flex items-center justify-between border-b border-border px-3 lg:px-6 py-4">
@@ -321,7 +321,7 @@ export function MindClient() {
                   <div className="space-y-1 text-xs text-muted-foreground">
                     <div className="flex justify-between"><span>{t("mind.tone")}</span><span>{p.tone}</span></div>
                     <div className="flex justify-between"><span>{t("mind.length")}</span><span>{p.response_length}</span></div>
-                    <div className="flex justify-between"><span>Emoji</span><span>{p.emoji_usage}</span></div>
+                    <div className="flex justify-between"><span>表情</span><span>{p.emoji_usage}</span></div>
                   </div>
                   <div className="flex gap-2">
                     <button onClick={() => handleSetActive(p.personality_id)}

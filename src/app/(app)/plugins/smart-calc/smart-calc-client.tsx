@@ -174,7 +174,7 @@ export function SmartCalcClient() {
           <Calculator size={20} className="text-primary" />
         </div>
         <div>
-          <h1 className="text-lg font-semibold">Smart Calculator</h1>
+          <h1 className="text-lg font-semibold">智能计算器</h1>
           <p className="text-xs text-muted-foreground">{t("smartCalc.subtitle")}</p>
         </div>
       </div>

@@ -154,7 +154,7 @@ export function WorkspaceClient() {
   };
 
   return (
-      <PageLayout title="Workspace">
+      <PageLayout title="工作区">
         
     <div className="flex h-full flex-col">
       {/* Header */}

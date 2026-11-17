@@ -223,7 +223,7 @@ export function VoiceClient() {
   const languages = stats?.profiles?.by_language || {};
 
   return (
-      <PageLayout title="Voice">
+      <PageLayout title="声带">
         
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}

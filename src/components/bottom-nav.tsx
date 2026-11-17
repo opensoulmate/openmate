@@ -118,7 +118,7 @@ export function BottomNav({ totalUnread = 0, onOpenConversations }: BottomNavPro
   // 插件导航项状态
   const [pluginNavItems, setPluginNavItems] = useState<PluginNavItem[]>([]);
 
-  const userId = getUserName() || getUserId() || "User";
+  const userId = getUserName() || getUserId() || "用户";
 
   // 获取插件导航项
   useEffect(() => {

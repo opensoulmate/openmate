@@ -176,13 +176,13 @@ export function GlandClient() {
 
   const tabs: Array<{ key: ActiveTab; label: string; icon: typeof Zap }> = [
     { key: "overview", label: t("gland.tabs.overview") || "Overview", icon: Activity },
-    { key: "providers", label: "Providers", icon: Server },
+    { key: "providers", label: "服务商", icon: Server },
     { key: "keys", label: "API Keys", icon: Key },
     { key: "usage", label: t("gland.tabs.usage") || "Usage Stats", icon: BarChart3 },
   ]
 
   return (
-      <PageLayout title="Gland">
+      <PageLayout title="腺体">
         
     <div className="flex flex-col h-full overflow-hidden">
       {/* Header */}
@@ -229,7 +229,7 @@ export function GlandClient() {
             {/* Stats Cards */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 lg:gap-4">
               {[
-                { label: "Providers", value: health?.providers.total ?? 0, icon: Server, color: "text-blue-400", bg: "from-blue-500/20 to-blue-600/10" },
+                { label: "服务商", value: health?.providers.total ?? 0, icon: Server, color: "text-blue-400", bg: "from-blue-500/20 to-blue-600/10" },
                 { label: t("gland.enabled") || "Enabled", value: health?.providers.enabled ?? 0, icon: CheckCircle, color: "text-green-400", bg: "from-green-500/20 to-green-600/10" },
                 { label: "API Keys", value: health?.keys.total ?? 0, icon: Key, color: "text-purple-400", bg: "from-purple-500/20 to-purple-600/10" },
                 { label: t("gland.totalCalls") || "Total Calls", value: health?.token_meter.call_count ?? 0, icon: Activity, color: "text-amber-400", bg: "from-amber-500/20 to-amber-600/10" },
@@ -337,7 +337,7 @@ export function GlandClient() {
                       placeholder="openai" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs lg:text-sm" />
                   </div>
                   <div>
-                    <label className="text-xs text-muted-foreground mb-1 block">Base URL *</label>
+                    <label className="text-xs text-muted-foreground mb-1 block">基础 URL *</label>
                     <input value={newProvider.base_url} onChange={e => setNewProvider({ ...newProvider, base_url: e.target.value })}
                       placeholder="https://api.openai.com/v1" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs lg:text-sm" />
                   </div>
@@ -352,7 +352,7 @@ export function GlandClient() {
                       placeholder="text-embedding-3-small" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs lg:text-sm" />
                   </div>
                   <div>
-                    <label className="text-xs text-muted-foreground mb-1 block">API Key</label>
+                    <label className="text-xs text-muted-foreground mb-1 block">API 密钥</label>
                     <input value={newProvider.api_key} onChange={e => setNewProvider({ ...newProvider, api_key: e.target.value })}
                       type="password" placeholder="sk-..." className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs lg:text-sm" />
                   </div>
@@ -428,7 +428,7 @@ export function GlandClient() {
               <div className="p-4 rounded-xl border border-border bg-card space-y-3">
                 <div className="grid grid-cols-2 gap-2 lg:gap-3">
                   <div>
-                    <label className="text-xs text-muted-foreground mb-1 block">Provider *</label>
+                    <label className="text-xs text-muted-foreground mb-1 block">服务商 *</label>
                     <select value={newKey.provider} onChange={e => setNewKey({ ...newKey, provider: e.target.value })}
                       className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs lg:text-sm">
                       <option value="">{t("gland.form.selectProvider") || "Select Provider"}</option>
@@ -436,7 +436,7 @@ export function GlandClient() {
                     </select>
                   </div>
                   <div>
-                    <label className="text-xs text-muted-foreground mb-1 block">API Key *</label>
+                    <label className="text-xs text-muted-foreground mb-1 block">API 密钥 *</label>
                     <input value={newKey.api_key} onChange={e => setNewKey({ ...newKey, api_key: e.target.value })}
                       type="password" placeholder="sk-..." className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs lg:text-sm" />
                   </div>
@@ -498,7 +498,7 @@ export function GlandClient() {
               )}
             </div>
 
-            {/* Usage by Provider */}
+            {/* Usage by 服务商 */}
             {health?.token_meter.by_provider && Object.keys(health.token_meter.by_provider).length > 0 && (
               <div>
                 <h3 className="text-xs lg:text-sm font-semibold text-foreground mb-3">{t("gland.form.byProvider") || "By Provider"}</h3>
@@ -540,11 +540,11 @@ export function GlandClient() {
                   <table className="w-full text-xs lg:text-sm min-w-[500px]">
                     <thead>
                       <tr className="bg-muted/50">
-                        <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Provider</th>
-                        <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Model</th>
-                        <th className="text-right px-3 py-2 text-xs font-medium text-muted-foreground">Prompt</th>
-                        <th className="text-right px-3 py-2 text-xs font-medium text-muted-foreground">Completion</th>
-                        <th className="text-right px-3 py-2 text-xs font-medium text-muted-foreground">Total</th>
+                        <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">服务商</th>
+                        <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">模型</th>
+                        <th className="text-right px-3 py-2 text-xs font-medium text-muted-foreground">提示</th>
+                        <th className="text-right px-3 py-2 text-xs font-medium text-muted-foreground">补全</th>
+                        <th className="text-right px-3 py-2 text-xs font-medium text-muted-foreground">合计</th>
                         <th className="text-right px-3 py-2 text-xs font-medium text-muted-foreground">{t("gland.form.time") || "Time"}</th>
                       </tr>
                     </thead>

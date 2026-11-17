@@ -4,8 +4,8 @@
  * Architecture Monitor — 架构监控面板
  * 
  * 实时显示P0组件状态：
- * - Writer Fence: 活跃写入锁、等待队列
- * - Lane Queue: 队列深度、各lane等待数
+ * - 写入围栏: 活跃写入锁、等待队列
+ * - 通道队列: 队列深度、各lane等待数
  * - Timeouts: 各层超时统计
  * - Tool Errors: 错误统计、doom loop检测
  * - Edit Guard: 编辑统计
@@ -296,10 +296,10 @@ export function ArchitectureMonitor() {
 
       {/* Component Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Writer Fence */}
+        {/* 写入围栏 */}
         <ComponentCard
           icon={<Lock className="w-5 h-5 text-purple-400" />}
-          title="Writer Fence"
+          title="写入围栏"
           subtitle="并发写入保护"
         >
           {stats && (
@@ -320,10 +320,10 @@ export function ArchitectureMonitor() {
           )}
         </ComponentCard>
 
-        {/* Lane Queue */}
+        {/* 通道队列 */}
         <ComponentCard
           icon={<Layers className="w-5 h-5 text-blue-400" />}
-          title="Lane Queue"
+          title="通道队列"
           subtitle="消息优先级队列"
         >
           {stats && (
@@ -508,7 +508,7 @@ function P1Components({ stats, opensoulStats }: { stats: ArchStats | null; opens
       color: "text-green-400",
     },
     {
-      name: "Checkpoint",
+      name: "检查点",
       value: `${stats.checkpoints?.total_checkpoints ?? 0}`,
       detail: `${stats.checkpoints?.tracked_sessions ?? 0} sessions`,
       color: "text-purple-400",

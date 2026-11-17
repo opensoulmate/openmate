@@ -205,7 +205,7 @@ export function ConversationTree({
                         )}>
                         <div className="flex items-center gap-1.5">
                           <MessageSquare className={cn("w-3 h-3 shrink-0", isActive ? "text-primary" : "text-muted-foreground")} />
-                          <span className={cn("text-xs truncate flex-1", unread > 0 ? "font-bold" : "", isActive && "text-primary")}>{session.name || session.title || "Untitled"}</span>
+                          <span className={cn("text-xs truncate flex-1", unread > 0 ? "font-bold" : "", isActive && "text-primary")}>{session.name || session.title || "未命名"}</span>
                           <UnreadBadge count={unread} />
                           {onDeleteSession && (
                             <button
@@ -247,7 +247,7 @@ export function ConversationTree({
                     )}>
                     <div className="flex items-center gap-1.5">
                       <MessageSquare className={cn("w-3 h-3 shrink-0", isActive ? "text-primary" : "text-muted-foreground")} />
-                      <span className={cn("text-xs truncate flex-1", unread > 0 ? "font-bold" : "", isActive && "text-primary")}>{session.name || session.title || "Untitled"}</span>
+                      <span className={cn("text-xs truncate flex-1", unread > 0 ? "font-bold" : "", isActive && "text-primary")}>{session.name || session.title || "未命名"}</span>
                       <UnreadBadge count={unread} />
                       {onDeleteSession && (
                         <button

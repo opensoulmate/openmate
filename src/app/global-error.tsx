@@ -16,9 +16,9 @@ export default function GlobalError({
           <div className="mx-auto mb-6 flex h-14 w-14 items-center justify-center rounded-full bg-red-500/10">
             <AlertTriangle size={28} className="text-red-500" />
           </div>
-          <h1 className="text-lg font-bold">Application Error</h1>
+          <h1 className="text-lg font-bold">应用错误</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            A critical error occurred. Please reload the page.
+            发生严重错误，请重新加载页面。
           </p>
           {error.digest && (
             <p className="mt-2 font-mono text-xs text-muted-foreground">
