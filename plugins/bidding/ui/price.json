@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "page": {
+    "title": "报价策略",
+    "description": "报价策略与价格得分预估（最低价法 / 平均价法 / 线性插值），核验不超最高限价、不低于个别成本"
+  },
+  "panels": [
+    {
+      "type": "form",
+      "id": "price-form",
+      "title": "报价测算",
+      "fields": [
+        { "name": "bid_price", "label": "投标报价", "widget": "number", "required": true, "placeholder": "拟投报价" },
+        {
+          "name": "method",
+          "label": "价格分公式",
+          "widget": "select",
+          "default": "最低价法",
+          "options": [
+            { "value": "最低价法", "label": "最低价法" },
+            { "value": "平均价法", "label": "平均价法" },
+            { "value": "线性插值", "label": "线性插值" }
+          ]
+        },
+        { "name": "price_weight", "label": "价格权重分", "widget": "number", "default": 30 },
+        { "name": "budget", "label": "最高限价 / 控制价", "widget": "number", "placeholder": "选填" },
+        { "name": "cost", "label": "个别成本", "widget": "number", "placeholder": "选填，用于低于成本风险" },
+        {
+          "name": "competitor_prices",
+          "label": "其他有效报价（逗号分隔）",
+          "widget": "text",
+          "placeholder": "例如 13100000, 12800000"
+        }
+      ],
+      "submit": {
+        "label": "计算价格分",
+        "tool": "bidding__price_calc",
+        "target_panel": "price-report"
+      }
+    },
+    {
+      "type": "report",
+      "id": "price-report",
+      "title": "报价策略结果",
+      "sections": [
+        {
+          "kind": "kv",
+          "title": "价格得分",
+          "items": [
+            { "label": "状态", "value": "尚未计算" },
+            { "label": "价格分", "value": "—" }
+          ]
+        },
+        {
+          "kind": "bars",
+          "title": "得分对比",
+          "items": [
+            { "label": "价格得分", "value": 0 },
+            { "label": "价格权重", "value": 30 }
+          ]
+        },
+        {
+          "kind": "text",
+          "title": "策略建议",
+          "content": "计算后此处展示报价建议（超限价 / 低于成本 / 竞争力）。"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "page": {
+    "title": "废标风险审查报告",
+    "description": "废标风险检查 🔴🟡🟢 —— 报价合规 / 资格材料 / ★ 实质性响应 / 评审因素合规 / 废标条款"
+  },
+  "panels": [
+    {
+      "type": "form",
+      "id": "review-form",
+      "title": "废标风险审查",
+      "fields": [
+        {
+          "name": "file_path",
+          "label": "招标文件路径",
+          "widget": "text",
+          "required": true,
+          "placeholder": "招标文件绝对路径"
+        },
+        { "name": "bid_price", "label": "投标报价", "widget": "number", "placeholder": "用于超限价 / 低于成本核验" },
+        {
+          "name": "materials_provided",
+          "label": "已提供材料（逗号分隔）",
+          "widget": "textarea",
+          "placeholder": "营业执照, 资质证书, 安全生产许可证, 注册建造师证, 投标保证金, 信用中国记录 …"
+        },
+        { "name": "bid_doc_path", "label": "投标文件路径（可选）", "widget": "text", "placeholder": "用于响应性核对" }
+      ],
+      "submit": {
+        "label": "审查",
+        "tool": "bidding__bid_review",
+        "target_panel": "review-report"
+      }
+    },
+    {
+      "type": "report",
+      "id": "review-report",
+      "title": "审查报告",
+      "sections": [
+        {
+          "kind": "kv",
+          "title": "结论",
+          "items": [
+            { "label": "状态", "value": "尚未审查" },
+            { "label": "废标风险", "value": "—" }
+          ]
+        },
+        {
+          "kind": "bars",
+          "title": "风险分布",
+          "items": [
+            { "label": "🔴 高风险", "value": 0 },
+            { "label": "🟡 中风险", "value": 0 },
+            { "label": "🟢 合规", "value": 0 }
+          ]
+        },
+        {
+          "kind": "text",
+          "title": "说明",
+          "content": "审查后此处展示逐条检查项（level / 类别 / 详情）与整改建议。"
+        }
+      ]
+    }
+  ]
+}

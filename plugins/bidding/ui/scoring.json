@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "page": {
+    "title": "评分办法配置",
+    "description": "配置评分办法（评标方法 / 价格分公式 / 价格·技术·商务·服务权重），权重合计应为 100"
+  },
+  "panels": [
+    {
+      "type": "form",
+      "id": "scoring-form",
+      "title": "评分权重配置",
+      "fields": [
+        {
+          "name": "method",
+          "label": "评标方法",
+          "widget": "select",
+          "default": "综合评估法",
+          "options": [
+            { "value": "综合评估法", "label": "综合评估法" },
+            { "value": "最低评标价法", "label": "最低评标价法" }
+          ]
+        },
+        {
+          "name": "price_method",
+          "label": "价格分公式",
+          "widget": "select",
+          "default": "最低价法",
+          "options": [
+            { "value": "最低价法", "label": "最低价法" },
+            { "value": "平均价法", "label": "平均价法" },
+            { "value": "线性插值", "label": "线性插值" }
+          ]
+        },
+        { "name": "price_weight", "label": "价格分权重", "widget": "number", "default": 30 },
+        { "name": "tech_weight", "label": "技术分权重", "widget": "number", "default": 45 },
+        { "name": "business_weight", "label": "商务分权重", "widget": "number", "default": 20 },
+        { "name": "service_weight", "label": "服务分权重", "widget": "number", "default": 5 }
+      ],
+      "submit": {
+        "label": "保存配置",
+        "tool": "bidding__bid_score_config",
+        "target_panel": "scoring-report"
+      }
+    },
+    {
+      "type": "list",
+      "id": "scoring-rules",
+      "title": "当前评分办法",
+      "columns": [
+        { "key": "label", "label": "项目" },
+        { "key": "value", "label": "取值" }
+      ],
+      "source": { "tool": "bidding__bid_score_config", "args": {} },
+      "empty_text": "暂无评分配置"
+    },
+    {
+      "type": "report",
+      "id": "scoring-report",
+      "title": "配置结果",
+      "sections": [
+        {
+          "kind": "kv",
+          "title": "已保存配置",
+          "items": [
+            { "label": "状态", "value": "尚未保存" }
+          ]
+        }
+      ]
+    }
+  ]
+}

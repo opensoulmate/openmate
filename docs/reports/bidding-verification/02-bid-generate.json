@@ -1,0 +1,69 @@
+{
+  "output_docx": "/home/climbing/openmate/docs/reports/bidding-verification/generated/海城市地热水资源特许经营项目(水厂自动化工程)_投标文件_东华软件股份公司.docx",
+  "project": "海城市地热水资源特许经营项目(水厂自动化工程)",
+  "company": "东华软件股份公司",
+  "section_count": 9,
+  "word_total": 2450,
+  "resumed": false,
+  "checkpoint": "/home/climbing/.hermes/cache/scratch/bd_verify/checkpoints/d9c54b2318547b13.json",
+  "audit_ok": true,
+  "audit_problems": [],
+  "scoring_covered": 10,
+  "scoring_total": 10,
+  "sections": [
+    {
+      "id": "cover",
+      "title": "封面与投标函",
+      "status": "done",
+      "word_count": 347
+    },
+    {
+      "id": "qualification",
+      "title": "资格证明文件",
+      "status": "done",
+      "word_count": 745
+    },
+    {
+      "id": "commercial",
+      "title": "商务标（投标报价）",
+      "status": "done",
+      "word_count": 192
+    },
+    {
+      "id": "tech-org",
+      "title": "技术标·施工组织设计",
+      "status": "done",
+      "word_count": 224
+    },
+    {
+      "id": "tech-quality",
+      "title": "技术标·质量与工期保证",
+      "status": "done",
+      "word_count": 137
+    },
+    {
+      "id": "tech-safety",
+      "title": "技术标·安全与文明施工",
+      "status": "done",
+      "word_count": 106
+    },
+    {
+      "id": "management",
+      "title": "项目管理机构",
+      "status": "done",
+      "word_count": 102
+    },
+    {
+      "id": "score-response",
+      "title": "评分因素响应表",
+      "status": "done",
+      "word_count": 467
+    },
+    {
+      "id": "deviation",
+      "title": "偏离表",
+      "status": "done",
+      "word_count": 130
+    }
+  ]
+}

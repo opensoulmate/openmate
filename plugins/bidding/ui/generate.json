@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "page": {
+    "title": "标书生成工作台",
+    "description": "编排 → 逐节生成标书 Word → 一致性审计，支持断点续跑（python-docx）"
+  },
+  "panels": [
+    {
+      "type": "form",
+      "id": "generate-form",
+      "title": "生成标书",
+      "fields": [
+        {
+          "name": "file_path",
+          "label": "招标文件路径",
+          "widget": "text",
+          "required": true,
+          "placeholder": "招标文件绝对路径"
+        },
+        { "name": "company", "label": "投标人名称", "widget": "text", "placeholder": "例如 东华软件股份公司" },
+        { "name": "output_dir", "label": "输出目录", "widget": "text", "placeholder": "省略用默认目录" },
+        { "name": "resume", "label": "断点续跑", "widget": "checkbox", "default": true }
+      ],
+      "submit": {
+        "label": "生成标书 Word",
+        "tool": "bidding__bid_generate",
+        "target_panel": "generate-report"
+      }
+    },
+    {
+      "type": "list",
+      "id": "generate-sections",
+      "title": "章节树 / 断点状态",
+      "columns": [
+        { "key": "title", "label": "章节" },
+        { "key": "status", "label": "状态" },
+        { "key": "word_count", "label": "字数" }
+      ],
+      "source": { "tool": "bidding__bid_generate_status", "args": {} },
+      "empty_text": "尚未生成，先在上方生成标书"
+    },
+    {
+      "type": "report",
+      "id": "generate-report",
+      "title": "生成结果",
+      "sections": [
+        {
+          "kind": "kv",
+          "title": "生成结果",
+          "items": [
+            { "label": "状态", "value": "尚未生成" }
+          ]
+        },
+        {
+          "kind": "text",
+          "title": "一致性审计",
+          "content": "生成后此处展示项目名称 / 编号 / 预算一致性与评分得分点覆盖情况。"
+        }
+      ]
+    }
+  ]
+}

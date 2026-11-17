@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "page": {
+    "title": "知识库管理",
+    "description": "招标文件知识库：登记（入库解析）/ 检索已入库条目，为标书生成提供案例与条款引用"
+  },
+  "panels": [
+    {
+      "type": "form",
+      "id": "knowledge-add",
+      "title": "登记 / 检索",
+      "fields": [
+        {
+          "name": "files",
+          "label": "待入库招标文件（逗号分隔）",
+          "widget": "textarea",
+          "placeholder": "一个或多个招标文件绝对路径，入库即解析并抽取条目"
+        },
+        { "name": "query", "label": "检索关键词", "widget": "text", "placeholder": "按项目 / 编号 / 文件名检索" }
+      ],
+      "submit": {
+        "label": "登记 / 检索",
+        "tool": "bidding__bid_knowledge_list",
+        "target_panel": "knowledge-report"
+      }
+    },
+    {
+      "type": "list",
+      "id": "knowledge-list",
+      "title": "知识库条目",
+      "columns": [
+        { "key": "project", "label": "项目名称" },
+        { "key": "code", "label": "项目编号" },
+        { "key": "budget", "label": "预算" },
+        { "key": "scoring_count", "label": "评分项" },
+        { "key": "rejection_count", "label": "废标条款" }
+      ],
+      "source": { "tool": "bidding__bid_knowledge_list", "args": {} },
+      "empty_text": "知识库为空，先在上方登记招标文件"
+    },
+    {
+      "type": "report",
+      "id": "knowledge-report",
+      "title": "登记 / 检索结果",
+      "sections": [
+        {
+          "kind": "kv",
+          "title": "结果",
+          "items": [
+            { "label": "状态", "value": "尚未登记 / 检索" }
+          ]
+        }
+      ]
+    }
+  ]
+}

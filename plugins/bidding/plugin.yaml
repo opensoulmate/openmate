@@ -1,0 +1,186 @@
+id: bidding
+name: 招投标工作台
+version: 0.1.0
+description: 招投标插件本体——招标文件解析、评分办法配置、标书生成、废标风险审查、报价策略、知识库管理（设计文档 §8 规格）
+author: soulmate
+entry: main.py
+permissions:
+  - ui.serve
+  - tool.register
+  - tool.call
+  - data.read
+  - data.write
+  - knowledge.read
+  - export.write
+ui:
+  nav:
+    label: 招投标
+    icon: FileText
+    position: end
+  pages:
+    - id: parse
+      title: 招标文件解析
+      dsl: ui/parse.json
+    - id: scoring
+      title: 评分办法配置
+      dsl: ui/scoring.json
+    - id: generate
+      title: 标书生成工作台
+      dsl: ui/generate.json
+    - id: review
+      title: 废标风险审查报告
+      dsl: ui/review.json
+    - id: price
+      title: 报价策略
+      dsl: ui/price.json
+    - id: knowledge
+      title: 知识库管理
+      dsl: ui/knowledge.json
+tools:
+  - name: bid_parse
+    description: 解析招标文件→结构化关键信息（项目/评分办法/废标条款/资格/技术参数）
+    handler: handle_bid_parse
+    permissions: [tool.call, data.read, knowledge.read]
+    approval: never
+    input_schema:
+      type: object
+      properties:
+        file_path:
+          type: string
+          description: 招标文件路径（.docx/.pdf/.txt）
+        save_to_kb:
+          type: boolean
+          description: 是否同时登记进知识库
+      required: [file_path]
+
+  - name: bid_generate
+    description: 编排→逐节生成标书 Word→一致性审计→断点续跑（python-docx）
+    handler: handle_bid_generate
+    permissions: [tool.call, data.read, data.write, export.write]
+    approval: never
+    input_schema:
+      type: object
+      properties:
+        file_path:
+          type: string
+          description: 招标文件路径
+        company:
+          type: string
+          description: 投标人名称
+        output_dir:
+          type: string
+          description: 标书 Word 输出目录（省略用默认目录）
+        resume:
+          type: boolean
+          description: 是否断点续跑（默认 true）
+      required: [file_path]
+
+  - name: bid_review
+    description: 废标风险审查 🔴🟡🟢（报价/资格材料/★响应/评审因素合规/废标条款）
+    handler: handle_bid_review
+    permissions: [tool.call, data.read]
+    approval: never
+    input_schema:
+      type: object
+      properties:
+        file_path:
+          type: string
+          description: 招标文件路径
+        bid_price:
+          type: number
+          description: 投标报价（用于超限价/低于成本核验）
+        materials_provided:
+          type: string
+          description: 投标方已提供材料（逗号分隔），用于资格/证明材料核验
+        bid_doc_path:
+          type: string
+          description: 投标文件路径（可选，用于响应性核对）
+      required: [file_path]
+
+  - name: price_calc
+    description: 报价策略与价格得分预估（最低价法/平均价法/线性插值）
+    handler: handle_price_calc
+    permissions: [tool.call]
+    approval: never
+    input_schema:
+      type: object
+      properties:
+        bid_price:
+          type: number
+          description: 投标报价
+        method:
+          type: string
+          enum: [最低价法, 平均价法, 线性插值]
+          description: 价格分公式
+        price_weight:
+          type: number
+          description: 价格权重分（默认 30）
+        budget:
+          type: number
+          description: 最高限价/控制价
+        competitor_prices:
+          type: string
+          description: 其他有效报价（逗号分隔）
+        cost:
+          type: number
+          description: 个别成本（用于低于成本风险）
+      required: [bid_price]
+
+  - name: bid_score_config
+    description: 评分办法配置——写入/读取评分权重（价格/技术/商务/服务）
+    handler: handle_bid_score_config
+    permissions: [tool.call, data.read, data.write]
+    approval: never
+    input_schema:
+      type: object
+      properties:
+        method:
+          type: string
+          description: 评标方法（综合评估法/最低评标价法）
+        price_method:
+          type: string
+          enum: [最低价法, 平均价法, 线性插值]
+          description: 价格分公式
+        price_weight:
+          type: number
+          description: 价格分权重
+        tech_weight:
+          type: number
+          description: 技术分权重
+        business_weight:
+          type: number
+          description: 商务分权重
+        service_weight:
+          type: number
+          description: 服务分权重
+
+  - name: bid_generate_status
+    description: 标书生成状态——读取最近一次生成的章节树/断点（列表数据源）
+    handler: handle_bid_generate_status
+    permissions: [tool.call, data.read]
+    approval: never
+    input_schema:
+      type: object
+      properties:
+        project_key:
+          type: string
+          description: 项目检查点 key（省略取最近一次）
+
+  - name: bid_knowledge_list
+    description: 知识库管理——登记（入库）/检索已解析招标文件
+    handler: handle_bid_knowledge_list
+    permissions: [tool.call, data.read, data.write, knowledge.read]
+    approval: never
+    input_schema:
+      type: object
+      properties:
+        files:
+          type: string
+          description: 待入库招标文件路径（逗号分隔）
+        query:
+          type: string
+          description: 检索关键词
+        limit:
+          type: integer
+          description: 返回条数上限
+flows: []

@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "page": {
+    "title": "招标文件解析",
+    "description": "解析招标文件 → 结构化关键信息（项目信息 / 评分办法 / 废标条款 / 资格 / 技术参数）"
+  },
+  "panels": [
+    {
+      "type": "form",
+      "id": "parse-form",
+      "title": "解析招标文件",
+      "fields": [
+        {
+          "name": "file_path",
+          "label": "招标文件路径",
+          "widget": "text",
+          "required": true,
+          "placeholder": "例如 /home/user/招标文件.docx（支持 .docx/.pdf/.txt）"
+        },
+        {
+          "name": "save_to_kb",
+          "label": "同时登记进知识库",
+          "widget": "checkbox",
+          "default": false
+        }
+      ],
+      "submit": {
+        "label": "解析",
+        "tool": "bidding__bid_parse",
+        "target_panel": "parse-report"
+      }
+    },
+    {
+      "type": "report",
+      "id": "parse-report",
+      "title": "结构化解析结果",
+      "sections": [
+        {
+          "kind": "kv",
+          "title": "项目信息",
+          "items": [
+            { "label": "状态", "value": "尚未解析" },
+            { "label": "项目名称", "value": "—" },
+            { "label": "最高限价", "value": "—" }
+          ]
+        },
+        {
+          "kind": "text",
+          "title": "废标条款",
+          "content": "解析后此处展示招标文件中的废标 / 无效投标条款。"
+        },
+        {
+          "kind": "bars",
+          "title": "评分因素分布",
+          "items": [
+            { "label": "价格分", "value": 0 },
+            { "label": "技术分", "value": 0 },
+            { "label": "商务分", "value": 0 }
+          ]
+        }
+      ]
+    }
+  ]
+}

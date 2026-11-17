@@ -1,0 +1,15 @@
+{
+  "method": "线性插值",
+  "bid_price": 13000000.0,
+  "price_weight": 30.0,
+  "price_score": 19.21,
+  "within_budget": true,
+  "budget": 13356305.2,
+  "recommendation": "报价处于合理区间，价格得分健康，注意保持不低于个别成本。",
+  "breakdown": {
+    "method": "线性插值",
+    "highest_limit": 13356305.2,
+    "lowest": 12800000.0,
+    "ratio": 0.6405
+  }
+}
