@@ -35,6 +35,7 @@ from typing import Any
 
 from agent import repair_loop, run_guard, summary_control
 from agent.edit_safety import FileBaseline, _safe_ns
+from agent.output_validator import OutputValidator
 
 logger = logging.getLogger("agent.guard_tools")
 
@@ -43,8 +44,10 @@ GUARD_ACTIONS = ("configure", "beat", "progress", "pause", "resume",
 REPAIR_ACTIONS = ("start", "step", "prompt", "status", "reset")
 # 文件基线（Pi #8：受保护文件基线比对/还原）——工作区工具纪律
 BASELINE_ACTIONS = ("register", "check", "restore", "status", "unregister")
+# json-validation（Pi #11：四阶段校验/预置 Schema/路径越界）——验收校验器
+JSONV_ACTIONS = ("validate", "register_preset", "list_presets")
 
-TOOL_NAMES = ("run_guard", "repair_loop", "file_baseline")
+TOOL_NAMES = ("run_guard", "repair_loop", "file_baseline", "json_validation")
 
 
 def tool_defs() -> list[dict]:
@@ -155,6 +158,40 @@ def tool_defs() -> list[dict]:
                 },
             },
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "json_validation",
+                "description": (
+                    "JSON 产物四阶段校验（验收校验器，输出可直接喂 repair_loop "
+                    "step 的 validation）：①JSON 解析（裸 JSON/```json 块/{}/[]）"
+                    "②Schema 校验（type/required/enum/min/max）③路径越界校验"
+                    "（数据里的文件路径不得逃出 base_path）④结构化错误回传"
+                    "（逐条 {id, severity: blocking|minor, detail}）。"
+                    "action=validate 校验（schema 传对象或 preset 传预置名）/ "
+                    "register_preset 登记预置 Schema（插件任务配置下发）/ "
+                    "list_presets 列预置。产出 JSON 产物（台账/配置/清单）后"
+                    "交付前必校验；不过→把验收结果喂 repair_loop 修。"),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": {"type": "string", "enum": list(JSONV_ACTIONS)},
+                        "data": {"type": "string",
+                                 "description": "validate：待校验 JSON 文本（或含 JSON 的文本）"},
+                        "schema": {"type": "object",
+                                   "description": "validate：JSON Schema（type/required/properties/enum/min/max）"},
+                        "preset": {"type": "string",
+                                   "description": "validate：预置 Schema 名（与 schema 二选一）"},
+                        "base_path": {"type": "string",
+                                      "description": "validate：路径越界校验允许根（工作区目录；不传=跳过该阶段并标注）"},
+                        "name": {"type": "string",
+                                 "description": "register_preset：预置名"},
+                        **tc,
+                    },
+                    "required": ["action"],
+                },
+            },
+        },
     ]
 
 
@@ -178,6 +215,8 @@ class GuardTools:
                 return self._repair_loop(args, session_id)
             if func_name == "file_baseline":
                 return self._file_baseline(args, session_id)
+            if func_name == "json_validation":
+                return self._json_validation(args, session_id)
             return (f"❌ 未知治理工具: {func_name!r}。支持: {', '.join(TOOL_NAMES)}")
         except ValueError as e:
             return f"❌ 参数错误: {e}"
@@ -309,6 +348,61 @@ class GuardTools:
             return (f"✅ 已解除登记: {r['path']}" if r["unregistered"]
                     else f"⚠️ 该文件不在基线中: {r['path']}")
         return (f"❌ 参数错误: 未知 action {action!r}。支持: {', '.join(BASELINE_ACTIONS)}")
+
+    # ── json_validation（Pi #11：四阶段校验/预置 Schema/路径越界）────
+
+    def _validator(self) -> OutputValidator:
+        """验收校验器（lazy-init；预置 Schema 模块级单点共享）。"""
+        v = getattr(self, "_validator_inst", None)
+        if v is None:
+            v = OutputValidator()
+            self._validator_inst = v
+        return v
+
+    def _json_validation(self, args: dict, session_id: str) -> str:
+        action = str(args.get("action", "") or "").strip().lower() or "validate"
+        v = self._validator()
+        if action == "register_preset":
+            name = str(args.get("name", "") or "").strip()
+            schema = args.get("schema")
+            if not name or not isinstance(schema, dict):
+                return "❌ 参数错误: register_preset 需要 name + schema（对象）"
+            try:
+                r = v.register_preset(name, schema)
+            except ValueError as e:
+                return f"❌ 参数错误: {e}"
+            return f"✅ 预置 Schema 已登记: {r['registered']}（共 {r['total']} 个）"
+        if action == "list_presets":
+            names = v.list_presets()
+            return ("✅ 预置 Schema: " + (", ".join(names) if names else "（无）"))
+        if action == "validate":
+            data = args.get("data")
+            if data is None:
+                return "❌ 参数错误: validate 需要 data（JSON 文本）"
+            if not isinstance(data, str):
+                data = json.dumps(data, ensure_ascii=False)
+            schema = args.get("schema") if isinstance(args.get("schema"), dict) else None
+            report = v.validate_artifact(
+                data, schema=schema,
+                preset=str(args.get("preset", "") or ""),
+                base_path=str(args.get("base_path", "") or ""))
+            machine = {k: report[k] for k in
+                       ("ok", "blocking", "issues", "stage", "presets_used",
+                        "path_bounds")}
+            if report["ok"]:
+                head = (f"✅ 校验通过（stage={report['stage']}"
+                        + (f"，预置 {report['presets_used']}" if report["presets_used"] else "")
+                        + ("，路径越界检查已跳过（未传 base_path）"
+                           if report["path_bounds"].get("skipped") else "")
+                        + "）")
+            else:
+                head = f"⚠️ 校验不过（stage={report['stage']}，{len(report['blocking'])} 个阻塞项）"
+            return (head + "\n逐条问题：\n"
+                    + "\n".join(f"  {'🔴' if i['severity'] == 'blocking' else '🟡'} "
+                                f"[{i['id']}] {i['detail']}" for i in report["issues"])
+                    + "\n\n验收结果（可直接作为 repair_loop step 的 validation）：\n"
+                    + json.dumps(machine, ensure_ascii=False))
+        return (f"❌ 参数错误: 未知 action {action!r}。支持: {', '.join(JSONV_ACTIONS)}")
 
     # ── run_guard ────────────────────────────────────────────────────
 

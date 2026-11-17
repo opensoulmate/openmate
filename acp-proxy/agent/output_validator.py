@@ -7,6 +7,7 @@ import logging
 import json
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Optional, Callable
 from enum import Enum
 
@@ -249,3 +250,158 @@ class OutputValidator:
             "pass_rate": f"{self._stats['passed'] / max(total, 1) * 100:.1f}%",
             "repair_rate": f"{self._stats['repaired'] / max(self._stats['failed'], 1) * 100:.1f}%",
         }
+
+    # ═══════════════════════════════════════════════════════════════
+    # json-validation 预置 Schema 工具（Pi 取长补短 #11）
+    # ═══════════════════════════════════════════════════════════════
+    #
+    # 来源：OpenBidKit piJsonValidationTool（Ajv 四阶段、预置 Schema、路径越界
+    # 校验、错误回传模型）。SoulMate 落地在**既有** OutputValidator（解析→schema
+    # 校验→修复三段已有）上补第四段与两件套：
+    #   ① JSON 解析（_extract_json：裸 JSON/```json块/{}/[] 三形态）
+    #   ② Schema 校验（_validate_against_schema：object/array/string/number/
+    #      boolean + required/enum/min/max，既有）
+    #   ③ 路径越界校验（check_path_bounds：数据里的文件路径不得逃出 base_path
+    #      ——防产物里写穿工作区的路径；无 base_path 显式跳过可见）
+    #   ④ 结构化错误回传（_artifact_report：归一成 repair_loop.step 的
+    #      验收输入形态 {ok, blocking, issues}——验收→修复天然对接，#3 成环）
+    # 预置 Schema：register_preset/get_preset（Schema 映射走插件任务配置下发）。
+
+    def register_preset(self, name: str, schema: dict) -> dict:
+        """登记预置 Schema（插件任务配置下发的映射面）。"""
+        name = str(name or "").strip()
+        if not name:
+            raise ValueError("preset 名必填")
+        if not isinstance(schema, dict):
+            raise ValueError("preset schema 需为对象")
+        SCHEMA_PRESETS[name] = dict(schema)
+        return {"registered": name, "total": len(SCHEMA_PRESETS)}
+
+    def get_preset(self, name: str) -> dict | None:
+        return SCHEMA_PRESETS.get(str(name or "").strip())
+
+    def list_presets(self) -> list[str]:
+        return sorted(SCHEMA_PRESETS)
+
+    def validate_artifact(self, output, schema: dict | None = None,
+                          preset: str = "", base_path: str = "") -> dict:
+        """四阶段校验主入口 → repair_loop 验收输入形态。
+
+        {"ok", "blocking": [id...], "issues": [{id, severity, detail}...],
+         "stage", "data", "repaired", "presets_used", "path_bounds": {...}}
+
+        severity 口径（对接 repair_loop.step）：blocking=不过（解析失败/schema
+        错误/路径越界），minor=建议（min/max 警告类）。
+        """
+        # 预置 Schema 解析（插件任务配置映射）
+        preset_name = ""
+        if schema is None and preset:
+            schema = self.get_preset(preset)
+            preset_name = str(preset)
+            if schema is None:
+                return _artifact_report(False, issues=[{
+                    "id": "stage1-preset", "severity": "blocking",
+                    "detail": f"预置 Schema 不存在: {preset!r}（可用: {self.list_presets()}）",
+                }], stage="preset")
+        if schema is None:
+            return _artifact_report(False, issues=[{
+                "id": "stage1-schema", "severity": "blocking",
+                "detail": "缺 schema（传 schema 对象或 preset 预置名）",
+            }], stage="preset")
+
+        # ① JSON 解析
+        parsed = output if not isinstance(output, str) else self._extract_json(output)
+        if parsed is None:
+            return _artifact_report(False, issues=[{
+                "id": "stage1-parse", "severity": "blocking",
+                "detail": "JSON 解析失败（非合法 JSON，也未在文本中找到 {...}/[...] 或 ```json 块）",
+            }], stage="parse", presets_used=preset_name)
+
+        # ② Schema 校验（既有递归校验）
+        vres = ValidationResult(is_valid=True, original_output=parsed)
+        self._validate_against_schema(parsed, schema, vres)
+        self._stats["total_validations"] += 1
+        issues = []
+        for e in vres.errors:
+            issues.append({"id": f"stage2-{len(issues) + 1}", "severity": "blocking",
+                           "detail": f"{e['message']}（at {e['path'] or 'root'}）"})
+        for w in vres.warnings:
+            issues.append({"id": f"stage2-w{len(issues) + 1}", "severity": "minor",
+                           "detail": f"{w['message']}（at {w['path'] or 'root'}）"})
+
+        # ③ 路径越界校验（数据内文件路径不得逃出 base_path）
+        bounds = self.check_path_bounds(parsed, base_path)
+        for b in bounds["violations"]:
+            issues.append({"id": f"stage3-{len(issues) + 1}", "severity": "blocking",
+                           "detail": f"路径越界: {b['value']}（at {b['path']}）——"
+                                     f"不得逃出 {bounds['base_path']}"})
+
+        # ④ 结构化错误回传（repair_loop 验收输入形态）
+        return _artifact_report(
+            not any(i["severity"] == "blocking" for i in issues),
+            issues=issues, stage="done", data=parsed,
+            presets_used=preset_name, path_bounds=bounds)
+
+    @staticmethod
+    def check_path_bounds(data: Any, base_path: str, _path: str = "") -> dict:
+        """路径越界校验（第三阶段）：数据里的文件路径不得逃出 base_path。
+
+        只校验**路径形态**字符串（/ 开头、./ ../ 开头、盘符、含 ../），散文
+        文本零误伤；无 base_path=显式跳过（skipped=True 可见，不静默）。
+        """
+        base = str(base_path or "").strip()
+        report = {"base_path": base, "skipped": not base, "violations": []}
+        if not base:
+            return report
+        base_res = Path(base).expanduser().resolve()
+
+        def _walk(node, p):
+            if isinstance(node, dict):
+                for k, v in node.items():
+                    _walk(v, f"{p}.{k}" if p else str(k))
+            elif isinstance(node, list):
+                for i, v in enumerate(node):
+                    _walk(v, f"{p}[{i}]")
+            elif isinstance(node, str):
+                if not _looks_like_path(node):
+                    return
+                cand = Path(node).expanduser()
+                resolved = (base_res / cand).resolve() if not cand.is_absolute() \
+                    else cand.resolve()
+                if resolved != base_res and base_res not in resolved.parents:
+                    report["violations"].append(
+                        {"value": node, "path": p or "root",
+                         "resolved": str(resolved)})
+
+        _walk(data, _path)
+        return report
+
+
+# 预置 Schema 注册表（Schema 映射走插件任务配置——模块级单点）
+SCHEMA_PRESETS: dict[str, dict] = {}
+
+
+def _looks_like_path(s: str) -> bool:
+    """路径形态判定（保守：散文零误伤）。"""
+    s = str(s)
+    return (s.startswith(("/", "./", "../", "~", ".\\", "..\\", "\\\\"))
+            or (len(s) > 2 and s[1] == ":" and s[2] in ("/", "\\"))
+            or "../" in s or "..\\" in s)
+
+
+def _artifact_report(ok: bool, issues: list, stage: str = "done",
+                     data=None, repaired=None, presets_used: str = "",
+                     path_bounds: dict | None = None) -> dict:
+    """四阶段报告 → repair_loop.step 验收输入形态（天然对接 #3）。"""
+    blocking = [i["id"] for i in issues if i.get("severity") == "blocking"]
+    return {
+        "ok": bool(ok) and not blocking,
+        "blocking": blocking,
+        "issues": issues,
+        "stage": stage,
+        "data": data,
+        "repaired": repaired,
+        "presets_used": presets_used,
+        "path_bounds": path_bounds or {"base_path": "", "skipped": True,
+                                       "violations": []},
+    }
