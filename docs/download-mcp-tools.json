@@ -3,14 +3,14 @@
   "tools": [
     {
       "name": "torrent_search",
-      "description": "Search torrents and resources across pluggable sources (Internet Archive, Academic Torrents, user-configured RSS/JSON sources, and user-configured pan/网盘 index sources). Returns a unified list of results. Pan results carry share_url + extract_code (shape: title/size/share_url/extract_code/source). Short-TTL cached. Unreachable sources degrade gracefully and are reported in 'errors'.",
+      "description": "Smart resource search (SoulMate intelligent chain): the query may be a natural-language ask as-is — intent understanding → multi-query rewrite → candidate fetch across pluggable sources (Internet Archive, Academic Torrents, Bing 磁力发现, user-configured RSS/JSON/pan sources) → LLM semantic relevance filtering & ranking (drops 科普/百科 pages and unrelated items, curated rows carry relevance score + reason). Pan results carry share_url + extract_code (shape: title/size/share_url/extract_code/source). Deterministic lexical filtering is the free floor when the LLM is unavailable. Unreachable sources degrade gracefully and are reported in 'errors'. Ask which work/version when ambiguous before adding a task.",
       "x-endpoint": "GET /api/download/search?query=&category=&limit=",
       "inputSchema": {
         "type": "object",
         "properties": {
           "query": {
             "type": "string",
-            "description": "Free-text search query (title/keywords)."
+            "description": "Search query — natural-language ask (e.g. 「三体的有声书」「最新有什么好的科幻电影」) or plain keywords; the smart chain rewrites it into multi-queries."
           },
           "category": {
             "type": "string",

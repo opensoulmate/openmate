@@ -40,6 +40,13 @@ DownloadTask 形状按 docs/download-engine-api.md §3：camelCase 主形 + 蛇�
 下载业务逻辑只在 OpenSoul Python FastAPI 侧（download_search.py/download_api.py）
 单一真源；本模块是 acp-proxy 侧薄转发层（REST 调用 + 形状对齐 + 结果呈现），
 不得把搜索/下载逻辑写进来，不得引入 Rust/Go/C/JS。
+
+智能搜索（2026-11-17 用户钉死「搜索=SoulMate 智能搜索（语义相关性，非字面
+匹配）」）：torrent_search 走 agent/smart_search.py 的智能编排链（意图理解→
+查询改写多路→取候选→LLM 语义相关性筛选排序→精选呈现/歧义追问→可入任务），
+LLM 经 llm_fn 注入（SoulMate 传 _smart_search_llm 真实 LLM；测试传桩；None=
+免费地板模式=确定性词面过滤降级路径）。编排逻辑在 smart_search.py，本模块只
+做 REST 取数（search_candidates）+ 形状对齐 + 结果呈现，分层铁律不破。
 """
 
 from __future__ import annotations
@@ -145,9 +152,10 @@ def _fmt_task(task: dict) -> str:
 
 
 class DownloadTools:
-    """下载中心工具组（确定性 REST 转发 + 形状对齐，无 LLM 参与）。"""
+    """下载中心工具组（REST 转发 + 形状对齐 + 结果呈现；智能编排在 smart_search）。"""
 
-    def __init__(self, api_base: str | None = None, timeout: float | None = None):
+    def __init__(self, api_base: str | None = None, timeout: float | None = None,
+                 llm_fn=None):
         self._base = (api_base
                       or os.environ.get("SOULMATE_DOWNLOAD_API_BASE")
                       or DEFAULT_API_BASE).rstrip("/")
@@ -168,6 +176,9 @@ class DownloadTools:
             "SOULMATE_DOWNLOAD_REMOTE_PATH", _DEFAULT_REMOTE_PATH).rstrip("/")
         self._results_path = os.environ.get(
             "SOULMATE_DOWNLOAD_RESULTS_PATH", _DEFAULT_RESULTS_PATH).rstrip("/")
+        # 智能搜索 LLM 注入口（smart_search.llm_fn 契约：async messages→str）：
+        # SoulMate 注入真实 LLM（_smart_search_llm），测试注入桩，None=免费地板
+        self.llm_fn = llm_fn
 
     # ── HTTP（出站有界超时，失败细分报因）─────────────────────────
 
@@ -254,7 +265,33 @@ class DownloadTools:
 
     # ── 四工具（计划书形状）───────────────────────────────────────
 
+    async def search_candidates(self, query: str, category: str | None = None,
+                                limit: int = 20) -> tuple[list, list, str]:
+        """裸候选取数口（smart_search.fetch 注入契约）：(rows, source_errors, err)。
+
+        纯 REST 转发（GET /search），取数/降级/缓存业务逻辑全在后端
+        download_search.py；本方法只做形状对齐（results/errors 键）。
+        """
+        q: dict = {"query": query, "limit": limit}
+        if category:
+            q["category"] = category
+        data, err = await self._request("GET", self._search_path, params=q)
+        if err:
+            return [], [], err
+        src_errors = (data.get("errors") or []) \
+            if isinstance(data, dict) else []
+        return (self._search_list_of(data),
+                [e for e in src_errors if isinstance(e, dict)], "")
+
     async def torrent_search(self, params: dict) -> str:
+        """智能搜索（SoulMate 智能链，2026-11-17 用户钉死语义相关性非字面匹配）。
+
+        自然语言 query → smart_search.SmartSearchEngine：意图理解→查询改写
+        （多路）→后端 /search 取多源候选→确定性词面免费地板→LLM 语义相关性
+        筛选与排序（丢科普页/不相干项）→精选呈现（有歧义先问「哪一部/哪个
+        版本」）→候选可直接 download_add 入任务。LLM 缺席/失败降级只用免费
+        地板（确定性词面过滤），失败报因见 notes 显式呈现。
+        """
         query = str(params.get("query", "") or "").strip()
         if not query:
             return "错误: query 参数不能为空"
@@ -264,31 +301,69 @@ class DownloadTools:
             limit = 20
         limit = max(1, min(limit, 100))  # 契约 1-100，缺省 20
         category = str(params.get("category", "") or "").strip()
-        q = {"query": query, "limit": limit}
-        if category:
-            q["category"] = category
-        data, err = await self._request("GET", self._search_path, params=q)
-        if err:
-            return err
-        results = self._search_list_of(data)
-        src_errors = (data.get("errors") or []) \
-            if isinstance(data, dict) else []
+        from agent.smart_search import SmartSearchEngine
+        engine = SmartSearchEngine(llm_fn=self.llm_fn,
+                                   fetch=self.search_candidates)
+        res = await engine.run(query, category=category or None, limit=limit)
+        return self._render_search(query, limit, res)
+
+    def _render_search(self, query: str, limit: int, res) -> str:
+        """智能链结果呈现（形状对齐计划书候选行 + 语义层标注/丢弃/歧义追问）。"""
+        # 整面失败（后端不可达等）且无任何候选：报因原样上抛（细分报因禁静默）
+        if res.fatal and not res.items and not res.dropped:
+            return res.fatal
         lines: list = []
+        results = res.items
+        shown = results[:limit]
+        layer_txt = ("LLM 语义精选" if res.llm_used
+                     else "免费地板（确定性词面过滤，LLM 未参与）")
+        head = f"🔍 种子搜索 {query}（SoulMate 智能搜索）"
         if not results:
-            lines.append(
-                f"🔍 种子搜索 {query}：0 个结果（换个关键词或去掉 category 再试）")
+            lines.append(f"{head}：0 个结果（换个关键词或去掉 category 再试）")
         else:
-            shown = results[:limit]
-            lines.append(
-                f"🔍 种子搜索 {query}：{len(results)} 个结果"
-                f"（展示前 {len(shown)} 条）：")
+            lines.append(f"{head}：{len(results)} 个结果"
+                         f"（展示前 {len(shown)} 条）：")
+        # 编排可观测：意图与多路查询（0 结果时也呈现——改写透明，排查有据）
+        if res.intent:
+            lines.append(f"🧠 意图: {res.intent}")
+        lines.append(f"🧠 多路查询: {' / '.join(res.queries) or query}"
+                     f" | 语义层: {layer_txt}")
+        if results:
             for i, item in enumerate(shown, 1):
-                lines.append(f"{i}. {_fmt_search_item(item)}")
-        # 契约 errors=[{source,error}]：逐源降级如实回报（单源挂不造数据）
-        for e in src_errors:
+                smart = item.get("_smart") or {}
+                if smart.get("layer") == "llm":
+                    kind_txt = "（仅相关网页，非直接资源）" \
+                        if smart.get("kind") == "web" else ""
+                    try:
+                        score_txt = f"{float(smart.get('score', 0)):g}"
+                    except Exception:
+                        score_txt = str(smart.get("score"))
+                    tag = (f"｜相关性 {score_txt}"
+                           f"（{smart.get('reason') or '语义判定相关'}）{kind_txt}")
+                else:
+                    tag = f"｜{smart.get('reason') or '免费地板词面命中'}"
+                # 空格分隔语义标注：磁力 URL 后不紧跟非空白字符（download_add 引导可复制）
+                lines.append(f"{i}. {_fmt_search_item(item)} {tag}")
+        # 丢弃项如实列因（科普页/不相干项/词面无关——语义筛选的证据）
+        if res.dropped:
+            shown_d = res.dropped[:5]
+            parts = [f"「{d.get('title', '?')[:24]}」—{d.get('reason', '?')}"
+                     for d in shown_d]
+            more = f" 等共 {len(res.dropped)} 条" if len(res.dropped) > 5 else ""
+            lines.append(f"🗑 已丢弃 {len(res.dropped)} 条（科普页/不相干）: "
+                         + "；".join(parts) + more)
+        # 显式报因：LLM 降级/地板放宽等 notes + 契约 errors 逐源降级
+        for note in res.notes:
+            lines.append(f"ℹ️ {note}")
+        for e in res.source_errors:
             if isinstance(e, dict):
                 lines.append(f"⚠️ 源降级: {e.get('source', '?')}: "
                              f"{e.get('error', '?')}")
+        if res.fatal:
+            lines.append(f"⚠️ {res.fatal}")
+        # 歧义追问（哪一部/哪个版本）——先问再加任务
+        if res.clarify:
+            lines.append(f"❓ 先确认（哪一部/哪个版本）: {res.clarify}")
         if results:
             lines.append("→ 候选已呈现：多个候选有歧义先问用户要哪部（可用 clarify），"
                          "默认取最合适的一个；选定后 download_add(url=该候选的磁力/"
