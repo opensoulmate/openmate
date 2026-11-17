@@ -31,7 +31,8 @@ __all__ = [
     "verify_reject_all",
 ]
 
-BLOCK_TYPES = ("heading", "paragraph", "bullet", "table", "pagebreak")
+BLOCK_TYPES = ("heading", "paragraph", "bullet", "table", "figure", "toc",
+               "pagebreak")
 _SEGMENT_MODES = ("normal", "ins", "del")
 
 _THREE_LINE = "three_line"
@@ -61,10 +62,15 @@ def compile_docx(spec: dict, out_path, author: str = _AUTHOR_DEFAULT) -> dict:
     - {"type": "bullet", "text": str}
     - {"type": "table", "rows": [[...]], "style": three_line|grid,
         "caption"?, "header_repeat"?: true, "col_widths"?: [cm,...]}
+    - {"type": "figure", "image"?: 图片路径, "mermaid"?: Mermaid 源码
+        （二选一；mermaid 时本地确定性渲染成 PNG 落 <输出>.figN.png）,
+        "caption"?: 显式题注 | "caption_title"?+"chapter"? 自动"图 X-N 标题",
+        "width_cm"?: 14}
+    - {"type": "toc", "title"?: "目录"}   # Word 目录域（页码由 office_finalize 导 PDF 时更新）
     - {"type": "pagebreak"}
 
     返回 {"path", "blocks", "tables", "sections", "revisions", "provenance",
-          "trace_comments", "reject_all_verified"}
+          "trace_comments", "reject_all_verified", "figures"}
     """
     try:
         from docx import Document
@@ -80,14 +86,16 @@ def compile_docx(spec: dict, out_path, author: str = _AUTHOR_DEFAULT) -> dict:
     _set_normal_font(doc, str(font.get("east_asia", "宋体") or "宋体"), font_size)
 
     ctx = {
-        "doc": doc, "author": author, "font_size": font_size,
+        "doc": doc, "author": author, "font_size": font_size, "out": out,
         "counts": {"blocks": 0, "tables": 0, "headings": 0, "paragraphs": 0,
-                   "bullets": 0},
+                   "bullets": 0, "figures": 0},
         "revisions": [],        # 来源血缘条目
         "rev_id": 0,
         "trace_comments": 0,
         "expected_original": [],   # reject-all 应得原文（渲染级跟踪，回读对账）
     }
+    from agent.mermaid_figure import FigureCounter
+    ctx["fig_counter"] = FigureCounter()
     if spec.get("title"):
         title = str(spec["title"])
         p = doc.add_paragraph(title)
@@ -137,6 +145,7 @@ def compile_docx(spec: dict, out_path, author: str = _AUTHOR_DEFAULT) -> dict:
         "provenance": str(provenance_path) if provenance_path else None,
         "trace_comments": ctx["trace_comments"],
         "reject_all_verified": verified,
+        "figures": ctx["counts"]["figures"],
     }
 
 
@@ -181,6 +190,25 @@ def _validate_content(content, where: str) -> None:
                     raise ValueError(f"{where}[{i}].rows[{ri}] 必须是列表")
         elif btype == "pagebreak":
             pass
+        elif btype == "toc":
+            pass   # 目录域（标题可选，无必填参数）
+        elif btype == "figure":
+            image = block.get("image")
+            code = block.get("mermaid")
+            has_image = isinstance(image, str) and image.strip()
+            has_code = isinstance(code, str) and code.strip()
+            if not has_image and not has_code:
+                raise ValueError(
+                    f"{where}[{i}] figure 需要 image（图片路径）或 mermaid（源码），二选一")
+            if code is not None and not isinstance(code, str):
+                raise ValueError(f"{where}[{i}] mermaid 需为字符串源码")
+            w = block.get("width_cm")
+            if w is not None:
+                try:
+                    if not (0.5 <= float(w) <= 30.0):
+                        raise ValueError
+                except (TypeError, ValueError):
+                    raise ValueError(f"{where}[{i}] width_cm 需在 [0.5, 30]") from None
         elif btype == "paragraph":
             segs = block.get("segments")
             if segs is not None:
@@ -297,6 +325,12 @@ def _render_block(ctx, block: dict, si: int, bi: int) -> None:
         return
     if btype == "table":
         _render_table(ctx, block, si, bi)
+        return
+    if btype == "figure":
+        _render_figure(ctx, block, si, bi)
+        return
+    if btype == "toc":
+        _render_toc(ctx, block)
         return
 
     # paragraph（text 或 segments 混排修订）
@@ -463,6 +497,60 @@ def _apply_header_repeat(table) -> None:
             th = OxmlElement("w:tblHeader")
             th.set(qn("w:val"), "true")
             tr_pr.append(th)
+
+
+def _render_toc(ctx, block: dict) -> None:
+    """toc 块：Word 目录域（w:fldSimple TOC，1-3 级标题），缓存占位文本；目录
+    页码由 office_finalize 导 PDF 时 DocumentIndexes.update() 确定性更新。"""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    doc = ctx["doc"]
+    title = str(block.get("title", "") or "")
+    if title:
+        tp = doc.add_paragraph()
+        run = tp.add_run(title)
+        run.bold = True
+        ctx["expected_original"].append(title)
+    p = doc.add_paragraph()
+    fld = OxmlElement("w:fldSimple")
+    fld.set(qn("w:instr"), ' TOC \\o "1-3" \\h \\z \\u ')
+    r = OxmlElement("w:r")
+    t = OxmlElement("w:t")
+    t.text = "目录占位（导出 PDF 时更新页码）"
+    r.append(t)
+    fld.append(r)
+    p._p.append(fld)
+
+
+def _render_figure(ctx, block: dict, si: int, bi: int) -> None:
+    """figure 块：mermaid 本地确定性渲染（落 <输出>.figN.png）或现成图片 →
+    InlineShape 居中嵌入 + 显式/自动题注（图 X-N）。"""
+    from agent import mermaid_figure
+    image = str(block.get("image", "") or "").strip()
+    code = block.get("mermaid")
+    if not image and isinstance(code, str) and code.strip():
+        n = ctx["counts"]["figures"] + 1
+        img_out = Path(str(ctx["out"]) + f".fig{n}.png")
+        mermaid_figure.render_mermaid(
+            code, img_out,
+            scale=float(block.get("scale") or mermaid_figure.DEFAULT_SCALE),
+            background=str(block.get("background", "") or "white"),
+            theme=str(block.get("theme", "") or "default"))
+        image = str(img_out)
+    if not Path(image).is_file():
+        raise ValueError(f"figure 图片不存在: {image!r}")
+    caption = str(block.get("caption", "") or "")
+    if not caption and str(block.get("caption_title", "") or "").strip():
+        counter = ctx["fig_counter"]
+        caption = counter.next_caption(
+            str(block["caption_title"]),
+            str(block.get("chapter", "") or counter.chapter))
+    mermaid_figure.append_figure(
+        ctx["doc"], Path(image), caption,
+        float(block.get("width_cm") or mermaid_figure.DEFAULT_WIDTH_CM))
+    ctx["counts"]["figures"] += 1
+    if caption:
+        ctx["expected_original"].append(caption)
 
 
 # ── 修订视图 / 拒绝全部修订自校验 ────────────────────────────────────
