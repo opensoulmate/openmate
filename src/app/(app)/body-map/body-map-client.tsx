@@ -33,7 +33,7 @@ const ORGAN_LAYOUT: Array<{
   system: string;
 }> = [
   // Brain area (head)
-  { key: "soul", label: "灵魂", emoji: "🧠", category: "core", x: 50, y: 6, href: "/dashboard", system: "brain" },
+  { key: "soul", label: "灵魂", emoji: "🧠", category: "core", x: 50, y: 6, href: "/admin", system: "brain" },
   { key: "cortex", label: "皮层", emoji: "🧩", category: "core", x: 38, y: 10, href: "/cortex", system: "brain" },
   { key: "hippo", label: "海马体", emoji: "🧠", category: "organ", x: 62, y: 10, href: "/hippo", system: "brain" },
   { key: "mind", label: "心智", emoji: "💭", category: "organ", x: 50, y: 13, href: "/mind", system: "brain" },
@@ -49,7 +49,7 @@ const ORGAN_LAYOUT: Array<{
   { key: "echo", label: "回声", emoji: "🔊", category: "service", x: 40, y: 24, href: "/echo", system: "sensory" },
 
   // Chest area
-  { key: "vital", label: "体征", emoji: "📊", category: "service", x: 45, y: 32, href: "/vital", system: "circulatory" },
+  { key: "vital", label: "体征", emoji: "📊", category: "service", x: 45, y: 32, href: "/system", system: "circulatory" },
   { key: "pulse", label: "脉搏", emoji: "💓", category: "organ", x: 55, y: 30, href: "/pulse", system: "circulatory" },
   { key: "immune", label: "免疫", emoji: "🛡", category: "service", x: 38, y: 36, href: "/immune", system: "immune" },
 
@@ -59,7 +59,7 @@ const ORGAN_LAYOUT: Array<{
 
   // Core (torso center)
   { key: "gland", label: "腺体", emoji: "🧪", category: "service", x: 50, y: 40, href: "/gland", system: "endocrine" },
-  { key: "heredity", label: "遗传链", emoji: "🔗", category: "organ", x: 58, y: 38, href: "/heredity", system: "endocrine" },
+  { key: "heredity", label: "遗传链", emoji: "🔗", category: "organ", x: 58, y: 38, href: "/evolution", system: "endocrine" },
 
   // Vein (vascular system - spread across body)
   { key: "vein", label: "血管", emoji: "🩸", category: "core", x: 30, y: 40, href: "/vein", system: "circulatory" },
@@ -77,12 +77,12 @@ const ORGAN_LAYOUT: Array<{
   { key: "mirror", label: "镜像", emoji: "🪞", category: "service", x: 38, y: 58, href: "/mirror", system: "isolation" },
 
   // Legs (Foundation)
-  { key: "trajectory", label: "轨迹", emoji: "📊", category: "system", x: 42, y: 68, href: "/trajectory", system: "foundation" },
+  { key: "trajectory", label: "轨迹", emoji: "📊", category: "system", x: 42, y: 68, href: "/system", system: "foundation" },
   { key: "mcp", label: "MCP", emoji: "🔌", category: "system", x: 58, y: 68, href: "/mcp", system: "foundation" },
 
   // Feet (Infrastructure)
   { key: "learn", label: "Learn", emoji: "📚", category: "system", x: 45, y: 80, href: "/learn", system: "foundation" },
-  { key: "diagnostics", label: "Diagnostics", emoji: "🩺", category: "system", x: 55, y: 80, href: "/monitoring", system: "foundation" },
+  { key: "diagnostics", label: "Diagnostics", emoji: "🩺", category: "system", x: 55, y: 80, href: "/system", system: "foundation" },
 ];
 
 const SYSTEM_COLORS: Record<string, { fill: string; stroke: string; glow: string }> = {
