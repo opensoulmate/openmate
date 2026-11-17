@@ -37,6 +37,122 @@ class ToolCallRequest(PydanticBaseModel):
     approved: bool = False  # 审批闸：用户在审批弹窗确认后置 true
 
 
+# ═══════════════════════════════════════════════════════════════════
+# 自定义 HTML 面板（层②）— Sprint C：静态只读服务 + postMessage RPC 宿主侧
+# ═══════════════════════════════════════════════════════════════════
+#
+# 设计 docs/plugin-system-design.md §3：内容来自插件 html/ 目录（只读静态）、
+# 通信=postMessage RPC（{id, method, params}→{id, result|error}）、宿主 method
+# 白名单=该插件声明的 MCP 工具 + ui.* 事件；工具调用与 DSL 面**同一审批闸**
+# （approved → ApprovalRequired→approval_required 409 同构回传）。
+
+UI_PANEL_EVENTS = ("ui.toast", "ui.refresh", "ui.store.get", "ui.store.set")
+HTML_RPC_MAX_STORE_BYTES = 64 * 1024   # ui.store 单值上限（防面板灌爆存储）
+_HTML_CONTENT_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".htm": "text/html; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".mjs": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".ico": "image/x-icon",
+    ".woff2": "font/woff2",
+    ".txt": "text/plain; charset=utf-8",
+}
+
+
+def html_panel_methods(descriptor: PluginDescriptor) -> dict[str, Any]:
+    """宿主 method 白名单（设计 §3）：插件声明的 MCP 工具 + ui.* 事件。"""
+    return {
+        "tools": sorted(t.name for t in descriptor.manifest.tools),
+        "ui_events": list(UI_PANEL_EVENTS),
+    }
+
+
+def _html_file(descriptor: PluginDescriptor, rel: str) -> Path:
+    """html/ 静态文件定位（只读 + 越界必拒——与 zip-slip 同一路径约束语义）。"""
+    root = (descriptor.dir_path / "html").resolve()
+    if not root.is_dir():
+        raise HTTPException(status_code=404, detail=f"插件 {descriptor.id} 无 html/ 面板目录")
+    cand = (root / rel).resolve()
+    if cand != root and root not in cand.parents:
+        raise HTTPException(status_code=403, detail=f"路径越界: {rel!r}（html/ 只读子树）")
+    if not cand.is_file():
+        raise HTTPException(status_code=404, detail=f"面板文件不存在: {rel!r}")
+    return cand
+
+
+def _store_file(descriptor: PluginDescriptor) -> Path:
+    """ui.store 落点：插件 store 目录（ToolContext.store_dir 同一持久面）。"""
+    return ToolContext(plugin_id=descriptor.id,
+                       data_dir=str(descriptor.dir_path)).store_dir() / "html_store.json"
+
+
+async def html_panel_rpc(descriptor: PluginDescriptor,
+                         registry: PluginToolRegistry,
+                         payload: dict[str, Any], *,
+                         approved: bool = False) -> dict[str, Any]:
+    """postMessage RPC 宿主侧核心（纯逻辑可测）：{id, method, params} → {id, result|error}。
+
+    - 白名单外 method 必拒（method_not_allowed，未声明工具绝不可调）；
+    - 工具 method → plugin_id__method 走 registry（与 DSL 面同一审批闸；
+      ApprovalRequired → error.approval_required——前端弹审批再带 approved 重发）；
+    - ui.* 事件：toast/refresh=回执（前端壳消费），store.get/set=插件自有存储。
+    """
+    req_id = payload.get("id")
+    method = str(payload.get("method", "") or "").strip()
+    raw_params = payload.get("params")
+    params: dict[str, Any] = raw_params if isinstance(raw_params, dict) else {}
+    try:
+        if method in ("ui.toast", "ui.refresh"):
+            return {"id": req_id, "result": {"ok": True, "method": method}}
+        if method == "ui.store.get":
+            store = _store_file(descriptor)
+            data = json.loads(store.read_text(encoding="utf-8")) if store.is_file() else {}
+            return {"id": req_id, "result": {"value": data.get("value")}}
+        if method == "ui.store.set":
+            blob = json.dumps(params.get("value"), ensure_ascii=False)
+            if len(blob.encode("utf-8")) > HTML_RPC_MAX_STORE_BYTES:
+                return {"id": req_id, "error": {
+                    "code": "store_value_too_large",
+                    "message": f"ui.store.set 值超上限 {HTML_RPC_MAX_STORE_BYTES}B"}}
+            store = _store_file(descriptor)
+            store.write_text(json.dumps({"value": params.get("value")},
+                                        ensure_ascii=False), encoding="utf-8")
+            return {"id": req_id, "result": {"ok": True}}
+        allowed = {t.name for t in descriptor.manifest.tools}
+        if method not in allowed:
+            logger.warning(
+                f"[html-panel] method_not_allowed: {descriptor.id}.{method}")
+            return {"id": req_id, "error": {
+                "code": "method_not_allowed",
+                "message": (f"method {method!r} 不在白名单（声明工具: {sorted(allowed)}"
+                            f"；ui 事件: {list(UI_PANEL_EVENTS)}）")}}
+        ctx = ToolContext(plugin_id=descriptor.id, data_dir=str(descriptor.dir_path))
+        result = await registry.call_tool_async(
+            f"{descriptor.id}__{method}", params, approved=approved, ctx=ctx)
+        return {"id": req_id, "result": result}
+    except ApprovalRequired as e:
+        return {"id": req_id, "error": {"code": "approval_required",
+                                        "message": str(e)}}
+    except ToolNotFound as e:
+        return {"id": req_id, "error": {"code": "tool_not_found", "message": str(e)}}
+    except (SchemaValidationError, PermissionError, ValueError, OSError) as e:
+        return {"id": req_id, "error": {"code": "invalid_request", "message": str(e)}}
+
+
+class HtmlRpcRequest(PydanticBaseModel):
+    id: Any = None
+    method: str = ""
+    params: dict[str, Any] = {}
+    approved: bool = False   # 审批闸（与 DSL 面 tools 调用同构）
+
+
 def load_dsl_page(descriptor: PluginDescriptor, page_id: str) -> dict[str, Any]:
     """读取并校验 UI DSL 页面；返回可直接下发前端的 JSON"""
     page_path = descriptor.page_path(page_id)
@@ -44,7 +160,9 @@ def load_dsl_page(descriptor: PluginDescriptor, page_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=f"页面不存在: {page_id}")
     page_spec = next(p for p in descriptor.manifest.pages if p.id == page_id)
     if page_spec.dsl is None:
-        raise HTTPException(status_code=404, detail=f"页面 {page_id} 为 HTML 面板（层②，PoC 未实现运行时）")
+        raise HTTPException(status_code=404, detail=(
+            f"页面 {page_id} 为 HTML 面板（层②）——"
+            f"内容走 GET /plugins/{descriptor.id}/html/{page_spec.html}"))
     try:
         raw = json.loads(page_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as e:
@@ -85,6 +203,33 @@ def build_plugin_router(descriptor: PluginDescriptor, registry: PluginToolRegist
     @router.get("/tools")
     async def list_tools() -> dict[str, Any]:
         return {"tools": registry.list_tools(plugin_id)}
+
+    # ── 层② HTML 面板：静态只读服务（html/ 子树，越界必拒）──────────
+    @router.get("/html/{file_path:path}")
+    async def get_html_panel(file_path: str):
+        from fastapi.responses import FileResponse
+
+        target = _html_file(descriptor, file_path)
+        suffix = target.suffix.lower()
+        media = _HTML_CONTENT_TYPES.get(suffix, "application/octet-stream")
+        # 只读+禁缓存（面板开发期改完即刷新可见；X-Content-Type-Options 防 MIME 嗅探）
+        return FileResponse(target, media_type=media, headers={
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "no-cache",
+        })
+
+    # ── 层② postMessage RPC 宿主侧（白名单=声明工具+ui.*，同一审批闸）──
+    @router.post("/html-rpc")
+    async def html_rpc(req: HtmlRpcRequest) -> dict[str, Any]:
+        return await html_panel_rpc(
+            descriptor, registry,
+            {"id": req.id, "method": req.method, "params": req.params},
+            approved=req.approved)
+
+    @router.get("/html-methods")
+    async def html_methods() -> dict[str, Any]:
+        """宿主 method 白名单（前端壳 postMessage 前的契约面）。"""
+        return html_panel_methods(descriptor)
 
     return router
 
