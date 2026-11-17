@@ -19,7 +19,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-PLUGINS_DIR = REPO_ROOT / "plugins"
 TEST_PLUGIN_ID = "zz-agent-notes"
 
 
@@ -38,7 +37,7 @@ class HttpShim:
 
 
 @pytest.fixture()
-def rig(tmp_path, monkeypatch):
+def rig(tmp_path, monkeypatch, plugins_dir):
     """插件注册桥 + forge/插件 HTTP 面 + PluginTools（注入 registry/http）"""
     monkeypatch.setenv("FLOW_RUNS_DIR", str(tmp_path / "flow-runs"))
     monkeypatch.setenv("OPENMATE_PLUGIN_DATA_DIR", str(tmp_path / "plugin-data"))
@@ -50,14 +49,14 @@ def rig(tmp_path, monkeypatch):
 
     reset_engine()
     registry = PluginToolRegistry()
-    scan = scan_plugins(PLUGINS_DIR)
+    scan = scan_plugins(plugins_dir)
     demo = scan.get("demo-greeter")
     assert demo is not None
     bind_tools(demo, registry)
 
     app = FastAPI()
     app.include_router(build_forge_router(
-        PLUGINS_DIR, registry=registry, engine=get_engine(),
+        plugins_dir, registry=registry, engine=get_engine(),
         include_router=app.include_router))
 
     @app.post("/plugins/{plugin_id}/tools/{tool_name}")
@@ -79,9 +78,10 @@ def rig(tmp_path, monkeypatch):
     client = TestClient(app)
     shim = HttpShim(client)
     tools = PluginTools(http_base=shim.base, registry=registry, http=shim)
-    yield {"client": client, "registry": registry, "tools": tools, "shim": shim}
+    yield {"client": client, "registry": registry, "tools": tools, "shim": shim,
+           "plugins_dir": plugins_dir}
     registry.unregister_plugin(TEST_PLUGIN_ID)
-    for path in (PLUGINS_DIR / TEST_PLUGIN_ID, PLUGINS_DIR / ".drafts" / TEST_PLUGIN_ID):
+    for path in (plugins_dir / TEST_PLUGIN_ID, plugins_dir / ".drafts" / TEST_PLUGIN_ID):
         if path.exists():
             shutil.rmtree(path)
     reset_engine()
@@ -257,7 +257,7 @@ def test_plugin_dev_install_denied_keeps_draft(rig):
         blocked = await tools.plugin_dev(
             {"action": "install", "id": TEST_PLUGIN_ID}, request_approval=deny)
         assert blocked.startswith("[已拒绝]") and "草稿保留未安装" in blocked
-        assert not (PLUGINS_DIR / TEST_PLUGIN_ID).exists()
+        assert not (rig["plugins_dir"] / TEST_PLUGIN_ID).exists()
         drafts = json.loads(await tools.plugin_dev({"action": "list"}))
         assert any(d["draft_id"] == TEST_PLUGIN_ID for d in drafts["drafts"])
 

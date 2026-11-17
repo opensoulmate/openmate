@@ -32,7 +32,7 @@
 
 `plugin.dsl_api.scan_and_build` 载入 `plugins/` 无错误：`bidding v0.1.0 · 6 页面 · 7 工具 · nav=招投标`，
 7 个 MCP 工具全部注册（`bidding__bid_parse/bid_generate/bid_review/price_calc/bid_score_config/bid_generate_status/bid_knowledge_list`），
-与 `demo-greeter`、`flow-console` 共存于 `/plugins`；旧 `plugin.json` REST（`/bidding/*`）不受影响。
+与 `flow-console` 共存于 `/plugins`（`demo-greeter` 样板已归位 `examples/`，不进运行时）；旧 `plugin.json` REST（`/bidding/*`）不受影响。
 
 ## 测试
 

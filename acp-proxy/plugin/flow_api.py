@@ -3,6 +3,7 @@
 
 设计文档: docs/plugin-system-design.md §5（可观测面板为宿主内建）
 - GET  /flows                          流程定义清单
+- DELETE /flows/{flow_id}              删除流程定义 + 清空实例/幂等键（测试流清理）
 - POST /flows/{flow_id}/run            manual 触发（面板按钮/对话「跑一下」）
 - GET  /flows/runs                     实例列表（可观测面板 list 数据源）
 - GET  /flows/runs/{run_id}            实例详情（节点状态/重试/耗时/输出摘要）
@@ -52,6 +53,14 @@ def build_flow_router(engine: FlowEngine | None = None) -> APIRouter:
     @router.get("")
     async def list_flows() -> dict[str, Any]:
         return {"flows": engine.list_flows(), "count": len(engine.list_flows())}
+
+    @router.delete("/{flow_id}")
+    async def delete_flow(flow_id: str) -> dict[str, Any]:
+        """删除流程定义并清空其全部实例/幂等键（彻底清理测试流，不留面板残留）"""
+        result = engine.delete_flow(flow_id)
+        if not result["removed_definition"] and result["purged_runs"] == 0:
+            raise HTTPException(status_code=404, detail=f"流程不存在: {flow_id}")
+        return {"flow_id": flow_id, **result}
 
     @router.post("/{flow_id}/run")
     async def run_flow(flow_id: str, req: RunRequest) -> dict[str, Any]:

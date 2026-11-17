@@ -17,6 +17,7 @@ import datetime as _dt
 import hashlib
 import json
 import logging
+import shutil
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -212,6 +213,15 @@ class FlowStore:
 
     def delete_run(self, flow_id: str, run_id: str) -> None:
         self._run_path(flow_id, run_id).unlink(missing_ok=True)
+
+    def purge_flow(self, flow_id: str) -> int:
+        """清空一条流程的全部实例与幂等键（数据侧彻底清理，返回清掉的实例数）"""
+        flow_dir = self.runs_dir / flow_id
+        if not flow_dir.is_dir():
+            return 0
+        count = sum(1 for p in flow_dir.glob("*.json") if not p.name.startswith("_"))
+        shutil.rmtree(flow_dir, ignore_errors=True)
+        return count
 
     # 幂等键（跨进程/重启仍生效）
     def _keys_path(self, flow_id: str) -> Path:
@@ -632,6 +642,17 @@ class FlowEngine:
         for name in names:
             del self._flows[name]
         return len(names)
+
+    def delete_flow(self, flow_id: str) -> dict[str, Any]:
+        """删除流程定义 + 清空实例/幂等键（防再生：另需移除插件侧 flows: 注册源）"""
+        entry = self._flows.pop(flow_id, None)
+        purged = self.store.purge_flow(flow_id)
+        self._locks.pop(flow_id, None)
+        stale = {k for k in self._executed_cron_slots if k.startswith(f"cron:{flow_id}:")}
+        self._executed_cron_slots -= stale
+        if entry is not None:
+            logger.info("流程已删除: %s (清实例 %d 条)", flow_id, purged)
+        return {"removed_definition": entry is not None, "purged_runs": purged}
 
     def get_flow(self, flow_id: str) -> FlowDefinition:
         entry = self._flows.get(flow_id)

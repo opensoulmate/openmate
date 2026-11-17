@@ -27,7 +27,7 @@
       "id": "run-form",
       "title": "手动触发",
       "fields": [
-        { "name": "flow_id", "label": "流程 id", "widget": "text", "required": true, "placeholder": "例如 daily-greet-report" },
+        { "name": "flow_id", "label": "流程 id", "widget": "text", "required": true, "placeholder": "/flows 清单里的流程 id" },
         { "name": "idempotency_key", "label": "幂等键", "widget": "text", "placeholder": "可选：同键不重复触发" }
       ],
       "submit": { "label": "触发", "tool": "flow-console__run_flow", "target_panel": "run-result" }

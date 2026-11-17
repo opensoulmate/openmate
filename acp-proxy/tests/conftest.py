@@ -8,7 +8,34 @@ tests/test_turn_outcome.py 的 read_file 失败路径测试把 /tmp/pytest-of-cl
 TOOL_FAILURE_DB_PATH 是 tool_recovery.py 既有的官方覆盖机制（多个测试已单独
 monkeypatch），这里统一由 autouse fixture 兜底——测试自己再 setenv 时以测试为准。
 """
+import shutil
+from pathlib import Path
+
 import pytest
+
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+PLUGINS_DIR = REPO_ROOT / "plugins"
+EXAMPLES_DIR = REPO_ROOT / "examples"
+
+
+def make_plugins_dir(dst: Path) -> Path:
+    """装配测试用插件扫描目录：plugins/ 真实插件 + examples/ 样板插件。
+
+    运行时 plugins/ 不含样板（demo-greeter 已归位 examples/，防测试数据再生），
+    但插件系统测试仍以样板为夹具——复制进临时目录扫描，不污染真实目录。
+    """
+    dst.mkdir(parents=True, exist_ok=True)
+    candidates = list(PLUGINS_DIR.iterdir()) + [d for d in EXAMPLES_DIR.iterdir() if d.is_dir()]
+    for src in candidates:
+        if not src.is_dir() or src.name.startswith(".") or src.name == "__pycache__":
+            continue
+        shutil.copytree(src, dst / src.name, dirs_exist_ok=True)
+    return dst
+
+
+@pytest.fixture()
+def plugins_dir(tmp_path) -> Path:
+    return make_plugins_dir(tmp_path / "plugins")
 
 
 @pytest.fixture(autouse=True)

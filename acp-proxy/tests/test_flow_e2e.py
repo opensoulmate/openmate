@@ -22,12 +22,11 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-PLUGINS_DIR = REPO_ROOT / "plugins"
 TEST_PLUGIN_ID = "zz-test-notes"
 
 
 @pytest.fixture()
-def env(tmp_path, monkeypatch):
+def env(tmp_path, monkeypatch, plugins_dir):
     """生产同款装配：插件扫描装载 + 流程引擎 + HTTP 面（flow/forge）"""
     monkeypatch.setenv("FLOW_RUNS_DIR", str(tmp_path / "flow-runs"))
     monkeypatch.setenv("OPENMATE_PLUGIN_DATA_DIR", str(tmp_path / "plugin-data"))
@@ -47,7 +46,7 @@ def env(tmp_path, monkeypatch):
     engine.set_tool_caller(_flow_tool_caller)
 
     app = FastAPI()
-    routers, index = scan_and_build(PLUGINS_DIR, registry)
+    routers, index = scan_and_build(plugins_dir, registry)
     for router in routers:
         app.include_router(router)
     index_plugins = list(index["plugins"])
@@ -61,7 +60,7 @@ def env(tmp_path, monkeypatch):
 
     app.include_router(build_flow_router(engine))
     app.include_router(build_forge_router(
-        PLUGINS_DIR, registry=registry, engine=engine,
+        plugins_dir, registry=registry, engine=engine,
         include_router=app.include_router, on_installed=on_installed))
 
     @app.get("/plugins")
@@ -74,11 +73,12 @@ def env(tmp_path, monkeypatch):
     yield {
         "client": client, "engine": engine, "registry": registry,
         "tmp_path": tmp_path, "index_plugins": index_plugins,
+        "plugins_dir": plugins_dir,
     }
     # 清理：测试插件（如已安装）+ 草稿
     registry.unregister_plugin(TEST_PLUGIN_ID)
     for plugin_id in (TEST_PLUGIN_ID, "zz-bad-dsl"):
-        for path in (PLUGINS_DIR / plugin_id, PLUGINS_DIR / ".drafts" / plugin_id):
+        for path in (plugins_dir / plugin_id, plugins_dir / ".drafts" / plugin_id):
             if path.exists():
                 shutil.rmtree(path)
     reset_engine()
@@ -305,4 +305,29 @@ def test_self_dev_loop_dry_run_blocks_install(env):
                           json={"confirmed": True})
     assert outcome.status_code == 409
     assert "dry-run 未通过" in outcome.json()["detail"]
-    assert not (PLUGINS_DIR / "zz-bad-dsl").exists()
+    assert not (env["plugins_dir"] / "zz-bad-dsl").exists()
+
+
+# ─────────────────────────── 流程清理面 ───────────────────────────
+
+def test_delete_flow_purges_definition_and_runs(env):
+    """DELETE /flows/{id}：定义+实例+幂等键全清（测试流彻底清理，面板零残留）"""
+    client = env["client"]
+    started = client.post("/flows/daily-greet-report/run",
+                          json={"inputs": {}, "idempotency_key": "del-1"}).json()
+    run_id = started["run_id"]
+    assert started["status"] == "waiting-approval"
+
+    deleted = client.delete("/flows/daily-greet-report").json()
+    assert deleted == {"flow_id": "daily-greet-report",
+                       "removed_definition": True, "purged_runs": 1}
+    # 定义清零 + 实例清零（flow-console 面板数据源为空，无残留）
+    assert all(f["id"] != "daily-greet-report"
+               for f in client.get("/flows").json()["flows"])
+    assert client.get("/flows/runs").json()["count"] == 0
+    assert client.get(f"/flows/runs/{run_id}").status_code == 404
+    # 幂等键随实例清掉：重新定义后同键可再次触发（防再生测试夹具独立）
+    again = client.post("/flows/daily-greet-report/run", json={"inputs": {}})
+    assert again.status_code == 404          # 定义已删，无法触发
+    # 幂等清理：连删两次，第二次无残留可报 404
+    assert client.delete("/flows/daily-greet-report").status_code == 404

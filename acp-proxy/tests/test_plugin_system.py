@@ -31,8 +31,8 @@ from plugin.ui_dsl import DslError, FormPanel, validate_dsl_page
 from plugin.yaml_manifest import ManifestError, ToolSpec, load_yaml_manifest, parse_yaml_manifest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-PLUGINS_DIR = REPO_ROOT / "plugins"
-DEMO_DIR = PLUGINS_DIR / "demo-greeter"
+# 样板插件归位 examples/（运行时 plugins/ 不装载），测试以 plugins_dir 夹具装配扫描目录
+DEMO_DIR = REPO_ROOT / "examples" / "demo-greeter"
 
 
 # ─────────────────────────── ① plugin.yaml 清单解析 ───────────────────────────
@@ -125,18 +125,18 @@ def test_manifest_tool_schema():
 # ─────────────────────────── ① 目录扫描 + 导航注册 ───────────────────────────
 
 
-def test_scan_plugins_dir():
-    result = scan_plugins(PLUGINS_DIR)
+def test_scan_plugins_dir(plugins_dir):
+    result = scan_plugins(plugins_dir)
     demo = result.get("demo-greeter")
     assert demo is not None
     assert demo.state == "enabled"
-    assert demo.page_path("home") == DEMO_DIR / "ui" / "home.json"
+    assert demo.page_path("home") == demo.dir_path / "ui" / "home.json"
     # data/ __pycache__ 等非插件目录被跳过
     assert all(d.id != "data" for d in result.descriptors)
 
 
-def test_scan_collects_nav():
-    result = scan_plugins(PLUGINS_DIR)
+def test_scan_collects_nav(plugins_dir):
+    result = scan_plugins(plugins_dir)
     nav = collect_nav(result)
     demo_nav = [item for item in nav if item["pluginId"] == "demo-greeter"]
     assert demo_nav and demo_nav[0]["href"] == "/plugins/demo-greeter"
@@ -160,8 +160,8 @@ def test_scan_bad_manifest_recorded_not_fatal(tmp_path):
     assert result.errors and result.errors[0]["plugin"] == "bad-one"
 
 
-def test_load_entry_module():
-    result = scan_plugins(PLUGINS_DIR)
+def test_load_entry_module(plugins_dir):
+    result = scan_plugins(plugins_dir)
     demo = result.get("demo-greeter")
     assert demo is not None
     module = load_entry_module(demo)
@@ -226,16 +226,16 @@ def test_dsl_bars_items_need_numeric_value():
 # ─────────────────────────── ③ MCP 工具注册桥 ───────────────────────────
 
 
-def _bind_demo(registry: PluginToolRegistry) -> None:
-    result = scan_plugins(PLUGINS_DIR)
+def _bind_demo(registry: PluginToolRegistry, plugins_dir) -> None:
+    result = scan_plugins(plugins_dir)
     demo = result.get("demo-greeter")
     assert demo is not None
     bind_tools(demo, registry)
 
 
-def test_bind_and_list_tools_mcp_shape():
+def test_bind_and_list_tools_mcp_shape(plugins_dir):
     registry = PluginToolRegistry()
-    _bind_demo(registry)
+    _bind_demo(registry, plugins_dir)
     tools = registry.list_tools()
     names = [t["name"] for t in tools]
     assert names == ["demo-greeter__build_report", "demo-greeter__greet", "demo-greeter__greet_log"]
@@ -244,9 +244,9 @@ def test_bind_and_list_tools_mcp_shape():
     assert set(greet.keys()) == {"name", "description", "inputSchema"}
 
 
-def test_call_greet_tool():
+def test_call_greet_tool(plugins_dir):
     registry = PluginToolRegistry()
-    _bind_demo(registry)
+    _bind_demo(registry, plugins_dir)
     ctx = ToolContext(plugin_id="demo-greeter")
     result = registry.call_tool("demo-greeter__greet", {"name": "小明", "style": "casual"}, ctx=ctx)
     assert result["greeting"] == "嗨，小明！今天也要加油鸭～"
@@ -254,9 +254,9 @@ def test_call_greet_tool():
     assert log["count"] >= 1
 
 
-def test_call_tool_schema_validation():
+def test_call_tool_schema_validation(plugins_dir):
     registry = PluginToolRegistry()
-    _bind_demo(registry)
+    _bind_demo(registry, plugins_dir)
     with pytest.raises(SchemaValidationError, match="缺少必填参数"):
         registry.call_tool("demo-greeter__greet", {})
     with pytest.raises(SchemaValidationError, match="取值应为"):
@@ -298,9 +298,9 @@ def test_register_requires_permission():
         registry.register("p-1", spec, lambda args, ctx: {}, set())
 
 
-def test_unregister_plugin_removes_tools():
+def test_unregister_plugin_removes_tools(plugins_dir):
     registry = PluginToolRegistry()
-    _bind_demo(registry)
+    _bind_demo(registry, plugins_dir)
     assert registry.unregister_plugin("demo-greeter") == 3
     assert registry.list_tools() == []
 
@@ -316,11 +316,11 @@ def test_call_tool_mcp_error_shape():
 
 
 @pytest.fixture()
-def client():
+def client(plugins_dir):
     from plugin.dsl_api import scan_and_build
 
     registry = PluginToolRegistry()
-    routers, index = scan_and_build(PLUGINS_DIR, registry)
+    routers, index = scan_and_build(plugins_dir, registry)
     app = FastAPI()
     for router in routers:
         app.include_router(router)
