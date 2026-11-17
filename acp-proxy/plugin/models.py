@@ -85,12 +85,20 @@ class PluginManifest:
 
 
 # ---- 合法Hook拦截点 ----
-
+# Pi 取长补短 #1 钩子面映射（六类钩子）：
+#   beforeToolCall   → before_tool_call（可 block=cancel / 改参=data["args"]）
+#   afterToolCall    → after_tool_call（可覆盖结果=data["result"] / 置 task_complete）
+#   finishTurn       → finish_turn（end/continue 续轮——SettleGate 有界消费防打转）
+#   prepareRequest   → prepare_request（LLM 请求面可改 messages/system_prompt/tools）
+#   steering/followUp → steering.py 人机插话队列（getSteeringMessages/getFollowUpMessages
+#                      同位：turn 间隙 drain 注入，既有人机对话通道，不重复建钩子）
 HOOK_POINTS: set[str] = {
     "before_session_create",
     "after_session_create",
     "before_tool_call",
     "after_tool_call",
+    "prepare_request",
+    "finish_turn",
     "on_event",
 }
 
@@ -113,13 +121,16 @@ class HookContext:
     hook_point: str
     data: dict[str, Any] = field(default_factory=dict)
     cancelled: bool = False
+    cancel_reason: str = ""
     plugin_name: str = ""
 
-    def cancel(self) -> None:
-        """标记当前操作被取消（仅before_*类Hook有效）"""
+    def cancel(self, reason: str = "") -> None:
+        """标记当前操作被取消（仅before_*类Hook有效）；reason 显式可见（Pi #1）。"""
         if not self.hook_point.startswith("before_"):
             raise RuntimeError(f"只有before_*类Hook支持cancel操作，当前: {self.hook_point}")
         self.cancelled = True
+        if reason:
+            self.cancel_reason = str(reason)
 
 
 # ---- Hook处理函数类型 ----
