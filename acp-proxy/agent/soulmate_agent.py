@@ -601,6 +601,32 @@ class SoulMateAgent:
         return _maybe_save
 
 
+    def _ensure_session_row(self, session_id: str) -> None:
+        """懒注册 agent_sessions 行并盖账号归属（账号是唯一分区键，2026-11-17）。
+
+        归属来自 ws_acp 注入的 SOULMATE_USER_ID（登录账号）；已有归属绝不改写
+        （COALESCE 语义），只把无主行归并到当前账号。失败只告警不阻断消息流。
+        """
+        try:
+            owner = os.environ.get("SOULMATE_USER_ID") or None
+            db = self._get_db()
+            db.execute(
+                "INSERT OR IGNORE INTO agent_sessions"
+                " (id, agent_id, title, created_at, last_activity_at, message_count, user_id)"
+                " VALUES (?, ?, 'New Chat', ?, ?, 0, ?)",
+                (session_id, getattr(self, "_agent_id", "soulmate"),
+                 time.time(), time.time(), owner),
+            )
+            if owner:
+                db.execute(
+                    "UPDATE agent_sessions SET user_id = ? WHERE id = ? AND user_id IS NULL",
+                    (owner, session_id),
+                )
+            db.commit()
+            db.close()
+        except Exception as e:
+            logger.warning(f"ensure session row failed (non-fatal): {e}")
+
     def _save_message(
         self,
         session_id: str,
@@ -616,6 +642,10 @@ class SoulMateAgent:
         """
         try:
             db = self._get_db()
+            # 懒注册+归属盖章（2026-11-17）：首条消息即落 agent_sessions 行并盖
+            # 账号 user_id——修前只 UPDATE 不 INSERT，会话行缺失/无主时记录按写入端
+            # 分裂（列表不可见、跨端读取不一致）。INSERT OR IGNORE 幂等零开销。
+            self._ensure_session_row(session_id)
             try:
                 db.execute("SELECT attachments FROM agent_messages LIMIT 1")
             except sqlite3.OperationalError:
@@ -6194,6 +6224,10 @@ You can send files to the user natively: to deliver a file, write a brief confir
                 dbc.close()
             except Exception as e:
                 logger.warning(f"alias persist failed: {e}")
+        # 即时落行+归属盖章（2026-11-17）：会话创建即注册 agent_sessions 并盖账号——
+        # 修前行只在别处懒注册，重启/换端重连时 _session_exists_in_db 为假 →
+        # client-key 去重命中不了，同一次对话被分裂成两个 om- 会话（跨端记录不一致）。
+        self._ensure_session_row(sid)
         self.sessions[sid] = {
             "session_id": sid,
             "cwd": cwd,

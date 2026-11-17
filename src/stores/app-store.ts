@@ -386,6 +386,7 @@ interface AppState {
   setGlobalWsConnected: (v: boolean) => void;
   incrementUnread: (sessionId: string) => void;
   clearUnread: (sessionId: string) => void;
+  syncUnreadFromServer: (serverUnread: Record<string, number>) => void;
   getTotalUnread: () => number;
 
   // Cached agents (avoid re-fetching /api/agents/detect on every mount)
@@ -960,15 +961,26 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   // Global WebSocket + Unread state
+  // 未读以服务端为真源（session_reads 按账号分区，2026-11-17）：本地缓存只是
+  // 实时尾巴的加速缓存，且按账号分桶——设备不再作为数据归属（同一账号换设备
+  // 看到同一份未读；切账号不串桶）。
   globalWsConnected: false,
   unreadBySession: typeof window !== "undefined"
-    ? (() => { try { return JSON.parse(localStorage.getItem("openmate-unread") || "{}"); } catch { return {}; } })()
+    ? (() => {
+        try {
+          const uid = localStorage.getItem("openmate-user-id") || "";
+          return JSON.parse(localStorage.getItem(`openmate-unread:${uid}`) || "{}");
+        } catch { return {}; }
+      })()
     : {},
   setGlobalWsConnected: (v) => set({ globalWsConnected: v }),
   incrementUnread: (sessionId) =>
     set((s) => {
       const next = { ...s.unreadBySession, [sessionId]: (s.unreadBySession[sessionId] || 0) + 1 };
-      try { localStorage.setItem("openmate-unread", JSON.stringify(next)); } catch {}
+      try {
+        const uid = typeof window !== "undefined" ? (localStorage.getItem("openmate-user-id") || "") : "";
+        localStorage.setItem(`openmate-unread:${uid}`, JSON.stringify(next));
+      } catch {}
       return { unreadBySession: next };
     }),
   clearUnread: (sessionId) =>
@@ -976,7 +988,24 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (!s.unreadBySession[sessionId]) return s;
       const next = { ...s.unreadBySession };
       delete next[sessionId];
-      try { localStorage.setItem("openmate-unread", JSON.stringify(next)); } catch {}
+      try {
+        const uid = typeof window !== "undefined" ? (localStorage.getItem("openmate-user-id") || "") : "";
+        localStorage.setItem(`openmate-unread:${uid}`, JSON.stringify(next));
+      } catch {}
+      return { unreadBySession: next };
+    }),
+  syncUnreadFromServer: (serverUnread) =>
+    // 服务端为准（加速缓存降级）：拉列表时用账号分区的服务端未读覆盖本地缓存，
+    // 本地只剩"本端实时流内尚未刷新"的尾巴（incrementUnread 累加的部分被覆盖归正）。
+    set((s) => {
+      const next: Record<string, number> = {};
+      for (const [sid, n] of Object.entries(serverUnread || {})) {
+        if (n > 0) next[sid] = n;
+      }
+      try {
+        const uid = typeof window !== "undefined" ? (localStorage.getItem("openmate-user-id") || "") : "";
+        localStorage.setItem(`openmate-unread:${uid}`, JSON.stringify(next));
+      } catch {}
       return { unreadBySession: next };
     }),
   getTotalUnread: () => {
@@ -998,29 +1027,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 }));
 
 // ─── localStorage persistence for conversations ────────────────────────────
-if (typeof window !== "undefined") {
-  try {
-    const saved = localStorage.getItem("openmate-conversations");
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        useAppStore.setState({
-          conversations: parsed,
-          activeConversationId: parsed[0]?.id ?? null,
-        });
-      }
-    }
-  } catch {
-    // ignore
-  }
-
-  useAppStore.subscribe((state, prevState) => {
-    if (state.conversations !== prevState.conversations) {
-      try {
-        localStorage.setItem("openmate-conversations", JSON.stringify(state.conversations));
-      } catch {
-        // ignore
-      }
-    }
-  });
-}
+// 已降级（2026-11-17 跨端单一真源）：conversations 不再持久化/回灌 localStorage。
+// 修前每台设备各存一份 openmate-conversations 并在启动时当记录回灌 store——
+// 设备本地存储被当成数据真源，桌面/移动各见各的（违反"账号区分，设备只是入口"）。
+// 消息/会话真源=服务端 opensoul.db（GET /api/sessions/{id}/messages），本地零副本。

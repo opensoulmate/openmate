@@ -295,6 +295,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       if (r.ok) { const d = await r.json(); sessions = d.sessions || []; } else { console.error("sessions failed:", r.status); }
     } catch (e) { console.error("sessions error:", e); }
 
+    // 2b. 未读以服务端为真源（账号分区 session_reads，2026-11-17）：本地未读缓存
+    // 覆盖归正——任一端读过，同一账号所有端未读归零，不再各设备各一份。
+    try {
+      const serverUnread: Record<string, number> = {};
+      for (const s of sessions) {
+        if (typeof s.unread === 'number') serverUnread[s.id] = s.unread;
+      }
+      useAppStore.getState().syncUnreadFromServer(serverUnread);
+    } catch { /* 缓存归正失败不影响列表 */ }
+
     // 3. Group sessions by agent (check session tags first, then fallback to platform)
     const agentSessionMap: Record<string, Session[]> = {};
     for (const s of sessions) {

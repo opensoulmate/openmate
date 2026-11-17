@@ -1575,9 +1575,15 @@ export function ChatClient() {
               memoryMarker: (m.memory_marker as MemoryMarker | null) || null,
             };
           });
-        // DB数据可能比本地更完整（包含AI回复），但如果本地有更多消息（流式中），取更长的
-        const localCount = sessionDataMap.get(sessionId)?.messages.length || 0;
-        if (msgs.length >= localCount || localCount === 0) {
+        // 跨端单一真源（2026-11-17）：消息记录以服务端 DB 为唯一真源。
+        // 修前"本地更长就用本地"——本端流式/未落库的本地消息会被当记录留下，
+        // 桌面与移动端各见各的（发送端多、另一端少）。现仅当本端正在流式
+        // （loading）时保留本地尾巴，否则一律以 DB 回读为准。
+        const localData = sessionDataMap.get(sessionId);
+        const streamingHere = !!localData?.loading;
+        if (!streamingHere) {
+          updateCurrentSessionMessages(() => msgs);
+        } else if (msgs.length >= (localData?.messages.length || 0)) {
           updateCurrentSessionMessages(() => msgs);
         }
       }
@@ -1883,6 +1889,57 @@ export function ChatClient() {
     }, 500);
   }, [sendAcpPrompt, updateSessionMessages, t]);
 
+  // ── 草稿跨端同步（账号分区单一真源，2026-11-17）────────────────────────
+  // 草稿真源=服务端 session_drafts(session_id, user_id)——登录同一账号的任一端
+  // 打开会话即见同一份草稿。修前草稿只存本端内存（promptFields），换设备/刷新
+  // 即丢、两端各一份。本地仍保留即时编辑态作加速缓存，以服务端为准。
+  const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadSessionDraft = useCallback(async (sessionId: string) => {
+    if (!sessionId || sessionId.startsWith('temp-')) return;
+    try {
+      const r = await fetch(`${getApiBaseUrl()}/api/sessions/${sessionId}/draft`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (!r.ok) return;
+      const d = await r.json();
+      const raw = typeof d?.draft === 'string' ? d.draft : '';
+      if (!raw) return;
+      // 会话切换竞态：响应回来时已切走则弃用
+      if (useAppStore.getState().activeSessionId !== sessionId) return;
+      let fields = { task: raw, role: '', background: '', constraints: '', format: '' };
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && typeof parsed.task === 'string') {
+          fields = {
+            task: parsed.task || '',
+            role: parsed.role || '',
+            background: parsed.background || '',
+            constraints: parsed.constraints || '',
+            format: parsed.format || '',
+          };
+        }
+      } catch { /* 纯文本草稿=task */ }
+      setSessionDataMap(prev => {
+        const next = new Map(prev);
+        const data = next.get(sessionId) || { messages: [], unreadCount: 0 };
+        next.set(sessionId, { ...data, promptFields: fields });
+        return next;
+      });
+      setSmartTaskText(fields.task);
+    } catch { /* 草稿加载失败不阻断会话 */ }
+  }, []);
+  const saveSessionDraft = useCallback((sessionId: string, fieldsJson: string) => {
+    if (!sessionId || sessionId.startsWith('temp-')) return;
+    if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+    draftTimerRef.current = setTimeout(() => {
+      fetch(`${getApiBaseUrl()}/api/sessions/${sessionId}/draft`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({ draft: fieldsJson }),
+      }).catch(() => {});
+    }, 800);
+  }, []);
+
   const selectSession = (session: Session, agent: AgentInfo) => {
     console.log(`[selectSession] session.id=${session.id}, agent.id=${agent.id}`);
     setUrlSessionError(null);
@@ -1898,6 +1955,7 @@ export function ChatClient() {
     setEditingTitle(false);
     setShowCheckpoints(false); // close checkpoints when switching sessions
     loadHistory(session.id);
+    loadSessionDraft(session.id); // 草稿跨端同步：以服务端为真源
     // Ensure ACP WebSocket is connected for this session
     connectSession(session.id, agent.id);
     // Update store with agent metadata for cross-component access
@@ -2317,6 +2375,8 @@ export function ChatClient() {
                   next.set(sid, { ...data, promptFields: newFields });
                   return next;
                 });
+                // 草稿跨端同步（账号分区）：防抖落服务端，任一端可见同一份
+                saveSessionDraft(sid, JSON.stringify(newFields));
               }}
               onSend={(assembled) => {
                 // P1插话（Khoj interrupt_queue/goose Steer）：任务运行中发送=插话排队注入，不拒绝
@@ -2360,6 +2420,8 @@ export function ChatClient() {
                   pendingSessionIdRef.current = newId;
                 }
                 updateSessionMessages(currentSessionId, prev => [...prev, userMsg]);
+                // 发送即清草稿（服务端草稿同步删除，各端一致）
+                saveSessionDraft(currentSessionId, '');
                 // 立即更新标题为消息前20字（不等session迁移）
                 const curName = selectedSessionRef.current?.name || '';
                 const curId = selectedSessionRef.current?.id || '';

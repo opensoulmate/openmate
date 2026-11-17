@@ -350,6 +350,9 @@ async def ws_acp_endpoint(client_ws: WebSocket):
             # 每次启动子进程必炸。os已由模块顶部import，删除局部import即可。）
             env = dict(os.environ)
             env["EVOLUTION_API_URL"] = "http://127.0.0.1:8092"
+            # 归属盖章（2026-11-17）：把登录账号传给 agent 子进程——懒注册会话行时
+            # 盖 user_id，杜绝"无主行"按写入端分裂记录（账号是唯一分区键）。
+            env["SOULMATE_USER_ID"] = str(user_id)
             proc = await asyncio.create_subprocess_exec(
                 *route["cmd"],
                 stdin=asyncio.subprocess.PIPE,

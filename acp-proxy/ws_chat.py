@@ -35,19 +35,32 @@ def _get_agent_db():
     return db
 
 
-def _create_or_get_agent_session(agent_id: str, session_id: str | None = None) -> str:
-    """Create a new agent session or return existing one. Returns session_id."""
+def _create_or_get_agent_session(
+    agent_id: str, session_id: str | None = None, user_id: str | None = None
+) -> str:
+    """Create a new agent session or return existing one. Returns session_id.
+
+    归属盖章（2026-11-17 根修"按端分裂的记录"）：建会话即盖账号 user_id——
+    修前不盖 → 无主行对本人列表不可见/读取 404，同一人的记录按写入端分裂。
+    已有归属绝不改写（COALESCE 语义），只把无主行归并到当前账号。
+    """
     db = _get_agent_db()
     try:
         if session_id:
             row = db.execute("SELECT id FROM agent_sessions WHERE id = ?", (session_id,)).fetchone()
             if row:
+                if user_id:
+                    db.execute(
+                        "UPDATE agent_sessions SET user_id = ? WHERE id = ? AND user_id IS NULL",
+                        (str(user_id), session_id),
+                    )
+                    db.commit()
                 return session_id
         # Create new session
         new_id = session_id or f"agent_{agent_id}_{int(time.time() * 1000)}"
         db.execute(
-            "INSERT OR IGNORE INTO agent_sessions (id, agent_id, title, created_at, last_activity_at) VALUES (?, ?, ?, ?, ?)",
-            (new_id, agent_id, "New Chat", time.time(), time.time()),
+            "INSERT OR IGNORE INTO agent_sessions (id, agent_id, title, created_at, last_activity_at, user_id) VALUES (?, ?, ?, ?, ?, ?)",
+            (new_id, agent_id, "New Chat", time.time(), time.time(), str(user_id) if user_id else None),
         )
         db.commit()
         return new_id
@@ -696,7 +709,7 @@ async def chat_websocket(websocket: WebSocket):
 
                     if mode == "agent_proxy" and agent_id:
                         # Create or get agent session for persistence
-                        agent_session_id = _create_or_get_agent_session(agent_id, session_id)
+                        agent_session_id = _create_or_get_agent_session(agent_id, session_id, str(user_id))
                         # 会话级provenance产生侧标注（jobs.source同款）：负载声明
                         # `_meta: {"source": "test"}` → 会话出身绑定，落库行metadata
                         # 带session_source，ExperienceCollector据此跳过测试会话
