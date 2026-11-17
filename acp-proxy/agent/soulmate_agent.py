@@ -2870,6 +2870,57 @@ ACP代理目录: {cwd}/acp-proxy（后端 Python 代码在此）
 - skill_save: 技能保存（把成功流程写成SKILL.md含触发条件/步骤/坑，存技能库供复用）。刚成功完成多步骤可复用任务、或用户要求"把XX流程保存为技能/记住怎么做"时使用；同名技能默认不覆盖（更新传 overwrite=true）。保存后同类任务命中触发词会自动加载该技能\n- browser: 浏览器自动化（Playwright/CDP，真实浏览器会话）。action=goto 打开URL / snapshot 读页面标题+正文+链接 / click 点元素 / type 输入（submit=true回车）/ fill 清空填入 / eval 执行JS / screenshot 截图（返回文件路径可MEDIA下发）/ back 后退 / close 关闭会话 / activity 读用户全端操作流（含 hover 指针上下文——用户说「这个地方/这个按钮」指代不明时，先调 activity 找最近 hover 事件定位元素）/ flows 录制流程清单 / replay 按录制流程重复执行（flow=名，data 填参数，「按XX流程再跑一遍」时用）/ resume 恢复自动操作。selector 用 CSS 选择器。需要看页面真实渲染内容、登录态页面、自动化网页操作时使用；纯静态网页抓取优先 web_extract。⚠️ 页面过长截断并自报；失败返回具体原因；页面状态跨调用保留（连续操作无需重复goto）\n- document: 文档生成（docx/pdf/xlsx，输出真实文件返回 MEDIA: 路径可直接下发）。format=docx|pdf 时 content 传块列表（heading/paragraph/bullet/table/pagebreak），format=xlsx 时传 sheets:[{{name, rows}}]。需要交付正式文档/报表/表格文件时使用；纯文本回答不需要生成文件\n- fact_lock / doc_blank / money_calc / docx_compile: 写作能力层（多章节长文/正式文档创作七件套）。fact_lock=全局事实锁（写长文前把工期/质保/人数/金额/系统全称等已确认事实建成只读锁并注入写作提示，成稿后 check 跨章节一致性校验，冲突即点名章节行号）；doc_blank=留白协议（缺资料登记待补不编造，缺口落 Word 批注+待补清单，scan 查占位残留）；money_calc=Decimal 精算（报价合计/折扣率/税率/人民币大小写——绝对禁止自己算钱，只传参数）；docx_compile=OpenXML 确定性编译（AST→docx：三线表/跨页续表头/页眉页脚分节/修订留痕 w:ins/w:del+来源血缘）；diagram_figure=Mermaid 流程图/架构图入图管线（Agent 产 Mermaid 源码→本地确定性渲染高清图→InlineShape 入 docx+自动"图 X-X"题注）；image_compress=Pillow 确定性压图（长边 1600/JPEG 82%/单张≤300KB 硬保证——含图交付前所有截图/照片先压再交，防超上传体积上限）；office_finalize=LibreOffice headless 终稿（TOC 目录页码确定性更新+PDF 导出，docx 原件不动——Word 目录缓存页码在正文变动后即过期，含目录文档交付前必调 export_pdf）。写方案/可研/合同/课件/标书/报销报价等正式文档全程使用\n- run_guard / repair_loop: 任务治理工具组（长任务防跑飞+产物验收修复）。run_guard=防跑飞三件套（无进展看门狗默认 480s+轮数上限默认 100+空转诊断——长任务/长流水线用 beat 记每轮（progress 算不算实质进展），check 取处决结论 ok|warn|stop；🛑 stop=收尾交付已有产物并如实报告，不要继续空转烧轮次）；repair_loop=三段式提交修复循环（程序验收不过→step 吃验收结果 {{ok, blocking, issues}} 出 accept/repair/stop+修复提示词退回同会话，normal 逐条修→change-strategy 换方法重写→minimum 只修阻塞项，stalled≥2 无阻塞带遗留接受，minimum 仍失败才停并如实报告）。另：写作/治理工具均支持 task_complete 参数——任务确已完成、工具输出即最终交付时置 true（本批工具调用全部带 true 才免总结收尾）\n- text_to_speech: 语音合成（TTS，文本→音频文件，输出返回 MEDIA: 路径可直接播放/下发）。需要把文字转成语音/音频文件（朗读稿/配音/语音播报）时使用；voice 可选（默认中文女声 zh-CN-XiaoxiaoNeural），rate 可选语速（如 +0%）。纯文字回复不需要合成音频\n- image: 图像生成/编辑（输出真实文件返回 MEDIA: 路径可直接下发）。action=generate 按 prompt 生成图像（⚠️ 未配置 AI 后端时为程序化绘制，会在结果里如实标注）；resize/crop/rotate/flip/convert/annotate/compose/thumbnail 为确定性编辑（传 path）。需要生成图片或处理图片（缩放/裁剪/加文字/拼图/转格式）时使用\n- send_file: 文件下发（本地已有文件→📎下载卡片，返回 MEDIA: 标签走既有下发通道）。path=文件绝对路径（不知道路径先用 search_files 找），message 可选随件附言。需要把本地文件交付给用户（产物/报告/日志）时使用；文件不存在/越界显式报因\n- process: 后台进程管理（长任务放后台跑，可见可管）。action=start 启动后台命令（command，返回 proc_id）/ list 列出全部 / poll 查状态 / log 看日志尾部 / kill 停止（默认 SIGTERM，force=true 才 SIGKILL）/ write 向 stdin 写入 / submit 写入并回车 / close 关闭 stdin。构建/测试/服务/长脚本等超过单次 terminal 耗时的任务用它；进程不随会话断开而终止。⚠️ 不会到点强杀长任务——超时只报状态\n- torrent_search / download_add / download_task_status / download_task_list: 下载中心工具链（自然语言→搜索→加任务→回报进度完整对话流）。「帮我找XX」「最新有什么好的电影/资源」等找资源诉求→ torrent_search 智能搜索（自然语言原话直接传，SoulMate 语义相关性筛选排序已自动丢科普页/不相干项）并呈现精选候选（标题/大小/做种数/源）；多个候选有歧义先问一句要哪部（可用 clarify），无歧义默认取最合适的一个；选定候选或用户给出链接/磁力→ download_add 加任务（target 默认 remote 后端落盘）；「下到哪了/好了没/有哪些下载任务」→ download_task_status / download_task_list 回报进度。网盘用法：「找百度网盘资源/网盘资源」→ torrent_search（网盘源候选含分享链 share_url 与提取码 extract_code）→ 选定后 download_add(url=分享链, extract_code=提取码) 加 pan_share 任务（引擎用用户自配 Cookie 解析直链下载；不破解会员限速/不打码/不绕风控，非会员下载限速如实呈现）。⚠️ 搜索结果只作候选呈现，未经确认不要批量添加多个任务\n
 You can send files to the user natively: to deliver a file, write a brief confirmation message (e.g. "文件已发送，请查收"), then include MEDIA:/absolute/path/to/file on a new line. The gateway extracts the tag, strips it, and sends the file as a download card. Always write some text before the MEDIA: tag — never output a bare MEDIA: tag alone. Use search_files first if you don't know the exact path. Do NOT paste file contents into chat."""
 
+    # ── settle 收尾边界（Pi 取长补短 #2：agent_before_settle / agent_settled）──
+
+    def register_settle_hook(self, hook, name: str = "", settled: bool = False) -> None:
+        """注册 settle 收尾钩子（Pi #2 挂点：插件「节点后置校验」挂这里）。
+
+        settled=False：before_settle 钩子——可返回 {"continue": True, "entry": ...}
+        追加记录让会话再发一轮（有界防打转，与 repair_loop 三段式修复成环）；
+        settled=True：agent_settled 收尾副作用钩子（如文件基线还原，不可续轮）。
+        """
+        registry = getattr(self, "_settle_hook_registry", None)
+        if registry is None:
+            registry = {"before": [], "settled": []}
+            self._settle_hook_registry = registry
+        registry["settled" if settled else "before"].append(
+            (name or getattr(hook, "__name__", "hook"), hook))
+
+    def _settle_gate_for(self, session_id: str) -> turn_lifecycle.SettleGate:
+        """每回合一个 settle gate（continue 有界计数随回合复位）。
+
+        钩子来源=register_settle_hook 注册表（before/settled 两相）；零注册=
+        零行为变化（放行即收）。事件经 turn_lifecycle 总线发布（订阅器隔离）。
+        """
+        registry = (getattr(self, "_settle_hook_registry", None)
+                    or {"before": [], "settled": []})
+        gate = turn_lifecycle.SettleGate(
+            session_id=session_id,
+            bus=getattr(self, "_turn_lifecycle", None),
+            max_continues=2,
+        )
+        for _n, _h in registry["before"]:
+            gate.register(_h, _n)
+        for _n, _h in registry["settled"]:
+            gate.register_settled(_h, _n)
+        store = getattr(self, "_settle_gates", None)
+        if store is None:
+            store = {}
+            self._settle_gates = store
+        store[session_id] = gate
+        return gate
+
+    def _settle_mark(self, session_id: str) -> None:
+        """回合终态收尾：agent_settled 幂等一次（settled 钩子跑收尾副作用）。"""
+        store = getattr(self, "_settle_gates", None) or {}
+        gate = store.pop(session_id, None)
+        if gate is None:
+            return
+        try:
+            gate.mark_settled({"session_id": session_id})
+        except Exception as e:  # pragma: no cover — 观测面兜底
+            logger.warning(f"[settle] mark_settled failed (non-fatal): {e}")
+
     # ── P1-15 五终止条件组合入trace（lazy初始化兼容 __new__ 搭建的测试agent）──
     def _termination_state(self) -> dict:
         """session_id -> 本回合触发的终止条件（max_turns/token_budget/external_cancel）。"""
@@ -4559,6 +4610,11 @@ You can send files to the user natively: to deliver a file, write a brief confir
         # 记账器，批内每个调用都显式 task_complete=true 才整批提前收尾（默认
         # 关闭：不带参数零行为变化）──
         summary_ctl = summary_control.SummaryControl()
+        # ── settle 收尾边界（Pi #2 agent_before_settle/agent_settled）：每回合一个
+        # gate（continue 有界防打转）——before 钩子可追加记录+continue 让会话再发
+        # 一轮（产出→校验→不过退回同会话修复，与 repair_loop 成环）；默认零钩子
+        # =零行为变化。agent_settled 在回合终态收尾处发（才算彻底结束）──
+        settle_gate = self._settle_gate_for(session_id)
         # ── P0输出侧注入审计门（agent-zero _infection_check）：工具执行前gate，
         # 启发式劫持签名（离线兜底）+LLM语义审计三态verdict。每真实turn一个实例
         # （clarify计数/LLM熔断不跨turn串扰）。unattended=无客户端回合（唤醒/定时/
@@ -5904,8 +5960,16 @@ You can send files to the user natively: to deliver a file, write a brief confir
                     f"（{_tc_fin['count']} 调用全带 task_complete）免总结收尾")
                 break
 
-            # 如果没有工具调用，模型返回了纯文本，结束循环
+            # 如果没有工具调用，模型返回了纯文本 → settle 收尾边界（Pi
+            # agent_before_settle）：钩子可追加记录+continue 让会话再发一轮
+            # （有界防打转）；放行才真正收尾——「产出→校验→不过退回同会话修复」
+            # 的挂点（repair_loop/文件基线还原挂这里），零钩子零行为变化
             if not got_tool_call:
+                _settle = settle_gate.before_settle(
+                    {"session_id": session_id, "response": full_response})
+                if not _settle["settled"]:
+                    messages.append({"role": "user", "content": _settle["entry"]})
+                    continue
                 break
             # ── 周期进展自评（推理门）：请求模型评估进展/重复失败/继续还是收尾 ──
             # 执行旁白路由（evo目标 2026-10-23）：自评回答只进日志/轨迹，
@@ -7776,6 +7840,10 @@ You can send files to the user natively: to deliver a file, write a brief confir
         # close_reason语义：steer中断/取消等非正常收尾标记在此收尾；
         # superseded→按interrupted处理（"被排队消息顶掉的turn=被中断，不完整不digest"）
         # kilocode #4 readTurn：快照diff+工具动作轮廓+recent 8轮trace随turn元数据进记忆采集
+        # ── settle 终态收尾（Pi #2：agent_settled 才算彻底结束）——settled 钩子
+        # 跑收尾副作用（如文件基线还原 #8），幂等一次，晚于一切内部路径（含硬
+        # 终止）；事件 best-effort 不破坏收尾流 ──
+        self._settle_mark(session_id)
         _rv = self._turn_read_view.render(session_id)
         await self._turn_lifecycle.aclose_turn(
             session_id,

@@ -47,6 +47,10 @@ CLOSE_ERROR = "error"
 
 EVENT_TURN_OPEN = "turn.open"
 EVENT_TURN_CLOSE = "turn.close"
+# ── settle 收尾边界（Pi 取长补短 #2）：agent_before_settle 可追加记录+continue
+# 再发一轮；agent_settled 才算彻底结束 ──
+EVENT_SETTLE_BEFORE = "agent_before_settle"
+EVENT_SETTLED = "agent_settled"
 
 
 def memory_close_view(close_reason: str) -> str:
@@ -124,6 +128,8 @@ class TurnLifecycleBus:
         self._subs: dict[str, list[TurnSubscriber]] = {
             EVENT_TURN_OPEN: [],
             EVENT_TURN_CLOSE: [],
+            EVENT_SETTLE_BEFORE: [],
+            EVENT_SETTLED: [],
         }
         self._active: dict[str, TurnRecord] = {}  # session_id -> 当前turn
         self._cancel_requested: set[str] = set()
@@ -233,6 +239,209 @@ async def _swallow_async(coro: Awaitable, cb: Any) -> None:
     except Exception as e:
         logger.warning(f"[turn] async subscriber {getattr(cb, '__name__', cb)} "
                        f"failed (host flow unaffected): {e}")
+
+
+# ════════════════════════════════════════════════════════════════
+# settle 收尾边界（Pi 取长补短 #2：agent_before_settle / agent_settled）
+# ════════════════════════════════════════════════════════════════
+#
+# 来源：Pi coding-agent 扩展事件 agent_before_settle（一次运行最终收尾前触发，
+# 处理函数可**追加记录并 continue:true 让会话再发一次模型请求**）/ agent_settled
+# （才算彻底结束）——pi4java 文档称其为「使用方实现提交校验、失败修复、出错续跑
+# 的基础」。OpenBidKit 没用它而是外置 submit-repair 循环（等效但更粗），SoulMate
+# 直接抄内核语义：
+# - SettleGate：钩子链在收尾边界跑——钩子可 continue+entry（追加进会话再跑一轮，
+#   产出→校验→不过退回同会话修复成环），有界 max_continues 防打转；
+# - make_repair_hook：与 repair_loop（#3 三段式修复）成环的挂点适配器；
+# - mark_settled：agent_settled 幂等发一次（settled 钩子跑收尾副作用，如文件
+#   基线还原 #8）。事件走 TurnLifecycleBus 同一订阅面（订阅器隔离纪律不变）。
+#
+# 默认零钩子 = 零行为变化（放行即收，无 continue）。
+
+# settle 钩子形态：hook(ctx: dict) -> dict | None
+#   continue=True + entry → 本不放行，entry 追加进会话再发一轮
+#   其余/None → 放行（reason 仅记账）
+SettleHook = Callable[[dict], Any]
+
+
+@dataclass
+class SettleRecord:
+    """settle 边界事件记录（agent_before_settle / agent_settled）。"""
+
+    session_id: str
+    kind: str = EVENT_SETTLE_BEFORE
+    settled: bool = True          # before_settle：本次是否放行（False=continue）
+    entry: str = ""               # continue 时追加进会话的记录
+    reason: str = ""
+    hook: str = ""                # 触发钩子名（可观测）
+    passes: int = 0               # 已消耗的 continue 次数（有界续轮计数）
+    meta: dict = field(default_factory=dict)
+
+    def as_dict(self) -> dict:
+        return {
+            "session_id": self.session_id, "kind": self.kind,
+            "settled": self.settled, "entry": self.entry, "reason": self.reason,
+            "hook": self.hook, "passes": self.passes,
+            "meta": dict(self.meta),
+        }
+
+
+class SettleGate:
+    """收尾边界闸门（Pi agent_before_settle 追加+continue / agent_settled 才算完）。
+
+    - `before_settle(ctx)`：跑 before 钩子链 → {"settled", "entry", "reason",
+      "hook", "passes"}。钩子 continue 且带 entry → 不放行（settled=False），调用方
+      把 entry 追加进会话再发一轮；continue 总数达 max_continues → **强制放行**
+      （reason 可见，防打转）。钩子异常按 pass 记账（订阅器失败永不破坏宿主流程），
+      但 reason 留痕（失败必须可见）。
+    - `mark_settled(ctx)`：彻底结束（幂等一次）——先跑 settled 钩子（收尾副作用，
+      不可续轮），再发 agent_settled。
+    - 事件（agent_before_settle / agent_settled）经 bus 订阅面发布（可空）。
+    """
+
+    def __init__(self, session_id: str = "", bus=None, hooks=None,
+                 on_settled=None, max_continues: int = 2):
+        self.session_id = str(session_id or "")
+        self._bus = bus
+        self.max_continues = int(max_continues)
+        if self.max_continues < 0:
+            raise ValueError(f"max_continues 需 ≥0，收到 {max_continues}")
+        self._before_hooks: list[tuple[str, SettleHook]] = []
+        self._settled_hooks: list[tuple[str, SettleHook]] = []
+        self._continues = 0
+        self._settled = False
+        for h in (hooks or []):
+            self.register(h)
+        for h in (on_settled or []):
+            self.register_settled(h)
+
+    # ── 注册（插件/编排层挂点：节点后置校验挂 before；收尾副作用挂 settled）──
+
+    def register(self, hook: SettleHook, name: str = "") -> "SettleGate":
+        self._before_hooks.append((name or getattr(hook, "__name__", "hook"), hook))
+        return self
+
+    def register_settled(self, hook: SettleHook, name: str = "") -> "SettleGate":
+        self._settled_hooks.append((name or getattr(hook, "__name__", "hook"), hook))
+        return self
+
+    @property
+    def continues_used(self) -> int:
+        return self._continues
+
+    @property
+    def is_settled(self) -> bool:
+        return self._settled
+
+    # ── before_settle（可 continue 再跑一轮）──
+
+    def before_settle(self, ctx: dict | None = None) -> dict:
+        ctx = dict(ctx or {})
+        ctx.setdefault("session_id", self.session_id)
+        ctx.setdefault("passes", self._continues)
+        entries: list[str] = []
+        reasons: list[str] = []
+        trigger = ""
+        for name, hook in self._before_hooks:
+            try:
+                out = hook(ctx) or {}
+            except Exception as e:
+                # 订阅器/钩子失败永不破坏宿主流程——但失败必须可见（reason 留痕）
+                logger.warning(f"[settle] hook {name} failed (host flow unaffected): {e}")
+                reasons.append(f"{name}: 异常 {e}")
+                continue
+            if not isinstance(out, dict):
+                continue
+            # reason 记账与 continue 无关（stop/accept 等放行决策的失败可见性靠它）
+            if str(out.get("reason") or "").strip():
+                reasons.append(str(out["reason"]))
+            if out.get("continue") and str(out.get("entry") or "").strip():
+                entries.append(str(out["entry"]))
+                trigger = trigger or name
+        if entries:
+            if self._continues < self.max_continues:
+                self._continues += 1
+                record = SettleRecord(
+                    session_id=self.session_id, kind=EVENT_SETTLE_BEFORE,
+                    settled=False, entry="\n\n".join(entries),
+                    reason="; ".join(r for r in reasons if r),
+                    hook=trigger, passes=self._continues,
+                    meta={"max_continues": self.max_continues})
+                self._fire(record)
+                return {"settled": False, "entry": record.entry,
+                        "reason": record.reason, "hook": trigger,
+                        "passes": self._continues}
+            reasons.append(f"continue 已达上限 {self.max_continues}（防打转强制放行）")
+        record = SettleRecord(
+            session_id=self.session_id, kind=EVENT_SETTLE_BEFORE, settled=True,
+            reason="; ".join(r for r in reasons if r), hook=trigger,
+            passes=self._continues,
+            meta={"max_continues": self.max_continues})
+        self._fire(record)
+        return {"settled": True, "entry": "", "reason": record.reason,
+                "hook": trigger, "passes": self._continues}
+
+    # ── agent_settled（彻底结束，幂等一次）──
+
+    def mark_settled(self, ctx: dict | None = None) -> dict | None:
+        if self._settled:
+            return None
+        self._settled = True
+        ctx = dict(ctx or {})
+        ctx.setdefault("session_id", self.session_id)
+        ctx.setdefault("passes", self._continues)
+        for name, hook in self._settled_hooks:
+            try:
+                hook(ctx)
+            except Exception as e:
+                logger.warning(f"[settle] settled hook {name} failed "
+                               f"(host flow unaffected): {e}")
+        record = SettleRecord(
+            session_id=self.session_id, kind=EVENT_SETTLED, settled=True,
+            passes=self._continues,
+            meta={"max_continues": self.max_continues})
+        self._fire(record)
+        logger.info(f"[settle] agent_settled session={self.session_id} "
+                    f"continues={self._continues}/{self.max_continues}")
+        return record.as_dict()
+
+    # ── 事件发布（复用 TurnLifecycleBus 订阅器隔离纪律）──
+
+    def _fire(self, record: SettleRecord) -> None:
+        bus = self._bus
+        if bus is None:
+            return
+        try:
+            bus._fire(record.kind, record)   # 同一订阅面：逐个隔离不破坏宿主流
+        except Exception as e:               # pragma: no cover — 观测面兜底
+            logger.debug(f"[settle] event publish dropped {record.kind}: {e}")
+
+
+def make_repair_hook(validate, repair, name: str = "repair_loop") -> SettleHook:
+    """settle 挂点 × 三段式修复成环（Pi #2×#3）——「产出→校验→不过退回同会话修复」。
+
+    validate：callable(ctx) -> {"ok", "blocking", "issues"}（程序验收，如
+    fact_lock.check / doc_blank.scan 的输出）或固定 dict；
+    repair：repair_loop.RepairLoop 实例。
+    钩子行为：settle 前跑校验 → RepairLoop.step：
+    - action=repair → continue+结构化修复提示词（退回同会话继续修）；
+    - action=accept → 放行（含 stalled 无阻塞带遗留接受）；
+    - action=stop   → 放行但失败可见（reason 记「最低目标仍失败」）。
+    """
+
+    def repair_hook(ctx: dict):
+        validation = validate(ctx) if callable(validate) else dict(validate or {})
+        decision = repair.step(validation)
+        action = str(decision.get("action") or "")
+        if action == "repair":
+            return {"continue": True,
+                    "entry": str(decision.get("prompt") or ""),
+                    "reason": str(decision.get("reason") or "")}
+        return {"continue": False,
+                "reason": f"{action}: {decision.get('reason', '')}"}
+
+    repair_hook.__name__ = name
+    return repair_hook
 
 
 # ════════════════════════════════════════════════════════════════
