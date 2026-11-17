@@ -28,15 +28,23 @@ from typing import Any, AsyncGenerator, Optional
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletion
 
+from error_codes import vendor_compat
 from .circuit_breaker import CircuitBreaker
 from .models import ModelConfig, ModelProvider, ModelStats, TokenUsage
+from .queue import RequestQueue, RequestQueueError
 
 logger = logging.getLogger("model_gateway.gateway")
 
 
 class ModelGatewayError(Exception):
-    """模型网关异常基类"""
-    pass
+    """模型网关异常基类
+
+    Pi #6 错误归一（抄 piRetryErrorNormalizer 功能不抄机制）：携带结构化归一
+    产物 normalized（error_codes LLM供应商域码 + retryable 标记），上层重试/降级
+    决策**只看码**（retryable 属性），error 文案仅供人工排查。
+    """
+    normalized: Any = None   # error_codes.vendor_compat.NormalizedError | None
+    retryable: bool = False  # 可重试错误标记（结构化判据，非文案正则）
 
 
 class ModelNotFoundError(ModelGatewayError):
@@ -47,6 +55,29 @@ class ModelNotFoundError(ModelGatewayError):
 class AllEndpointsCircuitBrokenError(ModelGatewayError):
     """该模型所有端点均被熔断"""
     pass
+
+
+class CostTrackerAccountant:
+    """TokenUsage → agent.cost_tracker.CostTracker 持久台账入账适配（Pi #6）。
+
+    网关按端点单价精算 cost_usd → custom_cost 直接入账（台账 MODEL_PRICING
+    不覆盖私有端点定价，网关侧精算优先）。request_type="gateway" 与会话路径
+    （request_type="chat"）区分口径。
+    """
+
+    def __init__(self, tracker, session_id: str = "gateway"):
+        self._tracker = tracker
+        self._session_id = session_id
+
+    def record_usage(self, usage: TokenUsage) -> None:
+        self._tracker.record_usage(
+            model=usage.model_name,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            session_id=self._session_id,
+            request_type="gateway",
+            custom_cost=usage.cost_usd,
+        )
 
 
 class ModelGateway:
@@ -67,11 +98,20 @@ class ModelGateway:
         _round_robin_counters: 按model_name维护的轮询计数器
     """
 
-    def __init__(self, usage_log_size: int = 1000) -> None:
+    def __init__(self, usage_log_size: int = 1000, usage_accountant: Any = "auto",
+                 max_concurrent: int = 8, max_queue_depth: int = 32,
+                 queue_timeout: float = 30.0) -> None:
         """初始化模型网关
 
         Args:
             usage_log_size: 调用日志环形缓冲区大小，默认保留最近1000条
+            usage_accountant: 用量入账台账（Pi #6）——"auto"=懒创建
+                agent.cost_tracker.CostTracker 持久台账（成本可观测的地基）；
+                None=只留环形缓冲（零入账）；也可传 .record_usage(usage) 对象/
+                callable(usage)（测试注入替身）。
+            max_concurrent: 请求并发上限（Pi #6 排队与并发节流，默认 8）
+            max_queue_depth: 排队深度上限（超出拒绝，禁无限堆积）
+            queue_timeout: 排队等待上限秒（超出显式报因）
         """
         # model_name → [ModelConfig, ...] 按注册顺序存储
         self._models: dict[str, list[ModelConfig]] = defaultdict(list)
@@ -82,6 +122,11 @@ class ModelGateway:
         self._usage_log_size = usage_log_size
         # 轮询计数器：model_name → 当前索引
         self._round_robin_counters: dict[str, int] = defaultdict(int)
+        # Pi #6：用量入账台账 + 请求排队/并发节流
+        self._usage_accountant = usage_accountant
+        self._queue = RequestQueue(max_concurrent=max_concurrent,
+                                   max_depth=max_queue_depth,
+                                   queue_timeout=queue_timeout)
 
         logger.info("ModelGateway 初始化完成")
 
@@ -279,48 +324,64 @@ class ModelGateway:
         # 计时开始
         start_time = time.time()
 
-        try:
-            logger.info(
-                f"调用LLM: {config.provider.value}/{config.model_name} "
-                f"via {config.base_url} (stream={stream})"
-            )
+        # Pi #6 请求排队与并发节流：高峰排队等空位（slot 内含排队计量；
+        # 排队饱和/超时=RequestQueueError 直接上抛，不进调用失败计量）
+        async with self._queue.slot(model) as slot_info:
+            queue_wait_ms = slot_info["queue_wait_ms"]
+            try:
+                logger.info(
+                    f"调用LLM: {config.provider.value}/{config.model_name} "
+                    f"via {config.base_url} (stream={stream})"
+                )
 
-            response = await client.chat.completions.create(**call_kwargs)
+                response = await client.chat.completions.create(**call_kwargs)
 
-            # 流式模式：返回generator，计量在消费完成后由调用方处理
-            if stream:
+                # 流式模式：返回generator，计量在消费完成后由调用方处理
+                if stream:
+                    config.circuit_breaker.record_success()
+                    return response
+
+                # 非流式：记录计量
+                latency_ms = (time.time() - start_time) * 1000
+                usage = self._build_usage(config, response, latency_ms,
+                                          success=True,
+                                          queue_wait_ms=queue_wait_ms)
+                self._record_usage(usage)
                 config.circuit_breaker.record_success()
+
                 return response
 
-            # 非流式：记录计量
-            latency_ms = (time.time() - start_time) * 1000
-            usage = self._build_usage(config, response, latency_ms, success=True)
-            self._record_usage(usage)
-            config.circuit_breaker.record_success()
+            except Exception as e:
+                latency_ms = (time.time() - start_time) * 1000
+                # Pi #6 错误归一：供应商错误边界归一一次 → 结构化码+可重试标记
+                norm = self._normalize_error(e, config)
+                logger.error(
+                    f"LLM调用失败: {config.provider.value}/{config.model_name} "
+                    f"error={type(e).__name__}: {e} "
+                    f"(code={norm.code} kind={norm.kind} retryable={norm.retryable})"
+                )
 
-            return response
+                # 记录失败计量（含归一错误字段）
+                usage = TokenUsage(
+                    model_name=config.model_name,
+                    provider=config.provider.value,
+                    latency_ms=latency_ms,
+                    success=False,
+                    error_message=str(e),
+                    error_code=norm.code,
+                    error_kind=norm.kind,
+                    retryable=norm.retryable,
+                    queue_wait_ms=queue_wait_ms,
+                )
+                self._record_usage(usage)
+                config.circuit_breaker.record_failure()
 
-        except Exception as e:
-            latency_ms = (time.time() - start_time) * 1000
-            logger.error(
-                f"LLM调用失败: {config.provider.value}/{config.model_name} "
-                f"error={type(e).__name__}: {e}"
-            )
-
-            # 记录失败计量
-            usage = TokenUsage(
-                model_name=config.model_name,
-                provider=config.provider.value,
-                latency_ms=latency_ms,
-                success=False,
-                error_message=str(e),
-            )
-            self._record_usage(usage)
-            config.circuit_breaker.record_failure()
-
-            raise ModelGatewayError(
-                f"模型 '{model}' 调用失败({config.endpoint_id()}): {e}"
-            ) from e
+                err = ModelGatewayError(
+                    f"模型 '{model}' 调用失败({config.endpoint_id()}): {e}"
+                )
+                err.normalized = norm
+                err.retryable = norm.retryable
+                raise err from e
 
     # ── 流式调用辅助 ──────────────────────────────────────────────
 
@@ -360,52 +421,65 @@ class ModelGateway:
         input_tokens = 0
         output_tokens = 0
 
-        try:
-            stream = await client.chat.completions.create(**call_kwargs)
-            async for chunk in stream:  # type: ignore
-                if chunk.choices and chunk.choices[0].delta.content:
-                    content = chunk.choices[0].delta.content
-                    collected_content += content
-                    yield content
+        # Pi #6 请求排队与并发节流：流式期间全程持位（消费完才释放）
+        async with self._queue.slot(model) as slot_info:
+            queue_wait_ms = slot_info["queue_wait_ms"]
+            try:
+                stream = await client.chat.completions.create(**call_kwargs)
+                async for chunk in stream:  # type: ignore
+                    if chunk.choices and chunk.choices[0].delta.content:
+                        content = chunk.choices[0].delta.content
+                        collected_content += content
+                        yield content
 
-                # 流式usage（部分provider支持）
-                if hasattr(chunk, "usage") and chunk.usage:
-                    input_tokens = chunk.usage.prompt_tokens or input_tokens
-                    output_tokens = chunk.usage.completion_tokens or output_tokens
+                    # 流式usage（部分provider支持）
+                    if hasattr(chunk, "usage") and chunk.usage:
+                        input_tokens = chunk.usage.prompt_tokens or input_tokens
+                        output_tokens = chunk.usage.completion_tokens or output_tokens
 
-            # 流结束，记录计量
-            latency_ms = (time.time() - start_time) * 1000
-            total_tokens = input_tokens + output_tokens
-            cost = self._calculate_cost(config, input_tokens, output_tokens)
+                # 流结束，记录计量
+                latency_ms = (time.time() - start_time) * 1000
+                total_tokens = input_tokens + output_tokens
+                cost = self._calculate_cost(config, input_tokens, output_tokens)
 
-            usage = TokenUsage(
-                model_name=config.model_name,
-                provider=config.provider.value,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                total_tokens=total_tokens,
-                cost_usd=cost,
-                latency_ms=latency_ms,
-                success=True,
-            )
-            self._record_usage(usage)
-            config.circuit_breaker.record_success()
+                usage = TokenUsage(
+                    model_name=config.model_name,
+                    provider=config.provider.value,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    total_tokens=total_tokens,
+                    cost_usd=cost,
+                    latency_ms=latency_ms,
+                    success=True,
+                    queue_wait_ms=queue_wait_ms,
+                )
+                self._record_usage(usage)
+                config.circuit_breaker.record_success()
 
-        except Exception as e:
-            latency_ms = (time.time() - start_time) * 1000
-            usage = TokenUsage(
-                model_name=config.model_name,
-                provider=config.provider.value,
-                latency_ms=latency_ms,
-                success=False,
-                error_message=str(e),
-            )
-            self._record_usage(usage)
-            config.circuit_breaker.record_failure()
+            except Exception as e:
+                latency_ms = (time.time() - start_time) * 1000
+                # Pi #6 错误归一：结构化码+可重试标记（决策只看码）
+                norm = self._normalize_error(e, config)
+                usage = TokenUsage(
+                    model_name=config.model_name,
+                    provider=config.provider.value,
+                    latency_ms=latency_ms,
+                    success=False,
+                    error_message=str(e),
+                    error_code=norm.code,
+                    error_kind=norm.kind,
+                    retryable=norm.retryable,
+                    queue_wait_ms=queue_wait_ms,
+                )
+                self._record_usage(usage)
+                config.circuit_breaker.record_failure()
 
-            raise ModelGatewayError(
-                f"模型 '{model}' 流式调用失败: {e}"
-            ) from e
+                err = ModelGatewayError(
+                    f"模型 '{model}' 流式调用失败: {e}"
+                )
+                err.normalized = norm
+                err.retryable = norm.retryable
+                raise err from e
 
     # ── 查询接口 ──────────────────────────────────────────────────
 
@@ -489,6 +563,10 @@ class ModelGateway:
                 "latency_ms": round(u.latency_ms, 2),
                 "success": u.success,
                 "error_message": u.error_message,
+                "error_code": u.error_code,
+                "error_kind": u.error_kind,
+                "retryable": u.retryable,
+                "queue_wait_ms": round(u.queue_wait_ms, 3),
                 "timestamp": u.timestamp,
             }
             for u in reversed(recent)
@@ -502,6 +580,7 @@ class ModelGateway:
         response: ChatCompletion,
         latency_ms: float,
         success: bool,
+        queue_wait_ms: float = 0.0,
     ) -> TokenUsage:
         """从ChatCompletion响应构建TokenUsage记录
 
@@ -509,7 +588,8 @@ class ModelGateway:
             config: 模型配置
             response: OpenAI ChatCompletion响应
             latency_ms: 调用延迟（毫秒）
-            success: 是否成功
+            success: 调用是否成功
+            queue_wait_ms: 排队等待耗时（Pi #6 计量）
 
         Returns:
             TokenUsage计量记录
@@ -534,7 +614,28 @@ class ModelGateway:
             cost_usd=cost,
             latency_ms=latency_ms,
             success=success,
+            queue_wait_ms=queue_wait_ms,
         )
+
+    @staticmethod
+    def _normalize_error(e: Exception, config: ModelConfig):
+        """Pi #6 错误归一：供应商错误边界归一一次（error_codes.vendor_compat）。
+
+        OpenAI SDK 异常带 status_code/body → 归一到结构化码+retryable 标记
+        （可重试错误标记的 SoulMate 版：结构化判据，不抄 piRetryErrorNormalizer
+        的文案正则改写机制）。归一自身失败只降级为 UNKNOWN（禁破坏错误路径）。
+        """
+        try:
+            return vendor_compat.normalize(
+                provider=config.provider.value,
+                status=getattr(e, "status_code", None),
+                payload=getattr(e, "body", None) or getattr(e, "message", None),
+                exc=e,
+            )
+        except Exception as ne:  # pragma: no cover — 归一兜底
+            logger.warning(f"错误归一失败（降级 UNKNOWN）: {ne}")
+            return vendor_compat.normalize(
+                provider=config.provider.value, exc=e)
 
     def _calculate_cost(
         self,
@@ -559,7 +660,7 @@ class ModelGateway:
         return round(cost, 8)
 
     def _record_usage(self, usage: TokenUsage) -> None:
-        """记录调用计量到统计和日志
+        """记录调用计量到统计和日志，并**入账**持久台账（Pi #6 用量统计入账）。
 
         Args:
             usage: 单次调用计量记录
@@ -574,9 +675,35 @@ class ModelGateway:
         if len(self._usage_log) > self._usage_log_size:
             self._usage_log = self._usage_log[-self._usage_log_size:]
 
+        # Pi #6 用量入账：网关计量 → 持久成本台账（成本可观测的地基）。
+        # best-effort（台账故障绝不破坏调用流）但失败必须可见（warning）。
+        self._account_usage(usage)
+
         logger.info(
             f"计量记录: {usage.model_name} "
             f"tokens={usage.input_tokens}+{usage.output_tokens}={usage.total_tokens} "
             f"cost=${usage.cost_usd:.6f} latency={usage.latency_ms:.0f}ms "
             f"success={usage.success}"
         )
+
+    def _account_usage(self, usage: TokenUsage) -> None:
+        """入账到台账（"auto"=懒创建 CostTracker；None=不入账）。"""
+        accountant = self._usage_accountant
+        if accountant is None:
+            return
+        if accountant == "auto":
+            try:
+                from agent.cost_tracker import CostTracker
+                accountant = CostTrackerAccountant(CostTracker())
+            except Exception as e:
+                logger.warning(f"用量台账不可用（降级只留环形缓冲）: {e}")
+                self._usage_accountant = None
+                return
+            self._usage_accountant = accountant
+        try:
+            if callable(accountant):
+                accountant(usage)
+            else:
+                accountant.record_usage(usage)
+        except Exception as e:
+            logger.warning(f"用量入账失败（调用流不受影响，台账故障可见）: {e}")

@@ -93,6 +93,12 @@ class TokenUsage:
     timestamp: float = field(default_factory=time.time)
     success: bool = True
     error_message: str = ""
+    # ── Pi #6 增量（错误归一 + 排队计量）：结构化错误字段（决策只看码，
+    # error_message 保留原文仅供人工排查）──
+    error_code: int = 0          # error_codes ErrorCode（LLM供应商域），0=无
+    error_kind: str = ""         # utils.llm_retry 九态分类码（记账口径）
+    retryable: bool = False      # 可重试错误标记（结构化判据，非文案正则）
+    queue_wait_ms: float = 0.0   # 请求排队等待耗时（并发节流可观测）
 
 
 @dataclass

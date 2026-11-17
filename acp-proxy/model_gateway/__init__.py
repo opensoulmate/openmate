@@ -30,11 +30,13 @@
 from .circuit_breaker import CircuitBreaker, CircuitState
 from .gateway import (
     AllEndpointsCircuitBrokenError,
+    CostTrackerAccountant,
     ModelGateway,
     ModelGatewayError,
     ModelNotFoundError,
 )
 from .models import ModelConfig, ModelProvider, ModelStats, TokenUsage
+from .queue import RequestQueue, RequestQueueError
 
 __all__ = [
     # 核心网关
@@ -47,6 +49,11 @@ __all__ = [
     # 熔断器
     "CircuitBreaker",
     "CircuitState",
+    # 请求排队与并发节流（Pi #6）
+    "RequestQueue",
+    "RequestQueueError",
+    # 用量入账（Pi #6）
+    "CostTrackerAccountant",
     # 异常
     "ModelGatewayError",
     "ModelNotFoundError",
