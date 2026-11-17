@@ -235,13 +235,16 @@ class TestSoulmateWiring:
         assert '"permission": "sandbox-restricted"' in src
 
     def test_code_mode_inner_has_deny_reason(self):
-        src = inspect.getsource(SoulMateAgent._code_mode_tool_call)
+        # Pi #1 拆出钩子面包裹层后执行主体改名 _code_mode_tool_call_inner
+        # （sandbox 双保险语义原样在执行体，包裹层不含执行逻辑）
+        src = inspect.getsource(SoulMateAgent._code_mode_tool_call_inner)
         assert "self._sandbox_policy.deny_reason(" in src
 
     def test_all_three_callsites_present(self):
         """三个调用点收敛断言：face收缩+主循环兜底+code-mode内层双保险"""
         hits = 0
-        for fn in (SoulMateAgent._run_llm_with_tools, SoulMateAgent._code_mode_tool_call):
+        for fn in (SoulMateAgent._run_llm_with_tools,
+                   SoulMateAgent._code_mode_tool_call_inner):
             hits += inspect.getsource(fn).count("self._sandbox_policy.deny_reason(")
         assert hits == 2  # 主循环 + code-mode内层
 

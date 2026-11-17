@@ -1428,8 +1428,11 @@ class SoulMateAgent:
     )
 
     async def _code_mode_tool_call(self, session_id: str, func_name: str, func_args: dict, cwd: str) -> str:
-        """批量化内层工具调用入口（Pi #1 钩子面包裹）：before_tool_call 可
-        block/改参（改参后过门禁——不绕审批），after_tool_call 可覆盖结果。"""
+        """批量化内层工具调用入口（Pi #1 钩子面 + #9 阶段门禁包裹）：before_tool_call
+        可 block/改参（改参后过门禁——不绕审批），after_tool_call 可覆盖结果。"""
+        _reason = self._tool_phase_gate().deny_reason(session_id, func_name)
+        if _reason:
+            return f"[被拦截:phase-blocked] {_reason}"
         _bh = await self._trigger_tool_hook("before_tool_call", {
             "session_id": session_id, "tool": func_name,
             "args": dict(func_args)})
@@ -3098,6 +3101,15 @@ ACP代理目录: {cwd}/acp-proxy（后端 Python 代码在此）
 You can send files to the user natively: to deliver a file, write a brief confirmation message (e.g. "文件已发送，请查收"), then include MEDIA:/absolute/path/to/file on a new line. The gateway extracts the tag, strips it, and sends the file as a download card. Always write some text before the MEDIA: tag — never output a bare MEDIA: tag alone. Use search_files first if you don't know the exact path. Do NOT paste file contents into chat."""
 
     # ── Pi #1 钩子面（plugin/hooks 注册中心消费方——「写了≠接线了」修复）──
+
+    def _tool_phase_gate(self):
+        """阶段工具门禁（Pi #9 setAllowedTools：拦截替代改清单）lazy-init。"""
+        gate = getattr(self, "_phase_gate_inst", None)
+        if gate is None:
+            from agent.sandbox_policy import AllowedToolsGate
+            gate = AllowedToolsGate()
+            self._phase_gate_inst = gate
+        return gate
 
     async def _trigger_tool_hook(self, hook_point: str, data: dict):
         """触发 plugin/hooks 钩子点（Pi #1 钩子面）。
@@ -5311,32 +5323,42 @@ You can send files to the user natively: to deliver a file, write a brief confir
                         _bh = await self._trigger_tool_hook("before_tool_call", {
                             "session_id": session_id, "tool": func_name,
                             "args": dict(func_args)})
+                        _block_reason = ""
+                        _block_src = "hook-blocked"
                         if _bh is not None:
                             func_args = _bh.data.get("args", func_args) or func_args
                             if _bh.cancelled:
-                                _hook_reason = str(
+                                _block_reason = str(
                                     _bh.cancel_reason or _bh.data.get("cancel_reason")
                                     or "before_tool_call 钩子拦截")
-                                logger.warning(
-                                    f"[tool-hooks] before_tool_call 拦截: "
-                                    f"{func_name} ({_hook_reason})")
-                                tool_results.append({
-                                    "tool_call_id": tc.get("id", ""),
-                                    "role": "tool",
-                                    "content": self._process_tool_output(
-                                        func_name, tc.get("id", ""),
-                                        f"[被拦截:hook] {_hook_reason}"),
-                                })
-                                all_tool_calls.append({
-                                    "name": func_name,
-                                    "arguments": func_args,
-                                    "result_preview": _hook_reason[:200],
-                                    "permission": "hook-blocked",
-                                })
-                                self._turn_read_view.record_tool(
-                                    session_id, func_name, func_args,
-                                    ok=False, error=_hook_reason)
-                                continue
+                        if not _block_reason:
+                            # ── Pi #9 阶段门禁（setAllowedTools：拦截替代改清单
+                            # ——工具清单恒定省前缀缓存，调用期拦截；未配置=零行为
+                            # 变化）。与钩子链同一拦截点，权限门禁之前 ──
+                            _block_reason = self._tool_phase_gate().deny_reason(
+                                session_id, func_name)
+                            _block_src = "phase-blocked"
+                        if _block_reason:
+                            logger.warning(
+                                f"[tool-hooks] {_block_src} 拦截: "
+                                f"{func_name} ({_block_reason})")
+                            tool_results.append({
+                                "tool_call_id": tc.get("id", ""),
+                                "role": "tool",
+                                "content": self._process_tool_output(
+                                    func_name, tc.get("id", ""),
+                                    f"[被拦截:{_block_src}] {_block_reason}"),
+                            })
+                            all_tool_calls.append({
+                                "name": func_name,
+                                "arguments": func_args,
+                                "result_preview": _block_reason[:200],
+                                "permission": _block_src,
+                            })
+                            self._turn_read_view.record_tool(
+                                session_id, func_name, func_args,
+                                ok=False, error=_block_reason)
+                            continue
 
                         # ── P0-3 工具权限引擎门禁（AgentScope PermissionEngine×kilocode分层）──
                         # opensoul immune评估：deny=合成阻断结果（open-webui三态，loop不断）；

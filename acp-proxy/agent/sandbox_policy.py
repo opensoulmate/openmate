@@ -359,3 +359,115 @@ def default_policy() -> SandboxPolicy:
     if _PROCESS_DEFAULT is None:
         _PROCESS_DEFAULT = SandboxPolicy()
     return _PROCESS_DEFAULT
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 固定工具清单 + 阶段门禁（Pi 取长补短 #9：setAllowedTools 语义）
+# ═══════════════════════════════════════════════════════════════════
+#
+# 来源：OpenBidKit fixedToolList 模式——「工具清单与系统提示词恒定（复用请求
+# 前缀缓存），阶段权限改在 beforeToolCall 链上拦截（抛'当前阶段不能调用 X'）」。
+# 与上方 filter_tools 的工具面收缩**互补**（kilocode："按环境裁剪工具面优于
+# 给了再拦" vs Pi："清单恒定省前缀缓存钱，拦截替代改清单"）：
+# - 工具清单恒定：不从 all_tools 裁剪（前缀缓存不失配）；
+# - 阶段白名单：set_allowed(phase, tools) 登记各阶段可用工具，set_phase 切段；
+# - 拦截点=before_tool_call 钩子面同一位置（deny_reason 纯函数消费）。
+#
+# 语义：未配置=零行为变化（deny_reason 恒空）；会话级配置 > 全局配置；
+# 阶段未登记白名单=不限制（只登记了才拦）。
+
+
+class AllowedToolsGate:
+    """固定工具清单 + 阶段门禁（setAllowedTools：拦截替代改清单）。"""
+
+    def __init__(self):
+        self._global_allowed: dict[str, frozenset[str]] = {}
+        self._global_phase: str = ""
+        self._sessions: dict[str, dict] = {}   # sid -> {"phase", "allowed": {phase: set}}
+
+    # ── 配置面 ─────────────────────────────────────────────────────
+
+    def set_allowed(self, phase: str, tools, session_id: str = "") -> dict:
+        """登记某阶段的工具白名单（session_id 空=全局；tools 空列表=该阶段零工具）。"""
+        phase = str(phase or "").strip()
+        if not phase:
+            raise ValueError("phase 必填")
+        allow = frozenset(str(t) for t in (tools or ()))
+        if session_id:
+            st = self._sessions.setdefault(
+                str(session_id), {"phase": "", "allowed": {}})
+            st["allowed"][phase] = allow
+        else:
+            self._global_allowed[phase] = allow
+        return {"phase": phase, "allowed": sorted(allow),
+                "scope": str(session_id) or "global"}
+
+    def set_phase(self, session_id: str, phase: str) -> dict:
+        """切会话当前阶段（门禁按该阶段白名单拦截）。"""
+        phase = str(phase or "").strip()
+        if not phase:
+            raise ValueError("phase 必填")
+        if session_id:
+            st = self._sessions.setdefault(
+                str(session_id), {"phase": "", "allowed": {}})
+            st["phase"] = phase
+        else:
+            self._global_phase = phase
+        return {"session_id": str(session_id) or "global", "phase": phase}
+
+    def clear(self, session_id: str = "") -> int:
+        """清配置（会话级或全局）。返回清除的阶段数。"""
+        if session_id:
+            st = self._sessions.pop(str(session_id), None)
+            return len(st["allowed"]) if st else 0
+        n = len(self._global_allowed)
+        self._global_allowed.clear()
+        self._global_phase = ""
+        return n
+
+    # ── 拦截面（before_tool_call 钩子面同位消费）───────────────────
+
+    def deny_reason(self, session_id: str, tool: str) -> str:
+        """""=放行；非空=拦截理由（显式可见，禁静默）。
+
+        会话级阶段配置 > 全局阶段配置；阶段未登记白名单=不限制。
+        """
+        sid = str(session_id or "")
+        st = self._sessions.get(sid)
+        phase = (st or {}).get("phase") or self._global_phase
+        if not phase:
+            return ""
+        allowed = ((st or {}).get("allowed") or {}).get(phase)
+        if allowed is None:
+            allowed = self._global_allowed.get(phase)
+        if allowed is None:
+            return ""   # 该阶段未登记白名单=不限制
+        tool = str(tool or "")
+        if tool in allowed:
+            return ""
+        return (f"当前阶段 {phase!r} 不能调用 {tool!r}"
+                f"（setAllowedTools 阶段门禁拦截——工具清单恒定，调用期拦截）")
+
+    def make_hook(self):
+        """before_tool_call 钩子形态（plugin/hooks 钩子面可直接注册）。"""
+
+        def phase_gate_hook(ctx):
+            reason = self.deny_reason(
+                ctx.data.get("session_id", ""), ctx.data.get("tool", ""))
+            if reason:
+                ctx.cancel(reason)
+
+        phase_gate_hook.__name__ = "phase_gate"
+        return phase_gate_hook
+
+    def snapshot(self) -> dict:
+        return {
+            "global_phase": self._global_phase,
+            "global_allowed": {p: sorted(v)
+                               for p, v in self._global_allowed.items()},
+            "sessions": {
+                sid: {"phase": st["phase"],
+                      "allowed": {p: sorted(v) for p, v in st["allowed"].items()}}
+                for sid, st in self._sessions.items()
+            },
+        }
