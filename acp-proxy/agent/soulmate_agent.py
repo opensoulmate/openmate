@@ -191,8 +191,14 @@ from agent.steering import (
     ABORT_MESSAGE,
     MAX_QUEUE_DEPTH,
     ActivityStore,
+    AutoAnswerBudget,
     SessionActivity,
     SteeringQueue,
+    ask_user_tool_def,
+    build_ask_user_payload,
+    build_failure_confirm_payload,
+    build_failure_report,
+    report_failure_tool_def,
 )
 from agent.context import SessionContext
 from agent.layered_timeouts import TimeoutConfig
@@ -4515,7 +4521,12 @@ You can send files to the user natively: to deliver a file, write a brief confir
         mcp_resource_tools = resource_tool_defs() if getattr(self, "_mcp_resource_servers", None) else []
         # ── 插件 MCP 工具 + plugin_dev（自我开发闭环）：UI 与对话共用同一工具表 ──
         plugin_tools = await self._plugin_tools_defs()
-        all_tools = builtin_tools + (mcp_tools or []) + plugin_tools + mcp_resource_tools + evolution_tools + [clarify_tool]
+        # 人机对话工具对（Pi 取长补短 #10）：ask_user=执行期单问决策（2-5 选项+
+        # 唯一 custom 项）/ report_failure=失败终止需确认（auto-answer 有界递减，
+        # 治「Agent 私自放弃任务」）。执行体 agent/steering.py 纯函数核心；执行面
+        # 与 clarify 共用提问卡 payload 形态 + pending_choices 回流通道。
+        human_tools = [ask_user_tool_def(), report_failure_tool_def()]
+        all_tools = builtin_tools + (mcp_tools or []) + plugin_tools + mcp_resource_tools + evolution_tools + [clarify_tool] + human_tools
         # ── kilocode supplement3 #15 网络受限工具面收缩（registry直接不暴露网络类
         # 工具，"按环境裁剪工具面优于给了再拦"）：受限会话的batch_execute(code-mode)/
         # web_search/web_extract/MCP工具不进LLM工具列表；被裁清单显式落日志（mem0
@@ -5224,6 +5235,16 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             # P1交互式提问卡（多问题/多选）：handler收口为_handle_clarify方法
                             # （可单测），单问题/多问题两形态共用同一pending_choices回流通道
                             result = await self._handle_clarify(session_id, func_args)
+
+                        elif func_name == "ask_user":
+                            # Pi #10 人机对话工具：执行期单问决策（2-5 选项+唯一
+                            # custom）；与 clarify 共用提问卡回流，无人值守不阻塞
+                            result = await self._handle_ask_user(session_id, func_args)
+
+                        elif func_name == "report_failure":
+                            # Pi #10 人机对话工具：失败终止需确认（auto-answer 有界
+                            # 递减）——治「Agent 私自放弃任务」，失败必须可见
+                            result = await self._handle_report_failure(session_id, func_args)
 
                         elif func_name == "todo":
                             # 简单的内存任务列表
@@ -7827,47 +7848,133 @@ You can send files to the user natively: to deliver a file, write a brief confir
             "choices": _clean_opts(options),
         }, ""
 
+    async def _push_choice_card(self, session_id: str, payload: dict) -> None:
+        """提问卡下发（clarify / ask_user / report_failure 共用）：流式推前端+落库。
+
+        落库：提问卡此前只走流式推送——历史里没有它，切页回来提问卡消失。
+        存与流式完全相同的 JSON 文本，历史还原按 type==='choice' 同解渲染。
+        """
+        # 通过 session_update 推送 choice 类型消息给前端
+        if self._client is not None:
+            await self._client.session_update(
+                session_id=session_id,
+                update=acp.update_agent_message_text(json.dumps(payload)),
+            )
+        try:
+            self._save_message(
+                session_id,
+                "assistant",
+                json.dumps(payload, ensure_ascii=False),
+                metadata='{"kind":"choice_card"}',
+            )
+        except Exception as _e:
+            logger.warning(f"提问卡落库失败: {_e}")
+
+    async def _await_choice(self, session_id: str) -> str:
+        """等待用户作答（pending_choices 回流，上限 CLARIFY_WAIT_TIMEOUT_S）。
+
+        Pi #7/#10 合流：等待用户期间暂停 run_guard 无进展计时（ask-user 等待期
+        暂停——等用户不算无进展），作答/超时一律恢复。中途插话不被阻塞（运行中
+        消息走 steering 队列，turn 间隙照常 drain 注入）。
+        """
+        tools = getattr(self, "_guard_tools_inst", None)
+        if tools is not None:
+            tools.pause_guard(session_id)
+        future = asyncio.get_event_loop().create_future()
+        self._pending_choices[session_id] = future
+        try:
+            return await asyncio.wait_for(future, timeout=self.CLARIFY_WAIT_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            return f"用户未在{int(self.CLARIFY_WAIT_TIMEOUT_S)}秒内选择，请继续"
+        finally:
+            self._pending_choices.pop(session_id, None)
+            if tools is not None:
+                tools.resume_guard(session_id)
+
     async def _handle_clarify(self, session_id: str, func_args: dict) -> str:
         """clarify工具执行面：推提问卡给前端 + 等待用户作答（pending_choices回流）。"""
         try:
             payload, err = self._build_clarify_payload(func_args)
             if err or payload is None:
                 return err or "clarify参数错误"
-            # 通过 session_update 推送 choice 类型消息给前端
-            if self._client is not None:
-                await self._client.session_update(
-                    session_id=session_id,
-                    update=acp.update_agent_message_text(json.dumps(payload)),
-                )
-            # 落库：提问卡此前只走流式推送——历史里没有它，切页回来提问卡消失。
-            # 存与流式完全相同的 JSON 文本，历史还原按 type==='choice' 同解渲染。
-            try:
-                self._save_message(
-                    session_id,
-                    "assistant",
-                    json.dumps(payload, ensure_ascii=False),
-                    metadata='{"kind":"choice_card"}',
-                )
-            except Exception as _e:
-                logger.warning(f"clarify 提问卡落库失败: {_e}")
-            if "questions" in payload:
-                result = (f"已向用户展示提问卡: {payload['text']} "
-                          f"(共{len(payload['questions'])}个问题，等待用户作答)")
-            else:
-                options = payload.get("choices", [])
-                result = f"已向用户展示选择菜单: {payload['text']} (共{len(options)}个选项，等待用户选择)"
-            # 等待用户作答（上限 CLARIFY_WAIT_TIMEOUT_S）
-            future = asyncio.get_event_loop().create_future()
-            self._pending_choices[session_id] = future
-            try:
-                result = await asyncio.wait_for(future, timeout=self.CLARIFY_WAIT_TIMEOUT_S)
-            except asyncio.TimeoutError:
-                result = f"用户未在{int(self.CLARIFY_WAIT_TIMEOUT_S)}秒内选择，请继续"
-            finally:
-                self._pending_choices.pop(session_id, None)
-            return result
+            await self._push_choice_card(session_id, payload)
+            return await self._await_choice(session_id)
         except Exception as e:
             return f"clarify失败: {e}"
+
+    def _auto_answer_budget(self, session_id: str) -> AutoAnswerBudget:
+        """autoAnswer 递减预算（Pi #10）：每会话一份，lazy-init 兼容 __new__ 裸实例。"""
+        store = getattr(self, "_auto_answer_budgets", None)
+        if store is None:
+            store = {}
+            self._auto_answer_budgets = store
+        b = store.get(session_id)
+        if b is None:
+            b = AutoAnswerBudget()
+            store[session_id] = b
+        return b
+
+    async def _handle_ask_user(self, session_id: str, func_args: dict) -> str:
+        """ask_user 执行面（Pi #10）：单问 2-5 选项+唯一 custom，等待用户拍板。
+
+        无人值守（无客户端回合：唤醒/定时/微信/子代理）**不阻塞等待**——直接给
+        假设指引（治「clarify 阻塞」），由调用方按最稳妥假设继续并自报假设。
+        """
+        try:
+            payload, err = build_ask_user_payload(
+                func_args.get("question", ""), func_args.get("options") or [])
+            if err or payload is None:
+                return err or "ask_user参数错误"
+            if self._client is None:
+                return ("【无人值守】无法向用户提问——请按最稳妥的默认假设继续推进，"
+                        "并在最终结果中明确说明所做假设；不要空等。")
+            await self._push_choice_card(session_id, payload)
+            answer = await self._await_choice(session_id)
+            return f"用户回答：{answer}"
+        except Exception as e:
+            return f"ask_user失败: {e}"
+
+    async def _handle_report_failure(self, session_id: str, func_args: dict) -> str:
+        """report_failure 执行面（Pi #10）：结构化失败报告+**终止需确认**。
+
+        三路径（治「Agent 私自放弃任务」）：
+        - mode=direct：直接失败终止（不等确认，完整留痕可见）；
+        - confirm 有人值守：确认卡（接受失败终止/继续尝试/自定义指导）等用户拍板；
+        - confirm 无人值守：auto-answer 自动确认**有界递减**（AutoAnswerBudget），
+          预算耗尽后代用户拍板被拒——改为继续尝试或最低目标收尾，禁假称完成。
+        """
+        try:
+            reason = str(func_args.get("reason", "") or "").strip()
+            if not reason:
+                return "report_failure参数错误：reason 必填（失败必须可见，禁空泛放弃）"
+            mode = str(func_args.get("mode", "") or "confirm").strip().lower()
+            if mode not in ("confirm", "direct"):
+                return f"report_failure参数错误：mode 仅支持 confirm|direct，收到 {mode!r}"
+            done = str(func_args.get("done", "") or "")
+            remaining = str(func_args.get("remaining", "") or "")
+            blocked_by = str(func_args.get("blocked_by", "") or "")
+            report = build_failure_report(
+                reason, done=done, remaining=remaining, blocked_by=blocked_by)
+            if mode == "direct":
+                return (report + "\n【direct 模式：直接失败终止（不等用户确认，留痕可见）"
+                        "——请如实向用户转述以上失败报告，禁假称完成】")
+            if self._client is None:
+                take = self._auto_answer_budget(session_id).take()
+                if take["allowed"]:
+                    return (report + "\n【无人值守：auto-answer 自动确认失败终止（剩余自动"
+                            f"确认预算 {take['remaining']}）——留痕可见，请如实向用户转述"
+                            "失败报告，禁假称完成】")
+                return (report + "\n【无人值守：自动确认预算已耗尽——无法代用户确认终止。"
+                        "请勿放弃任务：换方法继续尝试，或以最低目标收尾交付已有产物"
+                        "（禁假称完成）】")
+            payload = build_failure_confirm_payload(
+                reason, done=done, remaining=remaining)
+            await self._push_choice_card(session_id, payload)
+            answer = await self._await_choice(session_id)
+            return (report + f"\n\n用户决定：{answer}\n（按用户决定执行：接受失败终止→"
+                    "如实收尾并转述失败报告；继续尝试→继续推进；其他→按用户指导办）")
+        except Exception as e:
+            return f"report_failure失败: {e}"
 
     def resolve_choice(self, session_id: str, choice_result: str) -> bool:
         """用户选择后调用，唤醒等待中的clarify工具

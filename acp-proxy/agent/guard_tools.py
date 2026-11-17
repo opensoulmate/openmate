@@ -160,6 +160,27 @@ class GuardTools:
                 self._states.pop(next(iter(self._states)))
         return st
 
+    # ── 人机等待合流（Pi #10：ask_user/clarify 等用户期间暂停无进展看门狗）──
+
+    def pause_guard(self, session_id: str = "") -> bool:
+        """等待用户作答期间暂停无进展计时（Pi 同款：ask-user 等待期暂停）。
+
+        守卫未启用（会话没建过 run_guard）时 no-op——不为等待凭空建守卫状态。
+        """
+        st = self._states.get(str(session_id or "default"))
+        if not st:
+            return False
+        st["guard"].pause()
+        return True
+
+    def resume_guard(self, session_id: str = "") -> bool:
+        """作答回来恢复计时（暂停时长不计入无进展时长）。"""
+        st = self._states.get(str(session_id or "default"))
+        if not st:
+            return False
+        st["guard"].resume()
+        return True
+
     # ── run_guard ────────────────────────────────────────────────────
 
     def _run_guard(self, args: dict, session_id: str) -> str:

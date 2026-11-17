@@ -338,8 +338,16 @@ class TestWiringPins:
         assert '"allow_custom": {"type": "boolean"' in src
 
     def test_timeout_constant_single_source(self):
+        """等待超时常量唯一来源=CLARIFY_WAIT_TIMEOUT_S（可覆写）。
+
+        Pi #10 整合后等待逻辑收口 _await_choice（clarify/ask_user/report_failure
+        共用——同一次等待同一超时同一 run_guard 暂停语义），常量在共用等待处消费；
+        _handle_clarify 必须路由到共用等待（不再各自内联 wait）。
+        """
+        src_wait = inspect.getsource(SoulMateAgent._await_choice)
+        assert "self.CLARIFY_WAIT_TIMEOUT_S" in src_wait
         src = inspect.getsource(SoulMateAgent._handle_clarify)
-        assert "self.CLARIFY_WAIT_TIMEOUT_S" in src
+        assert "self._await_choice(session_id)" in src
 
     def test_payload_shape_constant_type_choice(self):
         """两形态同走 type:"choice" 通道（前端既有解析面）"""

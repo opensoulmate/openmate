@@ -24,6 +24,22 @@ from typing import Optional
 import logging
 logger = logging.getLogger("acp-agent.steering")
 
+# ── 人机对话工具（Pi 取长补短 #10：ask-user 2–5 选项+唯一 custom /
+# report-failure 终止需确认、autoAnswer 递减）——与上方插话队列同属
+# human-in-the-loop 面：插话=运行中用户插嘴，ask_user=运行中 Agent 问用户，
+# report_failure=Agent 放弃前必须过用户确认（治「clarify 阻塞、Agent 私自放弃」）──
+ASK_USER_TOOL = "ask_user"
+REPORT_FAILURE_TOOL = "report_failure"
+# Pi ask-user：唯一 custom 项 id（系统追加，用户选项禁用该保留字）
+CUSTOM_OPTION_ID = "custom"
+# report-failure 确认卡选项（终止需确认双模式：confirm=等确认 / direct=直接失败）
+FAILURE_ACCEPT_ID = "accept_failure"
+FAILURE_KEEP_TRYING_ID = "keep_trying"
+ASK_USER_MIN_OPTIONS = 2
+ASK_USER_MAX_OPTIONS = 5
+# autoAnswerAllowed 递减初值（无人值守自动确认有界，耗尽后禁止代用户拍板）
+DEFAULT_AUTO_ANSWER_BUDGET = 2
+
 # Khoj abort_message=END_EVENT 语义：队列中出现该文本 → 取消当前任务
 ABORT_MESSAGE = "/abort"
 # nanobot _MAX_INJECTIONS_PER_TURN：每个turn间隙最多注入几条插话
@@ -279,3 +295,174 @@ class ActivityStore:
                 "steer_injected_total": sum(s["steer_injected"] for s in sessions),
             },
         }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 人机对话工具（Pi 取长补短 #10）——ask_user / report_failure 参数面
+# 纯函数核心（独立可测）；执行面在 soulmate_agent（复用 clarify 提问卡
+# payload 形态 + pending_choices 回流通道，前端零改动）。
+# ═══════════════════════════════════════════════════════════════════
+
+
+def build_ask_user_payload(question: str, options) -> tuple[Optional[dict], str]:
+    """Pi ask-user 语义：单问、2–5 个有效选项（id/label 必填）、**唯一 custom 项**
+    （系统自动追加，用户选项禁用保留字 'custom'）。
+
+    返回 (payload, error)：error 非空=参数错误（调用方必须可见返回禁静默）。
+    payload 与 clarify 单问题卡片同构（{"type":"choice","text","choices"}），
+    经同一 pending_choices 闸门回流，前端 TaskChoiceMenu 零改动。
+    """
+    q = str(question or "").strip()
+    if not q:
+        return None, "ask_user参数错误：question 必填"
+    opts: list[dict] = []
+    for i, o in enumerate(options or []):
+        if not isinstance(o, dict):
+            return None, f"ask_user参数错误：options[{i}] 不是对象"
+        oid = str(o.get("id", "") or "").strip()
+        label = str(o.get("label", "") or "").strip()
+        if not oid or not label:
+            return None, f"ask_user参数错误：options[{i}] 需 id+label 必填"
+        if oid == CUSTOM_OPTION_ID:
+            return None, (f"ask_user参数错误：options[{i}].id 禁用保留字 "
+                          f"'{CUSTOM_OPTION_ID}'（自定义项由系统唯一追加）")
+        opts.append({"id": oid, "label": label,
+                     "description": str(o.get("description", "") or "")})
+    if not (ASK_USER_MIN_OPTIONS <= len(opts) <= ASK_USER_MAX_OPTIONS):
+        return None, (f"ask_user参数错误：options 需 "
+                      f"{ASK_USER_MIN_OPTIONS}-{ASK_USER_MAX_OPTIONS} 个有效选项，"
+                      f"收到 {len(opts)}")
+    opts.append({"id": CUSTOM_OPTION_ID, "label": "自定义",
+                 "description": "以上都不合适，自己填写答案"})
+    return {"type": "choice", "text": q, "choices": opts}, ""
+
+
+def build_failure_confirm_payload(reason: str, done: str = "",
+                                  remaining: str = "") -> dict:
+    """report-failure 确认卡（终止需确认）：复用 ask-user 卡片形态——
+    用户决定「接受失败终止 / 继续尝试 / 自定义指导」。"""
+    summary = build_failure_report(reason, done=done, remaining=remaining)
+    payload, _err = build_ask_user_payload(
+        summary + "\n\n是否接受失败终止？",
+        [
+            {"id": FAILURE_ACCEPT_ID, "label": "接受失败终止",
+             "description": "承认任务失败，按现状如实收尾（禁假称完成）"},
+            {"id": FAILURE_KEEP_TRYING_ID, "label": "继续尝试",
+             "description": "不接受放弃，换个方法继续或降低目标继续推进"},
+        ],
+    )
+    return payload  # 校验已在 builder 内完成（固定两选项必然合法）
+
+
+def build_failure_report(reason: str, done: str = "",
+                         remaining: str = "", blocked_by: str = "") -> str:
+    """结构化失败报告（失败必须可见禁假称完成——mem0 §1.1）。"""
+    lines = ["【失败报告】", f"原因：{str(reason or '').strip() or '（未填写）'}"]
+    if str(done or "").strip():
+        lines.append(f"已完成：{str(done).strip()}")
+    if str(remaining or "").strip():
+        lines.append(f"未完成：{str(remaining).strip()}")
+    if str(blocked_by or "").strip():
+        lines.append(f"阻塞点：{str(blocked_by).strip()}")
+    return "\n".join(lines)
+
+
+class AutoAnswerBudget:
+    """autoAnswerAllowed 递减（Pi：无人值守自动确认**有界**）。
+
+    每次无人值守代用户拍板消耗 1 额度，耗尽后禁止自动拍板（防「Agent 私自
+    放弃任务」借无人值守无限自决）。有界显式留痕（remaining 可见）。
+    """
+
+    def __init__(self, max_auto: int = DEFAULT_AUTO_ANSWER_BUDGET):
+        self.max_auto = int(max_auto)
+        if self.max_auto < 0:
+            raise ValueError(f"max_auto 需 ≥0，收到 {max_auto}")
+        self._left = self.max_auto
+
+    @property
+    def remaining(self) -> int:
+        return self._left
+
+    def take(self) -> dict:
+        """消耗一次自动确认 → {"allowed": bool, "remaining": int}。"""
+        if self._left <= 0:
+            return {"allowed": False, "remaining": 0}
+        self._left -= 1
+        return {"allowed": True, "remaining": self._left}
+
+    def snapshot(self) -> dict:
+        return {"max_auto": self.max_auto, "remaining": self._left}
+
+
+def ask_user_tool_def() -> dict:
+    """ask_user function-calling 定义（Pi ask-user 工具对之一）。"""
+    return {
+        "type": "function",
+        "function": {
+            "name": ASK_USER_TOOL,
+            "description": (
+                "向用户提一个结构化决策问题（human-in-the-loop，2-5 个选项+"
+                "自动追加唯一「自定义」项）。执行期遇到**只有用户能拍板**的"
+                "岔路（方向选择/取舍/授权）时使用：一次一问，用户作答文本即"
+                "工具结果。与 clarify 的分工：clarify 用于开工前一次性澄清"
+                "多个理解歧义；ask_user 用于执行中单点决策。⚠️ 无人值守时"
+                "不会阻塞等待——会返回无人值守指引，按最稳妥假设继续并在"
+                "结果中说明假设。"),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string",
+                                 "description": "要问用户的问题（单问、说清楚岔路）"},
+                    "options": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string"},
+                                "label": {"type": "string"},
+                                "description": {"type": "string"},
+                            },
+                            "required": ["id", "label"],
+                        },
+                        "description": ("2-5 个选项（按最优在前；id 禁用保留字 "
+                                        "'custom'，自定义项由系统追加）"),
+                    },
+                },
+                "required": ["question", "options"],
+            },
+        },
+    }
+
+
+def report_failure_tool_def() -> dict:
+    """report_failure function-calling 定义（Pi 工具对之二：终止需确认）。"""
+    return {
+        "type": "function",
+        "function": {
+            "name": REPORT_FAILURE_TOOL,
+            "description": (
+                "如实报告任务失败并请求终止（human-in-the-loop：**终止需用户"
+                "确认**，治「Agent 私自放弃任务」）。当任务确实无法完成（外部"
+                "条件缺失/反复修复仍失败/超出能力）时使用：给出原因+已完成+"
+                "未完成的结构化失败报告，默认等用户决定（接受失败终止/继续"
+                "尝试/自定义指导）。mode=direct=直接失败不等确认（仍完整留痕"
+                "可见）。⚠️ 无人值守时自动确认**有界递减**（auto-answer 预算"
+                "耗尽后代用户拍板被拒——改为继续尝试或以最低目标收尾交付，"
+                "禁假称完成）。repair_loop stop / run_guard stop 后的如实报告"
+                "用本工具。"),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reason": {"type": "string", "description": "失败原因（必填，具体）"},
+                    "done": {"type": "string", "description": "已完成部分（如实列）"},
+                    "remaining": {"type": "string", "description": "未完成部分"},
+                    "blocked_by": {"type": "string", "description": "阻塞点（缺什么/卡在哪）"},
+                    "mode": {"type": "string", "enum": ["confirm", "direct"],
+                             "description": "confirm=等用户确认终止（默认）/ "
+                                            "direct=直接失败（完整留痕不等确认）"},
+                },
+                "required": ["reason"],
+            },
+        },
+    }
