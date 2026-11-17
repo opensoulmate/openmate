@@ -171,7 +171,8 @@ def test_repair_loop_accept_and_string_issues():
 def test_guard_tools_defs_shape():
     defs = tool_defs()
     names = [d["function"]["name"] for d in defs]
-    assert names == ["run_guard", "repair_loop"]
+    # Pi #8 file_baseline 入治理工具组（受保护文件基线——工作区工具纪律第三件）
+    assert names == ["run_guard", "repair_loop", "file_baseline"]
     for d in defs:
         props = d["function"]["parameters"]["properties"]
         assert "task_complete" in props                      # 免总结参数面

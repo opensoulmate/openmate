@@ -30,17 +30,21 @@ from __future__ import annotations
 import json
 import logging
 import time
+from pathlib import Path
 from typing import Any
 
 from agent import repair_loop, run_guard, summary_control
+from agent.edit_safety import FileBaseline, _safe_ns
 
 logger = logging.getLogger("agent.guard_tools")
 
 GUARD_ACTIONS = ("configure", "beat", "progress", "pause", "resume",
                  "check", "status", "extract", "diagnose")
 REPAIR_ACTIONS = ("start", "step", "prompt", "status", "reset")
+# 文件基线（Pi #8：受保护文件基线比对/还原）——工作区工具纪律
+BASELINE_ACTIONS = ("register", "check", "restore", "status", "unregister")
 
-TOOL_NAMES = ("run_guard", "repair_loop")
+TOOL_NAMES = ("run_guard", "repair_loop", "file_baseline")
 
 
 def tool_defs() -> list[dict]:
@@ -120,15 +124,47 @@ def tool_defs() -> list[dict]:
                 },
             },
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "file_baseline",
+                "description": (
+                    "受保护文件基线（工作区工具纪律：Agent 只许动产物，任务输入"
+                    "文件禁动）：action=register 登记受保护输入文件（manifest+"
+                    "sha256 内容副本存工作区外，任务开工时把输入文件/模板/台账"
+                    "登记进来）/ check 基线比对（modified=被改动、deleted=被删"
+                    "，确定性 sha256）/ restore 还原被改动或删除的受保护文件"
+                    "（幂等，还原清单可见）/ status 状态快照 / unregister 解除"
+                    "登记。settle 收尾时自动还原（agent_before_settle/终态双保险）"
+                    "——发现输入被改动先 restore 再交付，产物照常可写。"),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": {"type": "string", "enum": list(BASELINE_ACTIONS)},
+                        "paths": {
+                            "type": "array", "items": {"type": "string"},
+                            "description": "register：受保护文件绝对路径列表",
+                        },
+                        "path": {"type": "string",
+                                 "description": "unregister：解除登记的文件路径"},
+                        "group": {"type": "string",
+                                  "description": "分组标签（默认 input；check/restore 可按组过滤）"},
+                        **tc,
+                    },
+                    "required": ["action"],
+                },
+            },
+        },
     ]
 
 
 class GuardTools:
-    """治理工具组（run_guard / repair_loop）。状态按 session 持有（有界）。"""
+    """治理工具组（run_guard / repair_loop / file_baseline）。状态按 session 持有（有界）。"""
 
-    def __init__(self, now=None):
+    def __init__(self, now=None, baseline_root=None):
         self._now = now or time.time
         self._states: dict[str, dict[str, Any]] = {}
+        self._baseline_root = baseline_root   # None=默认 ~/.hermes/soulmate/baselines
 
     # ── 分发 ─────────────────────────────────────────────────────────
 
@@ -140,6 +176,8 @@ class GuardTools:
                 return self._run_guard(args, session_id)
             if func_name == "repair_loop":
                 return self._repair_loop(args, session_id)
+            if func_name == "file_baseline":
+                return self._file_baseline(args, session_id)
             return (f"❌ 未知治理工具: {func_name!r}。支持: {', '.join(TOOL_NAMES)}")
         except ValueError as e:
             return f"❌ 参数错误: {e}"
@@ -180,6 +218,87 @@ class GuardTools:
             return False
         st["guard"].resume()
         return True
+
+    # ── file_baseline（Pi #8：受保护文件基线）────────────────────────
+
+    def baseline_for(self, session_id: str = "") -> FileBaseline | None:
+        """取会话基线（不新建状态——无登记即 None，settle 钩子延迟解析用）。"""
+        st = self._states.get(str(session_id or "default"))
+        return st.get("baseline") if st else None
+
+    def _baseline(self, session_id: str) -> FileBaseline:
+        """会话基线（lazy-init；基线目录在工作区外，按 session 命名空间隔离）。"""
+        st = self._state(session_id)
+        b = st.get("baseline")
+        if b is None:
+            sid = str(session_id or "default")
+            if self._baseline_root:
+                b = FileBaseline(baseline_dir=Path(self._baseline_root) / _safe_ns(sid))
+            else:
+                b = FileBaseline(ns=sid)
+            st["baseline"] = b
+        return b
+
+    def restore_baseline(self, session_id: str = "") -> dict | None:
+        """settle 前还原（settle 钩子用）：有登记才还原，无基线 no-op 返回 None。"""
+        b = self.baseline_for(session_id)
+        if b is None:
+            return None
+        return b.restore()
+
+    def _file_baseline(self, args: dict, session_id: str) -> str:
+        action = str(args.get("action", "") or "").strip().lower()
+        b = self._baseline(session_id)
+        group = str(args.get("group", "") or "")
+        if action == "register":
+            paths = args.get("paths") or []
+            if isinstance(paths, str):
+                paths = [paths]
+            if not isinstance(paths, list) or not paths:
+                return "❌ 参数错误: register 需要 paths（受保护文件绝对路径列表）"
+            r = b.register(paths, group=group or "input")
+            lines = [f"✅ 已登记 {len(r['registered'])} 个受保护文件"
+                     f"（不变 {len(r['unchanged'])}，总基线 {r['total']}）"]
+            for e in r["errors"]:
+                lines.append(f"❌ {e['path']}: {e['error']}")
+            if r["registered"]:
+                lines.append("（Agent 只许动产物：settle 收尾自动还原被改动的登记文件）")
+            return "\n".join(lines)
+        if action == "check":
+            c = b.check(group=group)
+            if c["ok"]:
+                return (f"✅ 基线比对通过：{c['matched']}/{c['total']} 个受保护文件未被改动")
+            lines = [f"⚠️ 基线比对发现改动（{c['total']} 个受保护文件）："]
+            for p in c["modified"]:
+                lines.append(f"  被改动: {p}")
+            for p in c["deleted"]:
+                lines.append(f"  被删除: {p}")
+            lines.append("（可 action=restore 还原；settle 收尾也会自动还原）")
+            return "\n".join(lines)
+        if action == "restore":
+            r = b.restore(group=group)
+            lines = []
+            for p in r["restored_modified"]:
+                lines.append(f"  已还原（改动）: {p}")
+            for p in r["restored_deleted"]:
+                lines.append(f"  已还原（删除）: {p}")
+            for e in r["errors"]:
+                lines.append(f"  ❌ {e['path']}: {e['error']}")
+            head = ("✅ 还原完成" if r["ok"] else "⚠️ 还原完成（仍有错误）")
+            if not lines:
+                return f"{head}：无被改动/删除的受保护文件（{r['unchanged']} 个原样）"
+            return f"{head}：\n" + "\n".join(lines)
+        if action == "status":
+            s = b.status(group=group)
+            return "✅ 基线状态：\n" + json.dumps(s, ensure_ascii=False, indent=2)
+        if action == "unregister":
+            path = str(args.get("path", "") or "").strip()
+            if not path:
+                return "❌ 参数错误: unregister 需要 path"
+            r = b.unregister(path)
+            return (f"✅ 已解除登记: {r['path']}" if r["unregistered"]
+                    else f"⚠️ 该文件不在基线中: {r['path']}")
+        return (f"❌ 参数错误: 未知 action {action!r}。支持: {', '.join(BASELINE_ACTIONS)}")
 
     # ── run_guard ────────────────────────────────────────────────────
 

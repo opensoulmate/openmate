@@ -203,7 +203,7 @@ from agent.steering import (
 from agent.context import SessionContext
 from agent.layered_timeouts import TimeoutConfig
 from agent.eval_pipeline import EvalPipeline
-from agent.edit_safety import EditConfig
+from agent.edit_safety import EditConfig, baseline_restore_hook
 from agent.schema_doctor import SchemaDoctor
 
 logger = logging.getLogger("acp-agent.soulmate")
@@ -2899,6 +2899,16 @@ You can send files to the user natively: to deliver a file, write a brief confir
             bus=getattr(self, "_turn_lifecycle", None),
             max_continues=2,
         )
+        # 内置首钩：#8 文件基线 settle 前还原（Pi：提交校验前 restore() 还原被
+        # Agent 改动的输入——Agent 只许动产物）。延迟解析（基线可能执行中途才
+        # 登记）+ before/settled 双相（settle 前还原 + 终态兜底），restore 幂等。
+        def _baseline_provider(ctx):
+            tools = getattr(self, "_guard_tools_inst", None)
+            return tools.baseline_for(session_id) if tools is not None else None
+
+        baseline_hook = baseline_restore_hook(_baseline_provider)
+        gate.register(baseline_hook, name="baseline_restore")
+        gate.register_settled(baseline_hook, name="baseline_restore")
         for _n, _h in registry["before"]:
             gate.register(_h, _n)
         for _n, _h in registry["settled"]:

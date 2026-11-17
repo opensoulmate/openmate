@@ -21,6 +21,7 @@
 import os
 import re
 import ast
+import json
 import time
 import shutil
 import logging
@@ -537,3 +538,221 @@ class EditSafetyGuard:
                 "verify_after_write": self.config.verify_after_write,
             },
         }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 受保护文件基线（Pi 取长补短 #8：manifest+sha256 副本、settle 前还原）
+# ═══════════════════════════════════════════════════════════════════
+#
+# 来源：Pi/OpenBidKit piWorkspaceBaseline——程序写入工作区的输入文件登记
+# manifest.json + files/<sha256> 内容副本（基线放**工作区外**），提交校验前/
+# settle 前 restore() 还原被 Agent 改动的输入——**Agent 只许动产物**。项目有
+# 文件截断/误改历史痛点（agent-file-editing-safety 教训），基线比对是兜底。
+#
+# 落地（既有 edit_safety 编辑安全面扩展——写前快照/原子写/恢复基建同一模块）：
+# - register：登记+内容快照（sha256 内容寻址副本，重复登记幂等）；
+# - check：基线比对（modified/deleted/matched，确定性 sha256）；
+# - restore：还原被改动/删除的受保护文件（幂等，还原清单可见禁静默）；
+# - baseline_restore_hook：settle 挂点适配（#2 agent_before_settle/settled 钩子
+#   形态）——settle 前还原+终态兜底。
+
+BASELINE_ROOT = Path.home() / ".hermes" / "soulmate" / "baselines"
+MANIFEST_NAME = "manifest.json"
+
+
+class FileBaseline:
+    """受保护文件基线（manifest + sha256 内容副本，基线目录在工作区外）。"""
+
+    def __init__(self, baseline_dir: str | Path | None = None, ns: str = "default"):
+        root = Path(baseline_dir) if baseline_dir else (BASELINE_ROOT / _safe_ns(ns))
+        self.baseline_dir = root
+        self.files_dir = root / "files"
+        self.manifest_path = root / MANIFEST_NAME
+        self._manifest = self._load_manifest()
+
+    # ── manifest（单一真源，落盘持久） ─────────────────────────────
+
+    def _load_manifest(self) -> dict:
+        if self.manifest_path.exists():
+            try:
+                data = json.loads(self.manifest_path.read_text(encoding="utf-8"))
+                if isinstance(data, dict) and isinstance(data.get("files"), dict):
+                    return data
+            except Exception as e:
+                logger.warning(f"[baseline] manifest 损坏，重建（副本保留）: {e}")
+        return {"created": time.time(), "files": {}}
+
+    def _save_manifest(self) -> None:
+        self.baseline_dir.mkdir(parents=True, exist_ok=True)
+        tmp = self.baseline_dir / (MANIFEST_NAME + ".tmp")
+        tmp.write_text(json.dumps(self._manifest, ensure_ascii=False, indent=2),
+                       encoding="utf-8")
+        os.replace(tmp, self.manifest_path)   # 原子写（同 utils.file_safety 纪律）
+
+    @staticmethod
+    def _sha256(path: Path) -> str:
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                h.update(chunk)
+        return h.hexdigest()
+
+    # ── 登记（分组） ───────────────────────────────────────────────
+
+    def register(self, paths, group: str = "input") -> dict:
+        """登记受保护文件 + 内容快照（sha256 内容寻址副本）。
+
+        重复登记同路径同内容=幂等跳过；内容变了=覆盖登记（新副本+manifest 更新）。
+        文件不存在=显式报因进 errors（禁静默跳过）。
+        """
+        if isinstance(paths, (str, Path)):
+            paths = [paths]
+        registered, unchanged, errors = [], [], []
+        for raw in paths:
+            p = Path(raw).expanduser()
+            try:
+                p_res = p.resolve()
+            except Exception:
+                p_res = p
+            if not p_res.is_file():
+                errors.append({"path": str(raw), "error": "基线登记失败：文件不存在"})
+                continue
+            sha = self._sha256(p_res)
+            key = str(p_res)
+            old = self._manifest["files"].get(key)
+            if old and old.get("sha256") == sha:
+                unchanged.append(key)
+                continue
+            self.files_dir.mkdir(parents=True, exist_ok=True)
+            stored = self.files_dir / sha
+            if not stored.exists():
+                shutil.copy2(p_res, stored)   # 内容寻址：同内容共享一份副本
+            self._manifest["files"][key] = {
+                "sha256": sha,
+                "size": p_res.stat().st_size,
+                "group": str(group or "input"),
+                "stored": f"files/{sha}",
+                "registered_at": time.time(),
+            }
+            registered.append(key)
+        if registered:
+            self._save_manifest()
+        return {"registered": registered, "unchanged": unchanged,
+                "errors": errors, "total": len(self._manifest["files"])}
+
+    def unregister(self, path: str) -> dict:
+        """解除登记（副本保留到 GC，manifest 移除）。"""
+        key = str(Path(path).expanduser().resolve())
+        existed = self._manifest["files"].pop(key, None)
+        if existed:
+            self._save_manifest()
+        return {"unregistered": bool(existed), "path": key}
+
+    # ── 基线比对 ───────────────────────────────────────────────────
+
+    def check(self, group: str = "") -> dict:
+        """比对当前文件与基线 → {"ok", "matched", "modified", "deleted", "total"}。
+
+        modified=内容 sha256 与基线不一致（Agent 动了输入）；deleted=文件消失。
+        """
+        modified, deleted, matched = [], [], 0
+        for key, meta in self._manifest["files"].items():
+            if group and meta.get("group") != group:
+                continue
+            p = Path(key)
+            if not p.is_file():
+                deleted.append(key)
+                continue
+            if self._sha256(p) != meta.get("sha256"):
+                modified.append(key)
+                continue
+            matched += 1
+        return {
+            "ok": not modified and not deleted,
+            "matched": matched,
+            "modified": modified,
+            "deleted": deleted,
+            "total": sum(1 for _m in self._manifest["files"].values()
+                         if not group or _m.get("group") == group),
+        }
+
+    # ── settle 前还原（Agent 只许动产物） ──────────────────────────
+
+    def restore(self, group: str = "") -> dict:
+        """还原被改动/删除的受保护文件（幂等；还原清单可见禁静默）。
+
+        返回 {"restored_modified", "restored_deleted", "errors", "unchanged"}。
+        """
+        restored_modified, restored_deleted, errors = [], [], []
+        for key, meta in self._manifest["files"].items():
+            if group and meta.get("group") != group:
+                continue
+            stored = self.baseline_dir / meta.get("stored", "")
+            if not stored.is_file():
+                errors.append({"path": key, "error": "基线副本缺失（无法还原）"})
+                continue
+            p = Path(key)
+            try:
+                p.parent.mkdir(parents=True, exist_ok=True)
+                if not p.is_file():
+                    shutil.copy2(stored, p)
+                    restored_deleted.append(key)
+                elif self._sha256(p) != meta.get("sha256"):
+                    shutil.copy2(stored, p)   # 覆盖还原被改动的输入
+                    restored_modified.append(key)
+            except Exception as e:
+                errors.append({"path": key, "error": f"还原失败: {e}"})
+        chk = self.check(group=group)
+        return {
+            "restored_modified": restored_modified,
+            "restored_deleted": restored_deleted,
+            "errors": errors,
+            "unchanged": chk["matched"],
+            "ok": chk["ok"] and not errors,
+        }
+
+    def status(self, group: str = "") -> dict:
+        """状态快照（登记面+比对面合一）。"""
+        groups: dict[str, int] = {}
+        for meta in self._manifest["files"].values():
+            g = str(meta.get("group") or "input")
+            groups[g] = groups.get(g, 0) + 1
+        return {
+            "baseline_dir": str(self.baseline_dir),
+            "total": len(self._manifest["files"]),
+            "groups": groups,
+            "check": self.check(group=group),
+        }
+
+
+def baseline_restore_hook(provider) -> callable:
+    """settle 挂点适配（#2×#8）：settle 前还原被 Agent 改动的受保护输入。
+
+    provider：FileBaseline 实例，或 callable()->FileBaseline|None（延迟解析——
+    基线可能在工具执行中途才登记）。钩子形态=SettleGate before/settled 双相通用：
+    restore 幂等，真还原了文件才带 reason 留痕（静默=no-op 不记账）。
+    """
+
+    def baseline_restore(ctx: dict):
+        if callable(provider):
+            baseline: Any = provider(ctx)
+        else:
+            baseline = provider
+        if baseline is None:
+            return None
+        result = baseline.restore()
+        touched = (result.get("restored_modified") or []) + (result.get("restored_deleted") or [])
+        if not touched and not result.get("errors"):
+            return None
+        names = ", ".join(Path(p).name for p in touched) or "（无）"
+        return {"continue": False,
+                "reason": f"文件基线还原 {len(touched)} 个受保护输入: {names}"
+                          + (f"；错误: {result['errors']}" if result.get("errors") else "")}
+
+    baseline_restore.__name__ = "baseline_restore"
+    return baseline_restore
+
+
+def _safe_ns(ns: str) -> str:
+    """命名空间消毒（防路径穿越）——只留字母数字 ._-。"""
+    return re.sub(r"[^A-Za-z0-9._-]", "_", str(ns or "default"))[:64] or "default"
