@@ -1,0 +1,41 @@
+# SoulMate 依赖锁（Pi 取长补短 #15：依赖锁版本防御）
+#
+# 立规矩：acp-proxy/agent 运行栈引用的第三方依赖一律**精确锁版本**（只允许 ==）。
+# 来源教训：Pi 在 patch/minor 发破坏性变更（1.0.3 改 Azure provider 命名、1.2.0
+# 四项 breaking），OpenBidKit 只能锁死 0.80.10 自保；SoulMate 引任何 pi 类依赖
+# 同样一律精确锁 + 升级前看变更日志，禁止 ^/~/>=/裸版本。
+#
+# 守护：agent/deps_lock.py verify() 比对运行环境实际安装版本，漂移即结构化报告
+# （missing / drifted / unpinned 三态，失败必须可见禁静默）。
+# 生成口径：以 acp-proxy 服务所用 interpreter（~/opensoul/.venv）实测版本为准——
+# ⚠️ 必须在干净 PYTHONPATH 下测量（PYTHONPATH= 前缀清掉外来 venv 遮蔽，否则
+# importlib.metadata 会先看到别的 venv 的版本，产生假漂移）。
+# 更新纪律：升级 = 改锁文件 + 过全量回归 + 提交说明写清升了什么为什么。
+
+# ── [core] agent 栈直接依赖（缺一不可跑）──
+agent-client-protocol==0.9.0   # import acp：ACP 协议面
+aiohttp==3.14.3
+python-dotenv==1.2.2
+httpx==0.28.1                  # utils/llm_* 传输核心
+websockets==15.0.1
+pydantic==2.13.4               # acp 依赖面（2.x breaking 频发，必须锁）
+pydantic-core==2.46.4
+PyYAML==6.0.3
+
+# ── [tools] 工具面直接依赖（工具缺依赖时显式报因，不静默降级）──
+Pillow==12.3.0                 # image_compress / image 工具
+python-docx==1.2.0             # document / docx 工具
+openpyxl==3.1.5                # document xlsx 工具
+edge-tts==7.3.1                # text_to_speech 主后端
+numpy==2.4.6
+openai==2.24.0                 # 生成式后端 SDK
+psutil==7.2.2
+requests==2.33.0
+
+# ── [dev] 测试栈 ──
+pytest==9.1.1
+pytest-asyncio==1.4.0
+
+# ── [optional] 可选增强（未安装=对应能力显式降级并报因；安装时也必须精确锁）──
+# faiss-cpu / sentence-transformers  记忆向量检索（未安装：检索走关键词兜底）
+# playwright                          browser 工具真实浏览器（未安装：browser 显式报因）

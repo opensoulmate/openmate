@@ -70,6 +70,20 @@ class ErrorCode:
     MCP_CONFIG_HOT_RELOAD_FAILED = -32711  # 配置热更新失败
     MCP_CONFIG_READONLY = -32712         # 配置项只读禁止修改
 
+    # ── LLM供应商域（-322xx）──（Pi #15 增量追加：供应商错误文案兼容层的归一目标。
+    # 重试决策用本域结构化码（is_retryable），不用供应商文案正则——抄
+    # piRetryErrorNormalizer 功能不抄机制，映射入口 error_codes/vendor_compat.py）
+    LLM_RATE_LIMITED = -32201            # 限流/并发超限（可重试）
+    LLM_TIMEOUT = -32202                 # 响应/读取超时（可重试）
+    LLM_SERVER_ERROR = -32203            # 供应商服务端故障（可重试）
+    LLM_NETWORK_ERROR = -32204           # 传输层网络故障（可重试）
+    LLM_AUTH_FAILED = -32205             # API key 无效/凭证级失败（不可重试）
+    LLM_QUOTA_EXCEEDED = -32206          # 额度/账单耗尽（不可重试，需人工）
+    LLM_INVALID_REQUEST = -32207         # 请求级错误：参数非法/上下文超长（不可重试）
+    LLM_EMPTY_OUTPUT = -32208            # HTTP 200 空输出（可重试）
+    LLM_CONTENT_FILTERED = -32209        # 内容安全过滤拒绝（不可重试）
+    LLM_UNKNOWN = -32299                 # 未识别的供应商错误（不可自动重试，人工看 desc）
+
 
 # ---------------------------------------------------------------------------
 # 标准错误结构
@@ -150,6 +164,19 @@ _ERROR_REGISTRY: dict[int, dict[str, Any]] = {
     ErrorCode.MCP_CONFIG_INVALID: {"message": "配置格式非法", "desc": "配置JSON/YAML解析失败", "retryable": False},
     ErrorCode.MCP_CONFIG_HOT_RELOAD_FAILED: {"message": "配置热更新失败", "desc": "动态配置加载不生效", "retryable": True},
     ErrorCode.MCP_CONFIG_READONLY: {"message": "配置项只读禁止修改", "desc": "系统核心配置禁止变更", "retryable": False},
+
+    # LLM供应商（Pi #15：retryable 即结构化重试判据——供应商文案只在
+    # vendor_compat 归一时消费一次，之后决策只看码）
+    ErrorCode.LLM_RATE_LIMITED: {"message": "模型限流", "desc": "供应商限流/并发超限，可退避重试", "retryable": True},
+    ErrorCode.LLM_TIMEOUT: {"message": "模型超时", "desc": "供应商响应/读取超时，可重试", "retryable": True},
+    ErrorCode.LLM_SERVER_ERROR: {"message": "模型服务故障", "desc": "供应商服务端 5xx/过载，可重试", "retryable": True},
+    ErrorCode.LLM_NETWORK_ERROR: {"message": "模型网络故障", "desc": "到供应商的传输层故障（连接/读/协议），可重试", "retryable": True},
+    ErrorCode.LLM_AUTH_FAILED: {"message": "模型鉴权失败", "desc": "API key 无效/被撤销——凭证级，重试无益", "retryable": False},
+    ErrorCode.LLM_QUOTA_EXCEEDED: {"message": "模型额度耗尽", "desc": "账单/配额不足——需人工充值或换端点", "retryable": False},
+    ErrorCode.LLM_INVALID_REQUEST: {"message": "模型请求非法", "desc": "参数非法/上下文超长等请求级错误——改请求后才能成功", "retryable": False},
+    ErrorCode.LLM_EMPTY_OUTPUT: {"message": "模型空输出", "desc": "HTTP 200 但输出为空——独立失败形态，可重试", "retryable": True},
+    ErrorCode.LLM_CONTENT_FILTERED: {"message": "内容被过滤", "desc": "供应商内容安全策略拒绝——重试无益", "retryable": False},
+    ErrorCode.LLM_UNKNOWN: {"message": "模型未知错误", "desc": "未识别的供应商错误——人工检查 desc/data 后处理", "retryable": False},
 }
 
 
