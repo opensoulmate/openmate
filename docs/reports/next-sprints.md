@@ -77,3 +77,16 @@
 ---
 
 *排序是建议不是圣旨：若用户侧出现新的高频痛点（如对话卡死、费用失控），把对应项直接提到 Sprint A。*
+
+---
+
+## 落地状态（扫尾回写）
+
+- **序 9（Pi#14 子代理治理）✅** `53720b28`：SubagentGovernor（并发乘数×2 超出排队/统一轮数 100/runChildTask 沿用）
+  + 流程引擎 parallel 节点运行时基线（分支=合成 tool 节点复用重试/软预算，失败隔离聚合 on_error）。
+- **序 10（Pi#5 阶段交接压缩）✅** `5a1c24e6`：业务摘要提示词模板 + 自定义压缩指令（compress-handoff
+  事件→set_compression_instructions）+ compaction_pending 断点补偿（失败置位→下轮 force 重压）。
+- **序 11（Pi#13）**：等 OpenSoul 取数接口（路线图 2.3）对接，未动。
+- **序 12（Pi#4 会话 JSONL 树）**：垫底观察，未动。
+- **插件市场三步走**：step 1 `c90f29e7`、step 2 `8b464fdc`、step 3 最小可行 `818beac1`
+  （HTTP 远端源拉取安装=仓库目录布局即协议；社区门户留接口不擅选外部服务）。
