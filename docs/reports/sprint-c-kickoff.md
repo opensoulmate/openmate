@@ -94,7 +94,8 @@
 | 层② step ③ postMessage 桥 | ✅ 已落 | `4ac7a0c7` | html_panel_rpc：白名单=声明工具+ui.*，白名单外必拒（穿透测试）；同一审批闸（approval_required→approved 重发）；/html-methods 契约面 |
 | 层② step ② iframe 壳 | ✅ 已落 | `b56f2396` | HtmlPanelFrame：sandbox=allow-scripts、消息源防冒充、theme 注入；render-test 15/15 |
 | 层② 验收样板 | ✅ 已落 | `b56f2396` | examples/html-panel-demo（按钮→add 工具+reset 审批闸演示）不进运行时，3 条样板 E2E |
-| 层② step ④ 导航长出 | ⏳ 剩余 | — | 依赖**动态插件页宿主**（DSL 面同样只有渲染组件、无清单驱动页面级路由宿主——共享前端工程）；清单面已备（to_frontend_manifest 含 dsl/html 页） |
-| 市场 step 2/3（仓库/社区） | 未动 | — | 按三步走顺序候场 |
+| 层② step ④ 导航长出 | ✅ 已落 | `32e9ebff` | **动态插件页宿主**：PluginDslView 清单驱动（frontend.pages→dsl/html 页型分支，多页页签）+ derivePluginNavItems 页级菜单（装即逐页长出/卸即收走，legacy 回落不变）+ 页级路由 [plugin]/[page]；render-test 21/21 |
+| 市场 step 2（本地仓库） | ✅ 已落 | `8b464fdc` | PluginRepo（发布/检索/版本/yank/装入，版本不可变）+ repo_api HTTP 面 + **卸载生命周期**（uninstall 镜像门禁 + hot_unloader + 路由组自惰）；顺手修白描真值 bug（approval!=never）；16 测试含 HTTP 全链 |
+| 市场 step 3（社区） | 未动 | — | 按三步走顺序候场 |
 
 *Sprint C 正式开工时按本盘点逐项对照，状态变化回写本文件。*
