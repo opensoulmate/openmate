@@ -83,4 +83,18 @@
 - 两项均延续铁律：纯 Python+既有栈、增量改码、git 显式路径提交、通用能力禁
   投标专用。
 
+---
+
+## 四、开工状态（Sprint C 落地回写）
+
+| 件 | 状态 | 提交 | 备注 |
+|---|---|---|---|
+| 市场 step 1（zip 打包导入导出） | ✅ 已落 | `c90f29e7` | forge 闭环扩展 export_zip/preview_zip/install_zip；zip-slip 必拒矩阵（含符号链接/炸弹上限）；确认链复用逐字保留（confirmed=false 绝不落 plugins/<id>）；23 测试 |
+| 层② step ① 静态只读服务 | ✅ 已落 | `4ac7a0c7` | GET /plugins/{id}/html/{path}，越界必拒，nosniff+no-cache |
+| 层② step ③ postMessage 桥 | ✅ 已落 | `4ac7a0c7` | html_panel_rpc：白名单=声明工具+ui.*，白名单外必拒（穿透测试）；同一审批闸（approval_required→approved 重发）；/html-methods 契约面 |
+| 层② step ② iframe 壳 | ✅ 已落 | `b56f2396` | HtmlPanelFrame：sandbox=allow-scripts、消息源防冒充、theme 注入；render-test 15/15 |
+| 层② 验收样板 | ✅ 已落 | `b56f2396` | examples/html-panel-demo（按钮→add 工具+reset 审批闸演示）不进运行时，3 条样板 E2E |
+| 层② step ④ 导航长出 | ⏳ 剩余 | — | 依赖**动态插件页宿主**（DSL 面同样只有渲染组件、无清单驱动页面级路由宿主——共享前端工程）；清单面已备（to_frontend_manifest 含 dsl/html 页） |
+| 市场 step 2/3（仓库/社区） | 未动 | — | 按三步走顺序候场 |
+
 *Sprint C 正式开工时按本盘点逐项对照，状态变化回写本文件。*
