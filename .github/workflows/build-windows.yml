@@ -1,0 +1,185 @@
+name: Build Windows Desktop (Electron + 本机下载引擎)
+
+# Windows 安装包 CI：PyInstaller 在 Windows 冻结 download-engine.exe（PyInstaller 不可跨编译）
+# → electron-builder NSIS 打包（extraResources 带引擎）→ 解包核验（引擎在包内 + asar 含
+# downloadEngine 桥 + latest.yml 版本递增/校验和一致）→ artifact 上传（tag 另发 GitHub Release）。
+# 更新通道（climbing.top/openmate-releases，publish-update.sh 同款 scp 目标）：配置
+# OPENMATE_DEPLOY_SSH_KEY / OPENMATE_DEPLOY_HOST / OPENMATE_DEPLOY_USER secrets 后
+# 自动推送安装包+blockmap+latest.yml，已装客户端 4 小时内自动升级；未配置则只出 artifact，
+# 由发版机手动推通道。
+on:
+  workflow_dispatch:
+    inputs:
+      push_channel:
+        description: '构建后推送 climbing.top 自动更新通道（需已配 OPENMATE_DEPLOY_* secrets）'
+        type: boolean
+        default: false
+  push:
+    tags: ['desktop-v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    env:
+      ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+      ELECTRON_BUILDER_BINARIES_MIRROR: https://npmmirror.com/mirrors/electron-builder-binaries/
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version
+        id: ver
+        shell: bash
+        run: echo "ver=$(node -p "require('./desktop/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      # ── ① Windows 冻结引擎（core/freeze_entry.py，纯 Python 不引异语言）──
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Freeze download-engine.exe (PyInstaller onefile)
+        shell: pwsh
+        run: |
+          pip install pyinstaller httpx
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/openmate-engine-pyi-work" | Out-Null
+          pyinstaller --onefile --name download-engine `
+            --paths core `
+            --distpath core/dist `
+            --workpath "$env:RUNNER_TEMP/openmate-engine-pyi-work" `
+            --specpath "$env:RUNNER_TEMP/openmate-engine-pyi-work" `
+            core/freeze_entry.py
+          if (!(Test-Path core/dist/download-engine.exe)) { throw "core/dist/download-engine.exe 未产出" }
+          & core/dist/download-engine.exe --version   # argparse 契约冒烟（应打印 openmate-engine <ver> 并 exit 0）
+          if ($LASTEXITCODE -ne 0) { throw "冻结引擎 --version 冒烟失败（exit $LASTEXITCODE）" }
+
+      # ── ② electron-builder NSIS 打包（win.extraResources 带 ../core/dist/download-engine.exe）──
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci
+
+      - name: Build NSIS installer
+        working-directory: desktop
+        run: npx electron-builder --win nsis
+
+      # ── ③ 解包核验：安装包内有引擎、asar 有桥、latest.yml 可被 electron-updater 认 ──
+      - name: Verify installer payload (解包核验)
+        shell: pwsh
+        run: |
+          $ver = '${{ steps.ver.outputs.ver }}'
+          $exe = "desktop/dist/OpenMate-Setup-$ver.exe"
+          if (!(Test-Path $exe)) { throw "安装包未产出: $exe" }
+
+          # 3.1 安装包（NSIS → app-64.7z）解包：resources/download-engine.exe 必须在
+          $x = "$env:RUNNER_TEMP/nsis-x"
+          7z x -y "-o$x" $exe | Out-Null
+          $app7z = Get-ChildItem -Recurse $x -Filter 'app-*.7z' | Select-Object -First 1
+          if (!$app7z) { throw "NSIS 包内未找到 app-*.7z（$PLUGINSDIR）" }
+          $app = "$env:RUNNER_TEMP/app-x"
+          7z x -y "-o$app" $app7z.FullName | Out-Null
+          if (!(Test-Path "$app/resources/download-engine.exe")) {
+            throw "安装包缺 resources/download-engine.exe ——「本机」下载目标必失败"
+          }
+          Write-Host "OK 安装包含 download-engine.exe ($((Get-Item "$app/resources/download-engine.exe").Length) bytes)"
+
+          # 3.2 fresh asar 含 downloadEngine 桥（preload 暴露 + main 的 IPC handler）
+          npx --yes @electron/asar extract "$app/resources/app.asar" "$env:RUNNER_TEMP/asar-x"
+          $preload = Get-Content -Raw "$env:RUNNER_TEMP/asar-x/preload.js"
+          $main = Get-Content -Raw "$env:RUNNER_TEMP/asar-x/main.js"
+          if ($preload -notmatch 'downloadEngine') { throw "asar 内 preload.js 缺 downloadEngine 桥" }
+          if ($main -notmatch 'download-engine-info') { throw "asar 内 main.js 缺 download-engine-info IPC" }
+          Write-Host "OK asar 含 downloadEngine 桥（preload + main IPC）"
+
+      - name: Verify latest.yml (版本递增 + 校验和一致)
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64, hashlib, json, pathlib, re, sys, urllib.request
+
+          ver = json.load(open('desktop/package.json', encoding='utf-8'))['version']
+          yml = open('desktop/dist/latest.yml', encoding='utf-8').read()
+
+          def field(name, text=yml):
+              m = re.search(rf'^{re.escape(name)}:\s*(.+)$', text, re.M)
+              return m.group(1).strip().strip("'\"") if m else None
+
+          # 结构：electron-updater(generic) 必需字段
+          yv = field('version')
+          path = field('path')
+          top_sha = field('sha512')
+          size = re.search(r'^\s+size:\s*(\d+)$', yml, re.M)
+          if not all([yv, path, top_sha, size]):
+              sys.exit(f'latest.yml 缺必需字段: version={yv} path={path} sha512={top_sha} size={size}')
+
+          exe = pathlib.Path(f'desktop/dist/OpenMate-Setup-{ver}.exe')
+          assert yv == ver, f'latest.yml version {yv} != package.json {ver}'
+          assert path == exe.name, f'latest.yml path {path} != {exe.name}'
+
+          # 校验和必须与 exe 一致（electron-updater 装前用 sha512 校验，不一致会拒装）
+          sha = base64.b64encode(hashlib.sha512(exe.read_bytes()).digest()).decode()
+          assert sha == top_sha, 'latest.yml sha512 与 exe 不一致'
+          assert int(size.group(1)) == exe.stat().st_size, 'latest.yml size 与 exe 不一致'
+
+          # 版本必须严格递增，否则已装客户端不升级
+          live = urllib.request.urlopen('https://climbing.top/openmate-releases/latest.yml', timeout=30).read().decode()
+          lv = field('version', live)
+          tup = lambda v: tuple(int(x) for x in re.findall(r'\d+', v)[:3])
+          assert tup(yv) > tup(lv), f'新版本 {yv} 未递增（线上 {lv}），electron-updater 不会升级'
+
+          print(f'OK latest.yml: {yv} > {lv}，sha512/size 与 exe 一致，字段可被 electron-updater 识别')
+          PY
+
+      # ── ④ 产物：artifact 上传（tag 另发 GitHub Release）──
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: openmate-windows-${{ steps.ver.outputs.ver }}
+          path: |
+            desktop/dist/OpenMate-Setup-${{ steps.ver.outputs.ver }}.exe
+            desktop/dist/OpenMate-Setup-${{ steps.ver.outputs.ver }}.exe.blockmap
+            desktop/dist/latest.yml
+          if-no-files-found: error
+
+      - name: GitHub Release (desktop-v* tag)
+        if: startsWith(github.ref, 'refs/tags/desktop-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            desktop/dist/OpenMate-Setup-${{ steps.ver.outputs.ver }}.exe
+            desktop/dist/OpenMate-Setup-${{ steps.ver.outputs.ver }}.exe.blockmap
+            desktop/dist/latest.yml
+
+      # ── ⑤ 可选：推 climbing.top 自动更新通道（secrets 未配置时跳过，绝不硬编码凭据）──
+      - name: Push to update channel (climbing.top/openmate-releases)
+        if: startsWith(github.ref, 'refs/tags/desktop-v') || inputs.push_channel
+        shell: bash
+        env:
+          DEPLOY_KEY: ${{ secrets.OPENMATE_DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.OPENMATE_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.OPENMATE_DEPLOY_USER }}
+        run: |
+          if [ -z "$DEPLOY_KEY" ] || [ -z "$DEPLOY_HOST" ]; then
+            echo "未配置 OPENMATE_DEPLOY_SSH_KEY/HOST secrets —— 跳过通道推送（由发版机手动推）"
+            exit 0
+          fi
+          VER='${{ steps.ver.outputs.ver }}'
+          USER="${DEPLOY_USER:-ubuntu}"
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new \
+            "desktop/dist/OpenMate-Setup-$VER.exe" \
+            "desktop/dist/OpenMate-Setup-$VER.exe.blockmap" \
+            desktop/dist/latest.yml \
+            "$USER@$DEPLOY_HOST:/var/www/html/wordpress/openmate-releases/"
+          rm -f ~/.ssh/deploy_key
+          curl -sf "https://climbing.top/openmate-releases/latest.yml"
+          echo "==> 已推送更新通道：https://climbing.top/openmate-releases/latest.yml"
