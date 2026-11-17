@@ -319,6 +319,9 @@ class SoulMateAgent:
         # ── P1/P2 组件初始化 ──
         self._semantic_cache = SemanticCache()
         self._ctx_compressor = ContextCompressor()
+        # Pi #5 阶段交接压缩：compaction_pending 断点补偿 + 自定义压缩指令
+        self._compaction_pending = False
+        self._compression_instructions: str | None = None
         self._prompt_builder = DynamicPromptBuilder()
         self._memory_engine = MemoryRetrievalEngine()
         self._tool_cache = ToolResultCache()
@@ -3125,6 +3128,12 @@ You can send files to the user natively: to deliver a file, write a brief confir
             return None
 
     # ── settle 收尾边界（Pi 取长补短 #2：agent_before_settle / agent_settled）──
+
+    def set_compression_instructions(self, instructions: str | None) -> None:
+        """阶段交接压缩指令（Pi #5 ③流程面）：插件阶段切换节点声明压缩要求
+        （flow compress-handoff 动作经事件总线广播 instructions），驱动层在此
+        注入——随后压缩按该业务摘要提示词执行；None 复位默认模板。"""
+        self._compression_instructions = instructions
 
     def register_settle_hook(self, hook, name: str = "", settled: bool = False) -> None:
         """注册 settle 收尾钩子（Pi #2 挂点：插件「节点后置校验」挂这里）。
@@ -7236,15 +7245,39 @@ You can send files to the user natively: to deliver a file, write a brief confir
                 await self._traj_recorder.end_turn(session_id, traj_root_id, status="ok")
                 return PromptResponse(stop_reason="end_turn")
 
-            # 2. 上下文压缩：消息过多时压缩历史
-            if self._ctx_compressor.should_compress(messages):
-                logger.info(f"[ctx-compress] 上下文过长，压缩历史消息")
+            # 2. 上下文压缩：消息过多时压缩历史（Pi #5 阶段交接压缩：业务摘要
+            #    提示词 + compaction_pending 断点补偿——上轮失败欠的压缩先补）
+            if self._compaction_pending or self._ctx_compressor.should_compress(messages):
+                _was_pending = self._compaction_pending
+                logger.info(
+                    f"[ctx-compress] {'compaction_pending 断点补偿重压' if _was_pending else '上下文过长'}，压缩历史消息")
                 _before_count = len(messages)
-                compressed = self._ctx_compressor.compress(messages)
-                if compressed:
+                compressed = self._ctx_compressor.compress(
+                    messages,
+                    instructions=self._compression_instructions,
+                    force=_was_pending,
+                )
+                if compressed is None:
+                    # 压缩失败：compaction_pending 已置位（compress 侧），留痕，
+                    # 下一轮断点补偿重压——失败绝不打断主流程
+                    self._compaction_pending = True
+                    with contextlib.suppress(Exception):
+                        await self._traj_recorder.log_event(
+                            session_id,
+                            kind="compact",
+                            content=f"上下文压缩失败待补偿: {_before_count} 条",
+                            metadata={
+                                "before_count": _before_count,
+                                "outcome": "pending",
+                                "compensated": _was_pending,
+                            },
+                            parent_id=traj_root_id,
+                        )
+                elif compressed:
                     # P2.3 四联KPI"compact后质量"数据源落点：真实压缩事件入
                     # trajectory（kind=compact+before/after数），KPI聚合面据此
                     # 算压缩后回合成功率（bootstrap_kpi._compact_quality）。
+                    self._compaction_pending = False
                     with contextlib.suppress(Exception):
                         await self._traj_recorder.log_event(
                             session_id,
@@ -7253,6 +7286,8 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             metadata={
                                 "before_count": _before_count,
                                 "after_count": len(compressed),
+                                "compensated": _was_pending,
+                                "custom_instructions": bool(self._compression_instructions),
                             },
                             parent_id=traj_root_id,
                         )

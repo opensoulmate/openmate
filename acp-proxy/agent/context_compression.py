@@ -20,6 +20,13 @@ from typing import Any
 
 logger = logging.getLogger("acp-agent.context-compression")
 
+# Pi #5 阶段交接压缩——业务摘要提示词模板（默认压缩指令）：
+# 正文/台账以工作区文件为准，不在摘要中摘录（文件路径引用即可），摘要只留业务状态。
+STAGE_HANDOFF_COMPRESSION_PROMPT = (
+    "生成业务摘要时遵守：正文/台账/表格以工作区文件为准，不在摘要中摘录其内容，"
+    "只保留文件路径引用；摘要仅保留当前目标、当前步骤、关键决策、错误与修复、待办。"
+)
+
 
 @dataclass
 class WorkState:
@@ -53,10 +60,16 @@ class WorkState:
     # 上次更新时间
     last_updated: float = field(default_factory=time.time)
     
-    def to_prompt(self) -> str:
-        """转换为注入到system prompt的工作状态摘要"""
+    def to_prompt(self, instructions: str | None = None) -> str:
+        """转换为注入到system prompt的工作状态摘要
+
+        instructions：压缩指令（阶段交接压缩业务摘要提示词模板）——随摘要头部注入，
+        指引摘要遵循（如"正文/台账以工作区文件为准，不在摘要中摘录"）。
+        """
         sections = []
-        
+        if instructions:
+            sections.append(f"## 压缩指令\n{instructions}")
+
         if self.current_goal:
             sections.append(f"## 当前目标\n{self.current_goal}")
         
@@ -133,6 +146,7 @@ class ContextCompressor:
         keep_recent: int = 10,  # 压缩时保留最近N条
     ):
         self.max_tokens = max_tokens
+        self.compaction_pending = False   # Pi #5：压缩失败置位，断点补偿重压
         self.compression_threshold = compression_threshold
         self.keep_recent = keep_recent
         self._work_states: dict[str, WorkState] = {}
@@ -218,6 +232,36 @@ class ContextCompressor:
         self,
         messages: list[dict],
         session_id: str | None = None,
+        instructions: str | None = None,
+        force: bool = False,
+    ) -> list[dict] | None:
+        """压缩消息历史（阶段交接压缩，Pi #5）
+
+        - instructions：自定义压缩指令（业务摘要提示词模板），进摘要头部；
+          不传则用 STAGE_HANDOFF_COMPRESSION_PROMPT 默认模板。
+        - force=True：跳过阈值判定强制压缩（compaction_pending 断点补偿用）。
+        - 失败语义：置 compaction_pending=True 并返回 None——调用方留痕，
+          下一轮以 force=True 断点补偿重压；成功后自动清标志。
+        """
+        if not force and not self.should_compress(messages):
+            return messages
+        try:
+            result = self._compress_impl(
+                messages, session_id=session_id,
+                instructions=instructions or STAGE_HANDOFF_COMPRESSION_PROMPT)
+        except Exception as e:  # noqa: BLE001 — 压缩失败绝不打断主流程，置待补偿
+            self.compaction_pending = True
+            logger.warning(
+                "[context-compression] 压缩失败（compaction_pending 置位，待断点补偿）: %s", e)
+            return None
+        self.compaction_pending = False
+        return result
+
+    def _compress_impl(
+        self,
+        messages: list[dict],
+        session_id: str | None = None,
+        instructions: str | None = None,
     ) -> list[dict]:
         """压缩消息历史
         
@@ -250,12 +294,13 @@ class ContextCompressor:
                 elif msg.get("role") == "assistant":
                     self.update_work_state(session_id, assistant_text=msg.get("content", ""))
         
-        # 生成压缩摘要
+        # 生成压缩摘要（阶段交接压缩：instructions 随摘要头部注入）
         if session_id:
             work_state = self.get_work_state(session_id)
-            summary = work_state.to_prompt()
+            summary = work_state.to_prompt(instructions=instructions)
         else:
-            summary = self._generate_summary(older)
+            base = self._generate_summary(older)
+            summary = f"[压缩指令] {instructions}\n\n{base}" if instructions else base
         
         # 构建压缩后的消息列表
         compressed = system_msgs.copy()

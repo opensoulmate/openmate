@@ -312,7 +312,7 @@ def test_soulmate_compress_site_logs_compact_event():
     assert 'kind="compact"' in text, "压缩点未落 compact 事件（KPI 数据源断线）"
     assert '"before_count": _before_count' in text and '"after_count": len(compressed)' in text
     # 事件必须发在 compress 成功分支内（避免失败也记账）
-    idx_compress = text.index("compressed = self._ctx_compressor.compress(messages)")
+    idx_compress = text.index("compressed = self._ctx_compressor.compress(")
     idx_log = text.index('kind="compact"', idx_compress)
     assert 0 < idx_log - idx_compress < 800
 
