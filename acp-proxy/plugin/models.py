@@ -35,6 +35,15 @@ KNOWN_PERMISSIONS: set[str] = {
     "event.emit",        # 发射事件
     "config.read",       # 读取配置
     "config.write",      # 修改配置
+    # ── plugin.yaml 清单式插件（docs/plugin-system-design.md §6）──
+    "ui.serve",          # 提供 UI DSL / 自定义 HTML 面板
+    "tool.register",     # 注册 MCP 工具
+    "flow.register",     # 注册流程定义
+    "data.read",         # 读自有插件数据目录
+    "data.write",        # 写自有插件数据目录
+    "knowledge.read",    # 知识库检索
+    "export.write",      # 导出文件
+    "notify.send",       # 发送通知
 }
 
 

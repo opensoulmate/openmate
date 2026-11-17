@@ -29,6 +29,9 @@ logger = logging.getLogger("acp-proxy.app")
 
 PLUGINS_DIR = Path(__file__).parent.parent / "plugins"
 
+# plugin.yaml 清单式插件的 /plugins 载荷（load_plugins 填充，见 plugin/dsl_api.py）
+_yaml_plugin_index: dict = {"plugins": [], "count": 0, "errors": []}
+
 # 重启退出码（与supervisor.sh一致）
 RESTART_EXIT_CODE = 42
 
@@ -62,7 +65,21 @@ def load_plugins(app: FastAPI) -> list[str]:
                     manifest.get("description", ""))
                 loaded.append(plugin_name)
         except Exception as e:
-            logger.error("❌ 插件 %s 加载失败: %s", plugin_name, e)
+            logger.error("❌ 插件 %s 加载失败: %s", plugin_dir.name, e)
+    # plugin.yaml 清单式插件（docs/plugin-system-design.md）：扫描+工具绑定+DSL/工具路由注册
+    # 前端菜单/页面/工具全部从清单长出，宿主零硬编码
+    global _yaml_plugin_index
+    try:
+        from plugin.dsl_api import scan_and_build
+        from plugin.mcp_bridge import tool_registry
+
+        routers, index = scan_and_build(PLUGINS_DIR, tool_registry)
+        for router in routers:
+            app.include_router(router)
+        _yaml_plugin_index = index
+        loaded.extend(item["manifest"]["id"] for item in index["plugins"])
+    except Exception as e:
+        logger.error("❌ plugin.yaml 插件装载失败: %s", e)
     return loaded
 
 
@@ -595,7 +612,13 @@ async def list_plugins():
                     "status": "loaded",
                     "manifest": manifest
                 })
-    return {"plugins": plugins, "count": len(plugins)}
+    # plugin.yaml 清单式插件并入（含 ui.nav → 前端菜单长出来）
+    all_plugins = list(_yaml_plugin_index.get("plugins", [])) + plugins
+    return {
+        "plugins": all_plugins,
+        "count": len(all_plugins),
+        "errors": _yaml_plugin_index.get("errors", []),
+    }
 
 
 from pydantic import BaseModel as PydanticBaseModel

@@ -1,0 +1,50 @@
+id: demo-greeter
+name: 问候演示
+version: 0.1.0
+description: 插件机制 PoC——菜单长出来+UI DSL 页面渲染+MCP 工具可调
+author: soulmate
+entry: main.py
+permissions:
+  - ui.serve
+  - tool.register
+  - tool.call
+  - data.read
+  - data.write
+ui:
+  nav:
+    label: 问候演示
+    icon: Sparkles
+    position: end
+  pages:
+    - id: home
+      title: 问候工作台
+      dsl: ui/home.json
+tools:
+  - name: greet
+    description: 生成一条问候语（风格可选 formal/casual）
+    handler: handle_greet
+    permissions: [tool.call]
+    approval: never
+    input_schema:
+      type: object
+      properties:
+        name:
+          type: string
+          description: 问候对象
+        style:
+          type: string
+          enum: [formal, casual]
+          description: 问候风格
+      required: [name]
+  - name: greet_log
+    description: 查询问候记录
+    handler: handle_greet_log
+    permissions: [tool.call, data.read]
+    approval: never
+    input_schema:
+      type: object
+      properties:
+        limit:
+          type: integer
+          description: 返回条数上限
+flows: []

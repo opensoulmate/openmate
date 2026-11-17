@@ -16,6 +16,7 @@ import { Loader2 } from "lucide-react";
 // 直接导入插件页面组件（避免动态导入问题）
 import BiddingPage from "@/plugins/bidding/frontend/page";
 import GeneLoopPage from "@/plugins/gene_loop/frontend/page";
+import { PluginDslView } from "@/components/plugin-ui/panel-renderer";
 
 // 插件页面映射表
 const PLUGIN_PAGES: Record<string, React.ComponentType> = {
@@ -46,15 +47,8 @@ export default function PluginPage() {
   }
 
   if (!PluginComponent) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full text-center p-8">
-        <div className="text-6xl mb-4">🔌</div>
-        <h2 className="text-lg font-semibold mb-2">插件未找到</h2>
-        <p className="text-muted-foreground">
-          插件 "{pluginName}" 不存在或未启用
-        </p>
-      </div>
-    );
+    // plugin.yaml 清单式插件：UI DSL 页面由宿主组件渲染（菜单/页面/工具从清单长出）
+    return <PluginDslView pluginId={pluginName} />;
   }
 
   return <PluginComponent />;

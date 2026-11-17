@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "page": {
+    "title": "问候工作台",
+    "description": "插件机制 PoC：表单/列表/报告三面板，数据绑定走 MCP 工具"
+  },
+  "panels": [
+    {
+      "type": "form",
+      "id": "greet-form",
+      "title": "生成问候",
+      "fields": [
+        {
+          "name": "name",
+          "label": "问候对象",
+          "widget": "text",
+          "required": true,
+          "placeholder": "输入姓名"
+        },
+        {
+          "name": "style",
+          "label": "风格",
+          "widget": "select",
+          "default": "formal",
+          "options": [
+            { "value": "formal", "label": "正式" },
+            { "value": "casual", "label": "随意" }
+          ]
+        }
+      ],
+      "submit": {
+        "label": "生成",
+        "tool": "demo-greeter__greet",
+        "target_panel": "greet-result"
+      }
+    },
+    {
+      "type": "report",
+      "id": "greet-result",
+      "title": "最新问候",
+      "sections": [
+        { "kind": "kv", "title": "结果", "items": [{ "label": "状态", "value": "尚未生成" }] }
+      ]
+    },
+    {
+      "type": "list",
+      "id": "greet-log",
+      "title": "问候记录",
+      "columns": [
+        { "key": "time", "label": "时间" },
+        { "key": "name", "label": "对象" },
+        { "key": "style", "label": "风格" },
+        { "key": "greeting", "label": "内容" }
+      ],
+      "source": { "tool": "demo-greeter__greet_log", "args": { "limit": 20 } },
+      "empty_text": "暂无记录，先在上方生成一条"
+    }
+  ]
+}
