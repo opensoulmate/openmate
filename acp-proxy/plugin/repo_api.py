@@ -29,6 +29,18 @@ class PublishRequest(PydanticBaseModel):
     notes: str = ""
 
 
+class RemoteRequest(PydanticBaseModel):
+    name: str                         # 远端名（小写字母/数字/连字符）
+    url: str                          # http(s) 基址（静态托管即成远端源）
+
+
+class RemoteInstallRequest(PydanticBaseModel):
+    plugin_id: str
+    version: str
+    confirmed: bool = False           # 生成≠安装（确认链同 forge）
+    decided_by: str = "用户"
+
+
 def build_repo_router(
     store_dir: Path | str,
     plugins_dir: Path | str,
@@ -102,5 +114,67 @@ def build_repo_router(
             return repo.unpublish(plugin_id, version)
         except ForgeError as e:
             raise HTTPException(status_code=404, detail=str(e))
+
+    # ── step 3：本地远端仓库（HTTP 远端源拉取安装）+ 社区门户留接口 ──
+
+    @router.get("/catalog.json")
+    async def catalog() -> dict[str, Any]:
+        """远端协议目录：把本仓库挂成任意 HTTP 远端源的静态契约面。"""
+        return repo.catalog()
+
+    @router.get("/remotes")
+    async def list_remotes() -> dict[str, Any]:
+        remotes = repo.list_remotes()
+        return {"remotes": remotes, "count": len(remotes)}
+
+    @router.post("/remotes")
+    async def add_remote(req: RemoteRequest) -> dict[str, Any]:
+        try:
+            return repo.add_remote(req.name, req.url)
+        except ForgeError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    @router.delete("/remotes/{name}")
+    async def remove_remote(name: str) -> dict[str, Any]:
+        try:
+            return repo.remove_remote(name)
+        except ForgeError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+
+    @router.post("/remotes/{name}/pull")
+    async def pull_remote(name: str) -> dict[str, Any]:
+        try:
+            return repo.pull_remote(name)
+        except ForgeError as e:
+            status = 404 if "不存在" in str(e) else 502
+            raise HTTPException(status_code=status, detail=str(e))
+
+    @router.get("/remotes/{name}/search")
+    async def search_remote(name: str, keyword: str = "",
+                            limit: int = 50) -> dict[str, Any]:
+        try:
+            results = repo.search_remote(name, keyword, limit=limit)
+        except ForgeError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        return {"results": results, "count": len(results), "remote": name}
+
+    @router.post("/remotes/{name}/install")
+    async def install_remote(name: str,
+                             req: RemoteInstallRequest) -> dict[str, Any]:
+        """远端装入——sha256 对账 + install_zip 确认链（生成≠安装逐字）。"""
+        try:
+            return repo.install_remote(
+                name, req.plugin_id, req.version, forge=forge,
+                confirmed=req.confirmed, hot_load=hot_load,
+                decided_by=req.decided_by)
+        except ForgeError as e:
+            msg = str(e)
+            status = 404 if any(k in msg for k in ("无此版本", "不存在", "未拉取")) else 409
+            raise HTTPException(status_code=status, detail=msg)
+
+    @router.get("/community/status")
+    async def community_status() -> dict[str, Any]:
+        """社区门户接口现状（未配置外部服务如实呈现，选型=拍板项不擅定）。"""
+        return repo.portal.status()
 
     return router
