@@ -17,6 +17,8 @@ src-tauri/target/
 admin-ui/.tmp/
 *.tmp
 *.bak
+desktop/dist/
+*.apk
 
 # === 密钥/证书（严禁入库）===
 certs/
