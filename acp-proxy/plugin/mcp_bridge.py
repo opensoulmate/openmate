@@ -12,7 +12,9 @@ from __future__ import annotations
 import inspect
 import json
 import logging
+import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from plugin.yaml_manifest import ToolSpec
@@ -47,6 +49,15 @@ class ToolContext:
     data_dir: str = ""
     logger: logging.Logger = field(default_factory=lambda: logger)
 
+    def store_dir(self) -> Path:
+        """插件 store（plugin-data/<id>/，设计 §4.1）：跨进程持久的自有数据目录"""
+        base = os.environ.get("OPENMATE_PLUGIN_DATA_DIR") or (
+            Path(__file__).resolve().parent.parent.parent / "plugin-data"
+        )
+        store = Path(base) / self.plugin_id
+        store.mkdir(parents=True, exist_ok=True)
+        return store
+
     def require_permission(self, permission: str, manifest_permissions: set[str]) -> None:
         if permission not in manifest_permissions:
             raise PermissionError(f"插件 {self.plugin_id} 未声明权限 {permission}")
@@ -58,6 +69,7 @@ class RegisteredTool:
     spec: ToolSpec
     handler: ToolHandler
     manifest_permissions: frozenset[str] = frozenset()
+    data_dir: str = ""               # 插件目录（ToolContext.data_dir 来源）
 
     @property
     def full_name(self) -> str:
@@ -79,6 +91,7 @@ class PluginToolRegistry:
         spec: ToolSpec,
         handler: ToolHandler,
         manifest_permissions: set[str] | frozenset[str] = frozenset(),
+        data_dir: str = "",
     ) -> RegisteredTool:
         if not callable(handler):
             raise ValueError(f"工具 {spec.name} 的 handler 不可调用: {spec.handler!r}")
@@ -89,6 +102,7 @@ class PluginToolRegistry:
             spec=spec,
             handler=handler,
             manifest_permissions=frozenset(manifest_permissions),
+            data_dir=data_dir,
         )
         if tool.full_name in self._tools:
             raise ValueError(f"工具已注册: {tool.full_name}")
@@ -103,6 +117,23 @@ class PluginToolRegistry:
             del self._tools[name]
             self._approved_once.discard(name)
         return len(names)
+
+    def has_tool(self, name: str) -> bool:
+        """工具是否已注册（SoulMate 分发路由判别用）"""
+        return name in self._tools
+
+    def tool_meta(self, name: str) -> dict[str, Any] | None:
+        """工具元数据（approval 等，SoulMate 审批闸判别用）；未注册返回 None"""
+        tool = self._tools.get(name)
+        if tool is None:
+            return None
+        return {
+            "name": tool.full_name,
+            "plugin_id": tool.plugin_id,
+            "approval": tool.spec.approval,
+            "description": tool.spec.description,
+            "input_schema": tool.spec.input_schema,
+        }
 
     # ── MCP 契约 ──
 
@@ -145,7 +176,7 @@ class PluginToolRegistry:
                 self._approved_once.add(tool.full_name)
 
         if ctx is None:
-            ctx = ToolContext(plugin_id=tool.plugin_id)
+            ctx = ToolContext(plugin_id=tool.plugin_id, data_dir=tool.data_dir)
         result = tool.handler(args, ctx)
         if inspect.isawaitable(result):
             return {"awaitable": result}  # async handler：由 call_tool_async 消费

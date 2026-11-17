@@ -132,7 +132,8 @@ def bind_tools(descriptor: PluginDescriptor, registry: PluginToolRegistry) -> in
         handler = getattr(module, spec.handler, None)
         if handler is None:
             raise RuntimeError(f"插件 {descriptor.id} entry 缺少 handler: {spec.handler}")
-        registry.register(descriptor.id, spec, handler, manifest_permissions)
+        registry.register(descriptor.id, spec, handler, manifest_permissions,
+                          data_dir=str(descriptor.dir_path))
         count += 1
     return count
 

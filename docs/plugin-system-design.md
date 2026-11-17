@@ -1,6 +1,7 @@
 # OpenMate 插件系统设计
 
 > 2026-11-17 · 状态：设计定稿（PoC 同步落地）。对标依据见 `docs/reports/openbidkit-yibiao-benchmark.md`。
+> 2026-11-17 · 运行时落地：§5 流程引擎（`plugin/flow_def.py`/`flow_engine.py`/`flow_api.py`）+ 宿主运行面板（`plugins/flow-console/`，UI DSL list/report 实时页）+ §7 自我开发闭环（`plugin/plugin_forge.py`/`forge_api.py` + SoulMate `plugin_dev`）已实现并端到端验证（示例流程 `plugins/demo-greeter/flows/daily-report.yaml`：定时触发→调工具→人工审批→出报告）。工具级审批 token 语义：流程实例过人工审批闸后放行 approval 类工具。
 >
 > 第一原则「所想即所见，所见即所得」：用户对 SoulMate 说需求 → 生成可见子系统（菜单+页面+后台+流程）→ 沉淀为常驻入口。插件是"沉淀"的载体。
 

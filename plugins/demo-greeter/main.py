@@ -38,3 +38,36 @@ def handle_greet_log(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     limit = int(args.get("limit", 20))
     items = _GREET_LOG[-limit:]
     return {"items": items, "count": len(items)}
+
+
+def handle_build_report(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
+    """MCP 工具：生成问候报告（生成文档类动作，approval=always 须人工确认）。
+
+    流程引擎经「人工审批闸」放行后调用（approved token）；对话/UI 直接调用
+    走工具级审批闸。报告落 ctx.store_dir()/reports.json（跨进程持久）。
+    """
+    import json
+
+    title = str(args.get("title") or "问候报告").strip()
+    greeting = str(args.get("greeting") or "").strip()
+    fetched = int(args.get("fetched", 0) or 0)
+    report = {
+        "title": title,
+        "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "greeting": greeting,
+        "records_seen": fetched,
+        "total_logged": len(_GREET_LOG),
+        "summary": f"{title}：{greeting or '（无问候）'}，参考记录 {fetched} 条。",
+    }
+    try:
+        store_dir = ctx.store_dir()
+        path = store_dir / "reports.json"
+        reports = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else []
+        reports.append(report)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(reports, ensure_ascii=False, indent=1), encoding="utf-8")
+        report["stored_at"] = str(path)
+    except Exception as e:  # noqa: BLE001 — 落盘失败显式报因，报告本体仍返回
+        report["store_error"] = str(e)
+    ctx.logger.info("demo-greeter 生成报告: %s", title)
+    return report

@@ -1,0 +1,114 @@
+{
+  "version": 1,
+  "page": {
+    "title": "流程运行台",
+    "description": "宿主内建流程可观测面板：实例状态、节点日志、失败重试、人工审批、回放。数据绑定全部走 MCP 工具——面板能做的，对话也能做。"
+  },
+  "panels": [
+    {
+      "type": "list",
+      "id": "instances",
+      "title": "流程实例",
+      "columns": [
+        { "key": "run_id", "label": "实例" },
+        { "key": "flow", "label": "流程" },
+        { "key": "status", "label": "状态" },
+        { "key": "trigger", "label": "触发" },
+        { "key": "created_at", "label": "创建时间" },
+        { "key": "duration_ms", "label": "耗时(ms)" },
+        { "key": "error", "label": "错误" }
+      ],
+      "source": { "tool": "flow-console__run_list", "args": { "limit": 20 } },
+      "auto_refresh_seconds": 10,
+      "empty_text": "暂无流程实例——用下方「手动触发」跑一条，或等 cron 到点"
+    },
+    {
+      "type": "form",
+      "id": "run-form",
+      "title": "手动触发",
+      "fields": [
+        { "name": "flow_id", "label": "流程 id", "widget": "text", "required": true, "placeholder": "例如 daily-greet-report" },
+        { "name": "idempotency_key", "label": "幂等键", "widget": "text", "placeholder": "可选：同键不重复触发" }
+      ],
+      "submit": { "label": "触发", "tool": "flow-console__run_flow", "target_panel": "run-result" }
+    },
+    {
+      "type": "form",
+      "id": "detail-form",
+      "title": "实例详情 / 节点日志",
+      "fields": [
+        { "name": "run_id", "label": "实例 id", "widget": "text", "required": true, "placeholder": "run_…" }
+      ],
+      "submit": { "label": "查看", "tool": "flow-console__run_detail", "target_panel": "run-detail" }
+    },
+    {
+      "type": "report",
+      "id": "run-detail",
+      "title": "节点日志 / 重试 / 耗时",
+      "sections": [
+        {
+          "kind": "text",
+          "title": "用法",
+          "content": "输入实例 id 点「查看」：节点状态（pending/running/ok/failed/waiting-approval/skipped）、尝试与重试次数、耗时、软超时预算标记、输出摘要、事件时间线会注入这里。"
+        }
+      ]
+    },
+    {
+      "type": "form",
+      "id": "approval-form",
+      "title": "人工审批闸",
+      "fields": [
+        { "name": "run_id", "label": "实例 id", "widget": "text", "required": true },
+        {
+          "name": "decision",
+          "label": "决定",
+          "widget": "select",
+          "required": true,
+          "default": "approve",
+          "options": [
+            { "value": "approve", "label": "批准（流程恢复执行）" },
+            { "value": "reject", "label": "驳回（流程终止）" }
+          ]
+        },
+        { "name": "note", "label": "说明", "widget": "text", "placeholder": "可选" }
+      ],
+      "submit": { "label": "提交审批", "tool": "flow-console__run_approve", "target_panel": "run-result" }
+    },
+    {
+      "type": "form",
+      "id": "replay-form",
+      "title": "回放",
+      "fields": [
+        { "name": "run_id", "label": "实例 id", "widget": "text", "required": true, "placeholder": "按同触发/输入重跑" }
+      ],
+      "submit": { "label": "回放", "tool": "flow-console__run_replay", "target_panel": "run-result" }
+    },
+    {
+      "type": "report",
+      "id": "run-result",
+      "title": "操作结果",
+      "sections": [
+        {
+          "kind": "text",
+          "title": "说明",
+          "content": "触发 / 审批 / 回放的结果注入这里。"
+        }
+      ]
+    },
+    {
+      "type": "list",
+      "id": "events",
+      "title": "最近事件（实时）",
+      "columns": [
+        { "key": "time", "label": "时间" },
+        { "key": "run_id", "label": "实例" },
+        { "key": "node", "label": "节点" },
+        { "key": "event", "label": "事件" },
+        { "key": "detail", "label": "详情" }
+      ],
+      "source": { "tool": "flow-console__run_log", "args": { "limit": 30 } },
+      "auto_refresh_seconds": 10,
+      "empty_text": "暂无事件"
+    }
+  ]
+}

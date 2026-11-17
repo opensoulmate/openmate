@@ -212,6 +212,15 @@ function ListPanelView({
 }) {
   const [rows, setRows] = useState<Record<string, unknown>[]>(() => extractRows(initial));
   const [error, setError] = useState("");
+  const [autoTick, setAutoTick] = useState(0);
+
+  // 实时面板（auto_refresh_seconds）：轮询刷新数据源（运行面板「实时」要求）
+  useEffect(() => {
+    const seconds = panel.auto_refresh_seconds ?? 0;
+    if (seconds < 2) return;
+    const timer = setInterval(() => setAutoTick((t) => t + 1), seconds * 1000);
+    return () => clearInterval(timer);
+  }, [panel.auto_refresh_seconds]);
 
   useEffect(() => {
     if (!panel.source?.tool) return;
@@ -227,7 +236,7 @@ function ListPanelView({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [panel.id, refreshKey]);
+  }, [panel.id, refreshKey, autoTick]);
 
   return (
     <PanelCard title={panel.title}>

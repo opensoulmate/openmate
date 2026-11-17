@@ -196,6 +196,25 @@ async def lifespan(app: FastAPI):
     if loaded_plugins:
         logger.info("已加载 %d 个插件: %s", len(loaded_plugins), ", ".join(loaded_plugins))
 
+    # 流程引擎运行时（docs/plugin-system-design.md §5）：工具调用接 MCP 工具注册桥
+    # （流程工具节点与 UI/对话共用同一 handler），调度器跑 cron 触发+审批超时+断点续跑
+    flow_scheduler = None
+    try:
+        from plugin.flow_engine import FlowScheduler, get_engine
+        from plugin.mcp_bridge import tool_registry as _plugin_tool_registry
+
+        _flow_engine = get_engine()
+
+        async def _flow_tool_caller(name, args, approved=False):
+            return await _plugin_tool_registry.call_tool_async(
+                name, args, approved=approved)
+
+        _flow_engine.set_tool_caller(_flow_tool_caller)
+        flow_scheduler = FlowScheduler(_flow_engine)
+        await flow_scheduler.start()
+    except Exception as e:
+        logger.warning("流程引擎启动失败: %s", e)
+
     # 启动时探测模型能力（只执行一次）——配置走 utils.llm_config 单一真源
     # （旧实现自扫 os.environ：key 只写在 opensoul/.env 时探测被静默跳过，
     #   且与 resolve_llm_config"文件>env"语义不一致）
@@ -253,6 +272,11 @@ async def lifespan(app: FastAPI):
             logger.warning(f"Wakeup executor failed to start: {e}")
 
     yield
+    if flow_scheduler:
+        try:
+            await flow_scheduler.stop()
+        except Exception as e:
+            logger.warning("流程调度器停止失败: %s", e)
 
     if wakeup_executor:
         try:
@@ -291,6 +315,32 @@ app.include_router(evolution_router)
 app.include_router(gene_loop_router)
 app.include_router(architecture_router)
 app.include_router(routing_router)
+
+
+# 流程引擎 + 插件锻造坊 API（docs/plugin-system-design.md §5/§7）
+# /flows*：流程定义/实例/审批/回放；/plugins/forge*：自我开发闭环（草稿→dry-run→确认→安装）
+def _on_plugin_installed(grown: dict) -> None:
+    """热装载回调：新插件并入 /plugins 载荷（菜单/页面/工具即刻长出，不重启宿主）"""
+    global _yaml_plugin_index
+    manifest = grown.get("frontend_manifest") or {}
+    _yaml_plugin_index.setdefault("plugins", []).append({
+        "name": manifest.get("name", grown.get("plugin_id", "")),
+        "version": manifest.get("version", "0.0.0"),
+        "description": manifest.get("description", ""),
+        "status": "enabled",
+        "manifest": manifest,
+    })
+
+
+from plugin.flow_api import build_flow_router  # noqa: E402
+from plugin.forge_api import build_forge_router  # noqa: E402
+
+app.include_router(build_flow_router())
+app.include_router(build_forge_router(
+    PLUGINS_DIR,
+    include_router=app.include_router,
+    on_installed=_on_plugin_installed,
+))
 
 
 @app.websocket("/ws/acp")

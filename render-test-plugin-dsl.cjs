@@ -85,6 +85,26 @@ const demoDsl = JSON.parse(fs.readFileSync(path.join(ROOT, 'plugins/demo-greeter
     panels: [{ type: 'form', id: 'f', title: 'F', fields: [{ name: 'a', label: 'A' }, { widget: 'text' }], submit: { tool: 'p__t' } }],
   }).panels[0].fields;
   assert(fields.length === 1 && fields[0].widget === 'text' && fields[0].label === 'A', '非法字段丢弃+label 兜底 name');
+
+  // auto_refresh_seconds（实时运行面板）：≥2 生效，非法/缺省归 0
+  const refresh = normalizeDslPage({
+    version: 1, page: { title: 'P' },
+    panels: [
+      { type: 'list', id: 'l1', title: 'L', columns: [{ key: 'a', label: 'A' }], auto_refresh_seconds: 10 },
+      { type: 'list', id: 'l2', title: 'L', columns: [{ key: 'a', label: 'A' }], auto_refresh_seconds: 1 },
+    ],
+  }).panels;
+  assert(refresh[0].auto_refresh_seconds === 10, 'list 面板 auto_refresh_seconds=10 保留');
+  assert(refresh[1].auto_refresh_seconds === 0, 'auto_refresh_seconds<2 归 0（不轮询）');
+
+  // flow-console 宿主运行面板真实 DSL 可归一化（list/report 混排 + 实时列表）
+  const consoleDsl = JSON.parse(fs.readFileSync(path.join(ROOT, 'plugins/flow-console/ui/home.json'), 'utf8'));
+  const consolePage = normalizeDslPage(consoleDsl);
+  assert(consolePage !== null && consolePage.panels.length === 8, 'flow-console 归一化出 8 面板');
+  assert(consolePage.panels.filter((p) => p.type === 'list').length === 2
+    && consolePage.panels.filter((p) => p.type === 'report').length === 2
+    && consolePage.panels.filter((p) => p.type === 'form').length === 4,
+  'flow-console 面板构成 4 form + 2 list + 2 report');
 }
 
 // ── ②③④ 三面板真实渲染（demo ui/home.json）──

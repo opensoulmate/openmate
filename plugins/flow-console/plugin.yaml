@@ -1,0 +1,123 @@
+id: flow-console
+name: 流程运行台
+version: 0.1.0
+description: 宿主内建流程运行面板——实例状态/节点日志/重试/审批/回放（UI DSL list/report，插件作者无需写 UI）
+author: soulmate
+entry: main.py
+permissions:
+  - ui.serve
+  - tool.register
+  - tool.call
+  - flow.register
+  - data.read
+ui:
+  nav:
+    label: 流程运行台
+    icon: Workflow
+    position: end
+  pages:
+    - id: home
+      title: 流程运行台
+      dsl: ui/home.json
+tools:
+  - name: flow_list
+    description: 列出已注册的流程定义（id/触发器/节点）
+    handler: handle_flow_list
+    permissions: [tool.call, flow.register]
+    approval: never
+    input_schema:
+      type: object
+      properties: {}
+  - name: run_flow
+    description: 手动触发一条流程（面板按钮/对话「跑一下」）
+    handler: handle_run_flow
+    permissions: [tool.call, flow.register]
+    approval: never
+    input_schema:
+      type: object
+      properties:
+        flow_id:
+          type: string
+          description: 流程 id
+        inputs:
+          type: object
+          description: 触发输入（可选）
+        idempotency_key:
+          type: string
+          description: 幂等键（可选，同键不重复触发）
+      required: [flow_id]
+  - name: run_list
+    description: 流程实例列表（可观测面板数据源：状态/触发/耗时）
+    handler: handle_run_list
+    permissions: [tool.call, data.read]
+    approval: never
+    input_schema:
+      type: object
+      properties:
+        flow_id:
+          type: string
+          description: 按流程过滤（可选）
+        status:
+          type: string
+          description: 按状态过滤（running/waiting-approval/completed/failed，可选）
+        limit:
+          type: integer
+          description: 返回条数上限
+  - name: run_detail
+    description: 流程实例详情（节点状态/重试次数/耗时/输出摘要/事件日志）
+    handler: handle_run_detail
+    permissions: [tool.call, data.read]
+    approval: never
+    input_schema:
+      type: object
+      properties:
+        run_id:
+          type: string
+          description: 实例 id
+      required: [run_id]
+  - name: run_log
+    description: 流程实例事件日志（节点日志时间线；不传 run_id=全局最近事件）
+    handler: handle_run_log
+    permissions: [tool.call, data.read]
+    approval: never
+    input_schema:
+      type: object
+      properties:
+        run_id:
+          type: string
+          description: 实例 id（可选，缺省全局最近事件）
+        limit:
+          type: integer
+          description: 返回条数上限
+  - name: run_approve
+    description: 人工审批闸——批准/驳回等待审批的流程实例（approve 后流程恢复执行）
+    handler: handle_run_approve
+    permissions: [tool.call, flow.register]
+    approval: never
+    input_schema:
+      type: object
+      properties:
+        run_id:
+          type: string
+          description: 实例 id
+        decision:
+          type: string
+          enum: [approve, reject]
+          description: 审批决定
+        note:
+          type: string
+          description: 审批说明（可选）
+      required: [run_id, decision]
+  - name: run_replay
+    description: 回放流程实例（同触发/输入重跑，新实例链回 replay_of）
+    handler: handle_run_replay
+    permissions: [tool.call, flow.register]
+    approval: never
+    input_schema:
+      type: object
+      properties:
+        run_id:
+          type: string
+          description: 要回放的实例 id
+      required: [run_id]
+flows: []

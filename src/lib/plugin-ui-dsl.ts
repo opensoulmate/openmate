@@ -47,6 +47,8 @@ export interface DslListPanel {
   columns: DslListColumn[];
   source?: { tool: string; args?: Record<string, unknown> };
   empty_text?: string;
+  /** 实时面板：按秒轮询刷新（≥2 生效；0/缺省=只在提交后刷新） */
+  auto_refresh_seconds?: number;
 }
 
 export interface DslReportItem {
@@ -139,6 +141,10 @@ function normalizePanel(raw: unknown): DslPanel | null {
         ? { tool: source.tool, args: isRecord(source.args) ? source.args : {} }
         : undefined,
       empty_text: typeof raw.empty_text === "string" ? raw.empty_text : "暂无数据",
+      auto_refresh_seconds:
+        typeof raw.auto_refresh_seconds === "number" && raw.auto_refresh_seconds >= 2
+          ? Math.floor(raw.auto_refresh_seconds)
+          : 0,
     };
   }
   if (type === "report") {

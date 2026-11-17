@@ -1,0 +1,62 @@
+# 每日问候报告 — 示例流程（真实验证：定时触发→调工具→人工审批→出报告）
+#
+# 触发：cron 工作日 09:00（也可 manual「跑一下」）
+# 链路：取记录（工具+重试）→ 生成问候（工具）→ 人工审批闸（确认后才出报告）
+#      → 出报告（工具，approval=always 的生成文档动作，经流程审批放行）
+#      → 收尾通知
+# 可观测：宿主流程运行台（flow-console）列出实例/节点日志/重试/回放
+id: daily-greet-report
+name: 每日问候报告
+version: 1
+triggers:
+  - type: cron
+    cron: "0 9 * * 1-5"
+  - type: manual
+nodes:
+  - id: fetch-log
+    type: tool
+    tool: demo-greeter__greet_log
+    args:
+      limit: 5
+    retry:
+      max: 3
+      backoff: exponential
+      base_seconds: 2
+    timeout_seconds: 60
+  - id: greet-team
+    type: tool
+    tool: demo-greeter__greet
+    args:
+      name: "团队"
+      style: formal
+    retry:
+      max: 2
+      backoff: fixed
+      base_seconds: 1
+    timeout_seconds: 30
+  - id: confirm-report
+    type: approval
+    form: home
+    timeout_hours: 72
+    on_timeout: fail
+  - id: build-report
+    type: tool
+    tool: demo-greeter__build_report
+    args:
+      title: "每日问候报告"
+      greeting: "$.greet-team.greeting"
+      fetched: "$.fetch-log.count"
+    retry:
+      max: 2
+      backoff: fixed
+      base_seconds: 1
+    timeout_seconds: 60
+  - id: finish
+    type: action
+    actions:
+      - type: notify
+        channel: in-app
+        message: "每日问候报告已生成"
+observability:
+  panel: flow-run
+  retain_runs: 50

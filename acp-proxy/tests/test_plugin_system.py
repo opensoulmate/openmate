@@ -44,7 +44,7 @@ def test_load_demo_manifest():
     assert manifest.version == "0.1.0"
     assert manifest.nav is not None and manifest.nav.label == "问候演示"
     assert [p.id for p in manifest.pages] == ["home"]
-    assert [t.name for t in manifest.tools] == ["greet", "greet_log"]
+    assert [t.name for t in manifest.tools] == ["greet", "greet_log", "build_report"]
     assert manifest.permissions == ("ui.serve", "tool.register", "tool.call", "data.read", "data.write")
 
 
@@ -238,8 +238,8 @@ def test_bind_and_list_tools_mcp_shape():
     _bind_demo(registry)
     tools = registry.list_tools()
     names = [t["name"] for t in tools]
-    assert names == ["demo-greeter__greet", "demo-greeter__greet_log"]
-    greet = tools[0]
+    assert names == ["demo-greeter__build_report", "demo-greeter__greet", "demo-greeter__greet_log"]
+    greet = next(t for t in tools if t["name"] == "demo-greeter__greet")
     assert greet["inputSchema"]["required"] == ["name"]
     assert set(greet.keys()) == {"name", "description", "inputSchema"}
 
@@ -301,7 +301,7 @@ def test_register_requires_permission():
 def test_unregister_plugin_removes_tools():
     registry = PluginToolRegistry()
     _bind_demo(registry)
-    assert registry.unregister_plugin("demo-greeter") == 2
+    assert registry.unregister_plugin("demo-greeter") == 3
     assert registry.list_tools() == []
 
 
@@ -370,4 +370,4 @@ def test_e2e_tool_errors(client):
 def test_e2e_manifest_endpoint(client):
     data = client.get("/plugins/demo-greeter/manifest").json()
     assert data["id"] == "demo-greeter"
-    assert [t["name"] for t in data["tools"]] == ["greet", "greet_log"]
+    assert [t["name"] for t in data["tools"]] == ["greet", "greet_log", "build_report"]

@@ -47,4 +47,22 @@ tools:
         limit:
           type: integer
           description: 返回条数上限
-flows: []
+  - name: build_report
+    description: 生成问候报告（生成文档类动作——每次须人工确认；流程内经审批闸放行）
+    handler: handle_build_report
+    permissions: [tool.call, data.write]
+    approval: always
+    input_schema:
+      type: object
+      properties:
+        title:
+          type: string
+          description: 报告标题
+        greeting:
+          type: string
+          description: 问候语（写入报告）
+        fetched:
+          type: integer
+          description: 参考记录条数
+flows:
+  - flows/daily-report.yaml

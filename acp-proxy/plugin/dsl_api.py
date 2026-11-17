@@ -130,6 +130,16 @@ def scan_and_build(plugins_dir: Path | str, registry: PluginToolRegistry | None 
             logger.error("插件 %s 工具绑定失败: %s", descriptor.id, e)
             errors.append({"plugin": descriptor.id, "error": f"工具绑定失败: {e}"})
             descriptor.state = "error"
+        # 流程定义注册（设计 §5）：清单 flows: → 流程引擎（失败逐插件记录不中断）
+        try:
+            from plugin.flow_engine import get_engine
+
+            engine = get_engine()
+            for rel in descriptor.manifest.flows:
+                engine.register_flow_file(descriptor.dir_path / rel, descriptor.id)
+        except Exception as e:  # noqa: BLE001
+            logger.error("插件 %s 流程注册失败: %s", descriptor.id, e)
+            errors.append({"plugin": descriptor.id, "error": f"流程注册失败: {e}"})
         routers.append(build_plugin_router(descriptor, registry))
         live.append(descriptor)
     return routers, build_plugins_index(live, errors=errors)

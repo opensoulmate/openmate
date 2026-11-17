@@ -181,6 +181,7 @@ from agent.image_tools import ImageTools  # 路线图7.4 图像生成/编辑
 from agent.send_file_tools import SendFileTools  # 路线图9.1 文件下发（MEDIA标签通道）
 from agent.process_tools import ProcessTools  # 路线图9.2 后台进程管理（可见可管）
 from agent.download_tools import DownloadTools  # 下载中心工具组（SoulMate触发面：torrent_search/download_add/download_task_status/download_task_list）
+from agent.plugin_tools import PluginTools  # 插件 MCP 工具 + plugin_dev 自我开发闭环（UI 与对话共用同一工具表）
 from agent.writer_fence import SessionWriterFence, WriteAction
 from agent.tool_exec_fencing import FileFenceTimeout, file_fence
 from agent.steering import (
@@ -1643,6 +1644,10 @@ class SoulMateAgent:
             if func_name in ("torrent_search", "download_add",
                              "download_task_status", "download_task_list"):
                 return await self._download_dispatch(func_name, func_args, session_id)
+            # 插件 MCP 工具 + plugin_dev（自我开发闭环）：批内同样可用（可能含出站 HTTP IO）
+            _plugin_result = await self._plugin_tools_dispatch(func_name, func_args, session_id)
+            if _plugin_result is not None:
+                return _plugin_result
             # kilocode #19 MCP resource三件套：批内同样可用（与主循环同款注入安全层）
             if func_name in MCP_RESOURCE_TOOL_NAMES:
                 return await self._call_mcp_resource_tool(func_name, func_args)
@@ -2291,6 +2296,38 @@ class SoulMateAgent:
             tools = DownloadTools()
             self._download_tools_inst = tools
         return await tools.run(func_name, func_args, session_id=session_id)
+
+    # ── 插件 MCP 工具 + plugin_dev（自我开发闭环，docs/plugin-system-design.md §4/§7）──
+
+    def _plugin_tools(self) -> "PluginTools":
+        """插件工具触发面 lazy-init（__new__ 裸实例零感知，与 _download_dispatch 同款）"""
+        tools = getattr(self, "_plugin_tools_inst", None)
+        if tools is None:
+            tools = PluginTools()
+            self._plugin_tools_inst = tools
+        return tools
+
+    async def _plugin_tools_defs(self) -> list[dict]:
+        """插件工具进 function-calling 工具表（UI 与对话共用同一工具/同一 handler）"""
+        try:
+            return await self._plugin_tools().tool_defs()
+        except Exception as e:  # noqa: BLE001 — 工具表故障不炸会话（显式留痕）
+            logger.warning(f"[plugin-tools] 工具表装配失败(非致命): {e}")
+            return []
+
+    async def _plugin_tools_dispatch(self, func_name: str, func_args: dict,
+                                     session_id: str = "") -> str | None:
+        """插件工具分发（主循环与 code-mode 内层共用）。返回 None=非插件工具。
+
+        审批闸（用户铁律）：approval=always/on-first-use 的工具（发消息/生成文档类）
+        先经 ACP session/request_permission 真人确认，拒绝即不执行；plugin_dev
+        install 同样先确认（生成≠安装）。
+        """
+        async def _ask(tn: str, ta: dict, dec: dict) -> bool:
+            return await self._request_tool_approval(session_id, tn, ta, dec)
+
+        return await self._plugin_tools().run(
+            func_name, func_args, session_id=session_id, request_approval=_ask)
 
     def _merge_pending_send_media(self, session_id: str, full_response: str) -> str:
         """9.1 确定性交付兜底：待交付 MEDIA 标签并入最终回复（末行）。
@@ -4385,7 +4422,9 @@ You can send files to the user natively: to deliver a file, write a brief confir
         # ── kilocode #19 MCP resource三件套：hasMcpResourceServer门——仅当存在
         # resource能力的已连接MCP Server时进工具面（无能力不暴露，registry同款裁剪）──
         mcp_resource_tools = resource_tool_defs() if getattr(self, "_mcp_resource_servers", None) else []
-        all_tools = builtin_tools + (mcp_tools or []) + mcp_resource_tools + evolution_tools + [clarify_tool]
+        # ── 插件 MCP 工具 + plugin_dev（自我开发闭环）：UI 与对话共用同一工具表 ──
+        plugin_tools = await self._plugin_tools_defs()
+        all_tools = builtin_tools + (mcp_tools or []) + plugin_tools + mcp_resource_tools + evolution_tools + [clarify_tool]
         # ── kilocode supplement3 #15 网络受限工具面收缩（registry直接不暴露网络类
         # 工具，"按环境裁剪工具面优于给了再拦"）：受限会话的batch_execute(code-mode)/
         # web_search/web_extract/MCP工具不进LLM工具列表；被裁清单显式落日志（mem0
@@ -4405,6 +4444,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
         attr_items += items_from_openai_tools(builtin_tools, source="builtin")
         attr_items += items_from_openai_tools(mcp_tools or [], source="mcp")
         attr_items += items_from_openai_tools(mcp_resource_tools, source="mcp")
+        attr_items += items_from_openai_tools(plugin_tools, source="plugin")
         attr_items += items_from_openai_tools(evolution_tools, source="evolution")
         attr_items += items_from_openai_tools([clarify_tool], source="builtin")
 
@@ -5515,7 +5555,11 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             # ── kilocode #19 MCP resource三件套（list/read resources）──
                             result = await self._call_mcp_resource_tool(func_name, func_args)
                         else:
-                            result = await self._call_mcp_tool(func_name, func_args)
+                            # 插件 MCP 工具 + plugin_dev（自我开发闭环）优先——UI 面板与
+                            # 对话共用同一工具表/同一 handler；非插件工具回落 MCP 执行器
+                            result = await self._plugin_tools_dispatch(func_name, func_args, session_id)
+                            if result is None:
+                                result = await self._call_mcp_tool(func_name, func_args)
                         # ── 路线图2.2 失败恢复：工具报错自动重试/换路径
                         # （最多2次）+失败原因持久化日志；OK/BLOCKED 原样通过
                         # （权限拦截绝不重试绕过）──
