@@ -3,14 +3,12 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import {
-  Send,
   Sparkles,
   Loader2,
   RotateCcw,
   ChevronUp,
   ChevronDown,
   Mic,
-  Square,
   Smile,
   Star,
   Paperclip,
@@ -21,20 +19,7 @@ import {
 } from 'lucide-react';
 import { CodeMirrorEditor } from '@/components/codemirror-editor';
 import { ContextRing } from '@/components/context-ring';
-
-/** 共用发送按钮（会话/群组同一份）：派发 smart-prompt-send 事件触发 SmartPrompt 发送 */
-export function SmartSendButton({ disabled, loading, title }: { disabled?: boolean; loading?: boolean; title?: string }) {
-  return (
-    <button
-      onClick={() => { window.dispatchEvent(new CustomEvent('smart-prompt-send')); }}
-      disabled={disabled}
-      className="flex items-center justify-center w-9 h-9 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 active:bg-primary/80 disabled:opacity-50 transition-colors"
-      title={title || '发送'}
-    >
-      {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-    </button>
-  );
-}
+import { useVoiceInput } from '@/hooks/use-voice-input';
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -63,12 +48,6 @@ interface SmartPromptProps {
   /** Footer slot (e.g. action buttons) rendered inside the border */
   /** Called when file attach button is clicked */
   onFileClick?: () => void;
-  /** 语音输入（17.2）：点击麦克风开始/停止录音 */
-  onMicClick?: () => void;
-  /** 是否正在录音（按钮变红+计时） */
-  isRecording?: boolean;
-  /** 已录音秒数 */
-  recordingSeconds?: number;
   /** Paste handler for clipboard images */
   onPaste?: (e: React.ClipboardEvent) => void;
   /** Initial task value — auto-expands and triggers generate */
@@ -83,12 +62,6 @@ interface SmartPromptProps {
   sessionId?: string;
   /** Increment to trigger full clear (all fields + expanded) */
   clearTrigger?: number;
-  /** 发送钮禁用态（无内容/断线时 true） */
-  sendDisabled?: boolean;
-  /** 发送钮加载态 */
-  sendLoading?: boolean;
-  /** 发送钮 title */
-  sendTitle?: string;
   /** 统计文字（如 "12条 · $0.35"），显示在工具栏 */
   statsText?: string;
   /** 业务控制钮——按钮的代码全在本组件内，页面只传状态和回调 */
@@ -101,7 +74,7 @@ interface SmartPromptProps {
 
 /**
  * 业务控制钮状态/回调（按钮渲染代码全部在 SmartPrompt 内部，页面只管传数据）。
- * 渲染顺序固定：Plan/Act → 思考 → 清空 → 历史 → 上下文环 → 统计 → 发送 → 讨论。
+ * 渲染顺序固定：Plan/Act → 思考 → 清空 → 历史 → 上下文环 → 统计 → 语音输入。
  */
 export interface PromptControls {
   /** Plan/Act 模式切换 */
@@ -159,9 +132,6 @@ export function SmartPrompt({
   context,
   className,
   onFileClick,
-  onMicClick,
-  isRecording = false,
-  recordingSeconds = 0,
   onPaste,
   hasAttachments,
   isReadingFiles = false,
@@ -171,9 +141,6 @@ export function SmartPrompt({
   onClearInput,
   sessionId,
   clearTrigger,
-  sendDisabled,
-  sendLoading,
-  sendTitle,
   statsText,
   controls,
   loadFieldsTrigger,
@@ -392,12 +359,22 @@ export function SmartPrompt({
     return false;
   };
 
-  // Listen for external send trigger (from chat action bar button)
-  useEffect(() => {
-    const handler = () => handleSend();
-    window.addEventListener('smart-prompt-send', handler);
-    return () => window.removeEventListener('smart-prompt-send', handler);
-  }, [handleSend]);
+  // ── 语音输入（对标 Hermes Desktop useVoiceRecorder）：原发送按钮的位置=麦克风开关，
+  // 点击开始说话 → 再点结束 → STT 转写进输入框 → Enter 发送（发送键位保留） ──
+  const inputAreaRef = useRef<HTMLDivElement | null>(null);
+  const insertTranscript = useCallback((text: string) => {
+    internalUpdateRef.current = true;
+    setFields((prev) => {
+      const sep = prev.task && !/\s$/.test(prev.task) ? ' ' : '';
+      const next = { ...prev, task: `${prev.task}${sep}${text}` };
+      if (onFieldsChange) setTimeout(() => onFieldsChange(next), 0);
+      return next;
+    });
+    // 转写落输入框后聚焦编辑器，直接 Enter 发送
+    const cm = inputAreaRef.current?.querySelector('.cm-content') as HTMLElement | null;
+    if (cm) cm.focus();
+  }, [onFieldsChange]);
+  const voice = useVoiceInput({ onTranscript: insertTranscript });
 
   return (
     <div
@@ -409,7 +386,7 @@ export function SmartPrompt({
     >
       {/* Task input — always visible */}
       <div className="p-3 flex-1 min-h-0">
-        <div className="relative h-full" onClick={(e) => {
+        <div ref={inputAreaRef} className="relative h-full" onClick={(e) => {
           // 点击空白区域时聚焦 CodeMirror
           const target = e.target as HTMLElement;
           if (!target.closest('.cm-editor')) {
@@ -497,14 +474,6 @@ export function SmartPrompt({
         </button>
         <button onClick={onFileClick} className="p-1.5 rounded hover:bg-muted/30 text-muted-foreground/40 hover:text-muted-foreground transition-colors" title="文件">
           <Paperclip className="w-4 h-4" />
-        </button>
-        <button
-          onClick={onMicClick}
-          className={`flex items-center gap-1 p-1.5 rounded transition-colors ${isRecording ? 'bg-red-500/15 text-red-500 hover:bg-red-500/25' : 'hover:bg-muted/30 text-muted-foreground/40 hover:text-muted-foreground'}`}
-          title={isRecording ? '停止录音' : '语音输入'}
-        >
-          {isRecording ? <Square className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-          {isRecording && <span className="text-[10px] tabular-nums">{recordingSeconds}s</span>}
         </button>
         {/* ✨ Generate button */}
         {!expanded && (
@@ -607,7 +576,35 @@ export function SmartPrompt({
         {statsText && (
           <span className="text-[9px] text-muted-foreground/30 whitespace-nowrap">{statsText}</span>
         )}
-        <SmartSendButton disabled={sendDisabled} loading={sendLoading} title={sendTitle} />
+        {/* 语音输入按钮（原发送按钮键位不变：Enter 发送；按钮=录音开关，转写文字进输入框） */}
+        {voice.error && (
+          <span className="text-[10px] text-red-500 max-w-[320px] truncate" title={voice.error}>{voice.error}</span>
+        )}
+        <button
+          onClick={voice.dictate}
+          title={voice.status === 'recording' ? '结束录音并转文字' : voice.status === 'transcribing' ? '正在转写语音' : '语音输入（点击开始说话，转文字进输入框后回车发送）'}
+          className={`flex items-center justify-center h-9 rounded-full transition-colors ${
+            voice.status === 'idle'
+              ? 'w-9 bg-primary text-primary-foreground hover:bg-primary/90 active:bg-primary/80'
+              : voice.status === 'recording'
+                ? 'w-auto px-2 gap-1 border border-red-500/25 bg-red-500/15 text-red-500 hover:bg-red-500/25'
+                : 'w-auto px-2 gap-1 border border-transparent bg-primary text-primary-foreground hover:bg-primary/90'
+          }`}
+        >
+          {voice.status === 'transcribing' ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span className="text-[10px]">转写中</span>
+            </>
+          ) : (
+            <>
+              <Mic className={`w-4 h-4 ${voice.status === 'recording' ? 'animate-pulse' : ''}`} />
+              {voice.status === 'recording' && (
+                <span className="text-[10px] tabular-nums">录音中 {Math.round(voice.elapsedSeconds)}s</span>
+              )}
+            </>
+          )}
+        </button>
       </div>
 
     </div>

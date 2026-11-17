@@ -10,7 +10,7 @@ import { MultiFileDiff, type FileChange } from "@/components/multi-file-diff";
 import { TaskChoiceMenu, type ChoiceOption, type ChoiceQuestion } from "@/components/task-choice-menu";
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useAppStore } from '@/stores/app-store';
-import { Send, Bot, User, Loader2, Paperclip, X, Wifi, WifiOff, FileText, Image as ImageIcon, Info, ChevronDown, ChevronLeft, ChevronRight, Plus, Bookmark, RotateCcw, Zap, Brain, PanelLeft, Copy, ThumbsUp, ThumbsDown, Share2, RefreshCw, MoreHorizontal, Volume2, MessageSquare, FolderOpen, Video, Music, Link2, CalendarDays, LocateFixed, Mic, Square } from "lucide-react";
+import { Send, Bot, User, Loader2, Paperclip, X, Wifi, WifiOff, FileText, Image as ImageIcon, Info, ChevronDown, ChevronLeft, ChevronRight, Plus, Bookmark, RotateCcw, Zap, Brain, PanelLeft, Copy, ThumbsUp, ThumbsDown, Share2, RefreshCw, MoreHorizontal, Volume2, MessageSquare, FolderOpen, Video, Music, Link2, CalendarDays, LocateFixed } from "lucide-react";
 import { SkirtTabs, BoardPanel, TopbarLine } from "@opensoulmate/openface";
 import { getApiBaseUrl, getToken, getUserId } from '@/lib/api-client';
 import { copyToClipboard } from '@/lib/clipboard';
@@ -23,7 +23,6 @@ import { SmartPrompt } from '@/components/smart-prompt';
 import { AcpApprovalModal, type AcpApprovalRequest } from '@/components/acp-approval-modal';
 import { NetworkWaitBanner } from '@/components/network-wait-banner';
 import { buildUserMessage } from './user-message';
-import { pickRecorderMimeType, blobToAudioAttachment } from '@/lib/audio-record';
 
 const getApiUrl = () => getApiBaseUrl();
 const getWsUrl = () => getApiUrl().replace('http', 'ws');
@@ -46,7 +45,13 @@ async function tagSessionAgent(sessionId: string, agentId: string): Promise<void
 }
 
 const getAcpProxyUrl = () => {
-  // ACP Proxy runs on port 8092, same hostname
+  // 自定义入口（HTTPS 反代/NetBird 场景）优先；HTTPS 页面回源同域（由反代路由 /ws/acp）；
+  // 默认：ACP Proxy 跑在同主机 8092
+  const override = typeof window !== 'undefined' ? localStorage.getItem('openmate-acp-url') : null;
+  if (override) return override;
+  if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
+    return `https://${window.location.host}`;
+  }
   return `http://${window.location.hostname}:8092`;
 };
 const getAcpWsUrl = () => getAcpProxyUrl().replace('http', 'ws');
@@ -1255,7 +1260,6 @@ export function ChatClient() {
   const [editTitleValue, setEditTitleValue] = useState('');
   const titleInputRef = useRef<HTMLInputElement>(null);
   const [chatView, setChatView] = useState<string>('messages');
-  const [smartTaskText, setSmartTaskText] = useState<string>(''); // SmartPrompt实时文字（发送按钮禁用判断：附件与文字都为空时禁用）
   const [showViewTabs, setShowViewTabs] = useState(false);
   const { t } = useTranslation();
   const isMobile = useIsMobile();
@@ -1793,72 +1797,6 @@ export function ChatClient() {
     }
   };
 
-  // ── 语音输入（17.2）：MediaRecorder 录音 → 统一转 WAV → 音频附件（sendAcpPrompt 以 audio ACP 块直发）──
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordingSeconds, setRecordingSeconds] = useState(0);
-  const [audioError, setAudioError] = useState<string | null>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const recordChunksRef = useRef<Blob[]>([]);
-  const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const stopRecording = useCallback(() => {
-    if (recordTimerRef.current) { clearInterval(recordTimerRef.current); recordTimerRef.current = null; }
-    setIsRecording(false);
-    setRecordingSeconds(0);
-    const rec = recorderRef.current;
-    recorderRef.current = null;
-    if (rec && rec.state !== 'inactive') rec.stop();
-  }, []);
-
-  const startRecording = useCallback(async () => {
-    setAudioError(null);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mime = pickRecorderMimeType();
-      const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
-      recordChunksRef.current = [];
-      rec.ondataavailable = (e) => { if (e.data && e.data.size > 0) recordChunksRef.current.push(e.data); };
-      rec.onstop = async () => {
-        stream.getTracks().forEach(t => t.stop());
-        const blob = new Blob(recordChunksRef.current, { type: rec.mimeType || 'audio/webm' });
-        recordChunksRef.current = [];
-        if (!blob.size) { setAudioError('录音为空，请重试'); return; }
-        try {
-          const att = await blobToAudioAttachment(blob);
-          if (!att.converted) setAudioError(`音频未能统一转码，已按原格式 ${att.mime_type} 附着（如后端不支持会显式报因）`);
-          setAttachments(prev => [...prev, att]);
-        } catch (e) {
-          setAudioError(`音频处理失败：${(e as Error)?.message || e}`);
-        }
-      };
-      rec.onerror = () => { setAudioError('录音出错，请重试'); };
-      rec.start();
-      recorderRef.current = rec;
-      setIsRecording(true);
-      setRecordingSeconds(0);
-      recordTimerRef.current = setInterval(() => setRecordingSeconds(s => s + 1), 1000);
-    } catch (e) {
-      const name = (e as Error)?.name || '';
-      setAudioError(
-        name === 'NotAllowedError' ? '麦克风权限被拒绝，无法录音'
-        : name === 'NotFoundError' ? '未检测到麦克风设备'
-        : `无法开始录音：${(e as Error)?.message || e}`
-      );
-    }
-  }, []);
-
-  const toggleRecording = useCallback(() => {
-    if (isRecording) stopRecording();
-    else void startRecording();
-  }, [isRecording, startRecording, stopRecording]);
-
-  // 组件卸载收尾录音（释放麦克风，不静默留后台录音）
-  useEffect(() => () => {
-    if (recordTimerRef.current) clearInterval(recordTimerRef.current);
-    const rec = recorderRef.current;
-    if (rec && rec.state !== 'inactive') rec.stop();
-  }, []);
-
   // 公共 WS 等待函数：连接建立后自动发送消息
   // opts.steer=true：任务运行中发送=插话（排队注入，不抢占当前任务）
   const waitForConnection = useCallback((sessionId: string, messageText: string, attachments?: MessagePart[], opts?: { steer?: boolean }) => {
@@ -1925,7 +1863,6 @@ export function ChatClient() {
         next.set(sessionId, { ...data, promptFields: fields });
         return next;
       });
-      setSmartTaskText(fields.task);
     } catch { /* 草稿加载失败不阻断会话 */ }
   }, []);
   const saveSessionDraft = useCallback((sessionId: string, fieldsJson: string) => {
@@ -2328,18 +2265,6 @@ export function ChatClient() {
               <span>正在读取文件（{readingCount}个），读取完成前无法发送...</span>
             </div>
           )}
-          {isRecording && (
-            <div className="flex items-center gap-1.5 mb-2 px-2 py-1.5 bg-red-500/10 text-red-500 rounded text-xs">
-              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-              <span>正在录音… {recordingSeconds}s（再点麦克风停止，停止后作为语音附件随消息发送）</span>
-            </div>
-          )}
-          {audioError && (
-            <div className="flex items-center gap-1.5 mb-2 px-2 py-1.5 bg-amber-500/10 text-amber-600 rounded text-xs">
-              <span className="flex-1">{audioError}</span>
-              <button onClick={() => setAudioError(null)} title="关闭"><X className="w-3 h-3" /></button>
-            </div>
-          )}
           {attachments.length > 0 && (
             <div className="flex gap-2 mb-2 flex-wrap">
               {attachments.map((a, i) => (
@@ -2362,11 +2287,7 @@ export function ChatClient() {
               clearTrigger={clearTrigger}
               loadFieldsTrigger={loadFieldsTrigger}
               statsText={sessionStats.msgCount > 0 ? `${sessionStats.msgCount}条 · $${sessionStats.totalCost.toFixed(3)}` : undefined}
-              sendDisabled={attachments.length === 0 && !smartTaskText.trim()}
-              sendLoading={loading}
-              sendTitle={loading ? "发送插话（任务间隙注入）" : "发送"}
               onFieldsChange={(newFields) => {
-                setSmartTaskText(newFields.task || '');
                 const sid = useAppStore.getState().activeSessionId;
                 if (!sid) return;
                 setSessionDataMap(prev => {
@@ -2449,9 +2370,6 @@ export function ChatClient() {
               isLoading={loading}
               placeholder={t("chat.inputPlaceholder", "输入任务，点 ✨ 展开字段（Enter 发送，Shift+Enter 换行）")}
               onFileClick={() => fileRef.current?.click()}
-              onMicClick={toggleRecording}
-              isRecording={isRecording}
-              recordingSeconds={recordingSeconds}
               onPaste={handlePaste}
               controls={{
                 mode: { value: agentMode, onToggle: () => setAgentMode(prev => prev === 'plan' ? 'act' : 'plan') },

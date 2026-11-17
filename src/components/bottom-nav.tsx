@@ -14,7 +14,7 @@ import {
   Camera, Download, Tag, User, Bot, Droplets, Dna, Eye, Shield, Bone,
   Volume2, Layers, Link2, Home, MousePointer, Mic, ImageIcon, Smile,
   Stethoscope, Cpu, Bolt, Heart, Gauge, BarChart3, Package, ScrollText,
-  History, Store, Pill, LogOut, DollarSign, Terminal,
+  History, Store, Pill, LogOut, DollarSign, Terminal, Briefcase, GitMerge,
 } from "lucide-react";
 import { fetchPluginNavItems, getCachedPluginNavItems, mergePluginNavItems, PluginNavItem } from "@/lib/plugin-nav";
 import { BottomBar as OpenFaceBottomBar } from "@opensoulmate/openface";
@@ -35,7 +35,7 @@ const ICON_MAP: Record<string, React.ElementType> = {
   Camera, Download, Tag, User, Bot, Droplets, Dna, Eye, Shield, Bone,
   Volume2, Layers, Link2, Home, MousePointer, Mic, ImageIcon, Smile,
   Stethoscope, Cpu, Bolt, Heart, Gauge, BarChart3, Package, ScrollText,
-  History, Store, Pill, LogOut, DollarSign,
+  History, Store, Pill, LogOut, DollarSign, Briefcase, GitMerge,
 };
 
 const DEFAULT_ICON = FileText;
@@ -110,8 +110,6 @@ export function BottomNav({ totalUnread = 0, onOpenConversations }: BottomNavPro
   const router = useRouter();
   const { t } = useTranslation();
   const activeRef = useRef<HTMLAnchorElement>(null);
-  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isLongPress = useRef(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
@@ -161,28 +159,6 @@ export function BottomNav({ totalUnread = 0, onOpenConversations }: BottomNavPro
     return () => document.removeEventListener("mousedown", handler);
   }, [userMenuOpen]);
 
-  const handlePointerDown = useCallback(() => {
-    isLongPress.current = false;
-    longPressTimer.current = setTimeout(() => {
-      isLongPress.current = true;
-      document.dispatchEvent(new CustomEvent("openmate-voice-input"));
-    }, 500);
-  }, []);
-
-  const handlePointerUp = useCallback(() => {
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
-    }
-  }, []);
-
-  const handlePointerLeave = useCallback(() => {
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
-    }
-  }, []);
-
   function handleLogout() {
     clearUser();
     localStorage.removeItem("openmate-api-url");
@@ -191,7 +167,6 @@ export function BottomNav({ totalUnread = 0, onOpenConversations }: BottomNavPro
 
   return (
     <OpenFaceBottomBar
-      showBump={true}
       left={
         <div className="relative w-12 h-full flex items-center justify-center" ref={userMenuRef}>
           <button
@@ -304,18 +279,6 @@ export function BottomNav({ totalUnread = 0, onOpenConversations }: BottomNavPro
             <Terminal size={14} />
           </button>
         </div>
-      }
-      centerButton={
-        <button
-          onPointerDown={handlePointerDown}
-          onPointerUp={handlePointerUp}
-          onPointerLeave={handlePointerLeave}
-          onContextMenu={(e) => e.preventDefault()}
-          className="flex h-10 w-10 items-center justify-center rounded-full bg-background border border-border transition-transform hover:scale-105 active:scale-95 cursor-pointer shadow-sm"
-          title="Hold: Voice"
-        >
-          <Mic size={18} className="text-muted-foreground" />
-        </button>
       }
     />
   );

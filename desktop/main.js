@@ -1,5 +1,5 @@
 // OpenMate Desktop — Electron 薄壳（对标 Hermes Desktop 架构：壳+同一后端，同步架构自带）
-const { app, BrowserWindow, Tray, Menu, shell, nativeImage, nativeTheme, ipcMain, dialog, webContents } = require('electron');
+const { app, BrowserWindow, Tray, Menu, shell, nativeImage, nativeTheme, ipcMain, dialog, webContents, session } = require('electron');
 const path = require('path');
 
 // ── 下载引擎子进程（Python 引擎薄壳集成）────────────────────────────
@@ -372,6 +372,15 @@ app.on('second-instance', () => {
 });
 
 app.whenReady().then(() => {
+  // 麦克风/媒体权限显式放行（语音输入）：维持 Electron 原默认（放行全部请求）并显式覆盖
+  // media/麦克风。注意：权限放行只解决"权限请求"一层，页面还必须处于安全上下文
+  // （localhost/HTTPS）才有 navigator.mediaDevices——config.json 的 url 走
+  // http://localhost:3000 回源；经 http://IP:3000 远程加载时浏览器会直接禁用麦克风接口
+  // （前端会给出原因+指引，详见 docs/voice-https-entry.md）。
+  session.defaultSession.setPermissionRequestHandler((wc, permission, callback) => {
+    callback(true);
+  });
+  session.defaultSession.setPermissionCheckHandler(() => true);
   startDownloadEngine(); // 拉起 Python 引擎子进程（首行 JSON 握手 → IPC 可取 port/token）
   createSplash();
   createWindow();

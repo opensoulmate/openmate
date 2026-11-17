@@ -460,8 +460,6 @@ export default function AIGroupsClient() {
               { id: 'all', label: t('aiGroups.mentionAll', '所有人'), icon: <Users className="w-3.5 h-3.5 text-primary" /> },
               ...(selectedGroup?.agents || []).map((a: any) => ({ id: a.agent_id, label: a.name, icon: <Bot className="w-3.5 h-3.5 text-muted-foreground" /> })),
             ]}
-            sendDisabled={!wsConnected || (!sendReady && !editDraft.trim())}
-            sendLoading={sendingMessage}
             statsText={messages.length > 0 ? `${messages.length}条` : undefined}
             onFieldsChange={(f) => setSendReady(!!(f.task || '').trim())}
             onSend={(assembled) => { if (!wsConnected) return; sendText(assembled); setEditDraft(''); setSendReady(false); }}
