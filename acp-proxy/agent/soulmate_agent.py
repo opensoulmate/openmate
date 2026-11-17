@@ -184,6 +184,16 @@ from agent.download_tools import DownloadTools  # 下载中心工具组（SoulMa
 from agent.plugin_tools import PluginTools  # 插件 MCP 工具 + plugin_dev 自我开发闭环（UI 与对话共用同一工具表）
 from agent.writing_tools import WritingTools, tool_defs as writing_tool_defs, TOOL_NAMES as WRITING_TOOL_NAMES  # 写作能力层（C1-C7：事实锁/留白/精算/编译/入图/压图/终稿）
 from agent.guard_tools import GuardTools, tool_defs as guard_tool_defs, TOOL_NAMES as GUARD_TOOL_NAMES  # 治理工具组（防跑飞三件套/三段式修复）
+from agent.reflex import get_reflex as _get_reflex  # ⚡Reflex 反射层（事件驱动快速应激：事件捕获→轻量规则/安全拦截→快速回调，零 LLM 不进重型主循环）
+from agent.pulse import (  # ❤️Pulse 心跳层（时间驱动后台自治：定时心跳/周期自检/长任务推进/超时恢复/僵尸回收，软预算禁硬杀）
+    CATEGORY_BACKEND,
+    CATEGORY_CONNECTION,
+    CATEGORY_MEMORY,
+    CATEGORY_QUEUE,
+    CATEGORY_WORK_ORDER,
+    PulseCheck,
+    PulseLoop,
+)
 from agent import summary_control  # task_complete 免总结（整批 terminate 语义，Pi piSummaryControl 同款）
 from agent.writer_fence import SessionWriterFence, WriteAction
 from agent.tool_exec_fencing import FileFenceTimeout, file_fence
@@ -1078,6 +1088,11 @@ class SoulMateAgent:
         Returns:
             工具执行结果文本
         """
+        # ⚡Reflex 反射层·MCP 调用事件源：即时捕获（零 LLM，never-raise）
+        try:
+            self._reflex_hub().on_mcp_call(tool_name=func_name)
+        except Exception:  # noqa: BLE001
+            pass
         mapping = self._mcp_tool_call_id_map.get(func_name)
         if not mapping:
             return f"[错误] 未知工具: {func_name}"
@@ -2281,6 +2296,196 @@ class SoulMateAgent:
             tools = GuardTools()
             self._guard_tools_inst = tools
         return tools.run(func_name, func_args, session_id=session_id)
+
+    # ── ⚡Reflex 反射层 + ❤️Pulse 心跳层（2026-11-18）──────────────────
+    # Reflex=事件驱动快速应激（事件捕获→轻量规则/安全拦截→快速回调，零 LLM 不进
+    # 重型主循环）；Pulse=时间驱动后台自治（定时心跳/周期自检/长任务推进/超时
+    # 恢复/僵尸回收，软预算禁硬杀）。执行体 agent/reflex.py / agent/pulse.py
+    # （纯 Python 独立可测），本处只做接线。均 lazy-init（__new__ 裸实例零感知），
+    # 钩子调用永不抛异常（反射/心跳层故障绝不破坏宿主会话流）。
+
+    def _reflex_hub(self):
+        """进程级反射弧（与 /ws_acp 事件源共享同一 hub）。"""
+        hub = getattr(self, "_reflex_inst", None)
+        if hub is None:
+            hub = _get_reflex()
+            self._reflex_inst = hub
+        return hub
+
+    def _guard_tools(self) -> GuardTools:
+        """治理工具组实例（不新建守卫状态——guard_for 只读）。"""
+        tools = getattr(self, "_guard_tools_inst", None)
+        if tools is None:
+            tools = GuardTools()
+            self._guard_tools_inst = tools
+        return tools
+
+    def _pulse_guard_provider(self) -> dict:
+        """Pulse 空闲语义单一真源 = run_guard（idle_seconds 暂停期冻结/check
+        verdict 处决结论）+ SessionActivity（status/idle_seconds）——勿另造空闲
+        定义。等用户（ask-user run_guard pause）标记 guard_paused，Pulse 不唤醒。"""
+        sessions: dict[str, dict] = {}
+        try:
+            acts = getattr(self, "_activities", {}) or {}
+            gt = self._guard_tools()
+            gids = set(gt.session_ids())
+            for sid in set(acts) | gids:
+                act = acts.get(sid)
+                g = gt.guard_for(sid)
+                info = {
+                    "status": getattr(act, "status", "idle"),
+                    "busy": getattr(act, "status", "") == "running",
+                    "pending": (self._steering.pending(sid)
+                                if hasattr(self, "_steering") else 0),
+                    "idle_seconds": (act.idle_seconds() if act is not None else 0.0),
+                    "has_guard": g is not None,
+                    "guard_idle_seconds": (g.idle_seconds() if g is not None
+                                           else 0.0),
+                    "guard_paused": (g.snapshot().get("paused", False)
+                                     if g is not None else False),
+                    "guard_verdict": (g.check().get("verdict", "ok")
+                                      if g is not None else "ok"),
+                }
+                sessions[str(sid)] = info
+        except Exception as e:  # noqa: BLE001 — 供数失败只记日志，心跳继续
+            logger.warning(f"[pulse] guard_provider 构建失败(非致命): {e}")
+        return {"sessions": sessions}
+
+    def _pulse_checks(self) -> list:
+        """② 周期自检五类目清单：后端服务/连接状态/任务队列/未完成工单/记忆
+        一致性——接既有件（socket 探活/activity store/steering 队列/run_guard/
+        persistent_memory），不平行造轮子。"""
+        def backend_services():
+            import socket
+            ports = {8090: "opensoul-brain", 8092: "acp-proxy", 3000: "openmate-ui"}
+            down = []
+            for port, name in ports.items():
+                try:
+                    socket.create_connection(("127.0.0.1", port), timeout=0.3).close()
+                except OSError:
+                    down.append(f"{name}:{port}")
+            return {"ok": not down,
+                    "detail": "全部在听" if not down
+                    else "未监听: " + ", ".join(down)}
+
+        def connection_state():
+            store = getattr(self, "_activity_store", None)
+            if store is None:
+                return {"ok": False, "detail": "activity_store 未初始化"}
+            peek = store.peek_all()
+            s = peek.get("summary", {})
+            return {"ok": True,
+                    "detail": f"sessions={s.get('total_sessions', 0)} "
+                              f"by_status={s.get('by_status', {})}"}
+
+        def task_queue():
+            steering = getattr(self, "_steering", None)
+            buffered = 0
+            if steering is not None:
+                try:
+                    buffered = sum(
+                        steering.pending(sid)
+                        for sid in list(getattr(self, "_activities", {}) or {}))
+                except Exception:  # noqa: BLE001
+                    buffered = -1
+            pending_choices = len(getattr(self, "_pending_choices", {}) or {})
+            return {"ok": buffered >= 0,
+                    "detail": f"steering_buffered={buffered} "
+                              f"pending_choices={pending_choices}"}
+
+        def unfinished_work_orders():
+            gt = self._guard_tools()
+            bad = []
+            for sid in gt.session_ids():
+                g = gt.guard_for(sid)
+                if g is None:
+                    continue
+                chk = g.check()
+                if chk.get("verdict") != "ok":
+                    bad.append(f"{sid}:{chk.get('verdict')}({chk.get('reason')})")
+            bus = getattr(self, "_turn_lifecycle", None)
+            active = []
+            if bus is not None:
+                try:
+                    active = [r.get("session_id") for r in bus.recent(50)
+                              if not r.get("closed_at")]
+                except Exception:  # noqa: BLE001
+                    active = []
+            return {"ok": not bad,
+                    "detail": f"guard_non_ok={bad or '无'} open_turns={len(active)}"}
+
+        def memory_consistency():
+            pm = getattr(self, "_persistent_memory", None)
+            if pm is None:
+                return {"ok": False, "detail": "persistent_memory 未初始化"}
+            section = pm.load_prompt_section()
+            return {"ok": True,
+                    "detail": f"MEMORY.md 段 {len(section or '')} 字节可读"}
+
+        return [
+            PulseCheck("backend_services", backend_services,
+                       category=CATEGORY_BACKEND, critical=True),
+            PulseCheck("connection_state", connection_state,
+                       category=CATEGORY_CONNECTION),
+            PulseCheck("task_queue", task_queue, category=CATEGORY_QUEUE),
+            PulseCheck("unfinished_work_orders", unfinished_work_orders,
+                       category=CATEGORY_WORK_ORDER),
+            PulseCheck("memory_consistency", memory_consistency,
+                       category=CATEGORY_MEMORY),
+        ]
+
+    def _pulse_finding(self, finding: dict) -> None:
+        """自检发现落日志（故障必须可见禁静默）+ reflex 旁路留痕。"""
+        logger.warning(f"[pulse] 自检发现: {finding.get('check')} "
+                       f"({finding.get('category')}): {finding.get('detail')}")
+        try:
+            self._reflex_hub().on_error(
+                error=str(finding.get("detail") or ""),
+                where=f"pulse.{finding.get('check')}")
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _pulse_idle_wake(self, session_id: str, reason: str) -> dict:
+        """① 空闲唤醒（用户没发消息/会话空闲时主动唤醒 Agent）：快速回调零 LLM。
+
+        唤醒面可插拔（_pulse_wake_sink 由部署侧接到 wakeup/前端通知面），默认
+        只留痕可见（活动可观测 + reflex 信号）——不在此发起 LLM 回合。
+        """
+        logger.info(f"[pulse] 空闲唤醒: session={session_id} reason={reason}")
+        try:
+            act = self._activity(session_id)
+            act.buffered = (self._steering.pending(session_id)
+                            if hasattr(self, "_steering") else 0)
+            self._activity_store.upsert(act)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            self._reflex_hub().emit(
+                "signal", source="pulse", session_id=session_id,
+                text=f"idle_wake:{reason}",
+                payload={"wake_reason": reason, "from": "pulse"})
+        except Exception:  # noqa: BLE001
+            pass
+        sink = getattr(self, "_pulse_wake_sink", None)
+        if callable(sink):
+            try:
+                sink(session_id, reason)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"[pulse] wake_sink 失败(非致命): {e}")
+        return {"session_id": session_id, "reason": reason}
+
+    def _pulse_loop(self) -> PulseLoop:
+        """Pulse 心跳循环（lazy-init；beat 同步核心可直接测，start 起后台心跳）。"""
+        pl = getattr(self, "_pulse_inst", None)
+        if pl is None:
+            pl = PulseLoop(
+                checks=self._pulse_checks(),
+                guard_provider=self._pulse_guard_provider,   # 供数回调（每次beat重读）
+                on_idle_wake=self._pulse_idle_wake,
+                on_finding=self._pulse_finding,
+            )
+            self._pulse_inst = pl
+        return pl
 
     def _tts_dispatch(self, func_args: dict, session_id: str = "") -> str:
         """text_to_speech 工具分发（路线图 7.3：文本→语音合成）。
@@ -5019,6 +5224,13 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             logger.warning(
                                 f"[sandbox] network-restricted session={session_id} "
                                 f"兜底拦截幻觉工具调用: {func_name}")
+                            # ⚡Reflex 反射层·沙箱拦截路径：即时捕获（never-raise）
+                            try:
+                                self._reflex_hub().on_sandbox_blocked(
+                                    session_id=session_id, tool_name=func_name,
+                                    reason=_sb_reason)
+                            except Exception:  # noqa: BLE001
+                                pass
                             tool_results.append({
                                 "tool_call_id": tc.get("id", ""),
                                 "role": "tool",
@@ -5064,6 +5276,15 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             logger.warning(
                                 f"[{session_id}] permission-gate {gate_result.behavior}: "
                                 f"{func_name} (source={gate_result.rule_source}, mode={gate_result.mode})")
+                            # ⚡Reflex 反射层·权限拦截路径：即时捕获（安全拦截短路，
+                            # 快速回调零 LLM，never-raise）
+                            try:
+                                self._reflex_hub().on_permission_blocked(
+                                    session_id=session_id, tool_name=func_name,
+                                    reason=blocked_reason,
+                                    behavior=str(gate_result.behavior))
+                            except Exception:  # noqa: BLE001
+                                pass
                             tool_results.append({
                                 "tool_call_id": tc.get("id", ""),
                                 "role": "tool",
@@ -5769,6 +5990,18 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             "role": "tool",
                             "content": self._process_tool_output(func_name, tc["id"], str(result)),
                         })
+                        # ⚡Reflex 反射层·工具返回钩子：即时捕获（高优先突发信号，
+                        # 零 LLM 快速路径，never-raise——反射层故障不破坏会话流）
+                        try:
+                            _rfx_preview = str(result)[:200]
+                            self._reflex_hub().on_tool_return(
+                                session_id=session_id, tool_name=func_name,
+                                ok=result_ok(result),
+                                result_preview=_rfx_preview,
+                                duration_ms=(time.time() - tool_start) * 1000.0,
+                                error="" if result_ok(result) else _rfx_preview)
+                        except Exception:  # noqa: BLE001
+                            pass
                         # task_complete 免总结记账（整批 terminate 判定在轮尾）
                         summary_ctl.record(func_args, str(result))
 
@@ -6229,6 +6462,12 @@ You can send files to the user natively: to deliver a file, write a brief confir
     ) -> acp.InitializeResponse:
         """ACP initialize 握手 — 协议版本协商"""
         logger.info(f"ACP initialize: protocol_version={protocol_version}, client={client_info}")
+        # ❤️Pulse 心跳层：进程起即起后台心跳（定时唤醒/周期自检/长任务推进/
+        # 超时恢复/僵尸回收）。失败只记日志（心跳缺失不该阻断握手）。
+        try:
+            self._pulse_loop().start()
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[pulse] 心跳启动失败(非致命): {e}")
         return acp.InitializeResponse(
             protocol_version=acp.PROTOCOL_VERSION,
             agent_info=Implementation(name="soulmate-agent", version="0.1.0"),
@@ -6352,6 +6591,19 @@ You can send files to the user natively: to deliver a file, write a brief confir
         Writer Fencing: 同一session同时只有一个prompt在处理，后来的排队等待。
         """
         logger.info(f"[prompt] CALLED! session={session_id}, parts={len(prompt)}")
+        # ⚡Reflex 反射层·用户动作事件源：即时捕获（abort 文本自动路由 steering
+        # 语义；零 LLM 快速路径，never-raise）
+        try:
+            _ua_text = ""
+            for _b in prompt:
+                if hasattr(_b, "text"):
+                    _ua_text += str(_b.text or "")
+                elif isinstance(_b, dict) and _b.get("type") == "text":
+                    _ua_text += str(_b.get("text", "") or "")
+            self._reflex_hub().on_user_action(
+                session_id=session_id, text=_ua_text[:500])
+        except Exception:  # noqa: BLE001
+            pass
         
         # ── 检查是否有等待中的菜单选择 ──
         if session_id in self._pending_choices:

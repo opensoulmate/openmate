@@ -200,6 +200,16 @@ class GuardTools:
 
     # ── 人机等待合流（Pi #10：ask_user/clarify 等用户期间暂停无进展看门狗）──
 
+    def guard_for(self, session_id: str = ""):
+        """取会话守卫（不新建——Pulse 心跳层读 run_guard 空闲语义用：idle_seconds
+        暂停期冻结/check verdict 处决结论，空闲语义单一真源勿另造）。"""
+        st = self._states.get(str(session_id or "default"))
+        return st.get("guard") if st else None
+
+    def session_ids(self) -> list[str]:
+        """已有守卫状态的会话列表（Pulse 遍历用，不新建状态）。"""
+        return list(self._states.keys())
+
     def pause_guard(self, session_id: str = "") -> bool:
         """等待用户作答期间暂停无进展计时（Pi 同款：ask-user 等待期暂停）。
 

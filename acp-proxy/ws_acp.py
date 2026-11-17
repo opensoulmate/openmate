@@ -27,6 +27,20 @@ import select
 
 logger = logging.getLogger("acp-proxy.ws_acp")
 
+
+def _reflex_observe(direction: str, raw) -> None:
+    """⚡Reflex 反射层·/ws_acp 事件源桥（2026-11-18）。
+
+    in=客户端→代理（用户动作/快捷键/窗口变化/前端 Electron 上报事件），
+    out=代理→客户端（工具返回/报错信号）。轻量旁路即时捕获（零 LLM 不进
+    重型主循环），转发内容零改动；never-raise——反射层故障绝不破坏会话流。
+    """
+    try:
+        import agent.reflex as _reflex
+        _reflex.get_reflex().capture_ws_message(direction, raw)
+    except Exception:  # noqa: BLE001
+        pass
+
 # 路径根（2026-09-21硬编码治理：env可覆盖，默认值=原路径，行为不变）
 _OPENSOUL_ROOT = os.environ.get("OPENSOUL_ROOT", "/home/climbing/opensoul")
 _ACPPROXY_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -443,6 +457,8 @@ async def ws_acp_endpoint(client_ws: WebSocket):
                 # 过滤心跳ping消息，不传给子进程
                 if '"method":"ping"' in raw or '"method": "ping"' in raw:
                     continue
+                # ⚡Reflex 事件源：用户动作/快捷键/窗口变化/Electron 上报即时捕获
+                _reflex_observe("in", raw)
                 logger.info(f"[{user_id}] ws_to_stdin: forwarding {len(raw)} chars")
                 if traj_relay is not None:
                     # relay轨迹观察（旁路，never-raise）：session/prompt=回合起点
@@ -476,6 +492,8 @@ async def ws_acp_endpoint(client_ws: WebSocket):
         except (json.JSONDecodeError, ValueError):
             logger.debug(f"[{agent_id}] skip non-JSON: {msg[:100]}")
             return
+        # ⚡Reflex 事件源：工具返回/报错信号即时捕获（旁路零改动，never-raise）
+        _reflex_observe("out", parsed)
         # 过滤 subprocess 的 initialize 响应（Proxy 已经回复过）
         if parsed.get("id") in init_ids and "result" in parsed:
             logger.debug(f"[{agent_id}] skip subprocess initialize response (id={parsed['id']})")
