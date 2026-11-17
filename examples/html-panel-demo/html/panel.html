@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>HTML面板样板</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 2rem; }
+  button { padding: .5rem 1rem; border-radius: .5rem; border: 1px solid #ccc; cursor: pointer; }
+  #out { margin-top: 1rem; padding: .75rem; background: #f6f6f6; border-radius: .5rem; min-height: 2rem; }
+</style>
+</head>
+<body>
+<h1>层② HTML 面板样板</h1>
+<p>按钮 → 宿主 postMessage RPC 面（<code>POST ../html-rpc</code>）→ 样板 MCP 工具 <code>add</code>。</p>
+<p>
+  <input id="a" type="number" value="1" style="width:4rem">
+  +
+  <input id="b" type="number" value="41" style="width:4rem">
+  <button onclick="callTool('add', {a: +a.value, b: +b.value})">调用 add 工具</button>
+  <button onclick="callTool('reset', {})">reset（演示审批闸）</button>
+</p>
+<div id="out">（结果展示区）</div>
+
+<script>
+// 宿主 RPC 面：{id, method, params} → {id, result|error}（白名单=声明工具+ui.*）。
+// 嵌入 iframe 壳后改走 window.parent.postMessage，同一请求/响应形状。
+let seq = 0;
+async function rpc(method, params) {
+  const id = ++seq;
+  const res = await fetch('../html-rpc', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({id, method, params}),
+  });
+  return res.json();
+}
+
+async function callTool(method, params) {
+  const out = document.getElementById('out');
+  out.textContent = '调用中…';
+  try {
+    const msg = await rpc(method, params);
+    if (msg.error) {
+      // approval=always 工具未批 → approval_required（前端壳弹审批后带 approved 重发）
+      out.textContent = `错误 [${msg.error.code}]: ${msg.error.message}`;
+    } else {
+      out.textContent = `结果: ${JSON.stringify(msg.result)}`;
+    }
+  } catch (e) {
+    out.textContent = `调用失败: ${e}`;
+  }
+}
+</script>
+</body>
+</html>

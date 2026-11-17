@@ -218,3 +218,43 @@ class TestHtmlRpc:
         r2 = c.post("/plugins/html-demo/html-rpc",
                     json={"id": 10, "method": "evil"})
         assert r2.json()["error"]["code"] == "method_not_allowed"
+
+
+# ── ④ examples/html-panel-demo 样板实证（验收项：不进运行时）────────
+
+class TestExamplesSample:
+    """真实样板（examples/html-panel-demo）经共享 plugins 夹具装载端到端。"""
+
+    def _sample(self, plugins_dir, tmp_path, monkeypatch):
+        monkeypatch.setenv("OPENMATE_PLUGIN_DATA_DIR", str(tmp_path / "plugin-data"))
+        registry = PluginToolRegistry()
+        scan = scan_plugins(plugins_dir)
+        descriptor = scan.get("html-panel-demo")
+        assert descriptor is not None, f"样板未被扫描到: {scan.errors}"
+        bind_tools(descriptor, registry)
+        app = FastAPI()
+        app.include_router(dsl_api.build_plugin_router(descriptor, registry))
+        return TestClient(app)
+
+    def test_sample_panel_served_and_calls_tool(self, plugins_dir, tmp_path, monkeypatch):
+        c = self._sample(plugins_dir, tmp_path, monkeypatch)
+        page = c.get("/plugins/html-panel-demo/html/panel.html")
+        assert page.status_code == 200 and "callTool('add'" in page.text
+        r = c.post("/plugins/html-panel-demo/html-rpc",
+                   json={"id": 1, "method": "add", "params": {"a": 1, "b": 41}})
+        assert r.json() == {"id": 1, "result": {"sum": 42.0}}
+
+    def test_sample_approval_gate_visible(self, plugins_dir, tmp_path, monkeypatch):
+        c = self._sample(plugins_dir, tmp_path, monkeypatch)
+        r = c.post("/plugins/html-panel-demo/html-rpc",
+                   json={"id": 2, "method": "reset", "params": {}})
+        assert r.json()["error"]["code"] == "approval_required"
+        r2 = c.post("/plugins/html-panel-demo/html-rpc",
+                    json={"id": 3, "method": "reset", "params": {}, "approved": True})
+        assert r2.json()["result"] == {"reset": True}
+
+    def test_sample_whitelist_rejects(self, plugins_dir, tmp_path, monkeypatch):
+        c = self._sample(plugins_dir, tmp_path, monkeypatch)
+        r = c.post("/plugins/html-panel-demo/html-rpc",
+                   json={"id": 4, "method": "not_declared"})
+        assert r.json()["error"]["code"] == "method_not_allowed"

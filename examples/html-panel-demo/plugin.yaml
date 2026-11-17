@@ -1,0 +1,31 @@
+id: html-panel-demo
+name: HTML面板样板
+version: 0.1.0
+description: 层②自定义 HTML 面板验收样板（按钮→调样板 MCP 工具，postMessage RPC）
+author: soulmate
+entry: main.py
+permissions: [tool.register, tool.call]
+ui:
+  pages:
+    - id: panel
+      title: HTML面板
+      html: html/panel.html
+tools:
+  - name: add
+    description: 两个数相加（样板工具——面板按钮经 html-rpc 调用）
+    handler: handle_add
+    permissions: [tool.call]
+    approval: never
+    input_schema:
+      type: object
+      properties:
+        a: {type: number}
+        b: {type: number}
+      required: [a, b]
+  - name: reset
+    description: 重置面板计数（需人工确认——演示审批闸在 HTML 面板同样生效）
+    handler: handle_reset
+    permissions: [tool.call]
+    approval: always
+    input_schema:
+      type: object
