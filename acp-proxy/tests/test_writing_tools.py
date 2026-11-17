@@ -158,14 +158,23 @@ def test_wiring_source_guards():
     src = _src()
     # 工具定义进 LLM 工具面（tool_defs 由 writing_tools 提供）
     assert "builtin_tools.extend(writing_tool_defs())" in src
-    assert '"fact_lock", "doc_blank"' in src          # dispatch 工具名清单
+    assert "from agent.writing_tools import WritingTools" in src
+    assert "WRITING_TOOL_NAMES" in src                 # dispatch 工具名清单（常量单一真源）
     # 主循环 dispatch + code-mode 批内 dispatch 两处 + 共享入口定义
     assert src.count("self._writing_dispatch(func_name, func_args, session_id)") == 2
     assert "def _writing_dispatch" in src
+    # C5-C7 新工具进工具面（tool_defs 实际 API 面，不靠源码字符串）
+    from agent.writing_tools import tool_defs as _wtool_defs
+    names = {d["function"]["name"] for d in _wtool_defs()}
+    assert {"fact_lock", "doc_blank", "money_calc", "docx_compile",
+            "diagram_figure", "image_compress", "office_finalize"} <= names
+    # 治理工具组（Pi 取长补短：run_guard/repair_loop）+ task_complete 免总结接线
+    assert "builtin_tools.extend(guard_tool_defs())" in src
+    assert src.count("self._guard_dispatch(func_name, func_args, session_id)") == 2
+    assert "def _guard_dispatch" in src
+    assert "summary_ctl.batch_terminate()" in src      # 整批 terminate 收尾
     # 系统提示工具清单
     assert "- fact_lock / doc_blank / money_calc / docx_compile" in src
-    # 顶部 import
-    assert "from agent.writing_tools import WritingTools" in src
 
 
 def test_real_dispatch_smoke(tmp_path):

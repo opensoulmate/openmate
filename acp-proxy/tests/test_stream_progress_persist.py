@@ -215,7 +215,8 @@ class TestWiring:
     def test_wiring_saver_called_at_accumulation_and_tail(self):
         src = self._src()
         # 流式积累 + 自评轮旁白路由正文余量（evo目标 2026-10-23）+ round尾flush
-        assert src.count("_stream_save(full_response)") == 3
+        # + task_complete 免总结收尾落盘（Pi piSummaryControl 整批 terminate）
+        assert src.count("_stream_save(full_response)") == 4
         assert "_stream_save = self._progress_saver(session_id, turn_key) if stream_progress else None" in src
 
     def test_wiring_prompt_inner_turn_key_isolated(self):

@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""writing_tools.py — SoulMate 写作能力层工具组（C1/C2/C3/C4 触发面）。
+"""writing_tools.py — SoulMate 写作能力层工具组（C1-C7 触发面）。
 
 工具形状 = MCP 工具契约（function-calling），对齐 download_tools/plugin_tools
 分发先例：`tool_defs()` 进 LLM 工具表，`run(func_name, args, session_id)` 主循环
-与 code-mode 批内共用。四件套（**通用文档创作能力**，写标书/写方案/写课件/写
+与 code-mode 批内共用。七件套（**通用文档创作能力**，写标书/写方案/写课件/写
 合同/报销报价全场景复用，非投标专用）：
 
 - fact_lock    C1 全局事实锁：build（结构化事实表→锁工件+prompt 注入块）/
@@ -15,11 +15,21 @@
 - docx_compile C4 OpenXML 确定性编译：compile（AST→docx：三线表/跨页续表头/
                页眉页脚分节/修订留痕 w:ins/w:del+来源血缘）/ verify_revisions
                （拒绝全部修订≡原文自校验）
+- diagram_figure C5 Mermaid 入图：render（mmdc 本地渲染高清 PNG/SVG）/ insert
+               （InlineShape 入 docx+自动"图 X-X"题注）/ build（渲染+入图一步）
+- image_compress C6 Pillow 确定性压图：compress（长边 1600/JPEG 82%/单张≤
+               300KB 硬保证）/ batch（批量+manifest）——防标书超上传体积上限
+- office_finalize C7 LibreOffice headless 终稿：export_pdf（TOC 页码确定性
+               更新+PDF 导出，docx 原件不动）/ check_toc（目录域检测）
+
+task_complete 免总结（Pi piSummaryControl 同语义）：全部工具支持 task_complete
+参数（整批 true 才提前收尾，省末尾总结请求；不带=零行为变化）。
 
 纪律：参数非法/依赖缺失显式报因禁静默；金额只走 agent/money.py（拒绝 float）；
 编译产物落 ~/.hermes/soulmate/documents/（filename 只许文件名），返回 MEDIA: 路径。
-执行体：agent/fact_lock.py / doc_blank.py / money.py / docx_compile.py（纯函数
-核心，独立可测），本模块只做参数面+结果呈现（分层铁律）。
+执行体：agent/fact_lock.py / doc_blank.py / money.py / docx_compile.py /
+mermaid_figure.py / image_compress.py / office_finalize.py（纯函数核心，独立
+可测），本模块只做参数面+结果呈现（分层铁律）。
 """
 
 from __future__ import annotations
@@ -33,6 +43,7 @@ from pathlib import Path
 from typing import Any
 
 from . import doc_blank, fact_lock, money
+from agent import image_compress, mermaid_figure, office_finalize, summary_control
 from agent.docx_compile import compile_docx, revision_views, verify_reject_all
 
 logger = logging.getLogger("agent.writing_tools")
@@ -44,13 +55,18 @@ MONEY_ACTIONS = ("quote_total", "discount", "tax", "to_upper", "to_lower")
 BLANK_ACTIONS = ("register", "list", "scan", "attach_comments", "protocol")
 LOCK_ACTIONS = ("build", "check", "prompt")
 COMPILE_ACTIONS = ("compile", "verify_revisions")
+DIAGRAM_ACTIONS = ("render", "insert", "build")
+COMPRESS_ACTIONS = ("compress", "batch")
+FINALIZE_ACTIONS = ("export_pdf", "check_toc")
 
 # 工具名（soulmate_agent 接线用）
-TOOL_NAMES = ("fact_lock", "doc_blank", "money_calc", "docx_compile")
+TOOL_NAMES = ("fact_lock", "doc_blank", "money_calc", "docx_compile",
+              "diagram_figure", "image_compress", "office_finalize")
 
 
 def tool_defs() -> list[dict]:
-    """四件套 function-calling 工具定义（MCP 工具契约形状）。"""
+    """七件套 function-calling 工具定义（MCP 工具契约形状，含 task_complete）。"""
+    tc = summary_control.param_schema()
     return [
         {
             "type": "function",
@@ -82,6 +98,7 @@ def tool_defs() -> list[dict]:
                             "description": (
                                 "check 用：[{id, title, text}]，按文档顺序的章节文本"),
                         },
+                        **tc,
                     },
                     "required": ["action"],
                 },
@@ -115,6 +132,7 @@ def tool_defs() -> list[dict]:
                             "description": (
                                 "attach_comments：[{anchor|paragraph_index, text}]"),
                         },
+                        **tc,
                     },
                     "required": ["action"],
                 },
@@ -152,6 +170,7 @@ def tool_defs() -> list[dict]:
                         "net": {"type": "string", "description": "tax to_inclusive：不含税价"},
                         "amount": {"type": "string", "description": "to_upper：金额"},
                         "upper_text": {"type": "string", "description": "to_lower：大写金额"},
+                        **tc,
                     },
                     "required": ["action"],
                 },
@@ -183,6 +202,102 @@ def tool_defs() -> list[dict]:
                                       "description": "verify_revisions：目标 docx 绝对路径"},
                         "original_text": {"type": "string",
                                           "description": "verify_revisions 可选：原文（对照校验）"},
+                        **tc,
+                    },
+                    "required": ["action"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "diagram_figure",
+                "description": (
+                    "Mermaid 流程图/架构图入图管线（Agent 产 Mermaid 源码，"
+                    "程序确定性出图）：action=render 本地渲染高清 PNG/SVG"
+                    "（mmdc，scale=2 两倍分辨率；缺依赖显式报因不假渲染）/ "
+                    "insert 图片以 InlineShape 嵌入 docx+居中+自动\"图 X-X\"题注"
+                    "（caption 显式传，或 caption_title+chapter 自动按文档图数"
+                    "编号）/ build 渲染+入图一步到位。方案/可研/课件插图全程使用；"
+                    "严禁手绘占位图或用文字冒充图。"),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": {"type": "string", "enum": list(DIAGRAM_ACTIONS)},
+                        "code": {"type": "string",
+                                 "description": "render/build：Mermaid 源码（flowchart/sequence/architecture 等）"},
+                        "filename": {"type": "string",
+                                     "description": "render/build：输出图片文件名（不含路径）"},
+                        "scale": {"type": "number", "description": "render/build：渲染倍率（默认 2）"},
+                        "background": {"type": "string", "description": "render/build：背景色（默认 white）"},
+                        "theme": {"type": "string", "description": "render/build：Mermaid 主题（default/dark/forest/neutral）"},
+                        "docx_path": {"type": "string",
+                                      "description": "insert/build：目标 docx 绝对路径"},
+                        "image_path": {"type": "string",
+                                       "description": "insert：已渲染图片绝对路径"},
+                        "caption": {"type": "string",
+                                    "description": "insert/build：题注全文（如 图 3-1 系统架构图）"},
+                        "caption_title": {"type": "string",
+                                          "description": "insert/build：题注标题（配合 chapter 自动编号为 图 X-N 标题）"},
+                        "chapter": {"type": "string",
+                                    "description": "insert/build：章节号（自动题注用，如 3）"},
+                        "width_cm": {"type": "number", "description": "insert/build：图宽 cm（默认 14）"},
+                        **tc,
+                    },
+                    "required": ["action"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "image_compress",
+                "description": (
+                    "Pillow 确定性压图管线（防标书/方案超上传体积上限）："
+                    "action=compress 单图压缩（长边 1600 等比缩、JPEG 82% 起步、"
+                    "单张 300KB 硬保证——超限确定性降质/缩尺直至达标；已合规图"
+                    "原样复制不二压）/ batch 批量压缩（paths 列表或 dir 目录）"
+                    "+manifest 汇总（前后体积/尺寸/质量档/超限清单）。交付含图"
+                    "文档前对所有截图/照片先过本工具；EXIF 方向自动摆正。"),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": {"type": "string", "enum": list(COMPRESS_ACTIONS)},
+                        "path": {"type": "string", "description": "compress：图片绝对路径"},
+                        "paths": {"type": "array", "items": {"type": "string"},
+                                  "description": "batch：图片路径列表（或传 dir）"},
+                        "dir": {"type": "string", "description": "batch：目录（按扩展名收图）"},
+                        "out_name": {"type": "string",
+                                     "description": "compress：输出文件名（不含路径，.jpg 可省）"},
+                        "max_side": {"type": "integer", "description": "长边上限 px（默认 1600）"},
+                        "quality": {"type": "integer", "description": "JPEG 质量起步（默认 82）"},
+                        "max_bytes": {"type": "integer", "description": "单张字节硬上限（默认 307200=300KB）"},
+                        **tc,
+                    },
+                    "required": ["action"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "office_finalize",
+                "description": (
+                    "LibreOffice headless 终稿管线（交付前最后一步）："
+                    "action=export_pdf 更新 TOC 目录页码（DocumentIndexes 确定性"
+                    "刷新，目录页码与正文实际页逐一相符）并导出 PDF 终稿（docx "
+                    "原件不动可继续修订）/ check_toc 检测 docx 是否含目录域"
+                    "（无目录域明说'仅导出 PDF'，不假称更新了目录）。写完含目录的"
+                    "方案/可研/标书后必调 export_pdf 出终稿；Word 目录缓存页码在"
+                    "正文变动后即过期，直接导 PDF 页码会错。"),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": {"type": "string", "enum": list(FINALIZE_ACTIONS)},
+                        "docx_path": {"type": "string", "description": "目标 docx 绝对路径"},
+                        "out_name": {"type": "string",
+                                     "description": "export_pdf：输出 PDF 文件名（不含路径，.pdf 可省；缺省落 docx 同目录同名 .pdf）"},
+                        **tc,
                     },
                     "required": ["action"],
                 },
@@ -203,7 +318,7 @@ class WritingTools:
 
     def run(self, func_name: str, func_args: dict, session_id: str = "") -> str:
         func_name = str(func_name or "").strip()
-        args = dict(func_args or {})
+        args = summary_control.strip_meta(func_args)   # task_complete 元参数剔除
         try:
             if func_name == "fact_lock":
                 return self._fact_lock(args)
@@ -213,6 +328,12 @@ class WritingTools:
                 return self._money_calc(args)
             if func_name == "docx_compile":
                 return self._docx_compile(args)
+            if func_name == "diagram_figure":
+                return self._diagram_figure(args)
+            if func_name == "image_compress":
+                return self._image_compress(args)
+            if func_name == "office_finalize":
+                return self._office_finalize(args)
             return (f"❌ 未知写作工具: {func_name!r}。"
                     f"支持: {', '.join(TOOL_NAMES)}")
         except (ValueError, money.MoneyError) as e:
@@ -414,7 +535,8 @@ class WritingTools:
             lines = [
                 f"✅ 文档已编译（docx 确定性排版）: {res['path']}（{size} 字节）",
                 f"统计: {res['blocks']} 块，{res['tables']} 表，{res['sections']} 节，"
-                f"{res['revisions']} 条修订，{res['trace_comments']} 条溯源批注",
+                f"{res['revisions']} 条修订，{res['trace_comments']} 条溯源批注，"
+                f"{res.get('figures', 0)} 图",
             ]
             if res["reject_all_verified"] is not None:
                 mark = "✅ 通过" if res["reject_all_verified"] else "❌ 未过"
@@ -440,6 +562,222 @@ class WritingTools:
             return "\n".join(lines)
         return (f"❌ 参数错误: 未知 action={action!r}"
                 f"（支持 {'/'.join(COMPILE_ACTIONS)}）")
+
+    # ── C5 diagram_figure ────────────────────────────────────────────
+
+    def _diagram_figure(self, args: dict) -> str:
+        action = str(args.get("action", "") or "").strip().lower()
+        if action == "render":
+            code = args.get("code")
+            if not isinstance(code, str) or not code.strip():
+                return "❌ 参数错误: render 需要非空 code（Mermaid 源码）"
+            name = str(args.get("filename", "") or "").strip()
+            if not name:
+                name = f"diagram-{int(self._now() * 1000)}.png"
+            try:
+                out = self._resolve_media_path(name, (".png", ".svg"))
+                res = mermaid_figure.render_mermaid(
+                    code, out,
+                    scale=float(args.get("scale") or mermaid_figure.DEFAULT_SCALE),
+                    background=str(args.get("background", "") or "white"),
+                    theme=str(args.get("theme", "") or "default"))
+            except ValueError as e:
+                return f"❌ 参数错误: {e}"
+            except RuntimeError as e:
+                return f"❌ 依赖不可用: {e}"
+            return (f"✅ Mermaid 已渲染（本地确定性出图）: {res['path']}"
+                    f"（{res['format']} {res['bytes']} 字节，scale={res['scale']}）\n"
+                    f"MEDIA:{res['path']}")
+        if action == "insert":
+            docx_path = str(args.get("docx_path", "") or "")
+            image_path = str(args.get("image_path", "") or "")
+            if not docx_path or not Path(docx_path).is_file():
+                return f"❌ 参数错误: docx_path 不存在: {docx_path!r}"
+            if not image_path or not Path(image_path).is_file():
+                return f"❌ 参数错误: image_path 不存在: {image_path!r}"
+            caption = self._figure_caption(args, docx_path)
+            try:
+                res = mermaid_figure.insert_figure(
+                    docx_path, image_path, caption,
+                    width_cm=float(args.get("width_cm")
+                                   or mermaid_figure.DEFAULT_WIDTH_CM))
+            except ValueError as e:
+                return f"❌ 参数错误: {e}"
+            return (f"✅ 图已嵌入 docx（InlineShape+题注）: {res['path']}\n"
+                    f"题注: {caption or '（无）'}｜全文嵌入图 {res['figures']} 幅\n"
+                    f"MEDIA:{res['path']}")
+        if action == "build":
+            code = args.get("code")
+            docx_path = str(args.get("docx_path", "") or "")
+            if not isinstance(code, str) or not code.strip():
+                return "❌ 参数错误: build 需要非空 code（Mermaid 源码）"
+            if not docx_path or not Path(docx_path).is_file():
+                return f"❌ 参数错误: docx_path 不存在: {docx_path!r}"
+            name = str(args.get("filename", "") or "").strip()
+            if not name:
+                name = f"diagram-{int(self._now() * 1000)}.png"
+            caption = self._figure_caption(args, docx_path)
+            try:
+                out = self._resolve_media_path(name, (".png", ".svg"))
+                r1 = mermaid_figure.render_mermaid(
+                    code, out,
+                    scale=float(args.get("scale") or mermaid_figure.DEFAULT_SCALE),
+                    background=str(args.get("background", "") or "white"),
+                    theme=str(args.get("theme", "") or "default"))
+                r2 = mermaid_figure.insert_figure(
+                    docx_path, r1["path"], caption,
+                    width_cm=float(args.get("width_cm")
+                                   or mermaid_figure.DEFAULT_WIDTH_CM))
+            except ValueError as e:
+                return f"❌ 参数错误: {e}"
+            except RuntimeError as e:
+                return f"❌ 依赖不可用: {e}"
+            return (f"✅ Mermaid 渲染+入图一步完成\n"
+                    f"  图: {r1['path']}（{r1['bytes']} 字节）\n"
+                    f"  docx: {r2['path']}｜题注: {caption or '（无）'}\n"
+                    f"MEDIA:{r2['path']}")
+        return (f"❌ 参数错误: 未知 action={action!r}"
+                f"（支持 {'/'.join(DIAGRAM_ACTIONS)}）")
+
+    def _figure_caption(self, args: dict, docx_path: str) -> str:
+        """题注：caption 显式优先；否则 caption_title+chapter 自动'图 X-N 标题'
+        （N=文档已有嵌入图数+1，确定性文档态编号）。"""
+        caption = str(args.get("caption", "") or "").strip()
+        if caption:
+            return caption
+        title = str(args.get("caption_title", "") or "").strip()
+        if not title:
+            return ""
+        chapter = str(args.get("chapter", "") or "1")
+        no = 1
+        try:
+            from docx import Document
+            doc = Document(docx_path)
+            no = len(doc.inline_shapes) + 1
+        except Exception:  # noqa: BLE001 — 编号兜底不阻断插图
+            pass
+        return mermaid_figure.build_caption(title, chapter, no)
+
+    # ── C6 image_compress ────────────────────────────────────────────
+
+    def _image_compress(self, args: dict) -> str:
+        action = str(args.get("action", "") or "").strip().lower()
+        kw = {}
+        for k, dk in (("max_side", "max_side"), ("quality", "quality"),
+                      ("max_bytes", "max_bytes")):
+            if args.get(k) is not None:
+                kw[dk] = int(args[k])
+        if action == "compress":
+            path = str(args.get("path", "") or "")
+            if not path or not Path(path).is_file():
+                return f"❌ 参数错误: path 不存在: {path!r}"
+            name = str(args.get("out_name", "") or "").strip()
+            try:
+                out = (self._resolve_media_path(name, (".jpg", ".jpeg"),
+                                                default_ext=".jpg")
+                       if name else None)
+                if out is None:
+                    self.out_dir.mkdir(parents=True, exist_ok=True)
+                    out = self.out_dir / (Path(path).stem + ".min.jpg")
+                res = image_compress.compress_image(path, out, **kw)
+            except ValueError as e:
+                return f"❌ 参数错误: {e}"
+            except RuntimeError as e:
+                return f"❌ 依赖不可用: {e}"
+            saved = res["before"] - res["after"]
+            over = "⚠️ 仍超上限（已到可读尺寸/质量下限）" if res.get("over_budget") else ""
+            return (f"✅ 压图完成（确定性算子）: {res['dst']}\n"
+                    f"  {res['before']} → {res['after']} 字节（省 {saved}）｜"
+                    f"{res['width']}×{res['height']}｜质量 {res['quality']}｜"
+                    f"{'重编码' if res['reencoded'] else '已合规原样复制'}{over}\n"
+                    f"MEDIA:{res['dst']}")
+        if action == "batch":
+            items = args.get("paths") or args.get("dir")
+            if not items:
+                return "❌ 参数错误: batch 需要 paths（列表）或 dir（目录）"
+            try:
+                res = image_compress.compress_batch(items, self.out_dir, **kw)
+            except ValueError as e:
+                return f"❌ 参数错误: {e}"
+            except RuntimeError as e:
+                return f"❌ 依赖不可用: {e}"
+            lines = [f"✅ 批量压图完成：{res['count']} 张，"
+                     f"{res['total_before']} → {res['total_after']} 字节"
+                     f"（省 {res['saved_bytes']}）"]
+            for r in res["files"]:
+                lines.append(f"  {Path(r['src']).name} → {Path(r['dst']).name}"
+                             f"（{r['before']}→{r['after']} 字节，"
+                             f"{r['width']}×{r['height']}）")
+            for d in res["over_budget"]:
+                lines.append(f"  ⚠️ 仍超上限: {d}")
+            manifest = self.out_dir / f"compress-manifest-{int(self._now() * 1000)}.json"
+            self.out_dir.mkdir(parents=True, exist_ok=True)
+            manifest.write_text(json.dumps(res, ensure_ascii=False, indent=2),
+                                encoding="utf-8")
+            lines.append(f"清单: {manifest}")
+            return "\n".join(lines)
+        return (f"❌ 参数错误: 未知 action={action!r}"
+                f"（支持 {'/'.join(COMPRESS_ACTIONS)}）")
+
+    # ── C7 office_finalize ───────────────────────────────────────────
+
+    def _office_finalize(self, args: dict) -> str:
+        action = str(args.get("action", "") or "").strip().lower()
+        docx_path = str(args.get("docx_path", "") or "")
+        if not docx_path or not Path(docx_path).is_file():
+            return f"❌ 参数错误: docx_path 不存在: {docx_path!r}"
+        if action == "check_toc":
+            try:
+                toc = office_finalize.check_toc(docx_path)
+            except ValueError as e:
+                return f"❌ 参数错误: {e}"
+            if toc["has_toc_field"]:
+                return f"✅ 含 Word 目录域：{docx_path}（export_pdf 会更新目录页码）"
+            return (f"ℹ️ 无目录域：{docx_path}——export_pdf 将仅导出 PDF"
+                    f"（不会假称更新了目录）")
+        if action == "export_pdf":
+            name = str(args.get("out_name", "") or "").strip()
+            try:
+                out_pdf = (self._resolve_media_path(name, (".pdf",),
+                                                    default_ext=".pdf")
+                           if name else None)
+                res = office_finalize.update_toc_and_export(docx_path, out_pdf)
+            except ValueError as e:
+                return f"❌ 参数错误: {e}"
+            except RuntimeError as e:
+                return f"❌ 依赖不可用: {e}"
+            toc_line = ("TOC 页码已确定性更新" if res["toc_updated"]
+                        else "无目录域（仅导出 PDF）")
+            return (f"✅ PDF 终稿已导出（LibreOffice headless）: {res['pdf']}"
+                    f"（{res['bytes']} 字节，{res['elapsed_s']}s）\n"
+                    f"  {toc_line}｜docx 原件不动: {res['docx']}\n"
+                    f"MEDIA:{res['pdf']}")
+        return (f"❌ 参数错误: 未知 action={action!r}"
+                f"（支持 {'/'.join(FINALIZE_ACTIONS)}）")
+
+    def _resolve_media_path(self, name: str, allowed_exts: tuple,
+                            default_ext: str = "") -> Path:
+        """媒体输出路径纪律（_resolve_out_path 同款）：只许文件名，落 out_dir。"""
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+        name = str(name or "").strip()
+        if not name:
+            raise ValueError("filename 不能为空")
+        if not Path(name).suffix and default_ext:
+            name = f"{name}{default_ext}"
+        if "/" in name or "\\" in name or not _SAFE_NAME_RE.match(name):
+            if "/" in name or "\\" in name:
+                raise ValueError(
+                    f"⚠️ 输出目录受限：只能写入 {self.out_dir}，请求路径 {name!r} "
+                    f"越界。请改用 filename=<文件名>（不含路径分隔符）")
+            raise ValueError(f"filename 非法: {name!r}（只允许文件名本身）")
+        if Path(name).suffix.lower() not in tuple(
+                e.lower() for e in allowed_exts):
+            raise ValueError(
+                f"输出格式仅支持 {'/'.join(allowed_exts)}，收到 {Path(name).suffix!r}")
+        out = (self.out_dir / name).resolve()
+        if out.parent != self.out_dir.resolve():
+            raise ValueError("输出路径越界（必须落在文档目录内）")
+        return out
 
     def _resolve_out_path(self, args: dict) -> Path:
         """输出路径纪律（docgen_tools 同款）：只许文件名，落 out_dir。"""
