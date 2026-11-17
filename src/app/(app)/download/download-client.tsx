@@ -393,7 +393,7 @@ export function DownloadClient() {
                   <FolderOpen className="w-4 h-4 text-muted-foreground shrink-0" />
                 </div>
                 {!isLocalEngineAvailable() && (
-                  <p className="text-[10px] text-muted-foreground mt-1">{t('download.localDirHint', '本机目录仅桌面端（Tauri）可设置，浏览器/移动端只走后端')}</p>
+                  <p className="text-[10px] text-muted-foreground mt-1">{t('download.localDirHint', '本机目录仅桌面端（Electron）可设置，浏览器/移动端只走后端')}</p>
                 )}
               </div>
               <div>

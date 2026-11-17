@@ -28,6 +28,15 @@
       "target": [
         "nsis",
         "dir"
+      ],
+      "extraResources": [
+        {
+          "from": "../core/dist",
+          "to": ".",
+          "filter": [
+            "download-engine.exe"
+          ]
+        }
       ]
     },
     "nsis": {
@@ -43,7 +52,16 @@
       "target": [
         "dir"
       ],
-      "category": "Network"
+      "category": "Network",
+      "extraResources": [
+        {
+          "from": "../core/dist",
+          "to": ".",
+          "filter": [
+            "download-engine"
+          ]
+        }
+      ]
     },
     "electronDownload": {
       "mirror": "https://npmmirror.com/mirrors/electron/"

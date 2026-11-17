@@ -7,23 +7,32 @@ const path = require('path');
 // 本文件只做三件事：spawn 引擎子进程、读首行 JSON 握手（port/token）、IPC 转发给 renderer。
 // 禁在 JS 写任何下载逻辑（分段/续传/协议一律 Python）。
 const { spawn } = require('child_process');
+const fs = require('fs');
 let engineProc = null;
 let engineInfo = null; // {event, port, token, pid, dataDir, origin, version} —— 握手行原样
 let engineInfoWaiters = []; // 等握手的 getInfo 调用方（页面加载可能快于 PyInstaller 解包+握手）
 
 function resolveEngineCmd() {
-  // 冻结单文件（PyInstaller）优先：env 指定 > 打包资源 > exe 旁 > 开发模式 core/dist
+  // 冻结单文件（PyInstaller）优先：env 指定 > 打包资源 > exe 旁 > 开发模式 core/dist。
+  // Windows 产物名带 .exe（PyInstaller win 行为）——每个目录两种名字都试，
+  // 这是「桌面图标/已安装版」启动时引擎解析的关键路径：漏 .exe 会静默掉进 python 回退。
+  const names = process.platform === 'win32'
+    ? ['download-engine.exe', 'download-engine']
+    : ['download-engine', 'download-engine.exe'];
+  const dirs = [
+    process.resourcesPath || null,              // 打包版：extraResources 落点 resources/
+    path.dirname(process.execPath),             // 绿色包/安装版：exe 旁
+    path.join(__dirname, '..', 'core', 'dist'), // 开发模式
+  ].filter(Boolean);
   const frozenCandidates = [
     process.env.OPENMATE_ENGINE_BIN || null,
-    process.resourcesPath ? path.join(process.resourcesPath, 'download-engine') : null,
-    path.join(path.dirname(process.execPath), 'download-engine'),
-    path.join(__dirname, '..', 'core', 'dist', 'download-engine'),
+    ...dirs.flatMap((dir) => names.map((n) => path.join(dir, n))),
   ].filter(Boolean);
   for (const bin of frozenCandidates) {
     try { if (fs.existsSync(bin)) return { cmd: bin, args: [], env: {} }; } catch (e) { /* 试下一个 */ }
   }
   // 开发模式回退：python -m download_engine（PYTHONPATH 指向 openmate/core）
-  const python = process.env.OPENMATE_ENGINE_PYTHON || 'python3';
+  const python = process.env.OPENMATE_ENGINE_PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
   return { cmd: python, args: ['-m', 'download_engine'], env: { PYTHONPATH: path.join(__dirname, '..', 'core') } };
 }
 
@@ -43,6 +52,16 @@ function startDownloadEngine() {
     console.error('[download-engine] spawn failed:', e.message);
     return;
   }
+  console.log('[download-engine] spawn:', cmd);
+  engineProc.on('error', (e) => {
+    // 引擎可执行缺失/无执行权限（安装版没带引擎、机器无 python）——如实降级：
+    // 不崩壳（unhandled 'error' 会炸整个主进程），getInfo() 如实返回 null。
+    console.error('[download-engine] spawn error:', e.message);
+    engineProc = null;
+    engineInfo = null;
+    for (const r of engineInfoWaiters) r(null);
+    engineInfoWaiters = [];
+  });
   engineProc.stderr.on('data', (d) => console.error('[download-engine]', String(d).trim()));
   let buf = '';
   engineProc.stdout.on('data', (d) => {
@@ -81,7 +100,6 @@ ipcMain.handle('download-engine-info', () => {
 });
 
 // 地址解析：环境变量 > 同目录 config.json > 本机默认（Windows 免环境变量，改 config.json 即可）
-const fs = require('fs');
 function resolveUrl() {
   if (process.env.OPENMATE_URL) return process.env.OPENMATE_URL;
   // 打包后 __dirname 在安装包内部——必须优先读 exe 旁边的 config.json（用户可编辑的那个）
