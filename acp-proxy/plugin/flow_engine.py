@@ -47,6 +47,10 @@ NODE_STATUS_RUNNING = "running"
 NODE_STATUS_OK = "ok"
 NODE_STATUS_FAILED = "failed"
 NODE_STATUS_SKIPPED = "skipped"
+
+# 子代理治理运行时基线（Pi #14）：parallel 节点默认基础并发与统一轮数上限
+PARALLEL_BASE_CONCURRENCY = 4      # 实际并发上限 = 基础 × 2（SubagentGovernor 乘数）
+SUBAGENT_MAX_TURNS = 100           # 全分支共享统一轮数上限（Pi CHILD_AGENT_MAX_TURNS_PER_PROMPT）
 NODE_STATUS_WAITING = "waiting-approval"
 
 RUN_STATUS_RUNNING = "running"
@@ -340,6 +344,8 @@ class FlowExecutor:
                 output = self._run_decision(run, defn, node, record)
             elif node.type == "loop":
                 output = await self._run_loop(run, defn, node, record)
+            elif node.type == "parallel":
+                output = await self._run_parallel(run, defn, node, record)
             elif node.type == "approval":
                 output = self._suspend_for_approval(run, node)
                 suspended = True
@@ -530,7 +536,7 @@ class FlowExecutor:
         self.engine.store.save(run)
         return {"waiting": True, "node": node.id, "form": node.form}
 
-    # ── action 节点（notify | emit-event | update-panel）──
+    # ── action 节点（notify | emit-event | update-panel | compress-handoff）──
 
     def _run_action(self, run: FlowRun, defn: FlowDefinition,
                     node: NodeSpec, record: NodeRun) -> Any:
@@ -550,10 +556,87 @@ class FlowExecutor:
                 self.engine.emit(action.event, {"run_id": run.run_id, "flow_id": run.flow_id})
                 self._log(run, node.id, "emit-event", action.event)
                 results.append({"event": action.event})
+            elif action.type == "compress-handoff":
+                # 阶段切换节点声明压缩要求（Pi #5）：自定义压缩指令经既有事件总线
+                # 广播（`compress-handoff`），驱动层接 ContextCompressor 指令注入。
+                instructions = action.message
+                self.engine.emit("compress-handoff", {
+                    "run_id": run.run_id,
+                    "flow_id": run.flow_id,
+                    "node": node.id,
+                    "instructions": instructions,
+                })
+                self._log(run, node.id, "compress-handoff",
+                          f"阶段交接压缩要求: {instructions[:120]}")
+                results.append({"compress_handoff": {"instructions": instructions}})
             else:  # update-panel
                 self._log(run, node.id, "update-panel", action.panel)
                 results.append({"panel": action.panel})
         return {"actions": results}
+
+    # ── parallel 节点（子代理治理运行时基线，Pi #14）──
+
+    async def _run_parallel(self, run: FlowRun, defn: FlowDefinition,
+                            node: NodeSpec, record: NodeRun) -> Any:
+        """分支子任务并发执行，治理三件套全施加：
+        ①并发乘数×2 超出排队（SubagentGovernor，队满/排队超时显式报因）；
+        ②全分支共享统一轮数上限（TurnBudget，默认 100，超限显式报因不硬杀）；
+        ③分支经 governor.run_child 同源执行（runChildTask 沿用限制语义）。
+        分支=合成 tool 节点（id=<节点>__<分支>），复用 _run_tool_node 的重试/
+        软预算/审批语义；分支失败隔离（记 skipped/failed），聚合后按本节点
+        on_error 定夺（fail | skip | goto:<node>）。"""
+        from agent.subagent_governance import (
+            SubagentGovernor,
+            SubagentQueueFull,
+            SubagentQueueTimeout,
+            TurnLimitExceeded,
+        )
+
+        governor = SubagentGovernor(
+            base_concurrency=node.max_concurrency or PARALLEL_BASE_CONCURRENCY,
+            max_turns=SUBAGENT_MAX_TURNS)
+        self._log(run, node.id, "parallel-start",
+                  f"branches={len(node.branches)} capacity={governor.capacity} "
+                  f"max_turns={governor.budget.max_turns}")
+
+        async def _one(branch):
+            synth = NodeSpec(
+                id=f"{node.id}__{branch.id}", type="tool",
+                tool=branch.tool, args=dict(branch.args),
+                retry=node.retry, timeout_seconds=node.timeout_seconds,
+                on_error="skip")     # 分支失败隔离，聚合后按 parallel 节点 on_error 定夺
+            brecord = self._record(run, synth)
+            brecord.status = NODE_STATUS_RUNNING
+            brecord.started_at = time.time()
+            try:
+                async def _exec():
+                    return await self._run_tool_node(run, defn, synth, brecord)
+                # ③runChildTask 沿用限制：slot+统一轮数经 governor.run_child 同源施加
+                out = await governor.run_child(_exec, child_id=synth.id, turns=1)
+            except (SubagentQueueFull, SubagentQueueTimeout, TurnLimitExceeded) as e:
+                brecord.status = NODE_STATUS_FAILED
+                brecord.error = f"{type(e).__name__}: {e}"
+                self._log(run, synth.id, "branch-governed", brecord.error)
+                out = {"failed": True, "error": brecord.error}
+            brecord.finished_at = time.time()
+            brecord.duration_ms = (brecord.finished_at - brecord.started_at) * 1000
+            self.engine.store.save(run)
+            return branch.id, out
+
+        results = await asyncio.gather(*(_one(b) for b in node.branches))
+        outputs = {bid: out for bid, out in results}
+        failed = [bid for bid, out in outputs.items()
+                  if isinstance(out, dict) and (out.get("failed") or out.get("skipped"))]
+        summary = {"branches": outputs, "governor": governor.stats(),
+                   "failed_branches": failed}
+        if failed:
+            record.error = f"分支失败: {failed}"
+            self._log(run, node.id, "parallel-failed",
+                      f"failed={failed} stats={governor.stats()}")
+            return self._on_error(run, defn, node, record)   # 聚合后按节点 on_error
+        self._log(run, node.id, "parallel-ok",
+                  f"{len(outputs)} 分支完成 stats={governor.stats()}")
+        return summary
 
     # ── 工具 ──
 

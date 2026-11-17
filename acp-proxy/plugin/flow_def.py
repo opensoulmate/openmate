@@ -17,13 +17,13 @@ from typing import Any
 
 # ---- 常量 ----
 
-NODE_TYPES = {"tool", "decision", "loop", "approval", "action"}
+NODE_TYPES = {"tool", "decision", "loop", "approval", "action", "parallel"}
 TRIGGER_TYPES = {"cron", "event", "manual"}
 ON_ERROR_PATTERN = re.compile(r"^(fail|skip|goto:[a-z][a-z0-9-]{0,63})$")
 NODE_ID_PATTERN = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
 TOOL_FULL_PATTERN = re.compile(r"^[a-z][a-z0-9-]{0,63}__[a-z][a-z0-9_-]{0,63}$")
 BACKOFF_VALUES = {"fixed", "exponential"}
-ACTION_TYPES = {"notify", "emit-event", "update-panel"}
+ACTION_TYPES = {"notify", "emit-event", "update-panel", "compress-handoff"}
 ON_TIMEOUT_VALUES = {"fail", "skip"}
 
 
@@ -63,6 +63,14 @@ class ActionSpec:
 
 
 @dataclass(frozen=True)
+class ParallelBranchSpec:
+    """parallel 节点分支（子任务）：一条分支=一次工具子任务调用。"""
+    id: str
+    tool: str = ""
+    args: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class NodeSpec:
     id: str
     type: str
@@ -85,6 +93,9 @@ class NodeSpec:
     on_timeout: str = "fail"       # fail | skip
     # action
     actions: tuple[ActionSpec, ...] = ()
+    # parallel（子代理治理运行时基线：并发乘数×2 超出排队 + 统一轮数上限）
+    branches: tuple[ParallelBranchSpec, ...] = ()
+    max_concurrency: int = 0       # 0 = 引擎默认基础并发
 
 
 @dataclass(frozen=True)
@@ -216,6 +227,34 @@ def _parse_node(data: Any, index: int) -> NodeSpec:
         kwargs["when"] = _require(data, "when", str, where)
         kwargs["then"] = _require(data, "then", str, where)
         kwargs["else_"] = _require(data, "else", str, where)
+    elif typ == "parallel":
+        raw_branches = _require(data, "branches", list, where)
+        if not raw_branches:
+            raise FlowDefError(f"{where}.branches 应为非空列表")
+        branches: list[ParallelBranchSpec] = []
+        seen: set[str] = set()
+        for bi, item in enumerate(raw_branches):
+            bw = f"{where}.branches[{bi}]"
+            if not isinstance(item, dict):
+                raise FlowDefError(f"{bw} 应为映射")
+            bid = _require(item, "id", str, bw)
+            if not NODE_ID_PATTERN.match(bid):
+                raise FlowDefError(f"{bw}.id 非法: {bid!r}")
+            if bid in seen:
+                raise FlowDefError(f"{bw}.id 重复: {bid!r}")
+            seen.add(bid)
+            tool = _require(item, "tool", str, bw)
+            if not TOOL_FULL_PATTERN.match(tool):
+                raise FlowDefError(f"{bw}.tool 非法: {tool!r}（应为 <plugin-id>__<tool-name>）")
+            args = item.get("args", {})
+            if not isinstance(args, dict):
+                raise FlowDefError(f"{bw}.args 应为映射")
+            branches.append(ParallelBranchSpec(id=bid, tool=tool, args=args))
+        max_concurrency = data.get("max_concurrency", 0)
+        if not isinstance(max_concurrency, int) or max_concurrency < 0:
+            raise FlowDefError(f"{where}.max_concurrency 应为非负整数")
+        kwargs["branches"] = tuple(branches)
+        kwargs["max_concurrency"] = max_concurrency
     elif typ == "loop":
         over = _require(data, "over", str, where)
         body = data.get("body")
