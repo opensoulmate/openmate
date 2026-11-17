@@ -102,7 +102,7 @@ jobs:
       - name: Verify latest.yml (版本递增 + 校验和一致)
         shell: bash
         run: |
-          python - <<'PY'
+          PYTHONIOENCODING=utf-8 python - <<'PY'
           import base64, hashlib, json, pathlib, re, sys, urllib.request
 
           ver = json.load(open('desktop/package.json', encoding='utf-8'))['version']
