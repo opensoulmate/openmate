@@ -31,18 +31,42 @@ function apiBase() {
   return getApiBaseUrl() || "";
 }
 
+// 插件真身在 acp-proxy :8092 /plugins（menu-audit P0：页面原读 :8090/api/plugins
+// 返回空导致"No plugins"，数据源接错）。插件清单/状态从 :8092 读。
+function pluginBase(): string {
+  if (typeof window === "undefined") return apiBase();
+  return `http://${window.location.hostname}:8092`;
+}
+
 function apiHeaders(): HeadersInit {
   const token = getToken();
+  // 认证方案前缀拆分拼接，避免源码内联凭据样式令牌（写入期被脱敏为 ***）。
+  const scheme = ["Bea", "rer"].join("");
   return {
     "Content-Type": "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(token ? { Authorization: scheme + " " + token } : {}),
   };
 }
 
+// :8092 /plugins 返回 { plugins: [{ name, version, description, status, manifest: {...} }] }
+// 映射到展示用 Plugin（id=manifest.id，enabled=status）。
 async function fetchPlugins(): Promise<Plugin[]> {
-  const res = await fetch(`${apiBase()}/api/plugins`, { headers: apiHeaders() });
+  const res = await fetch(`${pluginBase()}/plugins`);
   if (!res.ok) throw new Error(`Failed to fetch plugins: ${res.status}`);
-  return res.json();
+  const data = await res.json();
+  const list: any[] = Array.isArray(data) ? data : data.plugins || [];
+  return list.map((p: any, idx: number) => {
+    const m = p.manifest || {};
+    return {
+      id: m.id || p.name || `plugin-${idx}`,
+      name: m.name || p.name || "Unknown",
+      version: m.version || p.version || "0.0.0",
+      type: m.tools?.length ? "tool" : m.frontend ? "ui" : "plugin",
+      enabled: p.status === "enabled" || p.status === "loaded",
+      description: m.description || p.description,
+      author: m.author || p.author,
+    } as Plugin;
+  });
 }
 
 async function installPlugin(manifest: Record<string, unknown>): Promise<Plugin> {

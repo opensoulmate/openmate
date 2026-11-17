@@ -15,6 +15,7 @@ import {
   Volume2, Layers, Link2, Home, MousePointer, Mic, ImageIcon, Smile,
   Stethoscope, Cpu, Bolt, Heart, Gauge, BarChart3, Package, ScrollText,
   History, Store, Pill, LogOut, DollarSign, Terminal, Briefcase, GitMerge,
+  MoreHorizontal,
 } from "lucide-react";
 import { fetchPluginNavItems, getCachedPluginNavItems, mergePluginNavItems, PluginNavItem } from "@/lib/plugin-nav";
 import { BottomBar as OpenFaceBottomBar } from "@opensoulmate/openface";
@@ -24,6 +25,7 @@ interface BottomNavItem {
   adminOnly?: boolean;
   href: string;
   label: string;
+  fallback?: string;
   icon: React.ElementType;
 }
 
@@ -40,65 +42,69 @@ const ICON_MAP: Record<string, React.ElementType> = {
 
 const DEFAULT_ICON = FileText;
 
-// Settings is NOT in scrollable items — it's fixed on the right
+// 底栏 56→9（menu-audit P0）：对话·AI群·知识库·学习·流程·能力市场·工作台·系统·更多。
+// 第 9 项"更多"（器官门户/管理/进化）由 MoreMenu 弹出承载。深层功能经 ⌘K 全量可达。
 const baseNavItems: BottomNavItem[] = [
-  { href: "/chat", label: "nav.chat", icon: MessageSquare },
-  { href: "/ai-groups", label: "nav.aiGroups", icon: Users },
-  { href: "/knowledge", label: "nav.knowledge", icon: BookOpen },
-  { href: "/learn", label: "nav.learn", icon: GraduationCap },
-  { href: "/graph", label: "nav.graph", icon: Network },
-  { href: "/knowledge-requests", label: "nav.kbSharing", icon: Share2 },
-  { href: "/cron", label: "nav.cron", icon: Clock },
-  { href: "/workflow", label: "nav.workflow", icon: Workflow },
-  { href: "/pipeline", label: "nav.pipeline", icon: Zap },
-  { href: "/skills", label: "nav.skills", icon: Puzzle },
-  { href: "/mcp", label: "nav.mcp", icon: Plug },
-  { href: "/workspace", label: "nav.workspace", icon: FolderKanban },
-  { href: "/capture", label: "nav.capture", icon: Camera },
-  { href: "/tags", label: "nav.tags", icon: Tag },
-  { href: "/body-map", label: "nav.bodyMap", icon: User },
-  { href: "/soma", label: "nav.soma", icon: Bot },
-  { href: "/discovery", label: "nav.discovery", icon: Search },
-  { href: "/cortex", label: "nav.cortex", icon: Cpu },
-  { href: "/vein", label: "nav.vein", icon: Droplets },
-  { href: "/gene", label: "nav.gene", icon: Dna },
-  { href: "/vital", label: "nav.vital", icon: Activity },
-  { href: "/gland", label: "nav.gland", icon: Zap },
-  { href: "/hippo", label: "nav.hippo", icon: Brain },
-  { href: "/reflex", label: "nav.reflex", icon: Bolt },
-  { href: "/heredity", label: "nav.heredity", icon: GitBranch },
-  { href: "/pulse", label: "nav.pulse", icon: Heart },
-  { href: "/nerve", label: "nav.nerve", icon: Zap },
-  { href: "/sense", label: "nav.sense", icon: Eye },
-  { href: "/immune", label: "nav.immune", icon: Shield },
-  { href: "/marrow", label: "nav.marrow", icon: Bone },
-  { href: "/echo", label: "nav.echo", icon: Volume2 },
-  { href: "/mirror", label: "nav.mirror", icon: Layers },
-  { href: "/link", label: "nav.link", icon: Link2 },
-  { href: "/nest", label: "nav.nest", icon: Home },
-  { href: "/limb", label: "nav.limb", icon: MousePointer },
-  { href: "/voice", label: "nav.voice", icon: Mic },
-  { href: "/vision", label: "nav.vision", icon: ImageIcon },
-  { href: "/mind", label: "nav.mind", icon: Smile },
-  { href: "/soul", label: "nav.soul", icon: Brain },
-  { href: "/soma-admin", adminOnly: true, label: "nav.somaAdmin", icon: Bot },
-  { href: "/admin", adminOnly: true, label: "nav.admin", icon: Shield },
-  { href: "/permission", adminOnly: true, label: "nav.permission", icon: Shield },
-  { href: "/enterprise", label: "nav.enterprise", icon: Shield },
-  { href: "/sessions", label: "nav.sessions", icon: History },
-  { href: "/spending", label: "nav.spending", icon: DollarSign },
-  { href: "/intelligence", label: "nav.intelligence", icon: Brain },
-  { href: "/ai-engine", label: "nav.aiEngine", icon: Cpu },
-  { href: "/healer", label: "nav.healer", icon: Pill },
-  { href: "/topology", label: "nav.topology", icon: Network },
-  { href: "/registry", label: "nav.registry", icon: Package },
-  { href: "/trajectory", label: "nav.trajectory", icon: Activity },
-  { href: "/timeline", label: "nav.timeline", icon: History },
-  { href: "/changelog", label: "nav.changelog", icon: ScrollText },
-  { href: "/docs", label: "文档中心", icon: FileText },
-  { href: "/devlog", label: "开发记录", icon: ScrollText },
-  { href: "/marketplace", label: "nav.marketplace", icon: Store },
+  { href: "/chat", label: "nav.chat", fallback: "对话", icon: MessageSquare },
+  { href: "/ai-groups", label: "nav.aiGroups", fallback: "AI 群", icon: Users },
+  { href: "/knowledge", label: "nav.knowledge", fallback: "知识库", icon: BookOpen },
+  { href: "/learn", label: "nav.learn", fallback: "学习", icon: GraduationCap },
+  { href: "/workflow", label: "nav.workflow", fallback: "流程", icon: Workflow },
+  { href: "/skills", label: "nav.skills", fallback: "能力市场", icon: Puzzle },
+  { href: "/workspace", label: "nav.workspace", fallback: "工作台", icon: FolderKanban },
+  { href: "/system", label: "nav.system", fallback: "系统", icon: Server },
 ];
+
+// 第 9 项"更多"：器官门户/管理/进化 三入口弹出（底栏 56→9 的"更多"承载）
+function MoreMenu() {
+  const router = useRouter();
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ bottom: number; left: number } | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => {
+      if (ref.current?.contains(e.target as Node)) return;
+      if (popRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [open]);
+  const items = [
+    { href: "/body-map", label: t("nav.bodyMap", "器官门户"), icon: User },
+    { href: "/admin", label: t("nav.admin", "管理"), icon: Shield },
+    { href: "/evolution", label: t("nav.evolution", "进化"), icon: Dna },
+  ];
+  return (
+    <div ref={ref} className="relative flex shrink-0 flex-col items-center justify-center gap-0.5 rounded-lg px-2.5 py-1.5 text-[9px] font-medium min-w-[48px] text-muted-foreground hover:text-foreground hover:bg-accent">
+      <button
+        onClick={(e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          setPos({ bottom: window.innerHeight - r.top + 8, left: Math.min(Math.max(8, r.left), Math.max(8, window.innerWidth - 184)) });
+          setOpen((v) => !v);
+        }}
+        className="flex flex-col items-center gap-0.5"
+      >
+        <MoreHorizontal size={16} />
+        <span className="truncate max-w-[56px] leading-tight">{t("nav.more", "更多")}</span>
+      </button>
+      {open && pos && createPortal(
+        <div ref={popRef} style={{ position: "fixed", bottom: pos.bottom, left: pos.left }} className="w-44 rounded-xl border border-border bg-card shadow-lg overflow-hidden z-[100]">
+          {items.map((it) => (
+            <button key={it.href} onClick={() => { router.push(it.href); setOpen(false); }} className="flex w-full items-center gap-2.5 px-3 py-2 text-sm hover:bg-muted/50 transition-colors">
+              <it.icon size={14} className="text-muted-foreground" />
+              {it.label}
+            </button>
+          ))}
+        </div>,
+        document.body
+      )}
+    </div>
+  );
+}
 
 interface BottomNavProps {
   totalUnread?: number;
@@ -241,7 +247,7 @@ export function BottomNav({ totalUnread = 0, onOpenConversations }: BottomNavPro
                     </span>
                   )}
                 </div>
-                <span className="truncate max-w-[56px] leading-tight">{t(item.label)}</span>
+                <span className="truncate max-w-[56px] leading-tight">{t(item.label, item.fallback ?? item.label)}</span>
               </button>
             ) : (
               <Link
@@ -263,10 +269,11 @@ export function BottomNav({ totalUnread = 0, onOpenConversations }: BottomNavPro
                     </span>
                   )}
                 </div>
-                <span className="truncate max-w-[56px] leading-tight">{t(item.label)}</span>
+                <span className="truncate max-w-[56px] leading-tight">{t(item.label, item.fallback ?? item.label)}</span>
               </Link>
             );
           })}
+          <MoreMenu />
         </>
       }
       right={

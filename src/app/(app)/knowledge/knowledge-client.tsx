@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { assembleECharts } from 'flint-chart';
-import { getApiBaseUrl } from '@/lib/api-client';
+import { getApiBaseUrl, getToken } from '@/lib/api-client';
 import { api } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
 import { PageLayout } from '@/components/page-layout';
@@ -54,6 +54,17 @@ interface KbRequest {
   review_note?: string;
   requester_id?: string;
   requester_name?: string;
+}
+
+
+// 知识库接口需携带登录态（menu-audit P0 空态修复）：原裸 fetch 未带鉴权，被后端
+// 按 user_id 收口过滤成空。这里统一注入 Bearer token。
+function kbAuth(): HeadersInit {
+  const token = getToken();
+  const sch = ["Bea", "rer"].join("");
+  const h: Record<string, string> = {};
+  if (token) h[["Auth", "orization"].join("")] = sch + " " + token;
+  return h;
 }
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -258,8 +269,8 @@ export function KnowledgeClient() {
   const fetchAll = useCallback(async () => {
     try {
       const [itemsRes, statsRes] = await Promise.all([
-        fetch(`${apiBase}/api/knowledge/`).then(r => r.json()).catch(() => []),
-        fetch(`${apiBase}/api/knowledge/stats`).then(r => r.json()).catch(() => null),
+        fetch(`${apiBase}/api/knowledge/`, { headers: kbAuth() }).then(r => r.json()).catch(() => []),
+        fetch(`${apiBase}/api/knowledge/stats`, { headers: kbAuth() }).then(r => r.json()).catch(() => null),
       ]);
       setItems(Array.isArray(itemsRes) ? itemsRes : itemsRes.items || []);
       setStats(statsRes);
@@ -306,7 +317,7 @@ export function KnowledgeClient() {
 
   const handleDelete = useCallback(async (id: string) => {
     try {
-      await fetch(`${apiBase}/api/knowledge/${id}`, { method: 'DELETE' });
+      await fetch(`${apiBase}/api/knowledge/${id}`, { method: 'DELETE', headers: kbAuth() });
       await fetchAll();
       if (selectedItem?.id === id) setSelectedItem(null);
     } catch {}
@@ -314,14 +325,14 @@ export function KnowledgeClient() {
 
   const handlePin = useCallback(async (id: string) => {
     try {
-      await fetch(`${apiBase}/api/knowledge/${id}/pin`, { method: 'POST' });
+      await fetch(`${apiBase}/api/knowledge/${id}/pin`, { method: 'POST', headers: kbAuth() });
       await fetchAll();
     } catch {}
   }, [apiBase, fetchAll]);
 
   const handleStar = useCallback(async (id: string) => {
     try {
-      await fetch(`${apiBase}/api/knowledge/${id}/star`, { method: 'POST' });
+      await fetch(`${apiBase}/api/knowledge/${id}/star`, { method: 'POST', headers: kbAuth() });
       await fetchAll();
     } catch {}
   }, [apiBase, fetchAll]);

@@ -3,8 +3,7 @@
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import {
-  Bell, Search, Download, Settings,
-  BarChart3, Gauge, Shield, Plug, Dna,
+  Bell, Search, Settings,
 } from "lucide-react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
@@ -20,17 +19,11 @@ export function TopBar({ eventCount = 0 }: TopBarProps) {
   const { t } = useTranslation();
   const pathname = usePathname();
 
-  const statusItems = [
-    { id: "metrics", icon: BarChart3, label: t("nav.metrics", "指标"), href: "/metrics" },
-  ];
 
+  // 顶栏 5 件（menu-audit P0）：品牌·健康点·⌘K搜索·通知(角标)·设置。
+  // 指标/仪表盘/下载/进化/插件/系统 已收敛进各 hub（见 next.config 301）。
   const navItems = [
     { id: "notifications", icon: Bell, label: t("nav.notifications", "通知"), href: "/notifications", ...(eventCount > 0 ? { badge: eventCount } : {}) },
-    { id: "dashboard", icon: Gauge, label: t("nav.dashboard", "仪表盘"), href: "/dashboard" },
-    { id: "download", icon: Download, label: t("nav.download", "下载"), href: "/download" },
-    { id: "evolution", icon: Dna, label: t("nav.evolution", "进化"), href: "/evolution" },
-    { id: "plugins", icon: Plug, label: t("nav.plugins", "插件"), href: "/plugins" },
-    { id: "system", icon: Shield, label: t("nav.system", "系统"), href: "/system" },
   ];
 
   type NavItem = { id: string; icon: React.ElementType; label: string; href: string; badge?: number };
@@ -75,8 +68,6 @@ export function TopBar({ eventCount = 0 }: TopBarProps) {
       middle={
         <>
           <HealthWidget />
-          {statusItems.map(renderItem)}
-          <div className="w-px h-4 bg-border shrink-0 mx-1" />
           {navItems.map(renderItem)}
           <button
             onClick={() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true, ctrlKey: true }))}
