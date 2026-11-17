@@ -16,7 +16,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel as PydanticBaseModel
 
 from plugin.mcp_bridge import (
@@ -177,7 +177,15 @@ def load_dsl_page(descriptor: PluginDescriptor, page_id: str) -> dict[str, Any]:
 def build_plugin_router(descriptor: PluginDescriptor, registry: PluginToolRegistry) -> APIRouter:
     """为单个插件生成 FastAPI 子路由"""
     plugin_id = descriptor.manifest.id
-    router = APIRouter(prefix=f"/plugins/{plugin_id}", tags=[f"plugin:{plugin_id}"])
+
+    def _installed_guard() -> None:
+        """卸载即收走：插件目录消失后本路由组整体 404（uninstall 热卸载后自惰，
+        无需从 app 摘除已注册路由）。"""
+        if not descriptor.dir_path.is_dir():
+            raise HTTPException(status_code=404, detail=f"插件已卸载：{plugin_id}")
+
+    router = APIRouter(prefix=f"/plugins/{plugin_id}", tags=[f"plugin:{plugin_id}"],
+                       dependencies=[Depends(_installed_guard)])
 
     @router.get("/manifest")
     async def get_manifest() -> dict[str, Any]:

@@ -81,6 +81,25 @@ def make_hot_loader(
     return hot_load
 
 
+def make_hot_unloader(
+    registry: PluginToolRegistry,
+    engine: FlowEngine,
+) -> Callable[[str], dict[str, Any]]:
+    """安装热装载的镜像（market step 2 卸载生命周期）：工具解绑 + 流程注销。
+    路由随插件目录消失自惰（dsl_api 目录守卫→404 插件已卸载）。"""
+
+    def hot_unload(plugin_id: str) -> dict[str, Any]:
+        tools = registry.unregister_plugin(plugin_id)
+        flows = engine.unregister_plugin(plugin_id)
+        return {
+            "plugin_id": plugin_id,
+            "tools_unbound": tools,
+            "flows_unbound": flows,
+        }
+
+    return hot_unload
+
+
 def build_forge_router(
     plugins_dir: Path | str,
     registry: PluginToolRegistry | None = None,
@@ -138,5 +157,16 @@ def build_forge_router(
         except ForgeError as e:
             raise HTTPException(status_code=404, detail=str(e))
         return {"deleted": draft_id}
+
+    @router.post("/{plugin_id}/uninstall")
+    async def uninstall_plugin(plugin_id: str, req: InstallRequest) -> dict[str, Any]:
+        """卸载（DELETE 门禁：未确认只回预览绝不删；确认后热卸载+删目录）。"""
+        try:
+            return forge.uninstall(
+                plugin_id, confirmed=req.confirmed,
+                hot_unload=make_hot_unloader(registry, engine),
+                decided_by=req.decided_by)
+        except ForgeError as e:
+            raise HTTPException(status_code=404, detail=str(e))
 
     return router

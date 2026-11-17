@@ -564,27 +564,9 @@ class PluginForge:
 
     def preview_zip(self, zip_path: str | Path) -> dict[str, Any]:
         """导入预览（零落盘）：zip-slip 拒绝 + 清单校验 + 权限预览（hooks/permissions
-        白描）+ 文件清单。深度校验（entry/DSL/自带测试）在 install_zip 的 dry-run。"""
-        with tempfile.TemporaryDirectory(prefix="plugin-preview-") as td:
-            root = _stage_zip(zip_path, Path(td))
-            try:
-                manifest = load_yaml_manifest(root)
-            except ManifestError as e:
-                raise ForgeError(f"清单非法，拒绝导入: {e}") from e
-            preview = self._preview_manifest(root)
-            return {
-                "ok": True,
-                "manifest": preview,
-                "permission_preview": {
-                    "permissions": preview["permissions"],
-                    "hooks": preview["hooks"],
-                    "tools_requiring_approval": [
-                        t["name"] for t in preview["tools"] if t["approval"]
-                    ],
-                },
-                "files": sorted(
-                    str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()),
-            }
+        白描）+ 文件清单。深度校验（entry/DSL/自带测试）在 install_zip 的 dry-run。
+        实现在模块级 preview_zip_file（PluginRepo.publish 共用单一来源）。"""
+        return preview_zip_file(zip_path)
 
     def install_zip(self, zip_path: str | Path, *, confirmed: bool,
                     hot_load: Callable[[str], dict[str, Any]] | None = None,
@@ -631,7 +613,7 @@ class PluginForge:
                         "permissions": preview["permissions"],
                         "hooks": preview["hooks"],
                         "tools_requiring_approval": [
-                            t["name"] for t in preview["tools"] if t["approval"]
+                            t["name"] for t in preview["tools"] if t["approval"] != "never"
                         ],
                     },
                     "dry_run": report,
@@ -644,7 +626,7 @@ class PluginForge:
                 "permissions": preview["permissions"],
                 "hooks": preview["hooks"],
                 "tools_requiring_approval": [
-                    t["name"] for t in preview["tools"] if t["approval"]
+                    t["name"] for t in preview["tools"] if t["approval"] != "never"
                 ],
             }
             return result
@@ -653,6 +635,53 @@ class PluginForge:
                 raise
             shutil.rmtree(draft_dir, ignore_errors=True)   # 确认失败不留悬空暂存
             raise
+
+    def uninstall(self, plugin_id: str, *, confirmed: bool,
+                  hot_unload: Callable[[str], dict[str, Any]] | None = None,
+                  decided_by: str = "用户") -> dict[str, Any]:
+        """卸载生命周期（market step 2，镜像 install 确认链）：
+
+        - confirmed=False：只回预览（将删什么/将解绑什么），plugins/<id> 一字不删；
+        - confirmed=True：先热卸载（工具/流程解绑——回调侧），再删目录。
+        删除是破坏性动作——与 install 的「生成≠安装」逐字对称：未确认绝不删。
+        """
+        plugin_dir = self.plugins_dir / plugin_id
+        if not plugin_dir.is_dir():
+            raise ForgeError(f"插件未安装：{plugin_id}")
+        files = sorted(
+            str(p.relative_to(plugin_dir)) for p in plugin_dir.rglob("*") if p.is_file())
+        try:
+            meta = self._preview_manifest(plugin_dir)
+        except (ManifestError, ForgeError):
+            meta = {"id": plugin_id, "tools": [], "pages": [], "permissions": [], "hooks": []}
+        if not confirmed:
+            return {
+                "action": "uninstall",
+                "plugin_id": plugin_id,
+                "dir": str(plugin_dir),
+                "confirmed": False,
+                "will_remove": files,
+                "will_unbind": {
+                    "tools": [t["name"] for t in meta.get("tools", [])],
+                    "pages": [p["id"] for p in meta.get("pages", [])],
+                    "permissions": meta.get("permissions", []),
+                },
+                "message": (f"DELETE 门禁：确认即彻底删除 {plugin_id}"
+                            f"（{len(files)} 文件、工具与流程解绑、菜单收走）。"
+                            "confirmed=true 再次调用执行。"),
+            }
+        unbound: dict[str, Any] = {}
+        if hot_unload is not None:
+            unbound = hot_unload(plugin_id) or {}
+        shutil.rmtree(plugin_dir)
+        return {
+            "action": "uninstall",
+            "plugin_id": plugin_id,
+            "confirmed": True,
+            "removed_files": len(files),
+            "unbound": unbound,
+            "decided_by": decided_by,
+        }
 
 
 # ---- zip 解包安全面（Sprint C 市场 step 1：zip-slip 必拒）----
@@ -729,3 +758,28 @@ def _stage_zip(zip_path: str | Path, dest: Path) -> Path:
     if root == dest.resolve() or not root.is_dir():
         raise ForgeError("zip 结构非法：顶层必须是插件目录")
     return root
+
+
+def preview_zip_file(zip_path: str | Path) -> dict[str, Any]:
+    """zip 导入预览（零落盘）——PluginForge.preview_zip 与 PluginRepo.publish
+    共用的单一来源：zip-slip 拒绝 + 清单校验 + 权限白描 + 文件清单。"""
+    with tempfile.TemporaryDirectory(prefix="plugin-preview-") as td:
+        root = _stage_zip(zip_path, Path(td))
+        try:
+            load_yaml_manifest(root)
+        except ManifestError as e:
+            raise ForgeError(f"清单非法，拒绝导入: {e}") from e
+        preview = PluginForge._preview_manifest(root)
+        return {
+            "ok": True,
+            "manifest": preview,
+            "permission_preview": {
+                "permissions": preview["permissions"],
+                "hooks": preview["hooks"],
+                "tools_requiring_approval": [
+                    t["name"] for t in preview["tools"] if t["approval"] != "never"
+                ],
+            },
+            "files": sorted(
+                str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()),
+        }

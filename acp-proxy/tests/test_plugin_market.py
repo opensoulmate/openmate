@@ -80,8 +80,10 @@ class TestPreview:
         perm = pv["permission_preview"]
         assert "tool.call" in perm["permissions"]            # 权限白描
         assert "hooks" in perm                               # hooks 白描（占位可见）
-        assert any(n.endswith("save_item") for n in
-                   perm["tools_requiring_approval"])          # 需审批工具白描
+        # 需审批工具白描＝approval != never（真值语义：脚手架 save_item 显式
+        # approval:never，不得误列为需审批；正例=always 见 test_plugin_repo）
+        assert not any(n.endswith("save_item") for n in
+                       perm["tools_requiring_approval"])
         assert "plugin.yaml" in pv["files"]                   # 文件清单（插件根相对）
 
     def test_preview_zero_persist(self, forge, tmp_path):
