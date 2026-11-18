@@ -1,4 +1,4 @@
-# 团队交接协作 — 协作三件套示例流程（组织角色路由 / agent_node / human_node / 预算）
+# 【样板】团队交接协作 — 协作三件套示例流程（组织角色路由 / agent_node / human_node / 预算）
 #
 # 验收链路：取数（tool）→ 分析（agent_node：按 role=engineer 路由到员工的 SoulMate，
 #   经 A2A 干活回流，结果进 $.analyze.result）→ 验收（human_node：按 role=manager

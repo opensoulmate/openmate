@@ -1,0 +1,50 @@
+# 公众号发布保障流 — 真实业务流（非样板，装了就干活）
+#
+# 真实触发：cron 每晚 21:30（AI课 12:00 / 架构 17:03 两个日更时点均已过）
+#          + manual「跑一下」（POST /flows/publish-guard/run）
+# 链路：对账（tool：读 ai-learning/agent-research 两本真账本 + 微信平台只读接口）
+#      → 分流（decision：有异常开单，无异常收尾）
+#      → 开人工工单（human_node：工单进 /tasks 收发台，超期自动催办）
+#      → 收尾通知
+# 对账口径：漏发（日更缺天）/ 封面未挂（封面图生成了但草稿没消费、thumb_media_id 空）
+#          / 待确认积压（草稿超窗未发布）/ 平台不一致（账本记草稿平台查无）
+id: publish-guard
+name: 公众号发布保障流
+version: 1
+triggers:
+  - type: cron
+    cron: "30 21 * * *"
+  - type: manual
+nodes:
+  - id: reconcile
+    type: tool
+    tool: publish-guard__reconcile
+    args:
+      window_days: 3
+      check_platform: true
+    retry:
+      max: 2
+      backoff: exponential
+      base_seconds: 5
+    timeout_seconds: 120
+  - id: route
+    type: decision
+    when: "$.reconcile.issue_count > 0"
+    then: open-ticket
+    else: finish
+  - id: open-ticket
+    type: human
+    user: "用户"
+    task: "$.reconcile.ticket_text"
+    form: "发布保障处置（补发/补挂封面/后台确认发布后交付处置说明）"
+    timeout_hours: 48
+    on_timeout: fail
+  - id: finish
+    type: action
+    actions:
+      - type: notify
+        channel: in-app
+        message: "公众号发布保障对账完成（异常已开单至 /tasks 并催办，无异常则本条即结论）"
+observability:
+  panel: flow-run
+  retain_runs: 30

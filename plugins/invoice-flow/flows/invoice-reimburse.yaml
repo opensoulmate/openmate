@@ -1,0 +1,73 @@
+# 发票报销流 — 真实业务流（非样板，装了就干活）
+#
+# 真实触发：manual「跑一下」（POST /flows/invoice-reimburse/run，
+#          inputs: {file: "/path/发票.pdf"} 或 {dir: "/path/发票目录"}）
+#          + event「invoice-dropped」（发票入目录事件）
+# 链路：识别（tool：二维码 + ocrmypdf/OCR，dhcc 分类器出报销类别）
+#      → 分流（decision：识别到发票才往下走）
+#      → 登记（tool：入报销台账 status=待确认，同号码去重）
+#      → 人工确认（human_node：/tasks 收发台逐张核对，缺字段在此补全）
+#      → 入台账（tool：确认回流 approve=已确认 / reject=已驳回）
+#      → 收尾通知（台账张数/金额/分类汇总）
+id: invoice-reimburse
+name: 发票报销流
+version: 1
+triggers:
+  - type: manual
+  - type: event
+    event: invoice-dropped
+nodes:
+  - id: recognize
+    type: tool
+    tool: invoice-flow__recognize
+    args:
+      file: "$run.inputs.file"
+      dir: "$run.inputs.dir"
+    retry:
+      max: 1
+      backoff: fixed
+      base_seconds: 2
+    timeout_seconds: 300
+  - id: has-invoices
+    type: decision
+    when: "$.recognize.count > 0"
+    then: register
+    else: finish
+  - id: register
+    type: tool
+    tool: invoice-flow__register
+    args:
+      records: "$.recognize.records"
+      note: "$run.inputs.note"
+    retry:
+      max: 1
+      backoff: fixed
+      base_seconds: 1
+    timeout_seconds: 60
+  - id: confirm
+    type: human
+    user: "用户"
+    task: "$.register.confirm_text"
+    form: "发票登记确认（通过=入报销台账 / 驳回+原因；缺字段请补全后交付）"
+    timeout_hours: 72
+    on_timeout: fail
+  - id: commit
+    type: tool
+    tool: invoice-flow__commit
+    args:
+      entry_ids: "$.register.entry_ids"
+      confirmation: "$.confirm.result"
+    retry:
+      max: 1
+      backoff: fixed
+      base_seconds: 1
+    timeout_seconds: 60
+  - id: finish
+    type: action
+    actions:
+      - type: notify
+        channel: in-app
+        message: "发票报销流完成：报销台账已更新（明细见 invoice-flow 工作台/台账查询）"
+observability:
+  panel: flow-run
+  retain_runs: 30

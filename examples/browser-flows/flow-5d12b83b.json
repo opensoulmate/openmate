@@ -1,0 +1,32 @@
+{
+  "id": "flow-5d12b83b",
+  "name": "录入订单",
+  "steps": [
+    {
+      "action": "goto",
+      "url": "https://x.test/{{page}}"
+    },
+    {
+      "action": "click",
+      "selector": "#new-btn",
+      "text": "新建"
+    },
+    {
+      "action": "fill",
+      "selector": "#order-no",
+      "value": "{{order_no}}"
+    },
+    {
+      "action": "fill",
+      "selector": "#password",
+      "value": "{{password}}",
+      "secret": true
+    }
+  ],
+  "params": [
+    "order_no",
+    "page",
+    "password"
+  ],
+  "created_at": 1794307609.646331
+}

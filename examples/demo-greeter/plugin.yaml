@@ -1,7 +1,7 @@
 id: demo-greeter
 name: 问候演示
 version: 0.1.0
-description: 插件机制 PoC——菜单长出来+UI DSL 页面渲染+MCP 工具可调
+description: 【样板】插件机制 PoC——菜单长出来+UI DSL 页面渲染+MCP 工具可调（不进运行时）
 author: soulmate
 entry: main.py
 permissions:

@@ -1,0 +1,14 @@
+{
+ "已确认张数": 1,
+ "已确认金额": 44263.5,
+ "待确认张数": 0,
+ "待确认金额": 0,
+ "已驳回张数": 0,
+ "按分类": {
+  "expense": {
+   "张数": 1,
+   "金额": 44263.5
+  }
+ },
+ "台账文件": "/home/climbing/Documents/Hermes/dhcc-reimbursement/ledger/报销台账.json"
+}

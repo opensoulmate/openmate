@@ -1,0 +1,67 @@
+id: invoice-flow
+name: 发票报销
+version: 0.1.0
+description: 发票报销流——发票进来→二维码+ocrmypdf识别→登记→人工确认→报销台账（整合 dhcc-reimbursement 既有资产）
+author: soulmate
+entry: main.py
+permissions:
+  - tool.register
+  - tool.call
+  - data.read
+  - data.write
+tools:
+  - name: recognize
+    description: 识别发票（PDF/图片）：二维码解析定号码/金额/日期/校验码，ocrmypdf/OCR 补销售方/税号/商品名称，dhcc 分类器出差旅/支出分类
+    handler: handle_recognize
+    permissions: [tool.call, data.read]
+    approval: never
+    input_schema:
+      type: object
+      properties:
+        file:
+          description: 单张发票文件路径（流程 $run.inputs.file 可空——空=用 dir）
+        dir:
+          description: 发票目录（识别其中全部 PDF/图片；$run.inputs.dir 可空）
+      required: []
+  - name: register
+    description: 识别结果登记入报销台账（status=待确认，同发票号码去重），返回逐张确认清单
+    handler: handle_register
+    permissions: [tool.call, data.write]
+    approval: never
+    input_schema:
+      type: object
+      properties:
+        records:
+          type: array
+          description: 识别记录列表（$.recognize.records）
+        note:
+          description: 登记备注（$run.inputs.note 可空）
+      required: [records]
+  - name: commit
+    description: 人工确认回流入台账：approve=已确认入账 / reject=已驳回留档，返回台账汇总
+    handler: handle_commit
+    permissions: [tool.call, data.write]
+    approval: never
+    input_schema:
+      type: object
+      properties:
+        entry_ids:
+          type: array
+          description: 登记条目 id 列表（$.register.entry_ids）
+        confirmation:
+          description: 人工确认交付物（$.confirm.result：decision+note 或说明文字）
+      required: [entry_ids]
+  - name: ledger
+    description: 报销台账查询（最近条目 + 张数/金额/分类汇总，只读）
+    handler: handle_ledger
+    permissions: [tool.call, data.read]
+    approval: never
+    input_schema:
+      type: object
+      properties:
+        limit:
+          type: integer
+          description: 返回条数上限
+      required: []
+flows:
+  - flows/invoice-reimburse.yaml

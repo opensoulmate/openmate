@@ -1,0 +1,120 @@
+{
+ "run_id": "run_20261119010740_85cd36f8",
+ "flow_id": "invoice-reimburse",
+ "flow_name": "发票报销流",
+ "plugin_id": "invoice-flow",
+ "status": "completed",
+ "trigger": "manual",
+ "idempotency_key": "",
+ "replay_of": "",
+ "created_at": "2026-11-19 01:07:40",
+ "finished_at": "2026-11-19 01:07:41",
+ "duration_ms": 1277.5,
+ "error": "",
+ "error_norm": null,
+ "failed_node": "",
+ "nodes": [
+  {
+   "node": "recognize",
+   "type": "tool",
+   "status": "ok",
+   "attempts": 1,
+   "retries": 0,
+   "duration_ms": 1250.1,
+   "over_budget": false,
+   "error": "",
+   "error_norm": null,
+   "output": "{\"records\": [{\"发票类型\": \"全电发票\", \"发票号码\": \"25112000000078684318\", \"开票日期\": \"2025-04-18\", \"价税合计\": 44263.5, \"校验码\": \"5EA0\", \"购买方\": \"大连市西岗区公共事业服务中心\", \"购买方税号\": \"12210203MB1637927F\", \"销售方\": \"北京东华合创科技有限公司\", \"销售方税…"
+  },
+  {
+   "node": "has-invoices",
+   "type": "decision",
+   "status": "ok",
+   "attempts": 0,
+   "retries": 0,
+   "duration_ms": 0.9,
+   "over_budget": false,
+   "error": "",
+   "error_norm": null,
+   "output": "{\"branch\": \"then\", \"when\": \"$.recognize.count > 0\", \"value\": true}"
+  },
+  {
+   "node": "register",
+   "type": "tool",
+   "status": "ok",
+   "attempts": 1,
+   "retries": 0,
+   "duration_ms": 2.5,
+   "over_budget": false,
+   "error": "",
+   "error_norm": null,
+   "output": "{\"registered\": [{\"id\": \"inv_23629c3e01\", \"发票号码\": \"25112000000078684318\", \"开票日期\": \"2025-04-18\", \"价税合计\": 44263.5, \"销售方\": \"北京东华合创科技有限公司\", \"商品名称\": \"*电子计算机*台式计算机\", \"分类\": \"expense\", \"报销类别\": \"【普】业务费\", \"校验码\":…"
+  },
+  {
+   "node": "confirm",
+   "type": "human",
+   "status": "ok",
+   "attempts": 0,
+   "retries": 0,
+   "duration_ms": 6.8,
+   "over_budget": false,
+   "error": "",
+   "error_norm": null,
+   "output": "审批 approved（用户）"
+  },
+  {
+   "node": "commit",
+   "type": "tool",
+   "status": "ok",
+   "attempts": 1,
+   "retries": 0,
+   "duration_ms": 2.1,
+   "over_budget": false,
+   "error": "",
+   "error_norm": null,
+   "output": "{\"decision\": \"approve\", \"updated\": [{\"id\": \"inv_23629c3e01\", \"发票号码\": \"25112000000078684318\", \"开票日期\": \"2025-04-18\", \"价税合计\": 44263.5, \"销售方\": \"北京东华合创科技有限公司\", \"商品名称\": \"*电子计算机*台式计算机\", \"分类\": \"expense\", \"报销类…"
+  },
+  {
+   "node": "finish",
+   "type": "action",
+   "status": "ok",
+   "attempts": 0,
+   "retries": 0,
+   "duration_ms": 1.1,
+   "over_budget": false,
+   "error": "",
+   "error_norm": null,
+   "output": "{\"actions\": [{\"channel\": \"in-app\", \"message\": \"发票报销流完成：报销台账已更新（明细见 invoice-flow 工作台/台账查询）\", \"ts\": 1795021661.6210036, \"run_id\": \"run_20261119010740_85cd36f8\"}]}"
+  }
+ ],
+ "notifications": [
+  {
+   "id": "a7e6f577a1",
+   "channel": "wechat:weixin",
+   "kind": "waiting-approval",
+   "message": "⏳ 流程「发票报销流」等你审批\n事项：发票登记确认（通过=入报销台账 / 驳回+原因；缺字段请补全后交付）\n到 OpenMate /will（或 /tasks 收发台）批准/驳回\n实例 run_20261119010740_85cd36f8",
+   "ts": 1795021661.6078944,
+   "status": "sending",
+   "message_id": "",
+   "run_id": "run_20261119010740_85cd36f8",
+   "dedupe_key": "confirm:1795021661.6063764"
+  },
+  {
+   "channel": "in-app",
+   "message": "发票报销流完成：报销台账已更新（明细见 invoice-flow 工作台/台账查询）",
+   "ts": 1795021661.6210036,
+   "run_id": "run_20261119010740_85cd36f8"
+  },
+  {
+   "id": "7c6c2cb971",
+   "channel": "wechat:weixin",
+   "kind": "completed",
+   "message": "✅ 流程「发票报销流」已完成\n耗时 1.3s · 实例 run_20261119010740_85cd36f8\n详情：OpenMate /will 运行实例",
+   "ts": 1795021661.6238995,
+   "status": "sending",
+   "message_id": "",
+   "run_id": "run_20261119010740_85cd36f8",
+   "dedupe_key": "1795021661.6222038"
+  }
+ ]
+}

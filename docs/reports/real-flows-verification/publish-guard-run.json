@@ -1,0 +1,96 @@
+{
+ "run_id": "run_20261119010736_4e3026cd",
+ "flow_id": "publish-guard",
+ "flow_name": "公众号发布保障流",
+ "plugin_id": "publish-guard",
+ "status": "completed",
+ "trigger": "manual",
+ "idempotency_key": "",
+ "replay_of": "",
+ "created_at": "2026-11-19 01:07:36",
+ "finished_at": "2026-11-19 01:07:40",
+ "duration_ms": 3353.4,
+ "error": "",
+ "error_norm": null,
+ "failed_node": "",
+ "nodes": [
+  {
+   "node": "reconcile",
+   "type": "tool",
+   "status": "ok",
+   "attempts": 1,
+   "retries": 0,
+   "duration_ms": 3324.7,
+   "over_budget": false,
+   "error": "",
+   "error_norm": null,
+   "output": "{\"issue_count\": 10, \"issues\": [{\"kind\": \"封面未挂\", \"ledger\": \"AI课/公众号日更\", \"article\": \"AI编程（七十）：自动化报表 — 一个程序出整份月报\", \"date\": \"2026-11-16\", \"detail\": \"封面图已生成未消费（发布链未挂封面）：/home/climbing/.hermes/wechat-visual…"
+  },
+  {
+   "node": "route",
+   "type": "decision",
+   "status": "ok",
+   "attempts": 0,
+   "retries": 0,
+   "duration_ms": 0.8,
+   "over_budget": false,
+   "error": "",
+   "error_norm": null,
+   "output": "{\"branch\": \"then\", \"when\": \"$.reconcile.issue_count > 0\", \"value\": true}"
+  },
+  {
+   "node": "open-ticket",
+   "type": "human",
+   "status": "ok",
+   "attempts": 0,
+   "retries": 0,
+   "duration_ms": 15.6,
+   "over_budget": false,
+   "error": "",
+   "error_norm": null,
+   "output": "审批 approved（用户）"
+  },
+  {
+   "node": "finish",
+   "type": "action",
+   "status": "ok",
+   "attempts": 0,
+   "retries": 0,
+   "duration_ms": 1.0,
+   "over_budget": false,
+   "error": "",
+   "error_norm": null,
+   "output": "{\"actions\": [{\"channel\": \"in-app\", \"message\": \"公众号发布保障对账完成（异常已开单至 /tasks 并催办，无异常则本条即结论）\", \"ts\": 1795021660.3398697, \"run_id\": \"run_20261119010736_4e3026cd\"}]}"
+  }
+ ],
+ "notifications": [
+  {
+   "id": "521af3339e",
+   "channel": "wechat:weixin",
+   "kind": "waiting-approval",
+   "message": "⏳ 流程「公众号发布保障流」等你审批\n事项：发布保障处置（补发/补挂封面/后台确认发布后交付处置说明）\n到 OpenMate /will（或 /tasks 收发台）批准/驳回\n实例 run_20261119010736_4e3026cd",
+   "ts": 1795021660.3302658,
+   "status": "sending",
+   "message_id": "",
+   "run_id": "run_20261119010736_4e3026cd",
+   "dedupe_key": "open-ticket:1795021660.327514"
+  },
+  {
+   "channel": "in-app",
+   "message": "公众号发布保障对账完成（异常已开单至 /tasks 并催办，无异常则本条即结论）",
+   "ts": 1795021660.3398697,
+   "run_id": "run_20261119010736_4e3026cd"
+  },
+  {
+   "id": "ce54e637fd",
+   "channel": "wechat:weixin",
+   "kind": "completed",
+   "message": "✅ 流程「公众号发布保障流」已完成\n耗时 3.4s · 实例 run_20261119010736_4e3026cd\n详情：OpenMate /will 运行实例",
+   "ts": 1795021660.342577,
+   "status": "sending",
+   "message_id": "",
+   "run_id": "run_20261119010736_4e3026cd",
+   "dedupe_key": "1795021660.3409152"
+  }
+ ]
+}

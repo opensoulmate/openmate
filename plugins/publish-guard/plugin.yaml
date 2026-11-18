@@ -1,0 +1,28 @@
+id: publish-guard
+name: 公众号发布保障
+version: 0.1.0
+description: 公众号日更发布保障——对账账本（ai-learning/agent-research）vs 实际发布（微信平台），检出漏发/封面未挂/待确认积压，异常开人工工单进 /tasks 催办
+author: soulmate
+entry: main.py
+permissions:
+  - tool.register
+  - tool.call
+  - data.read
+tools:
+  - name: reconcile
+    description: 对账公众号发布账本 vs 实际发布状态——读 ai-learning/_state.json 与 agent-research-state.json 账本，检出漏发、封面未挂、草稿待确认积压、平台不一致（可选直查微信平台 freepublish/draft 接口）
+    handler: handle_reconcile
+    permissions: [tool.call, data.read]
+    approval: never
+    input_schema:
+      type: object
+      properties:
+        window_days:
+          type: integer
+          description: 对账窗口（天），默认 3——只对最近 N 天的发布开问题单
+        check_platform:
+          type: boolean
+          description: 是否直查微信平台（freepublish/draft 只读接口），默认 true；false=纯本地账本对账
+      required: []
+flows:
+  - flows/publish-guard.yaml

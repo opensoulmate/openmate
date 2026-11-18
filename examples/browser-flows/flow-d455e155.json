@@ -1,0 +1,38 @@
+{
+  "id": "flow-d455e155",
+  "name": "立项系统",
+  "steps": [
+    {
+      "action": "goto",
+      "url": "https://dhzh.dhccjy.com/lx/login/"
+    },
+    {
+      "action": "click",
+      "selector": "#menu_li_4 > a:nth-child(1) > span:nth-child(2)",
+      "text": "span「信息立项」",
+      "ts": 1794377528598
+    },
+    {
+      "action": "goto",
+      "url": "https://dhzh.dhccjy.com/lx/login/"
+    },
+    {
+      "action": "click",
+      "selector": "#menu_li_6 > a:nth-child(1) > span:nth-child(2)",
+      "text": "span「盖标申请」",
+      "ts": 1794377535137
+    },
+    {
+      "action": "goto",
+      "url": "https://dhzh.dhccjy.com/lx/login/"
+    }
+  ],
+  "params": [],
+  "notes": "",
+  "context": {
+    "needs_login": true,
+    "intranet": false,
+    "preferred": "headed"
+  },
+  "created_at": 1794377570.357986
+}

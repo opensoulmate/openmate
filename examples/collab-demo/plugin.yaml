@@ -1,7 +1,7 @@
 id: collab-demo
 name: 协作流程演示
 version: 0.1.0
-description: 协作三件套示例——组织角色路由派单（agent_node→员工 SoulMate 干活回流→human_node 验收交付），流程 YAML 只写 role 不写人
+description: 【样板】协作三件套示例——组织角色路由派单（agent_node→员工 SoulMate 干活回流→human_node 验收交付），流程 YAML 只写 role 不写人（不进运行时）
 author: soulmate
 entry: main.py
 permissions:
