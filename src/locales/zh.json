@@ -3481,7 +3481,42 @@
     "nodeId": "节点ID",
     "nodeLabel": "节点名称",
     "duration": "耗时",
-    "noOutput": "无输出数据"
+    "noOutput": "无输出数据",
+    "tabFlows": "流程定义",
+    "tabRuns": "运行实例",
+    "refresh": "刷新",
+    "totalFlows": "流程定义",
+    "totalRuns": "运行实例",
+    "waiting": "待审批",
+    "loading": "加载中…",
+    "flowsError": "流程引擎不可达（acp-proxy :8092 /flows）",
+    "emptyFlows": "暂无流程定义——带 flows: 的插件装载后自动注册",
+    "emptyRuns": "暂无运行实例——在流程定义里「手动触发」跑一条",
+    "manualRun": "手动触发",
+    "runStarted": "已触发 {{id}}",
+    "runFailed": "触发失败：{{msg}}",
+    "replayBadge": "回放",
+    "approved": "已批准，流程继续",
+    "rejected": "已驳回",
+    "replayStarted": "回放已启动 {{id}}",
+    "when": "条件",
+    "ntTool": "工具",
+    "ntDecision": "判断",
+    "ntLoop": "循环",
+    "ntApproval": "审批",
+    "ntAction": "动作",
+    "ntAgent": "Agent",
+    "ntHuman": "人工",
+    "ntParallel": "并行",
+    "branchTaken": "判断分支走向",
+    "nodeStatus": "节点状态",
+    "eventLog": "事件日志",
+    "close": "关闭",
+    "note": "审批说明（可选）",
+    "approve": "批准",
+    "reject": "驳回",
+    "replay": "回放",
+    "decidedBy": "审批"
   },
   "trajectory": {
     "title": "轨迹追踪",
@@ -4003,7 +4038,97 @@
     "auto": "自动",
     "open": "打开",
     "allOrgans": "所有器官",
-    "systemsTitle": "系统"
+    "systemsTitle": "系统",
+    "organs": {
+      "soul": "灵魂",
+      "cortex": "皮层",
+      "hippo": "海马体",
+      "mind": "心智",
+      "reflex": "反射",
+      "sense": "感官",
+      "vision": "视觉",
+      "capture": "捕获",
+      "voice": "声带",
+      "echo": "回声",
+      "vital": "体征",
+      "pulse": "脉搏",
+      "immune": "免疫",
+      "nerve": "神经",
+      "will": "意志",
+      "gland": "腺体",
+      "heredity": "遗传链",
+      "vein": "血管",
+      "soma": "躯体",
+      "mate": "伙伴",
+      "limb": "四肢",
+      "link": "突触",
+      "marrow": "骨髓",
+      "gene": "基因",
+      "nest": "巢穴",
+      "mirror": "镜像",
+      "trajectory": "轨迹",
+      "mcp": "MCP",
+      "learn": "Learn",
+      "diagnostics": "Diagnostics"
+    },
+    "rel": {
+      "mate-will": {
+        "note": "Mate 下达业务流：用户意图经意志编排为业务工作流"
+      },
+      "mate-soul": {
+        "note": "Mate 默认直连 Soul：检索/问答 ↔ 知识记忆（三层架构核心规则）"
+      },
+      "soma-sense": {
+        "note": "Soma 只读采集 → Sense 多模态解析（看/听进来）"
+      },
+      "sense-nerve": {
+        "note": "感知结果 → Nerve 事件总线分发"
+      },
+      "nerve-soma": {
+        "note": "Nerve → Soma 分布式节点消息分发（采集调度下行）"
+      },
+      "nerve-soul": {
+        "note": "事件/轨迹 → Soul 存储（trajectory_events）"
+      },
+      "vein-soul": {
+        "note": "Vein 文件/资源流转 → Soul 知识存储"
+      },
+      "cortex-soul": {
+        "note": "Cortex 高级推理 ↔ Soul 记忆内核（RAG/图谱供给，推理结果回流）"
+      },
+      "will-soma": {
+        "note": "Will 工作流编排 → Soma 采集调度"
+      },
+      "link-limb": {
+        "note": "Link 双向集成 → Limb RPA 写入执行"
+      },
+      "pulse-will": {
+        "note": "Pulse 时间驱动循环 ↔ Will 定时业务流（心跳/节拍触发）"
+      },
+      "reflex-nerve": {
+        "note": "Nerve 传递信号 ↔ Reflex 快速应答"
+      },
+      "reflex-will": {
+        "note": "Reflex 应激快答/熔断 ↔ Will 业务流协同"
+      },
+      "gene-will": {
+        "note": "Gene 工作流模板 → Will 一键配置"
+      },
+      "gland-cortex": {
+        "note": "Gland 模型统一调度 → Cortex 推理供给"
+      },
+      "hippo-soul": {
+        "note": "Soul 永久存储 ↔ Hippo 记忆生命周期（归档/遗忘/过期）"
+      },
+      "mirror-will": {
+        "note": "Mirror 沙箱 → Will 工作流/连接器调试试跑"
+      }
+    },
+    "dragHint": "拖动器官可重排布局（自动记住）；悬停看关联邻居，点击看关系说明",
+    "resetLayout": "重置布局",
+    "relations": "关联",
+    "noRelations": "无既定关联记载",
+    "mateAbout": "Mate = OpenMate 本体——三进程之一（Soul/Soma/Mate）的客户端进程，即你正在使用的这个统一客户端/共生伙伴入口。不设独立器官功能页（产品自述）。"
   },
   "topology": {
     "title": "系统拓扑 · Topology",

@@ -3375,7 +3375,42 @@
     "nodeId": "ノードID",
     "nodeLabel": "ノード名",
     "duration": "所要時間",
-    "noOutput": "出力データなし"
+    "noOutput": "出力データなし",
+    "tabFlows": "フロー定義",
+    "tabRuns": "実行インスタンス",
+    "refresh": "更新",
+    "totalFlows": "フロー定義",
+    "totalRuns": "実行インスタンス",
+    "waiting": "承認待ち",
+    "loading": "読み込み中…",
+    "flowsError": "フロー到達不能（acp-proxy :8092 /flows）",
+    "emptyFlows": "フロー定義なし——flows: を持つプラグインが自動登録します",
+    "emptyRuns": "実行インスタンスなし——フロー定義から手動実行してください",
+    "manualRun": "手動実行",
+    "runStarted": "実行 {{id}}",
+    "runFailed": "実行失敗：{{msg}}",
+    "replayBadge": "リプレイ",
+    "approved": "承認、フロー再開",
+    "rejected": "却下",
+    "replayStarted": "リプレイ開始 {{id}}",
+    "when": "条件",
+    "ntTool": "ツール",
+    "ntDecision": "判断",
+    "ntLoop": "ループ",
+    "ntApproval": "承認",
+    "ntAction": "アクション",
+    "ntAgent": "Agent",
+    "ntHuman": "人間",
+    "ntParallel": "並列",
+    "branchTaken": "判断分岐",
+    "nodeStatus": "ノード状態",
+    "eventLog": "イベントログ",
+    "close": "閉じる",
+    "note": "承認メモ（任意）",
+    "approve": "承認",
+    "reject": "却下",
+    "replay": "リプレイ",
+    "decidedBy": "承認者"
   },
   "trajectory": {
     "title": "トラジェクトリー",
@@ -3840,7 +3875,97 @@
     "auto": "自動",
     "open": "開く",
     "allOrgans": "全臓器",
-    "systemsTitle": "システム"
+    "systemsTitle": "システム",
+    "organs": {
+      "soul": "魂",
+      "cortex": "皮質",
+      "hippo": "海馬体",
+      "mind": "心",
+      "reflex": "反射",
+      "sense": "感覚",
+      "vision": "視覚",
+      "capture": "キャプチャ",
+      "voice": "声帯",
+      "echo": "エコー",
+      "vital": "バイタル",
+      "pulse": "脈拍",
+      "immune": "免疫",
+      "nerve": "神経",
+      "will": "意志",
+      "gland": "腺体",
+      "heredity": "遺伝連鎖",
+      "vein": "血管",
+      "soma": "ソマ（躯体）",
+      "mate": "相棒",
+      "limb": "四肢",
+      "link": "シナプス",
+      "marrow": "骨髄",
+      "gene": "遺伝子",
+      "nest": "ネスト",
+      "mirror": "鏡",
+      "trajectory": "軌跡",
+      "mcp": "MCP",
+      "learn": "Learn",
+      "diagnostics": "Diagnostics"
+    },
+    "rel": {
+      "mate-will": {
+        "note": "Mate が業務フローを下达：ユーザー意图を Will が業務ワークフローに編成"
+      },
+      "mate-soul": {
+        "note": "Mate は Soul に直結：検索/问答 ↔ 知識・記憶（三層アーキテクチャ基本規則）"
+      },
+      "soma-sense": {
+        "note": "Soma 収集（読み取り専用）→ Sense マルチモーダル解析（見る/聞く）"
+      },
+      "sense-nerve": {
+        "note": "知覚結果 → Nerve イベントバス配信"
+      },
+      "nerve-soma": {
+        "note": "Nerve → Soma 分散ノードメッセージ配信（収集スケジューリング下行）"
+      },
+      "nerve-soul": {
+        "note": "イベント/軌跡 → Soul 保存（trajectory_events）"
+      },
+      "vein-soul": {
+        "note": "Vein ファイル/資源フロー → Soul 知識保存"
+      },
+      "cortex-soul": {
+        "note": "Cortex 高度推論 ↔ Soul 記憶コア（RAG/グラフ供給、推論結果還流）"
+      },
+      "will-soma": {
+        "note": "Will ワークフロー編成 → Soma 収集スケジューリング"
+      },
+      "link-limb": {
+        "note": "Link 双方向統合 → Limb RPA 書き込み実行"
+      },
+      "pulse-will": {
+        "note": "Pulse 時間駆動ループ ↔ Will 定時業務フロー（心拍/ティック起動）"
+      },
+      "reflex-nerve": {
+        "note": "Nerve 信号伝達 ↔ Reflex 高速応答"
+      },
+      "reflex-will": {
+        "note": "Reflex 即応/遮断 ↔ Will 業務フロー協調"
+      },
+      "gene-will": {
+        "note": "Gene ワークフローテンプレート → Will ワンクリック設定"
+      },
+      "gland-cortex": {
+        "note": "Gland モデル統合调度 → Cortex 推論供給"
+      },
+      "hippo-soul": {
+        "note": "Soul 永久保存 ↔ Hippo 記憶ライフサイクル（アーカイブ/減衰/失効）"
+      },
+      "mirror-will": {
+        "note": "Mirror サンドボックス → Will ワークフロー/コネクタ調試試走"
+      }
+    },
+    "dragHint": "器官をドラッグで並べ替え（レイアウト記憶）。ホバーで関連強調、クリックで関連説明",
+    "resetLayout": "レイアウト初期化",
+    "relations": "関連",
+    "noRelations": "記載された関連なし",
+    "mateAbout": "Mate = OpenMate 本体——3プロセス（Soul/Soma/Mate）のクライアントプロセスで、今使っている統一クライアント/共生パートナー入口です。独立した器官ページは設けません（製品自己紹介）。"
   },
   "topology": {
     "title": "システムトポロジー",

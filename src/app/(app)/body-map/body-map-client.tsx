@@ -4,10 +4,11 @@ import { cn } from "@/lib/utils";
 import { getApiBaseUrl } from "@/lib/api-client";
 import { useTranslation } from "react-i18next";
 import {
-  RefreshCw, Maximize2, Minimize2, Activity,
+  RefreshCw, Maximize2, Minimize2, Activity, RotateCcw,
   CheckCircle, XCircle, Loader2, Clock, PanelRightOpen, PanelRightClose,
 } from "lucide-react";
 import Link from "next/link";
+import type { TFunction } from "i18next";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { PageLayout } from '@/components/page-layout';
 
@@ -22,6 +23,8 @@ interface OrganStatus {
 
 // Organ layout: position each organ anatomically on the body
 // Coordinates are percentages relative to the SVG viewBox
+// healthKey: /api/health/all 器官键映射（soma 后端键是 soma-connector）
+// self: 产品自述条目（Mate=OpenMate 进程本体，无器官功能页）
 const ORGAN_LAYOUT: Array<{
   key: string;
   label: string;
@@ -31,6 +34,8 @@ const ORGAN_LAYOUT: Array<{
   y: number;
   href: string;
   system: string;
+  healthKey?: string;
+  self?: boolean;
 }> = [
   // Brain area (head)
   { key: "soul", label: "灵魂", emoji: "🧠", category: "core", x: 50, y: 6, href: "/dashboard", system: "brain" },
@@ -55,7 +60,7 @@ const ORGAN_LAYOUT: Array<{
 
   // Arms (Nerve/Will)
   { key: "nerve", label: "神经", emoji: "⚡", category: "service", x: 20, y: 32, href: "/nerve", system: "nervous" },
-  { key: "will", label: "意志", emoji: "✨", category: "core", x: 80, y: 32, href: "/workflow", system: "nervous" },
+  { key: "will", label: "意志", emoji: "✨", category: "core", x: 80, y: 32, href: "/will", system: "nervous" },
 
   // Core (torso center)
   { key: "gland", label: "腺体", emoji: "🧪", category: "service", x: 50, y: 40, href: "/gland", system: "endocrine" },
@@ -63,6 +68,10 @@ const ORGAN_LAYOUT: Array<{
 
   // Vein (vascular system - spread across body)
   { key: "vein", label: "血管", emoji: "🩸", category: "core", x: 30, y: 40, href: "/vein", system: "circulatory" },
+
+  // Soma/Mate（核心 8 补齐：躯体采集层 + 共生伙伴本体）
+  { key: "soma", label: "躯体", emoji: "🤖", category: "core", x: 66, y: 43, href: "/soma", system: "motor", healthKey: "soma-connector" },
+  { key: "mate", label: "伙伴", emoji: "🤝", category: "core", x: 65, y: 25, href: "", system: "brain", self: true },
 
   // Hands (Limb/Link)
   { key: "limb", label: "四肢", emoji: "💪", category: "organ", x: 15, y: 44, href: "/limb", system: "motor" },
@@ -138,31 +147,83 @@ const TORSO_OUTLINE = `
   Z
 `;
 
+// ── 器官关系（25 组件三层架构真实关系；出处：knowledge-brain/docs/open-soma-architecture.md
+//    分层架构图 + 关键边界区分表 + 组件职能表，勿编造）────────────────────────
+// dir: oneway = 上下游数据/控制流（箭头指向 to）；twoway = 层内协作/双向关系
+const RELATIONS: Array<{ id: string; from: string; to: string; dir: "oneway" | "twoway" }> = [
+  // 核心 8 主链（分层架构图：Mate ↓ Will ↓ 感知/采集层 ↓ 总线层 ↓ 大脑层）
+  { id: "mate-will", from: "mate", to: "will", dir: "oneway" },
+  { id: "mate-soul", from: "mate", to: "soul", dir: "twoway" },
+  { id: "soma-sense", from: "soma", to: "sense", dir: "oneway" },
+  { id: "sense-nerve", from: "sense", to: "nerve", dir: "oneway" },
+  { id: "nerve-soma", from: "nerve", to: "soma", dir: "oneway" },
+  { id: "nerve-soul", from: "nerve", to: "soul", dir: "oneway" },
+  { id: "vein-soul", from: "vein", to: "soul", dir: "oneway" },
+  { id: "cortex-soul", from: "cortex", to: "soul", dir: "twoway" },
+  { id: "will-soma", from: "will", to: "soma", dir: "oneway" },
+  { id: "link-limb", from: "link", to: "limb", dir: "oneway" },
+  // 应激/时序协同（Pulse=时间驱动循环、Reflex=事件驱动快速应激 ↔ Will 业务流）
+  { id: "pulse-will", from: "pulse", to: "will", dir: "twoway" },
+  { id: "reflex-nerve", from: "reflex", to: "nerve", dir: "twoway" },
+  { id: "reflex-will", from: "reflex", to: "will", dir: "twoway" },
+  // 底座支撑（组件职能表）
+  { id: "gene-will", from: "gene", to: "will", dir: "oneway" },
+  { id: "gland-cortex", from: "gland", to: "cortex", dir: "oneway" },
+  { id: "hippo-soul", from: "hippo", to: "soul", dir: "twoway" },
+  { id: "mirror-will", from: "mirror", to: "will", dir: "oneway" },
+];
+
+// 拖动位置持久化（localStorage；重置按钮恢复解剖默认位）
+const POSITIONS_KEY = "openmate-body-map-positions";
+type PosMap = Record<string, { x: number; y: number }>;
+const DEFAULT_POSITIONS: PosMap = Object.fromEntries(
+  ORGAN_LAYOUT.map((o) => [o.key, { x: o.x, y: o.y }]),
+);
+
 function OrganNode({
   organ,
   status,
+  pos,
+  dim,
+  active,
   onClick,
+  onPointerDown,
+  onHover,
 }: {
   organ: (typeof ORGAN_LAYOUT)[0];
   status: OrganStatus;
+  pos: { x: number; y: number };
+  dim: boolean;
+  active: boolean;
   onClick: () => void;
+  onPointerDown: (e: React.PointerEvent) => void;
+  onHover: (key: string | null) => void;
 }) {
+  const { t } = useTranslation();
   const colors = SYSTEM_COLORS[organ.system] || SYSTEM_COLORS.foundation;
   const isError = status.status === "error";
   const isLoading = status.status === "loading";
   const isOk = status.status === "ok";
+  const label = t(`bodyMap.organs.${organ.key}`, organ.label);
 
   return (
     <g
       onClick={onClick}
+      onPointerDown={onPointerDown}
+      onMouseEnter={() => onHover(organ.key)}
+      onMouseLeave={() => onHover(null)}
       className="cursor-pointer transition-all duration-300"
-      style={{ filter: isOk ? `drop-shadow(0 0 6px ${colors.glow})` : isError ? "drop-shadow(0 0 6px rgba(239,68,68,0.6))" : undefined }}
+      style={{
+        opacity: dim ? 0.22 : 1,
+        filter: isOk ? `drop-shadow(0 0 6px ${colors.glow})` : isError ? "drop-shadow(0 0 6px rgba(239,68,68,0.6))" : undefined,
+        touchAction: "none",
+      }}
     >
       {/* Pulse ring for ok status */}
-      {isOk && (
+      {isOk && !active && (
         <circle
-          cx={organ.x}
-          cy={organ.y}
+          cx={pos.x}
+          cy={pos.y}
           r="4.5"
           fill="none"
           stroke={colors.fill}
@@ -174,10 +235,15 @@ function OrganNode({
         </circle>
       )}
 
+      {/* 悬停/选中高亮环（关联邻居可视） */}
+      {active && (
+        <circle cx={pos.x} cy={pos.y} r="6.2" fill="none" stroke={colors.fill} strokeWidth="0.55" opacity={0.9} />
+      )}
+
       {/* Main circle */}
       <circle
-        cx={organ.x}
-        cy={organ.y}
+        cx={pos.x}
+        cy={pos.y}
         r="4"
         fill={isError ? "#ef4444" : isLoading ? "#6b7280" : colors.fill}
         stroke={isError ? "#dc2626" : colors.stroke}
@@ -187,16 +253,16 @@ function OrganNode({
 
       {/* Status indicator */}
       {isOk && (
-        <circle cx={organ.x + 3} cy={organ.y - 3} r="1.2" fill="#22c55e" stroke="#16a34a" strokeWidth="0.3" />
+        <circle cx={pos.x + 3} cy={pos.y - 3} r="1.2" fill="#22c55e" stroke="#16a34a" strokeWidth="0.3" />
       )}
       {isError && (
-        <circle cx={organ.x + 3} cy={organ.y - 3} r="1.2" fill="#ef4444" stroke="#dc2626" strokeWidth="0.3" />
+        <circle cx={pos.x + 3} cy={pos.y - 3} r="1.2" fill="#ef4444" stroke="#dc2626" strokeWidth="0.3" />
       )}
 
       {/* Emoji */}
       <text
-        x={organ.x}
-        y={organ.y + 1.2}
+        x={pos.x}
+        y={pos.y + 1.2}
         textAnchor="middle"
         fontSize="4"
         className="select-none pointer-events-none"
@@ -206,41 +272,19 @@ function OrganNode({
 
       {/* Label */}
       <text
-        x={organ.x}
-        y={organ.y + 7}
+        x={pos.x}
+        y={pos.y + 7}
         textAnchor="middle"
         fontSize="2.2"
         fill="currentColor"
         fontWeight="500"
         className="select-none pointer-events-none"
       >
-        {organ.label}
+        {label}
       </text>
     </g>
   );
 }
-
-// Connection lines between related organs
-const CONNECTIONS: Array<[string, string]> = [
-  ["soul", "cortex"],
-  ["soul", "hippo"],
-  ["cortex", "mind"],
-  ["soul", "nerve"],
-  ["soul", "will"],
-  ["nerve", "sense"],
-  ["nerve", "vein"],
-  ["vein", "vital"],
-  ["vital", "pulse"],
-  ["gland", "heredity"],
-  ["marrow", "immune"],
-  ["limb", "nerve"],
-  ["link", "will"],
-  ["echo", "voice"],
-  ["sense", "vision"],
-  ["nest", "mirror"],
-  ["gene", "gland"],
-  ["reflex", "cortex"],
-];
 
 export function BodyMapClient() {
   const { t } = useTranslation();
@@ -254,6 +298,75 @@ export function BodyMapClient() {
   const [showDetails, setShowDetails] = useState(false);
   const isMobile = useIsMobile();
   const containerRef = useRef<HTMLDivElement>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
+
+  // ── 拖动重排：位置状态 + localStorage 持久化 + 重置 ──
+  const [positions, setPositions] = useState<PosMap>(DEFAULT_POSITIONS);
+  const dragRef = useRef<{ key: string; moved: boolean } | null>(null);
+  const justDraggedRef = useRef(false);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(POSITIONS_KEY);
+      if (raw) {
+        const saved = JSON.parse(raw) as PosMap;
+        const merged: PosMap = { ...DEFAULT_POSITIONS };
+        for (const [key, pos] of Object.entries(saved)) {
+          if (key in DEFAULT_POSITIONS && pos && typeof pos.x === "number" && typeof pos.y === "number") {
+            merged[key] = pos;
+          }
+        }
+        setPositions(merged);
+      }
+    } catch { /* 缓存损坏时用默认布局 */ }
+  }, []);
+
+  const persistPositions = (pos: PosMap) => {
+    try { localStorage.setItem(POSITIONS_KEY, JSON.stringify(pos)); } catch { /* 存储异常不阻断拖动 */ }
+  };
+
+  const resetPositions = () => {
+    setPositions(DEFAULT_POSITIONS);
+    try { localStorage.removeItem(POSITIONS_KEY); } catch { /* 忽略 */ }
+  };
+
+  const svgCoords = (clientX: number, clientY: number) => {
+    const svg = svgRef.current;
+    if (!svg) return null;
+    const rect = svg.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return null;
+    return {
+      x: Math.min(97, Math.max(3, ((clientX - rect.left) / rect.width) * 100)),
+      y: Math.min(97, Math.max(3, ((clientY - rect.top) / rect.height) * 100)),
+    };
+  };
+
+  const handleOrganPointerDown = (e: React.PointerEvent, key: string) => {
+    e.preventDefault();
+    dragRef.current = { key, moved: false };
+    try {
+      (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+    } catch { /* 合成/异常指针无捕获对象：不影响拖动（move 事件照常冒泡到 svg） */ }
+  };
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (!dragRef.current) return;
+    const p = svgCoords(e.clientX, e.clientY);
+    if (!p) return;
+    dragRef.current.moved = true;
+    justDraggedRef.current = true;
+    const key = dragRef.current.key;
+    setPositions((prev) => ({ ...prev, [key]: p }));
+  };
+
+  const handlePointerUp = () => {
+    if (dragRef.current?.moved) {
+      setPositions((prev) => { persistPositions(prev); return prev; });
+    }
+    dragRef.current = null;
+    // 拖动结束短窗口屏蔽 click（防止松手误触详情）
+    setTimeout(() => { justDraggedRef.current = false; }, 300);
+  };
 
   const checkAllOrgans = useCallback(async () => {
     // Set all to loading
@@ -270,9 +383,10 @@ export function BodyMapClient() {
         const organs = data.organs || {};
         const updated: Record<string, OrganStatus> = {};
         ORGAN_LAYOUT.forEach((o) => {
+          const hk = o.healthKey ?? o.key;
           updated[o.key] = {
             ...o,
-            status: organs[o.key] === "ok" ? "ok" : "error",
+            status: o.self ? "ok" : organs[hk] === "ok" ? "ok" : "error",
           };
         });
         setOrganStatuses(updated);
@@ -280,7 +394,7 @@ export function BodyMapClient() {
     } catch {
       const fallback: Record<string, OrganStatus> = {};
       ORGAN_LAYOUT.forEach((o) => {
-        fallback[o.key] = { ...o, status: "error" };
+        fallback[o.key] = { ...o, status: o.self ? "ok" : "error" };
       });
       setOrganStatuses(fallback);
     }
@@ -315,6 +429,24 @@ export function BodyMapClient() {
 
   const selectedOrganData = selectedOrgan ? ORGAN_LAYOUT.find((o) => o.key === selectedOrgan) : null;
   const selectedStatus = selectedOrgan ? organStatuses[selectedOrgan] : null;
+
+  // 悬停高亮：active 器官的关联邻居 + 关系连线（其余淡化）
+  const activeKey = hoveredOrgan ?? selectedOrgan;
+  const neighborKeys = new Set<string>();
+  if (activeKey) {
+    for (const rel of RELATIONS) {
+      if (rel.from === activeKey) neighborKeys.add(rel.to);
+      if (rel.to === activeKey) neighborKeys.add(rel.from);
+    }
+  }
+
+  const organLabel = (key: string) => {
+    const o = ORGAN_LAYOUT.find((x) => x.key === key);
+    return o ? t(`bodyMap.organs.${o.key}`, o.label) : key;
+  };
+
+  const organRelations = (key: string) =>
+    RELATIONS.filter((r) => r.from === key || r.to === key);
 
   return (
       <PageLayout title="身体地图">
@@ -358,6 +490,13 @@ export function BodyMapClient() {
             <RefreshCw size={12} /> {t("bodyMap.refresh", "Refresh")}
           </button>
           <button
+            onClick={resetPositions}
+            title={t("bodyMap.resetLayout", "重置布局")}
+            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-muted transition-colors"
+          >
+            <RotateCcw size={12} /> {t("bodyMap.resetLayout", "重置布局")}
+          </button>
+          <button
             onClick={toggleFullscreen}
             className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-muted transition-colors"
           >
@@ -376,9 +515,13 @@ export function BodyMapClient() {
         {/* SVG Body Map */}
         <div className="body-map-content flex-1 flex items-center justify-center p-3 lg:p-6">
           <svg
+            ref={svgRef}
             viewBox="0 0 100 100"
             className="w-full max-w-2xl h-auto"
-            style={{ maxHeight: "100%" }}
+            style={{ maxHeight: "100%", touchAction: "none" }}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerLeave={handlePointerUp}
           >
             {/* Background grid */}
             <defs>
@@ -389,6 +532,12 @@ export function BodyMapClient() {
                 <stop offset="0%" stopColor="rgba(139,92,246,0.08)" />
                 <stop offset="100%" stopColor="transparent" />
               </radialGradient>
+              <marker id="organ-arrow" viewBox="0 0 6 6" markerWidth={4} markerHeight={4} refX={5.5} refY={3} orient="auto">
+                <path d="M 0 0.5 L 6 3 L 0 5.5 z" fill="currentColor" opacity={0.55} />
+              </marker>
+              <marker id="organ-arrow-back" viewBox="0 0 6 6" markerWidth={4} markerHeight={4} refX={0.5} refY={3} orient="auto">
+                <path d="M 6 0.5 L 0 3 L 6 5.5 z" fill="currentColor" opacity={0.55} />
+              </marker>
             </defs>
 
             <rect width="100" height="100" fill="url(#grid)" />
@@ -416,23 +565,26 @@ export function BodyMapClient() {
             {/* Right leg */}
             <path d="M 60 72 L 62 82 L 63 92 L 64 97" fill="none" stroke="currentColor" strokeWidth="0.2" opacity="0.1" />
 
-            {/* Connection lines between organs */}
-            {CONNECTIONS.map(([from, to], i) => {
-              const a = ORGAN_LAYOUT.find((o) => o.key === from);
-              const b = ORGAN_LAYOUT.find((o) => o.key === to);
+            {/* 关系连线（组件真实关系；拖动跟随；悬停高亮关联、其余淡化） */}
+            {RELATIONS.map((rel) => {
+              const a = positions[rel.from];
+              const b = positions[rel.to];
               if (!a || !b) return null;
-              const bothOk = organStatuses[from]?.status === "ok" && organStatuses[to]?.status === "ok";
+              const touched = activeKey === rel.from || activeKey === rel.to;
+              const dimmed = !!activeKey && !touched;
               return (
                 <line
-                  key={i}
+                  key={rel.id}
                   x1={a.x}
                   y1={a.y}
                   x2={b.x}
                   y2={b.y}
                   stroke="currentColor"
-                  strokeWidth="0.15"
-                  opacity={bothOk ? 0.2 : 0.08}
-                  strokeDasharray={bothOk ? undefined : "1 1"}
+                  strokeWidth={touched ? 0.45 : 0.15}
+                  opacity={touched ? 0.9 : dimmed ? 0.05 : 0.18}
+                  strokeDasharray={rel.dir === "twoway" ? "2 1" : undefined}
+                  markerEnd="url(#organ-arrow)"
+                  markerStart={rel.dir === "twoway" ? "url(#organ-arrow-back)" : undefined}
                 />
               );
             })}
@@ -443,10 +595,23 @@ export function BodyMapClient() {
                 key={organ.key}
                 organ={organ}
                 status={organStatuses[organ.key] || { ...organ, status: "loading" }}
-                onClick={() => setSelectedOrgan(organ.key === selectedOrgan ? null : organ.key)}
+                pos={positions[organ.key] || { x: organ.x, y: organ.y }}
+                dim={!!activeKey && activeKey !== organ.key && !neighborKeys.has(organ.key)}
+                active={activeKey === organ.key}
+                onClick={() => {
+                  if (justDraggedRef.current) return;
+                  setSelectedOrgan(organ.key === selectedOrgan ? null : organ.key);
+                }}
+                onPointerDown={(e) => handleOrganPointerDown(e, organ.key)}
+                onHover={setHoveredOrgan}
               />
             ))}
           </svg>
+        </div>
+
+        {/* 拖动提示 */}
+        <div className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 text-[10px] text-muted-foreground/70 bg-background/60 rounded-full px-3 py-1">
+          {t("bodyMap.dragHint", "拖动器官可重排布局（自动记住）；悬停看关联邻居，点击看关系说明")}
         </div>
 
         {/* Side panel: sidebar-style sliding on mobile, inline on desktop */}
@@ -460,164 +625,46 @@ export function BodyMapClient() {
               style={{ right: 0 }}
             >
               <div className="p-4 space-y-4">
-                {/* System legend */}
-                <div>
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">{t("bodyMap.systemsTitle", "Systems")}</h3>
-            <div className="space-y-1.5">
-              {Object.entries(SYSTEM_COLORS).map(([system, colors]) => (
-                <div key={system} className="flex items-center gap-2">
-                  <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: colors.fill }} />
-                  <span className="text-xs capitalize">{system}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Selected organ detail */}
-          {selectedOrganData && selectedStatus && (
-            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 space-y-3">
-              <div className="flex items-center gap-2">
-                <span className="text-2xl">{selectedOrganData.emoji}</span>
-                <div>
-                  <h3 className="font-semibold text-sm">{selectedOrganData.label}</h3>
-                  <p className="text-xs text-muted-foreground capitalize">{selectedOrganData.system} system</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                {selectedStatus.status === "ok" ? (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-500">
-                    <CheckCircle size={10} /> {t("bodyMap.healthy", "Healthy")}
-                  </span>
-                ) : selectedStatus.status === "error" ? (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-2 py-0.5 text-[10px] font-medium text-red-500">
-                    <XCircle size={10} /> {t("bodyMap.errors", "Error")}
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-                    <Loader2 size={10} className="animate-spin" /> {t("bodyMap.loading", "Checking...")}
-                  </span>
-                )}
-              </div>
-              <Link
-                href={selectedOrganData.href}
-                className="block w-full rounded-lg bg-primary px-3 py-2 text-center text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-              >
-                {t("bodyMap.open", "Open")} {selectedOrganData.label} →
-              </Link>
-            </div>
-          )}
-
-          {/* Organ list */}
-          <div>
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-              {t("bodyMap.allOrgans", "All Organs")} ({okCount}/{totalCount})
-            </h3>
-            <div className="space-y-1">
-              {ORGAN_LAYOUT.map((organ) => {
-                const status = organStatuses[organ.key];
-                return (
-                  <Link
-                    key={organ.key}
-                    href={organ.href}
-                    className={cn(
-                      "flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs transition-colors hover:bg-muted",
-                      selectedOrgan === organ.key && "bg-[rgba(124,58,237,0.12)] text-[#7c3aed]"
-                    )}
-                    onMouseEnter={() => setHoveredOrgan(organ.key)}
-                    onMouseLeave={() => setHoveredOrgan(null)}
-                  >
-                    <span>{organ.emoji}</span>
-                    <span className="flex-1 truncate">{organ.label}</span>
-                    {status?.status === "ok" && <CheckCircle size={12} className="text-emerald-500" />}
-                    {status?.status === "error" && <XCircle size={12} className="text-red-500" />}
-                    {status?.status === "loading" && <Loader2 size={12} className="animate-spin text-muted-foreground" />}
-                  </Link>
-                );
-              })}
-            </div>
-          </div>
+                <OrganDetailsBlock
+                  selectedOrganData={selectedOrganData}
+                  selectedStatus={selectedStatus}
+                  organLabel={organLabel}
+                  organRelations={organRelations}
+                  t={t}
+                />
+                <OrganListBlock
+                  statuses={organStatuses}
+                  selected={selectedOrgan}
+                  onSelect={setSelectedOrgan}
+                  onHover={setHoveredOrgan}
+                  organLabel={organLabel}
+                  okCount={okCount}
+                  totalCount={totalCount}
+                  t={t}
+                />
               </div>
             </div>
           )
         ) : (
           showDetails && (
             <div className="w-72 shrink-0 border-l border-border overflow-y-auto p-3 lg:p-4 space-y-4">
-              {/* System legend */}
-              <div>
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">{t("bodyMap.systemsTitle", "Systems")}</h3>
-                <div className="space-y-1.5">
-                  {Object.entries(SYSTEM_COLORS).map(([system, colors]) => (
-                    <div key={system} className="flex items-center gap-2">
-                      <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: colors.fill }} />
-                      <span className="text-xs capitalize">{system}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Selected organ detail */}
-              {selectedOrganData && selectedStatus && (
-                <div className="rounded-xl border border-border bg-card p-3 lg:p-4 space-y-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">{selectedOrganData.emoji}</span>
-                    <div>
-                      <h3 className="font-semibold text-sm">{selectedOrganData.label}</h3>
-                      <p className="text-xs text-muted-foreground capitalize">{selectedOrganData.system} system</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {selectedStatus.status === "ok" ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-500">
-                        <CheckCircle size={10} /> {t("bodyMap.healthy", "Healthy")}
-                      </span>
-                    ) : selectedStatus.status === "error" ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-2 py-0.5 text-[10px] font-medium text-red-500">
-                        <XCircle size={10} /> {t("bodyMap.errors", "Error")}
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-                        <Loader2 size={10} className="animate-spin" /> {t("bodyMap.loading", "Checking...")}
-                      </span>
-                    )}
-                  </div>
-                  <Link
-                    href={selectedOrganData.href}
-                    className="block w-full rounded-lg bg-primary px-3 py-2 text-center text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-                  >
-                    {t("bodyMap.open", "Open")} {selectedOrganData.label} →
-                  </Link>
-                </div>
-              )}
-
-              {/* Organ list */}
-              <div>
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-                  {t("bodyMap.allOrgans", "All Organs")} ({okCount}/{totalCount})
-                </h3>
-                <div className="space-y-1">
-                  {ORGAN_LAYOUT.map((organ) => {
-                    const status = organStatuses[organ.key];
-                    return (
-                      <Link
-                        key={organ.key}
-                        href={organ.href}
-                        className={cn(
-                          "flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs transition-colors hover:bg-muted",
-                          selectedOrgan === organ.key && "bg-[rgba(124,58,237,0.12)] text-[#7c3aed]"
-                        )}
-                        onMouseEnter={() => setHoveredOrgan(organ.key)}
-                        onMouseLeave={() => setHoveredOrgan(null)}
-                      >
-                        <span>{organ.emoji}</span>
-                        <span className="flex-1 truncate">{organ.label}</span>
-                        {status?.status === "ok" && <CheckCircle size={12} className="text-emerald-500" />}
-                        {status?.status === "error" && <XCircle size={12} className="text-red-500" />}
-                        {status?.status === "loading" && <Loader2 size={12} className="animate-spin text-muted-foreground" />}
-                      </Link>
-                    );
-                  })}
-                </div>
-              </div>
+              <OrganDetailsBlock
+                selectedOrganData={selectedOrganData}
+                selectedStatus={selectedStatus}
+                organLabel={organLabel}
+                organRelations={organRelations}
+                t={t}
+              />
+              <OrganListBlock
+                statuses={organStatuses}
+                selected={selectedOrgan}
+                onSelect={setSelectedOrgan}
+                onHover={setHoveredOrgan}
+                organLabel={organLabel}
+                okCount={okCount}
+                totalCount={totalCount}
+                t={t}
+              />
             </div>
           )
         )}
@@ -626,4 +673,156 @@ export function BodyMapClient() {
   
       </PageLayout>
     );
+}
+
+// ── 详情块：器官状态 + 关系说明（点击器官查看）+ Mate 产品自述 ──
+function OrganDetailsBlock({
+  selectedOrganData,
+  selectedStatus,
+  organLabel,
+  organRelations,
+  t,
+}: {
+  selectedOrganData: (typeof ORGAN_LAYOUT)[0] | null | undefined;
+  selectedStatus: OrganStatus | null;
+  organLabel: (key: string) => string;
+  organRelations: (key: string) => typeof RELATIONS;
+  t: TFunction;
+}) {
+  return (
+    <>
+      {/* System legend */}
+      <div>
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">{t("bodyMap.systemsTitle", "Systems")}</h3>
+        <div className="space-y-1.5">
+          {Object.entries(SYSTEM_COLORS).map(([system, colors]) => (
+            <div key={system} className="flex items-center gap-2">
+              <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: colors.fill }} />
+              <span className="text-xs capitalize">{system}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Selected organ detail */}
+      {selectedOrganData && selectedStatus && (
+        <div className="rounded-xl border border-border bg-card p-3 lg:p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <span className="text-2xl">{selectedOrganData.emoji}</span>
+            <div>
+              <h3 className="font-semibold text-sm">{organLabel(selectedOrganData.key)}</h3>
+              <p className="text-xs text-muted-foreground capitalize">{selectedOrganData.system} system</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {selectedStatus.status === "ok" ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-500">
+                <CheckCircle size={10} /> {t("bodyMap.healthy", "Healthy")}
+              </span>
+            ) : selectedStatus.status === "error" ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-2 py-0.5 text-[10px] font-medium text-red-500">
+                <XCircle size={10} /> {t("bodyMap.errors", "Error")}
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                <Loader2 size={10} className="animate-spin" /> {t("bodyMap.loading", "Checking...")}
+              </span>
+            )}
+          </div>
+
+          {/* 关系说明（点击器官查看：上下游数据流/层内协作） */}
+          <div>
+            <h4 className="text-xs font-semibold text-muted-foreground mb-1.5">{t("bodyMap.relations", "关联")}</h4>
+            {organRelations(selectedOrganData.key).length === 0 ? (
+              <p className="text-[11px] text-muted-foreground">{t("bodyMap.noRelations", "无既定关联记载")}</p>
+            ) : (
+              <div className="space-y-1.5">
+                {organRelations(selectedOrganData.key).map((rel) => {
+                  const other = rel.from === selectedOrganData.key ? rel.to : rel.from;
+                  const outgoing = rel.from === selectedOrganData.key;
+                  return (
+                    <div key={rel.id} className="rounded-lg bg-muted/50 px-2.5 py-1.5 text-[11px] leading-relaxed">
+                      <span className="font-medium">
+                        {rel.dir === "twoway" ? "↔" : outgoing ? "→" : "←"} {organLabel(other)}
+                      </span>
+                      <p className="text-muted-foreground">{t(`bodyMap.rel.${rel.id}.note`, rel.id)}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Mate=产品自述（无器官功能页）；其余器官 → 打开对应页 */}
+          {selectedOrganData.self ? (
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              {t("bodyMap.mateAbout", "Mate = OpenMate 本体——三进程之一（Soul/Soma/Mate）的客户端进程，即你正在使用的这个统一客户端/共生伙伴入口。不设独立器官功能页（产品自述）。")}
+            </p>
+          ) : (
+            <Link
+              href={selectedOrganData.href}
+              className="block w-full rounded-lg bg-primary px-3 py-2 text-center text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+            >
+              {t("bodyMap.open", "Open")} {organLabel(selectedOrganData.key)} →
+            </Link>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
+// ── 器官清单（点击选中看关系，hover 高亮图上邻居）──
+function OrganListBlock({
+  statuses,
+  selected,
+  onSelect,
+  onHover,
+  organLabel,
+  okCount,
+  totalCount,
+  t,
+}: {
+  statuses: Record<string, OrganStatus>;
+  selected: string | null;
+  onSelect: (key: string | null) => void;
+  onHover: (key: string | null) => void;
+  organLabel: (key: string) => string;
+  okCount: number;
+  totalCount: number;
+  t: TFunction;
+}) {
+  return (
+    <div>
+      <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+        {t("bodyMap.allOrgans", "All Organs")} ({okCount}/{totalCount})
+      </h3>
+      <div className="space-y-1">
+        {ORGAN_LAYOUT.map((organ) => {
+          const status = statuses[organ.key];
+          const row = (
+            <div
+              className={cn(
+                "flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs transition-colors hover:bg-muted cursor-pointer",
+                selected === organ.key && "bg-[rgba(124,58,237,0.12)] text-[#7c3aed]"
+              )}
+              onMouseEnter={() => onHover(organ.key)}
+              onMouseLeave={() => onHover(null)}
+            >
+              <span>{organ.emoji}</span>
+              <span className="flex-1 truncate">{organLabel(organ.key)}</span>
+              {status?.status === "ok" && <CheckCircle size={12} className="text-emerald-500" />}
+              {status?.status === "error" && <XCircle size={12} className="text-red-500" />}
+              {status?.status === "loading" && <Loader2 size={12} className="animate-spin text-muted-foreground" />}
+            </div>
+          );
+          return organ.href ? (
+            <Link key={organ.key} href={organ.href} onClick={() => onSelect(organ.key)}>{row}</Link>
+          ) : (
+            <div key={organ.key} onClick={() => onSelect(selected === organ.key ? null : organ.key)}>{row}</div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }

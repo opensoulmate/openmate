@@ -3475,7 +3475,42 @@
     "nodeId": "Node ID",
     "nodeLabel": "Node Label",
     "duration": "Duration",
-    "noOutput": "No output data"
+    "noOutput": "No output data",
+    "tabFlows": "Flow Definitions",
+    "tabRuns": "Run Instances",
+    "refresh": "Refresh",
+    "totalFlows": "Definitions",
+    "totalRuns": "Runs",
+    "waiting": "Awaiting Approval",
+    "loading": "Loading…",
+    "flowsError": "Flow engine unreachable (acp-proxy :8092 /flows)",
+    "emptyFlows": "No flow definitions — plugins with flows: register automatically",
+    "emptyRuns": "No run instances — trigger one from Flow Definitions",
+    "manualRun": "Run Now",
+    "runStarted": "Triggered {{id}}",
+    "runFailed": "Trigger failed: {{msg}}",
+    "replayBadge": "Replay",
+    "approved": "Approved, flow resumed",
+    "rejected": "Rejected",
+    "replayStarted": "Replay started {{id}}",
+    "when": "when",
+    "ntTool": "Tool",
+    "ntDecision": "Decision",
+    "ntLoop": "Loop",
+    "ntApproval": "Approval",
+    "ntAction": "Action",
+    "ntAgent": "Agent",
+    "ntHuman": "Human",
+    "ntParallel": "Parallel",
+    "branchTaken": "Decision Branches",
+    "nodeStatus": "Node Status",
+    "eventLog": "Event Log",
+    "close": "Close",
+    "note": "Approval note (optional)",
+    "approve": "Approve",
+    "reject": "Reject",
+    "replay": "Replay",
+    "decidedBy": "Approved by"
   },
   "trajectory": {
     "title": "Trajectory",
@@ -3994,7 +4029,97 @@
     "auto": "Auto",
     "open": "Open",
     "allOrgans": "All Organs",
-    "systemsTitle": "Systems"
+    "systemsTitle": "Systems",
+    "organs": {
+      "soul": "Soul",
+      "cortex": "Cortex",
+      "hippo": "Hippo",
+      "mind": "Mind",
+      "reflex": "Reflex",
+      "sense": "Sense",
+      "vision": "Vision",
+      "capture": "Capture",
+      "voice": "Voice",
+      "echo": "Echo",
+      "vital": "Vital",
+      "pulse": "Pulse",
+      "immune": "Immune",
+      "nerve": "Nerve",
+      "will": "Will",
+      "gland": "Gland",
+      "heredity": "Heredity",
+      "vein": "Vein",
+      "soma": "Soma",
+      "mate": "Mate",
+      "limb": "Limb",
+      "link": "Link",
+      "marrow": "Marrow",
+      "gene": "Gene",
+      "nest": "Nest",
+      "mirror": "Mirror",
+      "trajectory": "Trajectory",
+      "mcp": "MCP",
+      "learn": "Learn",
+      "diagnostics": "Diagnostics"
+    },
+    "rel": {
+      "mate-will": {
+        "note": "Mate issues business flows: user intent is orchestrated by Will"
+      },
+      "mate-soul": {
+        "note": "Mate connects directly to Soul: search/Q&A ↔ knowledge & memory (core rule)"
+      },
+      "soma-sense": {
+        "note": "Soma read-only collection → Sense multimodal parsing (seeing/hearing in)"
+      },
+      "sense-nerve": {
+        "note": "Perception results → Nerve event bus distribution"
+      },
+      "nerve-soma": {
+        "note": "Nerve → Soma distributed node message dispatch (collection scheduling downstream)"
+      },
+      "nerve-soul": {
+        "note": "Events/trajectory → Soul storage (trajectory_events)"
+      },
+      "vein-soul": {
+        "note": "Vein file/resource flow → Soul knowledge storage"
+      },
+      "cortex-soul": {
+        "note": "Cortex advanced reasoning ↔ Soul memory core (RAG/graph supply, results flow back)"
+      },
+      "will-soma": {
+        "note": "Will workflow orchestration → Soma collection scheduling"
+      },
+      "link-limb": {
+        "note": "Link bidirectional integration → Limb RPA write execution"
+      },
+      "pulse-will": {
+        "note": "Pulse time-driven loop ↔ Will scheduled flows (heartbeat/tick triggers)"
+      },
+      "reflex-nerve": {
+        "note": "Nerve signal transmission ↔ Reflex rapid response"
+      },
+      "reflex-will": {
+        "note": "Reflex rapid response/circuit breaking ↔ Will flow coordination"
+      },
+      "gene-will": {
+        "note": "Gene workflow templates → Will one-click configuration"
+      },
+      "gland-cortex": {
+        "note": "Gland unified model routing → Cortex reasoning supply"
+      },
+      "hippo-soul": {
+        "note": "Soul permanent storage ↔ Hippo memory lifecycle (archive/decay/expire)"
+      },
+      "mirror-will": {
+        "note": "Mirror sandbox → Will workflow/connector debug trials"
+      }
+    },
+    "dragHint": "Drag organs to rearrange (layout is remembered); hover to highlight relations, click for details",
+    "resetLayout": "Reset Layout",
+    "relations": "Relations",
+    "noRelations": "No documented relations",
+    "mateAbout": "Mate = OpenMate itself — the client process of the three processes (Soul/Soma/Mate): the unified client / symbiotic partner entry you are using now. No separate organ page (product self-description)."
   },
   "topology": {
     "title": "System Topology",
