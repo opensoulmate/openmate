@@ -6,8 +6,6 @@ import {
   ReactFlow,
   Background,
   Controls,
-  MiniMap,
-  addEdge,
   useNodesState,
   useEdgesState,
   type Connection,
@@ -21,8 +19,11 @@ import "@xyflow/react/dist/style.css";
 import { useWorkflowStore, type WorkflowNodeData } from "@/stores/workflow-store";
 import { useAppStore } from "@/stores/app-store";
 import { getApiBaseUrl, getToken } from "@/lib/api-client";
+import { friendlyAuthMessage } from "@/lib/auth-errors";
 import { PageLayout } from "@/components/page-layout";
 import { nodeTypes } from "./components/workflow-nodes";
+import { edgeTypes, prepareEdges, buildEdge } from "./components/workflow-edges";
+import { WorkflowMiniMap } from "./components/workflow-minimap";
 import { NodePalette } from "./components/node-palette";
 import { NodeConfigPanel } from "./components/node-config-panel";
 import { WorkflowToolbar } from "./components/workflow-toolbar";
@@ -186,7 +187,7 @@ export function WorkflowClient() {
         fetchWorkflows();
       } else {
         const data = await res.json();
-        showToast(data.detail || (t("workflow.executeFailed") || "Execution failed"), "error");
+        showToast(friendlyAuthMessage(data.detail, t("workflow.executeFailed") || "Execution failed"), "error");
       }
     } catch {
       showToast(t("workflow.networkError") || "Network error", "error");
@@ -256,7 +257,7 @@ export function WorkflowClient() {
         fetchWorkflows();
       } else {
         const data = await res.json();
-        showToast(data.detail || (t("workflow.createFailed") || "Create failed"), "error");
+        showToast(friendlyAuthMessage(data.detail, t("workflow.createFailed") || "Create failed"), "error");
       }
     } catch {
       showToast(t("workflow.networkError") || "Network error", "error");
@@ -310,11 +311,19 @@ export function WorkflowClient() {
 
   const onConnect = useCallback(
     (params: Connection) => {
-      const newEdges = addEdge({ ...params, animated: true }, edges);
+      const sourceNode = nodes.find((n) => n.id === params.source);
+      const newEdge = buildEdge({
+        source: params.source,
+        target: params.target,
+        sourceHandle: params.sourceHandle,
+        targetHandle: params.targetHandle,
+        sourceType: sourceNode?.type,
+      });
+      const newEdges = [...edges, newEdge];
       setEdges(newEdges);
       setStoreEdges(newEdges);
     },
-    [edges, setEdges, setStoreEdges],
+    [edges, nodes, setEdges, setStoreEdges],
   );
 
   const onNodeClick = useCallback(
@@ -662,10 +671,7 @@ export function WorkflowClient() {
                   debugActive: n.id === debugNodeId,
                 },
               }))}
-              edges={edges.map((e) => ({
-                ...e,
-                style: { strokeWidth: 1.5, stroke: "hsl(var(--border))" },
-              }))}
+              edges={prepareEdges(edges, debugNodeId)}
               onNodesChange={handleNodesChange}
               onEdgesChange={handleEdgesChange}
               onConnect={onConnect}
@@ -675,25 +681,20 @@ export function WorkflowClient() {
               onDrop={onDrop}
               onDragOver={onDragOver}
               nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
               fitView
               snapToGrid
               snapGrid={[16, 16]}
-              defaultEdgeOptions={{ animated: true }}
+              defaultEdgeOptions={{ type: "flowEdge" }}
               proOptions={{ hideAttribution: true }}
               className="bg-background"
             >
-              <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="hsl(var(--border))" />
+              <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="var(--color-border)" />
               <Controls
                 position="bottom-left"
-                className="!rounded-lg !border !border-border !bg-card !shadow-sm"
+                className="!rounded-[10px] !border-0 !bg-card/85 !shadow-[0_4px_16px_rgba(0,0,0,0.18)] backdrop-blur-sm"
               />
-              <MiniMap
-                position="bottom-right"
-                nodeStrokeWidth={2}
-                zoomable
-                pannable
-                className="!rounded-lg !border !border-border !bg-card"
-              />
+              <WorkflowMiniMap />
             </ReactFlow>
 
             {/* Empty state */}

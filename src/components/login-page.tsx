@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { LogIn, UserPlus, Loader2, Settings, ChevronDown, Check, Wifi, Eye, EyeOff } from 'lucide-react';
 import { setApiBaseUrl, getApiBaseUrl, setUserId, setToken, setUserName } from '@/lib/api-client';
+import { consumeLoginNext } from '@/lib/auth-errors';
 import { useTranslation } from 'react-i18next';
 import { SuperEllipse } from '@/components/ui/super-ellipse';
 
@@ -85,7 +86,8 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
         else throw new Error(t('login.loginFailed'));
       }
       // 强制页面刷新，确保所有 WebSocket 连接用新 token 重建
-      window.location.href = '/chat';
+      // 登录成功回跳原路径（401 过期接管时已存；无则落 /chat，与既有语义一致）
+      window.location.href = consumeLoginNext();
     } catch (e) {
       const msg = (e as Error).message;
       if (mode === 'login' && msg.includes('401')) setError(t('login.invalidCredentials'));
@@ -105,7 +107,7 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
       await a.verifyEmail(username, verifyCode.trim());
       const res = await a.login(username, password);
       if (res.user_id) { setUserId(res.user_id); setToken(res.access_token); setUserName(res.username || username); }
-      window.location.href = '/chat';
+      window.location.href = consumeLoginNext();
     } catch {
       setError(t('login.codeInvalid', '验证码错误或已过期'));
     }

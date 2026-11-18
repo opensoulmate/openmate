@@ -113,22 +113,28 @@ def _load_agent_binding(user_id: str) -> dict | None:
         return None
 
 
-def decode_token(token: str) -> str | None:
+def decode_token_ex(token: str) -> tuple[str | None, str | None]:
+    """解码 token → (user_id, 失败码)。失败码 AUTH_TOKEN_EXPIRED/AUTH_TOKEN_INVALID
+    供错误归一回包（友好文案+结构化 code），JWT 报错原文只留服务端日志，禁甩给用户。"""
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         uid = payload.get("sub") or payload.get("user_id")
         if uid:
             try:
-                return str(UUID(uid))
+                return str(UUID(uid)), None
             except ValueError:
-                return uid
-        return None
+                return uid, None
+        return None, "AUTH_TOKEN_INVALID"
     except jwt.ExpiredSignatureError:
         logger.warning("[ACP] Token expired")
-        return None
-    except jwt.InvalidTokenError:
-        logger.warning("[ACP] Invalid token")
-        return None
+        return None, "AUTH_TOKEN_EXPIRED"
+    except jwt.InvalidTokenError as e:
+        logger.warning(f"[ACP] Invalid token: {e}")
+        return None, "AUTH_TOKEN_INVALID"
+
+
+def decode_token(token: str) -> str | None:
+    return decode_token_ex(token)[0]
 
 
 async def _send_acp(ws: WebSocket, data: dict):
@@ -186,13 +192,19 @@ async def ws_acp_endpoint(client_ws: WebSocket):
 
     token = client_ws.query_params.get("token", "")
     if not token:
-        await _send_acp(client_ws, {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "Missing token"}})
+        # 错误归一：友好文案 + 结构化 code，禁甩鉴权库原文
+        await _send_acp(client_ws, {"jsonrpc": "2.0", "id": None, "error": {
+            "code": -32600, "message": "缺少认证令牌，请先登录",
+            "data": {"code": "AUTH_TOKEN_MISSING"}}})
         await client_ws.close()
         return
 
-    user_id = decode_token(token)
+    user_id, fail_code = decode_token_ex(token)
     if not user_id:
-        await _send_acp(client_ws, {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "Invalid token"}})
+        await _send_acp(client_ws, {"jsonrpc": "2.0", "id": None, "error": {
+            "code": -32600,
+            "message": "登录已过期，请重新登录" if fail_code == "AUTH_TOKEN_EXPIRED" else "登录状态无效，请重新登录",
+            "data": {"code": fail_code or "AUTH_TOKEN_INVALID"}}})
         await client_ws.close()
         return
 
