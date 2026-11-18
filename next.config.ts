@@ -17,12 +17,14 @@ const nextConfig: NextConfig = {
       },
     ];
   },
-  // 菜单/路由收敛（menu-audit.md P0）：死链修复 + 5 大 hub 吸收重复路由 + 无用器官删除，
-  // 全程 301 重定向（归位不砍杀：旧地址仍可达，导航收敛后无断链）。
+  // 菜单收敛已整体回滚（用户令：恢复收敛前原样菜单与全部入口，宁可乱但全）。
+  // 原 5 大 hub 吸收的 30 条 301 已撤——旧路由/旧组件已全部恢复为活页。
+  // 仅保留 7 条死链修复（原为实测 404，功能归宿不变：伙伴→对话等）。
+  // /will 已补建真页面（flow_engine 观察窗，核心件回归，见 menu-audit 附录 C 改判），
+  // /mate 不建页面（Mate=OpenMate 进程本体非器官页），301 保留指向对话主入口。
   async redirects() {
     return [
-      // ── P0-① 8 条死链 → 正确归宿 ─────────────────────────────
-      { source: "/will", destination: "/workflow", permanent: true },
+      // ── 7 条死链 → 正确归宿（原 404，点击可达真实功能页）────────────
       { source: "/mate", destination: "/chat", permanent: true },
       { source: "/groups", destination: "/ai-groups", permanent: true },
       { source: "/team", destination: "/ai-groups", permanent: true },
@@ -30,43 +32,6 @@ const nextConfig: NextConfig = {
       { source: "/diagnostics", destination: "/system", permanent: true },
       { source: "/benchmark", destination: "/system", permanent: true },
       { source: "/activity", destination: "/system", permanent: true },
-      // ── P0-③ 5 大 hub 吸收 30 重复路由（301）────────────────────
-      // 系统观测 → /system（概览/监控/拓扑/注册表/指标/架构）
-      { source: "/monitoring", destination: "/system", permanent: true },
-      { source: "/metrics", destination: "/system", permanent: true },
-      { source: "/topology", destination: "/system", permanent: true },
-      { source: "/registry", destination: "/system", permanent: true },
-      { source: "/intelligence", destination: "/system", permanent: true },
-      { source: "/ai-engine", destination: "/system", permanent: true },
-      { source: "/vital", destination: "/system", permanent: true },
-      { source: "/dashboard", destination: "/system", permanent: true },
-      // 管理 → /admin（系统管理/权限/企业/Soma/Soul）
-      { source: "/permission", destination: "/admin", permanent: true },
-      { source: "/enterprise", destination: "/admin", permanent: true },
-      { source: "/soma-admin", destination: "/admin", permanent: true },
-      { source: "/soul", destination: "/admin", permanent: true },
-      // 演进 → /evolution（目标/配置/概览/自愈/版本/轨迹/时间线）
-      { source: "/healer", destination: "/evolution", permanent: true },
-      { source: "/heredity", destination: "/evolution", permanent: true },
-      { source: "/changelog", destination: "/evolution", permanent: true },
-      { source: "/trajectory", destination: "/evolution", permanent: true },
-      { source: "/timeline", destination: "/evolution", permanent: true },
-      // 流程 → /workflow（流程/定时/流水线/运行观测）
-      { source: "/cron/:path*", destination: "/workflow", permanent: true },
-      { source: "/pipeline", destination: "/workflow", permanent: true },
-      // 知识文档 → /knowledge + /docs
-      { source: "/tags", destination: "/knowledge", permanent: true },
-      { source: "/knowledge-requests", destination: "/knowledge", permanent: true },
-      { source: "/dev-specs", destination: "/docs", permanent: true },
-      { source: "/devlog", destination: "/docs", permanent: true },
-      // 市场合一 → 能力市场（/skills）
-      { source: "/marketplace", destination: "/skills", permanent: true },
-      // ── 器官处置（用户两轮反例改判）───────────────────────────
-      // nest（企业/多租户）、reflex（事件驱动快速应激层）、pulse（时间驱动后台自主循环）
-      // 均为**战略核心/战略能力**，改判「留」：路由已恢复为活页（子系统观察面板），不再 301。
-      // reflex=被动触发求快、pulse=主动轮询求持续；页面只是观察窗，功能实现在另一路。
-      // 企业权限体系（多用户/RBAC/资源级权限/租户隔离/审计）排 P2 首位。
-      // （无器官级删除；仅 will/mate 为死链，见上。）
     ];
   },
   images: {

@@ -42,11 +42,14 @@ const SECTIONS: NavSection[] = [
     titleFallback: "核心",
     hasHealth: true,
     items: [
+      { key: "soul", labelKey: "nav.soul", fallback: "Soul", href: "/soul", icon: Brain },
       { key: "cortex", labelKey: "nav.cortex", fallback: "皮层", href: "/cortex", icon: Cpu },
       { key: "nerve", labelKey: "nav.nerve", fallback: "神经", href: "/nerve", icon: Zap },
       { key: "vein", labelKey: "nav.vein", fallback: "血管", href: "/vein", icon: Droplets },
       { key: "soma", labelKey: "nav.soma", fallback: "躯体", href: "/soma", icon: Bot },
       { key: "sense", labelKey: "nav.sense", fallback: "感官", href: "/sense", icon: Eye },
+      { key: "will", labelKey: "nav.will", fallback: "意志", href: "/will", icon: Sparkles },
+      { key: "mate", labelKey: "nav.mate", fallback: "伙伴", href: "/mate", icon: Users },
     ],
   },
   {
@@ -55,6 +58,7 @@ const SECTIONS: NavSection[] = [
     hasHealth: true,
     items: [
       { key: "immune", labelKey: "nav.immune", fallback: "免疫", href: "/immune", icon: Shield },
+      { key: "vital", labelKey: "nav.vital", fallback: "体征", href: "/vital", icon: Activity },
       { key: "marrow", labelKey: "nav.marrow", fallback: "骨髓", href: "/marrow", icon: Bone },
       { key: "gland", labelKey: "nav.gland", fallback: "腺体", href: "/gland", icon: Stethoscope },
       { key: "gene", labelKey: "nav.gene", fallback: "基因", href: "/gene", icon: Dna },
@@ -70,6 +74,7 @@ const SECTIONS: NavSection[] = [
     items: [
       { key: "hippo", labelKey: "nav.hippo", fallback: "海马体", href: "/hippo", icon: Brain },
       { key: "reflex", labelKey: "nav.reflex", fallback: "反射", href: "/reflex", icon: Bolt },
+      { key: "heredity", labelKey: "nav.heredity", fallback: "遗传链", href: "/heredity", icon: GitBranch },
       { key: "nest", labelKey: "nav.nest", fallback: "巢穴", href: "/nest", icon: Home },
       { key: "pulse", labelKey: "nav.pulse", fallback: "脉搏", href: "/pulse", icon: Heart },
       { key: "limb", labelKey: "nav.limb", fallback: "四肢", href: "/limb", icon: MousePointer },
@@ -83,11 +88,13 @@ const SECTIONS: NavSection[] = [
     titleFallback: "工具",
     hasHealth: false,
     items: [
+      { key: "dashboard", labelKey: "nav.dashboard", fallback: "仪表盘", href: "/dashboard", icon: LayoutDashboard },
       { key: "knowledge", labelKey: "nav.knowledge", fallback: "知识库", href: "/knowledge", icon: BookOpen },
       { key: "search", labelKey: "nav.search", fallback: "搜索", href: "/search", icon: Search },
       { key: "graph", labelKey: "nav.graph", fallback: "知识图谱", href: "/graph", icon: Network },
       { key: "workflow", labelKey: "nav.workflow", fallback: "工作流", href: "/workflow", icon: Workflow },
       { key: "tasks", labelKey: "nav.tasks", fallback: "任务收发台", href: "/tasks", icon: Inbox },
+      { key: "cron", labelKey: "nav.cron", fallback: "定时任务", href: "/cron", icon: Clock },
       { key: "skills", labelKey: "nav.skills", fallback: "技能市场", href: "/skills", icon: Puzzle },
       { key: "mcp", labelKey: "nav.mcp", fallback: "MCP客户端", href: "/mcp", icon: Plug },
       { key: "workspace", labelKey: "nav.workspace", fallback: "工作区", href: "/workspace", icon: FolderKanban },

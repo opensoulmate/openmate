@@ -1,35 +1,21 @@
 "use client";
 import { useState } from "react";
-import dynamic from "next/dynamic";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
-import { Network, Package, BarChart3, Activity, Gauge, LineChart, Brain, Cpu, Heart } from "lucide-react";
+import { Network, Package, BarChart3, Activity } from "lucide-react";
 import { PageLayout } from '@/components/page-layout';
 import { OverviewTab } from './tabs/overview-tab';
 import { TopologyTab } from './tabs/topology-tab';
 import { RegistryTab } from './tabs/registry-tab';
 import { TrajectoryTab } from './tabs/trajectory-tab';
 
-// menu-audit P1：系统观测类页面**组件实质迁入** system hub 各 tab（旧路由 301 到此）。
-// 旧页组件整体搬入 tab 不重写；迁移后旧 page.tsx 删除（组件保留由 tab 挂载）。
-const MonitoringTab = dynamic(() => import('../monitoring/monitoring-client').then(m => m.MonitoringClient), { ssr: false });
-const MetricsTab = dynamic(() => import('../metrics/metrics-client').then(m => m.MetricsClient), { ssr: false });
-const IntelligenceTab = dynamic(() => import('../intelligence/intelligence-client').then(m => m.IntelligenceClient), { ssr: false });
-const AiEngineTab = dynamic(() => import('../ai-engine/ai-engine-client').then(m => m.AiEngineClient), { ssr: false });
-const VitalTab = dynamic(() => import('../vital/vital-client').then(m => m.VitalClient), { ssr: false });
+type TabKey = "overview" | "topology" | "registry" | "trajectory";
 
-type TabKey = "overview" | "monitoring" | "topology" | "registry" | "metrics" | "trajectory" | "intelligence" | "architecture" | "vital";
-
-const TABS: { key: TabKey; label: string; fallback: string; icon: React.ElementType }[] = [
-  { key: "overview", label: "system.tabs.overview", fallback: "概览", icon: Activity },
-  { key: "monitoring", label: "system.tabs.monitoring", fallback: "监控", icon: Gauge },
-  { key: "topology", label: "system.tabs.topology", fallback: "拓扑", icon: Network },
-  { key: "registry", label: "system.tabs.registry", fallback: "注册表", icon: Package },
-  { key: "metrics", label: "system.tabs.metrics", fallback: "指标", icon: LineChart },
-  { key: "trajectory", label: "system.tabs.trajectory", fallback: "轨迹", icon: BarChart3 },
-  { key: "intelligence", label: "system.tabs.intelligence", fallback: "智能", icon: Brain },
-  { key: "architecture", label: "system.tabs.architecture", fallback: "架构", icon: Cpu },
-  { key: "vital", label: "system.tabs.vital", fallback: "体征", icon: Heart },
+const TABS: { key: TabKey; label: string; icon: React.ElementType }[] = [
+  { key: "overview", label: "system.tabs.overview", icon: Activity },
+  { key: "topology", label: "system.tabs.topology", icon: Network },
+  { key: "registry", label: "system.tabs.registry", icon: Package },
+  { key: "trajectory", label: "system.tabs.trajectory", icon: BarChart3 },
 ];
 
 export function SystemClient() {
@@ -42,7 +28,7 @@ export function SystemClient() {
         {/* Tab bar */}
         <div className="shrink-0 border-b border-border px-3 lg:px-6">
           <div className="flex gap-1 -mb-px overflow-x-auto">
-            {TABS.map(({ key, label, fallback, icon: Icon }) => (
+            {TABS.map(({ key, label, icon: Icon }) => (
               <button
                 key={key}
                 onClick={() => setActiveTab(key)}
@@ -54,7 +40,7 @@ export function SystemClient() {
                 )}
               >
                 <Icon size={14} />
-                {t(label, fallback)}
+                {t(label, key === "overview" ? "概览" : key === "topology" ? "拓扑" : key === "registry" ? "注册表" : "轨迹")}
               </button>
             ))}
           </div>
@@ -63,14 +49,9 @@ export function SystemClient() {
         {/* Tab content */}
         <div className="flex-1 overflow-hidden">
           {activeTab === "overview" && <OverviewTab />}
-          {activeTab === "monitoring" && <MonitoringTab />}
           {activeTab === "topology" && <TopologyTab />}
           {activeTab === "registry" && <RegistryTab />}
-          {activeTab === "metrics" && <MetricsTab />}
           {activeTab === "trajectory" && <TrajectoryTab />}
-          {activeTab === "intelligence" && <IntelligenceTab />}
-          {activeTab === "architecture" && <AiEngineTab />}
-          {activeTab === "vital" && <VitalTab />}
         </div>
       </div>
     </PageLayout>

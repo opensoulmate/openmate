@@ -20,7 +20,6 @@ import {
   Share2,
 } from 'lucide-react';
 import { SharingTab } from './tabs/sharing-tab';
-import { TagsClient } from '../tags/tags-client';
 
 import { EChart } from '@/components/echart';
 
@@ -242,7 +241,7 @@ export function KnowledgeClient() {
   const setPageWorkspace = useAppStore((s) => s.setPageWorkspace);
 
   // Tab state
-  const [activeTab, setActiveTab] = useState<'items' | 'requests' | 'sharing' | 'tags'>('items');
+  const [activeTab, setActiveTab] = useState<'items' | 'requests' | 'sharing'>('items');
 
   // Knowledge items state
   const [items, setItems] = useState<KnowledgeItem[]>([]);
@@ -706,18 +705,6 @@ export function KnowledgeClient() {
               <Share2 className="w-3.5 h-3.5 inline mr-1.5" />
               {t('knowledge.tabSharing', '知识共享')}
             </button>
-            <button
-              onClick={() => { setActiveTab('tags'); setSelectedItem(null); setSelectedRequest(null); }}
-              className={cn(
-                'px-3 py-2 text-xs font-medium rounded-lg transition-colors',
-                activeTab === 'tags'
-                  ? 'bg-violet-500/10 text-violet-500'
-                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-              )}
-            >
-              <TagIcon className="w-3.5 h-3.5 inline mr-1.5" />
-              {t('knowledge.tabTags', '标签')}
-            </button>
           </div>
         </div>
 
@@ -1027,11 +1014,6 @@ export function KnowledgeClient() {
         {/* ── Knowledge Sharing Tab ──────────────────────────── */}
         {activeTab === 'sharing' && (
           <SharingTab />
-        )}
-
-        {/* ── Tags Tab（menu-audit P1：/tags 组件迁入） ──── */}
-        {activeTab === 'tags' && (
-          <TagsClient />
         )}
       </div>
     </PageLayout>
