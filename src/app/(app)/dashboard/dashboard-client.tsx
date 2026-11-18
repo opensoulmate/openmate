@@ -4,16 +4,15 @@ import { useAppStore } from "@/stores/app-store";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import {
-  Clock, TrendingUp, Cpu, Zap,
-  CheckCircle, XCircle, Loader2, HardDrive,
-  ExternalLink,
+  TrendingUp, Cpu, Zap,
+  HardDrive,
 } from "lucide-react";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { getApiBaseUrl } from "@/lib/api-client";
 import Link from "next/link";
+import { useRouter, usePathname } from "next/navigation";
 import { PageLayout } from '@/components/page-layout';
 import { LeftPanel } from '@/components/left-panel';
-import { DetailPanel } from '@/components/detail-panel';
 import { COLORS, LINE_THEME, PIE_THEME, GAUGE_THEME, COLOR_PALETTE, BASE_CHART } from '@/lib/echarts-theme';
 
 import { EChart } from '@/components/echart';
@@ -110,7 +109,8 @@ export function DashboardClient() {
   const apiBase = getApiBaseUrl();
   const { t } = useTranslation();
   const setPageSidebar = useAppStore((s) => s.setPageSidebar);
-  const setPageWorkspace = useAppStore((s) => s.setPageWorkspace);
+  const router = useRouter();
+  const pathname = usePathname();
 
   // Data state
   const [organHealth, setOrganHealth] = useState<Record<string, "ok" | "error" | "loading">>({});
@@ -118,7 +118,6 @@ export function DashboardClient() {
   const [recentRecords, setRecentRecords] = useState<RecentRecord[]>([]);
   const [cronJobs, setCronJobs] = useState<CronJob[]>([]);
   const [sysMetrics, setSysMetrics] = useState<SystemMetrics | null>(null);
-  const [selectedOrganKey, setSelectedOrganKey] = useState<string | null>(null);
 
   // Zustand store reads
   const agentNodes = useAppStore((s) => s.agentNodes);
@@ -206,11 +205,6 @@ export function DashboardClient() {
     });
   }, [organHealth]);
 
-  const selectedOrgan = useMemo(
-    () => organs.find((o) => o.key === selectedOrganKey) ?? null,
-    [selectedOrganKey],
-  );
-
   // ── Sidebar: organ list via LeftPanel ────────────────────────
 
   useEffect(() => {
@@ -221,13 +215,16 @@ export function DashboardClient() {
         filter={(organ, query) => organ.label.toLowerCase().includes(query)}
         renderItem={(organ) => {
           const status = organHealth[organ.key] || "loading";
+          // 导航语义（菜单点击劫持根修 2026-11-19）：器官项=菜单项，点击必须路由跳转
+          // （router.push 到 /{key} 整页渲染），绝不走「选中→openface workspace 详情面板」
+          // 旧语义（那正是用户暴怒报障的「点击菜单在 openface 的 workspace 里面打开」）。
           return (
             <button
               key={organ.key}
-              onClick={() => setSelectedOrganKey(organ.key)}
+              onClick={() => router.push(`/${organ.key}`)}
               className={cn(
                 "w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors hover:bg-muted/50",
-                selectedOrganKey === organ.key && "bg-muted/70",
+                pathname === `/${organ.key}` && "bg-muted/70",
               )}
             >
               <span
@@ -263,58 +260,7 @@ export function DashboardClient() {
       />,
     );
     return () => setPageSidebar(null);
-  }, [sortedOrgans, organHealth, selectedOrganKey, setPageSidebar, checkOrganHealth, t]);
-
-  // ── Workspace: organ detail via DetailPanel ──────────────────
-
-  useEffect(() => {
-    if (!selectedOrgan) {
-      setPageWorkspace(null);
-      return;
-    }
-    const status = organHealth[selectedOrgan.key] || "loading";
-    setPageWorkspace(
-      <DetailPanel
-        title={selectedOrgan.label}
-        subtitle={selectedOrgan.endpoint}
-        icon={selectedOrgan.label.split(" ")[0]}
-        badge={status === "ok" ? "正常" : status === "error" ? "异常" : "检查中..."}
-        onClose={() => setSelectedOrganKey(null)}
-        sections={[
-          {
-            title: t("dashboard.organStatus", "Status"),
-            items: [
-              {
-                label: t("dashboard.healthStatus", "Health"),
-                value: status === "ok" ? "✅ 正常" : status === "error" ? "❌ 异常" : "⏳ 检查中...",
-                icon: status === "ok" ? <CheckCircle className="w-3.5 h-3.5 text-emerald-500" /> : status === "error" ? <XCircle className="w-3.5 h-3.5 text-red-500" /> : <Loader2 className="w-3.5 h-3.5 animate-spin" />,
-              },
-              {
-                label: t("dashboard.endpoint", "Endpoint"),
-                value: selectedOrgan.endpoint,
-                icon: <ExternalLink className="w-3.5 h-3.5" />,
-              },
-              {
-                label: t("dashboard.lastCheck", "Last Check"),
-                value: new Date().toLocaleTimeString('zh-CN', { fractionalSecondDigits: 3 }),
-                icon: <Clock className="w-3.5 h-3.5" />,
-              },
-            ],
-          },
-        ]}
-        headerActions={
-          <Link
-            href={`/${selectedOrgan.key}`}
-            className="text-xs text-primary hover:underline flex items-center gap-1"
-          >
-            {t("dashboard.viewFullPage", "View Full Page")}
-            <ExternalLink className="w-3 h-3" />
-          </Link>
-        }
-      />,
-    );
-    return () => setPageWorkspace(null);
-  }, [selectedOrgan, organHealth, setPageWorkspace, t]);
+  }, [sortedOrgans, organHealth, setPageSidebar, checkOrganHealth, t, router, pathname]);
 
   // ── Computed values ──────────────────────────────────────────
 
