@@ -17,6 +17,7 @@
     "agents": "Agents",
     "groups": "Agent Groups",
     "workflow": "Workflow",
+    "tasks": "Task Inbox",
     "settings": "Settings",
     "mcp": "MCP Client",
     "cron": "Cron Jobs",

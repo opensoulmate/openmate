@@ -12,7 +12,7 @@ import {
   Shield, Activity, Bone, Stethoscope, Dna, Volume2, Layers, Link2,
   Bolt, GitBranch, Home, Heart, MousePointer, Mic, ImageIcon, Smile,
   LayoutDashboard, BookOpen, Search, Network, Workflow, Clock, Puzzle,
-  Plug, FolderKanban, GraduationCap,
+  Plug, FolderKanban, GraduationCap, Inbox,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -87,6 +87,7 @@ const SECTIONS: NavSection[] = [
       { key: "search", labelKey: "nav.search", fallback: "搜索", href: "/search", icon: Search },
       { key: "graph", labelKey: "nav.graph", fallback: "知识图谱", href: "/graph", icon: Network },
       { key: "workflow", labelKey: "nav.workflow", fallback: "工作流", href: "/workflow", icon: Workflow },
+      { key: "tasks", labelKey: "nav.tasks", fallback: "任务收发台", href: "/tasks", icon: Inbox },
       { key: "skills", labelKey: "nav.skills", fallback: "技能市场", href: "/skills", icon: Puzzle },
       { key: "mcp", labelKey: "nav.mcp", fallback: "MCP客户端", href: "/mcp", icon: Plug },
       { key: "workspace", labelKey: "nav.workspace", fallback: "工作区", href: "/workspace", icon: FolderKanban },

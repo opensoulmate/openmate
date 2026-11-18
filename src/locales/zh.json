@@ -17,6 +17,7 @@
     "agents": "Agent管理",
     "groups": "Agent分组",
     "workflow": "工作流",
+    "tasks": "任务收发台",
     "workflowBuilder": "工作流编排",
     "settings": "设置",
     "mcp": "MCP客户端",
