@@ -295,3 +295,81 @@ def test_flow_def_validates_collab_nodes():
         parse_flow({"id": "f", "name": "f", "triggers": [{"type": "manual"}],
                     "nodes": [{"id": "n", "type": "human", "user": "a", "task": "x",
                                "budget": {"max_tokens": -1}}]})
+
+
+# ── E 组：任务包/上下文隔离/成果回流 ──────────────────────────────
+
+def test_task_package_context_isolation_and_modes(env):
+    """E1 任务包：上下文隔离（只带 $. 引用的上游）+ compact 档 + 快照落 payload"""
+    from plugin.flow_collab import build_task_package, collect_upstream_refs
+    # 纯函数：引用收集（有序去重）/两档/快照 diff（E2 变更摘要）
+    assert collect_upstream_refs("看 $.a 与 $.b", {"x": "$.a.c"}) == ["a", "b"]
+    pkg_full = build_task_package(goal="汇总", form="结论", upstream={"a": {"v": 1}})
+    assert "【任务】汇总" in pkg_full and "【验收】结论" in pkg_full
+    assert "【上游输出】" in pkg_full and '"v": 1' in pkg_full
+    pkg_compact = build_task_package(
+        goal="汇总", upstream={"a": {"v": 1, "w": 2}}, mode="compact")
+    assert "【上游输出(compact)】" in pkg_compact and "<dict×2" in pkg_compact
+    pkg_diff = build_task_package(
+        goal="汇总", upstream={"a": {"v": 2}, "b": 1},
+        prev_snapshot={"a": {"v": 1}, "c": 9})
+    assert "【变更摘要】" in pkg_diff and "~a" in pkg_diff \
+        and "+b" in pkg_diff and "-c" in pkg_diff
+
+    engine, runtime, calls = env
+    _register(engine, {
+        "id": "pkg-flow", "name": "任务包流", "triggers": [{"type": "manual"}],
+        "nodes": [
+            {"id": "a", "type": "tool", "tool": "p__t", "args": {"tag": "alpha"}},
+            {"id": "b", "type": "tool", "tool": "p__t", "args": {"tag": "beta"}},
+            {"id": "ask", "type": "human", "user": "x", "package": "full",
+             "task": "看 $.a 的数据出结论", "form": "结论", "timeout_hours": 1},
+        ],
+    })
+    run = asyncio.run(engine.run_now("pkg-flow", {"type": "manual"}))
+    task = runtime.store.load(run.approval.task_id)
+    # 上下文隔离：只带 a 的输出（引用的），绝不整包重灌 b（compact 档见纯函数断言）
+    assert "alpha" in task.instruction and "beta" not in task.instruction
+    assert "【上游输出】" in task.instruction
+    assert task.payload["upstream_snapshot"] == {"a": {"echo": {"tag": "alpha"}}}
+    assert task.payload["config_fingerprint"]
+
+
+def test_review_gate_accept_reject_and_receipt(env):
+    """E4 review gate：验收通过→完成；驳回→不算节点完成（flow_receipts 挂结论）"""
+    import json
+    import os
+    engine, runtime, calls = env
+    receipts_path = os.environ["FLOW_RECEIPTS_FILE"]
+    for verdict_text, expect in (("验收通过，结论可靠", "completed"),
+                                 ("驳回：数据口径不对", "failed")):
+        fid = f"review-{expect}"
+        _register(engine, {
+            "id": fid, "name": fid, "triggers": [{"type": "manual"}],
+            "nodes": [
+                {"id": "accept", "type": "human", "user": "qa", "review": True,
+                 "task": "验收交付物", "form": "验收意见", "timeout_hours": 1},
+                {"id": "after", "type": "action",
+                 "actions": [{"type": "notify", "message": "收尾"}]},
+            ],
+        })
+        run = asyncio.run(engine.run_now(fid, {"type": "manual"}))
+        asyncio.run(runtime.deliver_and_resume(
+            run.approval.task_id, verdict_text, delivered_by="qa"))
+        run = engine.store.find_run(run.run_id)
+        assert run.status == expect
+    # 验收结论挂 flow_receipts（凭证来自服务端，模型无法伪造）
+    receipts = json.loads(open(receipts_path, encoding="utf-8").read())
+    verdicts = [r for r in receipts if str(r.get("action", "")).startswith("review-")]
+    assert {r["action"] for r in verdicts} == {"review-accept", "review-reject"}
+    reject = next(r for r in verdicts if r["action"] == "review-reject")
+    assert reject["ok"] is False and "验收驳回" in reject.get("error", "")
+
+
+def test_config_fingerprint_changes_with_inputs():
+    """E3 配置指纹：有效输入变更→指纹换代（丢旧会话连续性的依据）"""
+    from plugin.flow_collab import config_fingerprint
+    a = config_fingerprint("engineer", "soulmate", {"max_tokens": 10}, "full")
+    assert a == config_fingerprint("engineer", "soulmate", {"max_tokens": 10}, "full")
+    assert a != config_fingerprint("engineer", "soulmate", {"max_tokens": 20}, "full")
+    assert a != config_fingerprint("manager", "soulmate", {"max_tokens": 10}, "full")

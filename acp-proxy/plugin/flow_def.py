@@ -111,6 +111,8 @@ class NodeSpec:
     role: str = ""                 # 组织角色路由（接 RBAC 角色表）
     target_agent: str = "soulmate"  # agent 节点：A2A 目标 SoulMate
     budget: BudgetSpec = field(default_factory=BudgetSpec)  # 预算隔离（软预算禁硬杀）
+    package: str = "full"          # 任务包档位（E1：full | compact 防上下文爆）
+    review: bool = False           # 人 工节点=验收门（E4：驳回→不算节点完成）
 
 
 @dataclass(frozen=True)
@@ -325,6 +327,9 @@ def _parse_node(data: Any, index: int) -> NodeSpec:
         if on_timeout not in ON_TIMEOUT_VALUES:
             raise FlowDefError(f"{where}.on_timeout 非法: {on_timeout!r}（fail | skip）")
         target_agent = str(data.get("target_agent", "soulmate") or "soulmate")
+        package = str(data.get("package", "full") or "full")
+        if package not in ("full", "compact"):
+            raise FlowDefError(f"{where}.package 非法: {package!r}（full | compact）")
         kwargs["task"] = task_text
         kwargs["user"] = user
         kwargs["role"] = role
@@ -333,6 +338,8 @@ def _parse_node(data: Any, index: int) -> NodeSpec:
         kwargs["timeout_hours"] = float(timeout_hours)
         kwargs["on_timeout"] = on_timeout
         kwargs["budget"] = _parse_budget(data.get("budget"), f"{where}.budget")
+        kwargs["package"] = package
+        kwargs["review"] = bool(data.get("review", False))
     elif typ == "action":
         kwargs["actions"] = _parse_actions(data.get("actions"), f"{where}.actions")
     return NodeSpec(**kwargs)

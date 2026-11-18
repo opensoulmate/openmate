@@ -592,9 +592,47 @@ class FlowExecutor:
             self._log(run, node.id, "collab-task-error", f"开单失败: {e}")
             return None
 
+    def _refresh_task_package(self, run: FlowRun, node: NodeSpec, instruction: Any,
+                              task: Any, collab) -> str:
+        """E1/E2/E3 任务包刷新（非在途才刷新，coalesce 合并保留原派发件）。
+
+        - 上下文隔离：只带本节点 $. 引用的上游节点输出（不整包重灌）
+        - full/compact 两档（node.package）防上下文爆
+        - 快照 diff：自上次派发以来上游变更摘要（E2，不整包重灌）
+        - 配置指纹：有效输入变更 → 留痕丢弃旧会话连续性（E3，correctness over continuity）
+        """
+        from plugin.flow_collab import (
+            build_task_package, collect_upstream_refs, config_fingerprint)
+        refs = collect_upstream_refs(node.task, node.args, node.form)
+        upstream = {rid: run.outputs[rid] for rid in refs if rid in run.outputs}
+        payload = getattr(task, "payload", None) or {}
+        package = build_task_package(
+            goal=str(instruction), form=node.form, upstream=upstream,
+            prev_snapshot=payload.get("upstream_snapshot"),
+            mode=node.package)
+        fingerprint = config_fingerprint(
+            node.role or node.user, node.target_agent, asdict(node.budget),
+            node.package)
+        in_flight = bool(getattr(task, "a2a_task_id", "")) \
+            or getattr(task, "status", "") == "working"
+        if not in_flight:
+            if payload.get("config_fingerprint") and \
+                    payload["config_fingerprint"] != fingerprint:
+                self._log(run, node.id, "config-changed",
+                          "配置指纹变更，丢弃旧会话连续性（E3 correctness over continuity）")
+            task.instruction = package
+            task.payload = {**payload,
+                            "upstream_snapshot": upstream,
+                            "config_fingerprint": fingerprint}
+            collab.store.save(task)
+        return package
+
     async def _run_human_node(self, run: FlowRun, defn: FlowDefinition,
                               node: NodeSpec, record: NodeRun) -> Any:
-        """human 节点：任务入收件箱 → 通知（Reflex 应激）→ 人交付回流，流程恢复。"""
+        """human 节点：任务入收件箱 → 通知（Reflex 应激）→ 人交付回流，流程恢复。
+
+        E1 任务包（上下文隔离+full/compact 两档）+ E4 可选验收门（review: true）。
+        """
         ctx = EvalContext(outputs=run.outputs, run=_run_ctx(run))
         instruction = resolve_value(node.task, ctx)
         collab = self.engine.collab()
@@ -606,9 +644,10 @@ class FlowExecutor:
             instruction=str(instruction), form=node.form,
             timeout_hours=node.timeout_hours, on_timeout=node.on_timeout,
             budget=node.budget)
+        self._refresh_task_package(run, node, instruction, task, collab)
         self._log(run, node.id, "human-task",
                   f"工单 {task.task_id} → {assignee}（role={role or '-'}，"
-                  f"期限 {node.timeout_hours:g}h）")
+                  f"期限 {node.timeout_hours:g}h{'，验收门' if node.review else ''}）")
         return self._suspend_for_approval(run, node, kind="human", task=task)
 
     async def _run_agent_node(self, run: FlowRun, defn: FlowDefinition,
@@ -650,6 +689,7 @@ class FlowExecutor:
             instruction=str(instruction), form=node.form,
             timeout_hours=node.timeout_hours, on_timeout=node.on_timeout,
             budget=node.budget)
+        self._refresh_task_package(run, node, instruction, task, collab)
         self._log(run, node.id, "agent-task",
                   f"工单 {task.task_id} → {assignee} 的 SoulMate"
                   f"（target_agent={node.target_agent}，role={role or '-'}）")
@@ -980,6 +1020,25 @@ class FlowEngine:
                     f"{run.run_id}:{run.approval.node_id}")
             except Exception as e:  # noqa: BLE001
                 logger.warning("预算放行标记失败: %s", e)
+        if decision == "approve" and run.approval.kind == "human" \
+                and approval_node is not None and approval_node.review:
+            # E4 review gate：验收驳回不算节点完成（成果回流挂 flow_receipts 凭证）
+            from plugin.flow_collab import record_review_receipt, review_verdict
+            verdict = review_verdict(result)
+            record_review_receipt(run.run_id, approval_node.id, verdict,
+                                  decided_by, result)
+            if verdict == "reject":
+                run.status = RUN_STATUS_FAILED
+                run.finished_at = time.time()
+                run.error = f"验收驳回: {note or str(result or '')[:200]}"
+                if record is not None:
+                    record.status = NODE_STATUS_FAILED
+                self._log(run, approval_node.id, "review-rejected",
+                          f"by={decided_by or '用户'}: {str(result)[:200]}")
+                self.store.save(run)
+                return run
+            self._log(run, approval_node.id, "review-accepted",
+                      f"by={decided_by or '用户'}")
         if decision == "reject":
             run.status = RUN_STATUS_FAILED
             run.finished_at = time.time()

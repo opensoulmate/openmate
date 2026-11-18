@@ -30,9 +30,11 @@ data/collab-tasks，环境变量 COLLAB_TASKS_DIR 覆盖——测试隔离）。
 from __future__ import annotations
 
 import datetime as _dt
+import hashlib
 import json
 import logging
 import os
+import re
 import threading
 import time
 import uuid
@@ -95,6 +97,124 @@ def wake_decision(facts: dict[str, Any]) -> dict[str, Any]:
     if same_task:
         return {"action": "coalesce", "reason": "merge-into-in-flight"}
     return {"action": "defer", "reason": "lock-held-queued"}
+
+
+# ---- E1/E2 任务包组装（上下文隔离 + 快照 diff 告知变化）----
+
+_UPSTREAM_REF_RE = re.compile(r"\$\.([a-z][a-z0-9-]{0,63})")
+_REJECT_VERDICT_RE = re.compile(r"驳回|不通过|reject", re.I)
+
+
+def collect_upstream_refs(*values: Any) -> list[str]:
+    """扫描任务文本/args 中的 $.<node-id> 引用（有序去重）——上下文隔离依据。
+
+    任务包只带这里列出的上游节点输出，不整包重灌全部 run.outputs。
+    """
+    seen: list[str] = []
+    for value in values:
+        text = value if isinstance(value, str) \
+            else json.dumps(value, ensure_ascii=False, default=str)
+        for match in _UPSTREAM_REF_RE.finditer(text or ""):
+            node_id = match.group(1)
+            if node_id not in seen:
+                seen.append(node_id)
+    return seen
+
+
+def _compact_value(value: Any) -> Any:
+    """compact 档上游值摘要：标量截 80 字符，容器只留形状标记（防上下文爆）。"""
+    if isinstance(value, str):
+        return value[:80]
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    if isinstance(value, list):
+        return f"<list×{len(value)}>"
+    if isinstance(value, dict):
+        return f"<dict×{len(value)}: {','.join(list(value)[:5])}>"
+    return str(value)[:80]
+
+
+def _snapshot_diff(old: dict[str, Any], new: dict[str, Any]) -> str:
+    """E2 快照 diff：自上次派发以来上游变了什么（added/changed/removed，不整包重灌）。"""
+    parts: list[str] = []
+    for key in sorted(set(old) | set(new)):
+        if key not in old:
+            parts.append(f"+{key}")
+        elif key not in new:
+            parts.append(f"-{key}")
+        elif json.dumps(old[key], ensure_ascii=False, default=str) != \
+                json.dumps(new[key], ensure_ascii=False, default=str):
+            parts.append(f"~{key}")
+    return " ".join(parts)
+
+
+def build_task_package(*, goal: str, form: str = "",
+                       upstream: dict[str, Any] | None = None,
+                       prev_snapshot: dict[str, Any] | None = None,
+                       mode: str = "full",
+                       max_chars: int = 1600) -> str:
+    """E1 任务包组装：目标+验收+上游输出（full/compact 两档防上下文爆）
+    + E2 变更摘要（上游快照 diff 告知变化）。
+
+    上下文隔离：upstream 只含本节点引用的上游输出（collect_upstream_refs 收口）。
+    """
+    lines = [f"【任务】{goal}"]
+    if form:
+        lines.append(f"【验收】{form}")
+    upstream = upstream or {}
+    if upstream:
+        if mode == "compact":
+            body = json.dumps({k: _compact_value(v) for k, v in upstream.items()},
+                              ensure_ascii=False, default=str)
+            lines.append(f"【上游输出(compact)】{body[:max_chars // 2]}")
+        else:
+            body = json.dumps(upstream, ensure_ascii=False, default=str)
+            lines.append(f"【上游输出】{body[:max_chars]}")
+    if prev_snapshot is not None and prev_snapshot != upstream:
+        diff = _snapshot_diff(prev_snapshot, upstream)
+        if diff:
+            lines.append(f"【变更摘要】自上次派发以来: {diff}")
+    return "\n".join(lines)
+
+
+def config_fingerprint(*parts: Any) -> str:
+    """E3 配置指纹：role/target_agent/预算等有效输入的指纹（变更→换代丢连续性）。"""
+    blob = json.dumps(parts, ensure_ascii=False, default=str, sort_keys=True)
+    return hashlib.sha1(blob.encode("utf-8")).hexdigest()[:12]
+
+
+def review_verdict(result: Any) -> str:
+    """E4 review gate 判定：交付物中的验收结论（accept | reject）。
+
+    结构化 {"verdict": "accept|reject"} 优先；散文按驳回/不通过/reject 关键词
+    判 reject（缺省 accept——通过与否由关键词显式表达）。
+    """
+    if isinstance(result, dict):
+        value = str(result.get("verdict") or "").strip().lower()
+        if value in ("reject", "rejected", "rejects"):
+            return "reject"
+        if value in ("accept", "accepted", "approve", "approved"):
+            return "accept"
+    text = str(result or "")
+    if _REJECT_VERDICT_RE.search(text):
+        return "reject"
+    return "accept"
+
+
+def record_review_receipt(run_id: str, node_id: str, verdict: str,
+                          decided_by: str, result: Any) -> None:
+    """E4 成果回流留档：验收结论挂 flow_receipts（凭证来自服务端，模型无法伪造）。"""
+    try:
+        from flow_receipts import record_receipt
+        record_receipt(
+            task_id=run_id, action=f"review-{verdict}",
+            params={"node": node_id, "verdict": verdict, "by": decided_by,
+                    "result": str(result)[:200]},
+            ok=(verdict == "accept"),
+            error="" if verdict == "accept" else f"验收驳回: {str(result)[:200]}",
+        )
+    except Exception as e:  # noqa: BLE001 — 留档失败不阻断流程
+        logger.warning("验收回执留档失败 %s/%s: %s", run_id, node_id, e)
 
 
 # ---- 工单模型 ----

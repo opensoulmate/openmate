@@ -85,9 +85,14 @@ def mask_params(params: dict, secret: bool = False) -> dict:
 
 # ── 执行回执（滚动表：服务端派发实录）──────────────────────────
 
+def _receipts_path() -> Path:
+    """回执落盘路径（FLOW_RECEIPTS_FILE 可覆盖——测试隔离，默认原路径不变）。"""
+    return Path(os.environ.get("FLOW_RECEIPTS_FILE") or RECEIPTS_FILE)
+
+
 def _load_receipts() -> list[dict]:
     try:
-        data = json.loads(RECEIPTS_FILE.read_text(encoding="utf-8"))
+        data = json.loads(_receipts_path().read_text(encoding="utf-8"))
         return [r for r in data if isinstance(r, dict)][-RECEIPTS_MAX:]
     except Exception:
         return []
@@ -95,11 +100,12 @@ def _load_receipts() -> list[dict]:
 
 def _store_receipts(items: list[dict]) -> None:
     try:
-        RECEIPTS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        tmp = RECEIPTS_FILE.with_suffix(".tmp")
+        target = _receipts_path()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_suffix(".tmp")
         tmp.write_text(json.dumps(items[-RECEIPTS_MAX:], ensure_ascii=False, indent=1),
                        encoding="utf-8")
-        os.replace(tmp, RECEIPTS_FILE)
+        os.replace(tmp, target)
     except Exception:
         pass  # 落盘失败不阻塞派发；内存表仍在（服务端实录尽力持久化）
 
