@@ -70,6 +70,33 @@ class CollabError(RuntimeError):
     """协作层显式报因（幂等/锁/状态机拒绝均走此异常，消息带原因）"""
 
 
+# ---- B1 唤醒三态决策（纯函数，Paperclip wake-queue/domain/policy 对位）----
+
+def wake_decision(facts: dict[str, Any]) -> dict[str, Any]:
+    """新唤醒撞上执行锁/已关闭时的三态决策（纯函数+facts 对象，不碰存储）。
+
+    - proceed：锁空闲 → 正常开跑
+    - coalesce：同任务已在途 → 并入正在跑的执行（不新开 run，A4 合并防重）
+    - defer：锁被他人占着 → 排队等锁释放（不插队不双发）
+    - cancel：任务已关闭/被取代 → 本次唤醒作废（CLOSED_TASK_CONTINUATION
+      静默取消语义；系统 continuation 不对已关任务行动）
+
+    facts: closed | superseded | in_flight | same_task（全部布尔，缺省 False）
+    """
+    closed = bool(facts.get("closed"))
+    superseded = bool(facts.get("superseded"))
+    in_flight = bool(facts.get("in_flight"))
+    same_task = bool(facts.get("same_task"))
+    if closed or superseded:
+        return {"action": "cancel",
+                "reason": "closed_task_continuation" if closed else "superseded"}
+    if not in_flight:
+        return {"action": "proceed", "reason": "lock-free"}
+    if same_task:
+        return {"action": "coalesce", "reason": "merge-into-in-flight"}
+    return {"action": "defer", "reason": "lock-held-queued"}
+
+
 # ---- 工单模型 ----
 
 @dataclass
@@ -235,8 +262,10 @@ class WorkOrderStore:
         with self._lock:
             existing = self.find_open(run_id, node_id, kind)
             if existing is not None:
+                # B1 唤醒三态：同任务在途 → coalesce 并入（不新开 run，A4 合并防重）
+                decision = wake_decision({"in_flight": True, "same_task": True})
                 existing.note("create-coalesced",
-                              "重复建单并入在途任务（A4 输入合并，不新开 run）")
+                              f"{decision['action']}: {decision['reason']}")
                 self.save(existing)
                 return existing, False
             now = fields.pop("now", time.time())
@@ -944,10 +973,16 @@ class CollabRuntime:
         """
         if task.kind != KIND_AGENT:
             return task
-        if task.status == STATUS_DELIVERED:
-            return task  # 幂等：绝不重派
-        if task.a2a_task_id:
-            task.note("dispatch-coalesced", "已在途，重复派发并入（A4，不双发）")
+        # B1 唤醒三态（纯函数决策）：已关/被取代→cancel 幂等；同任务在途→coalesce 不双发
+        decision = wake_decision({
+            "closed": task.status in TERMINAL_STATUSES,
+            "in_flight": bool(task.a2a_task_id)
+            or (task.status == STATUS_WORKING
+                and task.lease_expires_at > self._clock()),
+            "same_task": True,
+        })
+        if decision["action"] != "proceed":
+            task.note("wake-decision", f"{decision['action']}: {decision['reason']}")
             self.store.save(task)
             return task
         # C2 派发前预算闸（隔离：按 scope 拦截，其他员工 Agent 不受影响）
@@ -965,7 +1000,9 @@ class CollabRuntime:
                 claimed_by=f"soulmate:{task.target_agent or task.assignee}",
                 now=self._clock())
         except CollabError as e:
-            task.note("dispatch-decision", f"rejected: {e}")
+            # B1 唤醒三态：锁被他人占着 → defer 排队语义（显式留痕后按失败语义上抛）
+            d = wake_decision({"in_flight": True, "same_task": False})
+            task.note("wake-decision", f"{d['action']}: {d['reason']}（{e}）")
             self.store.save(task)
             raise
         # C4 交接标记先落盘，再出网（防双发双扣）

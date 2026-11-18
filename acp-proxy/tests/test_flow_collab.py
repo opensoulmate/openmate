@@ -255,6 +255,23 @@ def test_node_budget_over_is_soft(no_cost_db):
     assert verdict["over_budget"] and len(verdict["over_reasons"]) == 2
 
 
+# ── B1 唤醒三态（纯函数 policy，对位 wake-queue/domain/policy）────────
+
+def test_wake_decision_three_states():
+    """B1：proceed/coalesce/defer 三态 + closed/superseded 静默取消（纯 facts）"""
+    from plugin.flow_collab import wake_decision
+    assert wake_decision({})["action"] == "proceed"                     # 锁空闲
+    assert wake_decision({"in_flight": True, "same_task": True})["action"] == "coalesce"
+    assert wake_decision({"in_flight": True, "same_task": False})["action"] == "defer"
+    assert wake_decision({"closed": True})["action"] == "cancel"       # 已关不行动
+    assert wake_decision({"superseded": True})["action"] == "cancel"
+    # 已关/被取代优先于在途（绝不并入已关任务）
+    assert wake_decision({"closed": True, "in_flight": True,
+                          "same_task": True})["action"] == "cancel"
+    # 决策带 reason（可观测）
+    assert wake_decision({"in_flight": True, "same_task": False})["reason"] == "lock-held-queued"
+
+
 # ── 运行时派发：A1 领取后才出网 + C2 兜底 ────────────────────────
 
 class _FakeChannel:
@@ -288,7 +305,9 @@ def test_dispatch_claims_before_sending(tmp_path, no_cost_db, monkeypatch):
     # A4：重复派发并入在途，不双发
     out2 = asyncio.run(runtime.dispatch(runtime.store.load(task.task_id)))
     assert len(channel.calls) == 1
-    assert any(h["event"] == "dispatch-coalesced" for h in out2.history)
+    # B1 唤醒三态：重复派发 → coalesce 并入在途（纯函数决策留痕）
+    wake_notes = [h for h in out2.history if h["event"] == "wake-decision"]
+    assert wake_notes and "coalesce" in wake_notes[-1]["detail"]
 
 
 def test_dispatch_budget_blocked_queues_without_sending(tmp_path, no_cost_db):
@@ -303,3 +322,26 @@ def test_dispatch_budget_blocked_queues_without_sending(tmp_path, no_cost_db):
     out = asyncio.run(runtime.dispatch(task))
     assert out.status == STATUS_QUEUED and channel.calls == []
     assert any(h["event"] == "budget-blocked" for h in out.history)
+
+
+def test_wake_decision_drives_dispatch_and_create(tmp_path, no_cost_db):
+    """B1 集成：决策真走 create/dispatch 唤醒点（coalesce 并入 / cancel 幂等）"""
+    store = WorkOrderStore(tmp_path / "collab")
+    channel = _FakeChannel()
+    runtime = CollabRuntime(store=store, channel=channel,
+                            ledger=BudgetLedger(daily_budget_usd=100.0))
+    task = runtime.create(kind="agent", run_id="r", flow_id="f", node_id="n",
+                          assignee="alice", instruction="活")
+    # create 唤醒点：重复建单 → coalesce（wake-decision 留痕并入在途）
+    again = runtime.create(kind="agent", run_id="r", flow_id="f", node_id="n",
+                           assignee="alice", instruction="活")
+    assert again.task_id == task.task_id
+    assert any(h["event"] == "create-coalesced" and "coalesce" in h["detail"]
+               for h in again.history)
+    # dispatch 唤醒点：已交付 → cancel 幂等（绝不重派）
+    asyncio.run(runtime.dispatch(task))
+    runtime.store.deliver(task.task_id, "done", delivered_by="soulmate")
+    out = asyncio.run(runtime.dispatch(runtime.store.load(task.task_id)))
+    assert any(h["event"] == "wake-decision" and "cancel" in h["detail"]
+               for h in out.history)
+    assert len(channel.calls) == 1
