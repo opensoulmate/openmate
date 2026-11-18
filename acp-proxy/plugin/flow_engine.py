@@ -95,6 +95,12 @@ class ApprovalRecord:
     decided_at: float | None = None
     decided_by: str = ""
     note: str = ""
+    # 协作工单整合（agent/human 节点与 approval 同一挂起/恢复面）：
+    kind: str = "approval"       # approval | human | agent
+    task_id: str = ""            # 关联工单号（收发台可见/可交付）
+    assignee: str = ""
+    role: str = ""
+    result: Any = None           # 交付物（human/agent 交付回流）
 
 
 @dataclass
@@ -325,10 +331,11 @@ class FlowExecutor:
     # ── 节点执行 ──
 
     async def _run_node(self, run: FlowRun, defn: FlowDefinition, node: NodeSpec) -> _NodeOutcome:
-        if node.type == "approval" and run.approval and run.approval.node_id == node.id \
-                and run.approval.status == "pending":
+        if node.type in ("approval", "human", "agent") and run.approval \
+                and run.approval.node_id == node.id and run.approval.status == "pending":
+            # 断点/跳转重入到待决闸：幂等重挂（不重建工单不重置超时时钟），绝不推进
             self._suspend_for_approval(run, node)
-            return _NodeOutcome(next_id=defn.next_node_id(node.id))
+            return _NodeOutcome(next_id=None, suspended=True)
 
         record = self._record(run, node)
         record.status = NODE_STATUS_RUNNING
@@ -349,6 +356,13 @@ class FlowExecutor:
             elif node.type == "approval":
                 output = self._suspend_for_approval(run, node)
                 suspended = True
+            elif node.type in ("human", "agent"):
+                if node.type == "human":
+                    output = await self._run_human_node(run, defn, node, record)
+                else:
+                    output = await self._run_agent_node(run, defn, node, record)
+                # 挂起以 {"waiting": True} 为准；on_error=skip/goto 失败路径不挂起
+                suspended = bool(isinstance(output, dict) and output.get("waiting"))
             else:  # action
                 output = self._run_action(run, defn, node, record)
         except _FlowAbort:
@@ -517,24 +531,137 @@ class FlowExecutor:
                     raise _NodeJump(body.on_error.split(":", 1)[1])
                 raise _FlowAbort(f"节点 {body.id} 失败: {record.error}")
 
-    # ── approval 节点（人工审批闸：挂起，等用户批准/驳回后恢复）──
+    # ── approval / human / agent 闸（挂起等人工或 SoulMate 交付，恢复同一面）──
 
-    def _suspend_for_approval(self, run: FlowRun, node: NodeSpec) -> Any:
+    def _suspend_for_approval(self, run: FlowRun, node: NodeSpec,
+                              kind: str = "approval", task: Any = None,
+                              resume_at: str | None = None) -> Any:
+        """闸挂起（幂等：同节点已挂不重建工单/不重置超时时钟）。
+
+        approval 也开工单进收件箱（kind=approval，与 human 节点整合：
+        审批/交付共用工单账、收发台可见、超时催办同一套）。
+        resume_at：恢复起点（缺省=后继节点；预算闸=本节点原地续跑）。
+        """
         record = self._record(run, node)
         record.status = NODE_STATUS_WAITING
         run.status = RUN_STATUS_WAITING
+        if run.approval is not None and run.approval.node_id == node.id \
+                and run.approval.status == "pending":
+            # 重入：保留原记录与超时时钟
+            self.engine.store.save(run)
+            return {"waiting": True, "node": node.id, "kind": run.approval.kind,
+                    "task_id": run.approval.task_id, "form": node.form}
+        if task is None:
+            task = self._open_gate_task(run, node, kind)
         run.approval = ApprovalRecord(
             node_id=node.id,
             status="pending",
             created_at=time.time(),
             timeout_hours=node.timeout_hours,
             on_timeout=node.on_timeout,
+            kind=kind,
+            task_id=getattr(task, "task_id", ""),
+            assignee=getattr(task, "assignee", ""),
+            role=getattr(task, "role", ""),
         )
-        run.cursor = self.engine.get_flow(run.flow_id).next_node_id(node.id)
+        run.cursor = resume_at or self.engine.get_flow(run.flow_id).next_node_id(node.id)
         self._log(run, node.id, "approval-pending",
-                  f"等待人工审批（超时 {node.timeout_hours:g}h，on_timeout={node.on_timeout}）")
+                  f"等待{'人工审批' if kind == 'approval' else '交付'}"
+                  f"（kind={kind} task={run.approval.task_id or '-'} "
+                  f"assignee={run.approval.assignee or '-'} "
+                  f"超时 {node.timeout_hours:g}h，on_timeout={node.on_timeout}）")
         self.engine.store.save(run)
-        return {"waiting": True, "node": node.id, "form": node.form}
+        return {"waiting": True, "node": node.id, "kind": kind,
+                "task_id": run.approval.task_id, "form": node.form}
+
+    def _open_gate_task(self, run: FlowRun, node: NodeSpec, kind: str):
+        """闸开单进收件箱（approval/human/agent 共用；失败只记日志不阻断挂起）。"""
+        try:
+            collab = self.engine.collab()
+            assignee, role = collab.router.resolve(
+                role=node.role, user=node.user or ("用户" if kind == "approval" else ""),
+                kind=kind)
+            return collab.create(
+                kind=kind, run_id=run.run_id, flow_id=run.flow_id, node_id=node.id,
+                assignee=assignee, role=role, assignee_kind="human",
+                title=node.form or f"{run.flow_name}:{node.id}",
+                instruction=node.task or node.form or "审批",
+                form=node.form, timeout_hours=node.timeout_hours,
+                on_timeout=node.on_timeout, budget=node.budget)
+        except Exception as e:  # noqa: BLE001 — 开单失败不吞挂起（日志显式报因）
+            self._log(run, node.id, "collab-task-error", f"开单失败: {e}")
+            return None
+
+    async def _run_human_node(self, run: FlowRun, defn: FlowDefinition,
+                              node: NodeSpec, record: NodeRun) -> Any:
+        """human 节点：任务入收件箱 → 通知（Reflex 应激）→ 人交付回流，流程恢复。"""
+        ctx = EvalContext(outputs=run.outputs, run=_run_ctx(run))
+        instruction = resolve_value(node.task, ctx)
+        collab = self.engine.collab()
+        assignee, role = collab.router.resolve(role=node.role, user=node.user, kind="human")
+        task = collab.create(
+            kind="human", run_id=run.run_id, flow_id=run.flow_id, node_id=node.id,
+            assignee=assignee, role=role, assignee_kind="human",
+            title=node.form or f"{run.flow_name}:{node.id}",
+            instruction=str(instruction), form=node.form,
+            timeout_hours=node.timeout_hours, on_timeout=node.on_timeout,
+            budget=node.budget)
+        self._log(run, node.id, "human-task",
+                  f"工单 {task.task_id} → {assignee}（role={role or '-'}，"
+                  f"期限 {node.timeout_hours:g}h）")
+        return self._suspend_for_approval(run, node, kind="human", task=task)
+
+    async def _run_agent_node(self, run: FlowRun, defn: FlowDefinition,
+                              node: NodeSpec, record: NodeRun) -> Any:
+        """agent 节点：任务经 A2A 发到指定 SoulMate 干活，a2a/task/result 回流。
+
+        员工归属按组织角色路由（D1/D2：org 表+RBAC），target_agent 为 A2A 目标。
+        C2 预算闸转人工：派发前查预算 block，被挡 → human 审批放行 → 原地续跑
+        （C3 恢复续跑，真闸不是只观测）；放行后经 A1 原子领取锁住才出网。
+        """
+        ctx = EvalContext(outputs=run.outputs, run=_run_ctx(run))
+        instruction = resolve_value(node.task, ctx)
+        collab = self.engine.collab()
+        assignee, role = collab.router.resolve(role=node.role, user=node.user, kind="agent")
+        gate_key = f"{run.run_id}:{node.id}"
+        reasons = collab.ledger.blocked(assignee=assignee, flow_id=run.flow_id)
+        if reasons and not collab.ledger.has_waiver(gate_key):
+            # C2 真闸：预算超硬停线 → 转 human 审批放行，放行后重入本节点续跑
+            # （waiver 只窥视不消耗，派发闸被真正拦下时才消耗——防双重消耗）
+            gate_task = collab.create(
+                kind="human", run_id=run.run_id, flow_id=run.flow_id, node_id=node.id,
+                assignee=node.user or "用户", role=node.role, assignee_kind="human",
+                title=f"预算闸放行：{run.flow_name}:{node.id}",
+                instruction=f"预算被拦，需人工放行后继续派发 SoulMate。原因：{'; '.join(reasons)}",
+                form="审批放行（approve=拨款放行续跑）",
+                timeout_hours=node.timeout_hours, on_timeout=node.on_timeout,
+                payload={"gate": "budget", "blocked": reasons},
+            )
+            self._log(run, node.id, "budget-gate",
+                      f"预算拦截 {assignee}/{run.flow_id}：{'; '.join(reasons)[:200]}"
+                      f" → 转人工放行（工单 {gate_task.task_id}）")
+            return self._suspend_for_approval(run, node, kind="budget-gate",
+                                              task=gate_task, resume_at=node.id)
+        task = collab.create(
+            kind="agent", run_id=run.run_id, flow_id=run.flow_id, node_id=node.id,
+            assignee=assignee, role=role, assignee_kind="agent",
+            target_agent=node.target_agent,
+            title=f"{run.flow_name}:{node.id}",
+            instruction=str(instruction), form=node.form,
+            timeout_hours=node.timeout_hours, on_timeout=node.on_timeout,
+            budget=node.budget)
+        self._log(run, node.id, "agent-task",
+                  f"工单 {task.task_id} → {assignee} 的 SoulMate"
+                  f"（target_agent={node.target_agent}，role={role or '-'}）")
+        try:
+            task = await collab.dispatch(task)
+        except Exception as e:  # noqa: BLE001 — 派发失败按节点失败语义走 on_error
+            record.error = f"agent 派发失败: {type(e).__name__}: {e}"
+            self._log(run, node.id, "node-failed", record.error)
+            return self._on_error(run, defn, node, record)
+        self._log(run, node.id, "agent-dispatched",
+                  f"a2a_task_id={task.a2a_task_id or '-'} status={task.status}")
+        return self._suspend_for_approval(run, node, kind="agent", task=task)
 
     # ── action 节点（notify | emit-event | update-panel | compress-handoff）──
 
@@ -820,9 +947,10 @@ class FlowEngine:
             executor = FlowExecutor(self)
             return await executor.execute(run, start_at=start_at)
 
-    # 审批闸
+    # 审批闸（approval/human/agent 三类共用：human/agent=交付回流）
     async def resolve_approval(self, run_id: str, decision: str,
-                               decided_by: str = "", note: str = "") -> FlowRun:
+                               decided_by: str = "", note: str = "",
+                               result: Any = None) -> FlowRun:
         run = self.store.find_run(run_id)
         if run is None:
             raise FlowRunError(f"流程实例不存在: {run_id}")
@@ -835,6 +963,7 @@ class FlowEngine:
         run.approval.decided_at = time.time()
         run.approval.decided_by = decided_by
         run.approval.note = note
+        run.approval.result = result
         defn = self.get_flow(run.flow_id)
         approval_node = defn.node_map.get(run.approval.node_id)
         record = run.nodes.get(run.approval.node_id)
@@ -842,6 +971,15 @@ class FlowEngine:
             record.status = NODE_STATUS_OK if decision == "approve" else NODE_STATUS_FAILED
             record.finished_at = time.time()
             record.output_summary = f"审批 {run.approval.status}（{decided_by or '用户'}）"
+        self._sync_gate_task(run.approval, approved=(decision == "approve"),
+                             result=result, decided_by=decided_by)
+        if decision == "approve" and run.approval.kind == "budget-gate":
+            # C3 预算闸放行：一次性豁免下一次拦截，流程原地续跑（记账照常）
+            try:
+                self.collab().ledger.grant_waiver(
+                    f"{run.run_id}:{run.approval.node_id}")
+            except Exception as e:  # noqa: BLE001
+                logger.warning("预算放行标记失败: %s", e)
         if decision == "reject":
             run.status = RUN_STATUS_FAILED
             run.finished_at = time.time()
@@ -849,9 +987,16 @@ class FlowEngine:
             self._log(run, run.approval.node_id, "approval-rejected", note or "（无说明）")
             self.store.save(run)
             return run
-        run.outputs[run.approval.node_id] = {
-            "decision": "approved", "by": decided_by, "note": note,
-        }
+        if run.approval.kind in ("human", "agent", "budget-gate"):
+            run.outputs[run.approval.node_id] = {
+                "kind": run.approval.kind, "task_id": run.approval.task_id,
+                "assignee": run.approval.assignee, "role": run.approval.role,
+                "result": result, "delivered_by": decided_by, "note": note,
+            }
+        else:
+            run.outputs[run.approval.node_id] = {
+                "decision": "approved", "by": decided_by, "note": note,
+            }
         run.status = RUN_STATUS_RUNNING
         self._log(run, run.approval.node_id, "approval-approved",
                   f"by={decided_by or '用户'} note={note or '（无说明）'}")
@@ -865,6 +1010,46 @@ class FlowEngine:
             self.store.save(run)
             return run
         return await self.execute(run_id, start_at=resume_from)
+
+    async def resolve_delivery(self, run_id: str, result: Any,
+                               decided_by: str = "", note: str = "") -> FlowRun:
+        """human/agent 工单交付回流：与 approval 同一恢复面（approve + 交付物）。"""
+        return await self.resolve_approval(
+            run_id, "approve", decided_by=decided_by, note=note, result=result)
+
+    def _sync_gate_task(self, approval: ApprovalRecord, *, approved: bool,
+                        result: Any, decided_by: str) -> None:
+        """闸决定同步工单账（幂等：工单侧已终态不覆盖）。"""
+        if not approval.task_id:
+            return
+        try:
+            from plugin.flow_collab import STATUS_FAILED, get_collab
+            collab = get_collab()
+            if approved:
+                collab.store.deliver(approval.task_id, result,
+                                     delivered_by=decided_by, via="approval")
+            else:
+                collab.store.close(approval.task_id, STATUS_FAILED,
+                                   note=f"审批驳回: {decided_by}")
+        except Exception as e:  # noqa: BLE001 — 台账同步失败不阻断流程恢复
+            logger.warning("工单台账同步失败 %s: %s", approval.task_id, e)
+
+    def _sync_timeout_task(self, approval: ApprovalRecord) -> None:
+        """超时处置同步工单收口：fail→failed，skip→cancelled（幂等）。"""
+        if not approval.task_id:
+            return
+        try:
+            from plugin.flow_collab import get_collab
+            get_collab().sync_timeout_close(approval.task_id, approval.on_timeout)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("工单超时收口失败 %s: %s", approval.task_id, e)
+
+    # 协作运行时（工单收发台/角色路由/预算隔离；惰性单例，测试可 reset）
+    def collab(self):
+        from plugin.flow_collab import get_collab
+        runtime = get_collab()
+        runtime.attach_engine(self)
+        return runtime
 
     def _resume_cursor(self, defn: FlowDefinition, run: FlowRun,
                        approval_node: NodeSpec | None) -> str | None:
@@ -889,6 +1074,7 @@ class FlowEngine:
             approval_node = defn.node_map.get(approval.node_id)
             approval.status = "timed-out"
             handled += 1
+            self._sync_timeout_task(approval)
             if approval.on_timeout == "skip":
                 record = run.nodes.get(approval.node_id)
                 if record is not None:
@@ -899,6 +1085,9 @@ class FlowEngine:
                 self._log(run, approval.node_id, "approval-timeout",
                           "超时，按 on_timeout=skip 跳过")
                 self.store.save(run)
+                if approval.kind == "budget-gate":
+                    # 预算闸超时跳过=跳过整个节点（cursor 是本节点，不能原地续跑兜圈）
+                    run.cursor = defn.next_node_id(approval.node_id)
                 resume_from = self._resume_cursor(defn, run, approval_node)
                 if resume_from:
                     _fire_and_forget(self.execute(run.run_id, start_at=resume_from))
@@ -1096,6 +1285,10 @@ class FlowScheduler:
                 self.engine.check_timeouts()
             except Exception as e:  # noqa: BLE001 — 调度循环绝不因单次失败退出
                 logger.warning("流程调度 tick 失败: %s", e)
+            try:
+                await self.engine.collab().poll_agent_tasks()  # agent 工单结果回流
+            except Exception as e:  # noqa: BLE001
+                logger.warning("协作工单回流轮询失败: %s", e)
 
 
 # ---- 进程级单例（app.py / flow_api / 插件 handler 共用）----

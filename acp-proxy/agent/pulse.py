@@ -282,6 +282,10 @@ class PulseLoop:
         self._checks.append(check)
         return check
 
+    def set_task_overdue_handler(self, handler) -> None:
+        """设置工单超时恢复钩子（协作层催办接线；返回 {action: requeue|defer|attention}）。"""
+        self._on_task_overdue = handler
+
     def add_task(self, task: LongTask, now: float | None = None) -> LongTask:
         if task.task_id in self._tasks:
             raise ValueError(f"task_id 已存在: {task.task_id}")

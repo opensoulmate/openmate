@@ -17,7 +17,8 @@ from typing import Any
 
 # ---- 常量 ----
 
-NODE_TYPES = {"tool", "decision", "loop", "approval", "action", "parallel"}
+NODE_TYPES = {"tool", "decision", "loop", "approval", "action", "parallel",
+              "agent", "human"}
 TRIGGER_TYPES = {"cron", "event", "manual"}
 ON_ERROR_PATTERN = re.compile(r"^(fail|skip|goto:[a-z][a-z0-9-]{0,63})$")
 NODE_ID_PATTERN = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
@@ -71,6 +72,14 @@ class ParallelBranchSpec:
 
 
 @dataclass(frozen=True)
+class BudgetSpec:
+    """协作节点预算（YAML budget: 块）——0=不限；超出只记账 over_budget，禁硬杀。"""
+    max_tokens: int = 0
+    max_cost_usd: float = 0.0
+    max_duration_seconds: float = 0.0
+
+
+@dataclass(frozen=True)
 class NodeSpec:
     id: str
     type: str
@@ -96,6 +105,12 @@ class NodeSpec:
     # parallel（子代理治理运行时基线：并发乘数×2 超出排队 + 统一轮数上限）
     branches: tuple[ParallelBranchSpec, ...] = ()
     max_concurrency: int = 0       # 0 = 引擎默认基础并发
+    # agent / human 协作节点（工单收发台：SoulMate 干活回流 / 人收单交付回流）
+    task: str = ""                 # 任务指令（整串 $ 路径可解析节点输出）
+    user: str = ""                 # 显式收件人（人/员工）
+    role: str = ""                 # 组织角色路由（接 RBAC 角色表）
+    target_agent: str = "soulmate"  # agent 节点：A2A 目标 SoulMate
+    budget: BudgetSpec = field(default_factory=BudgetSpec)  # 预算隔离（软预算禁硬杀）
 
 
 @dataclass(frozen=True)
@@ -188,6 +203,26 @@ def _parse_actions(data: Any, where: str) -> tuple[ActionSpec, ...]:
     return tuple(actions)
 
 
+def _parse_budget(data: Any, where: str) -> BudgetSpec:
+    """协作节点预算块：max_tokens/max_cost_usd/max_duration_seconds（非负，0=不限）"""
+    if data is None:
+        return BudgetSpec()
+    if not isinstance(data, dict):
+        raise FlowDefError(f"{where} 应为映射")
+    budget = BudgetSpec(
+        max_tokens=data.get("max_tokens", 0),
+        max_cost_usd=data.get("max_cost_usd", 0),
+        max_duration_seconds=data.get("max_duration_seconds", 0),
+    )
+    if not isinstance(budget.max_tokens, int) or budget.max_tokens < 0:
+        raise FlowDefError(f"{where}.max_tokens 应为非负整数")
+    for key, value in (("max_cost_usd", budget.max_cost_usd),
+                       ("max_duration_seconds", budget.max_duration_seconds)):
+        if not isinstance(value, (int, float)) or value < 0:
+            raise FlowDefError(f"{where}.{key} 应为非负数")
+    return budget
+
+
 def _parse_node(data: Any, index: int) -> NodeSpec:
     where = f"nodes[{index}]"
     if not isinstance(data, dict):
@@ -274,6 +309,30 @@ def _parse_node(data: Any, index: int) -> NodeSpec:
         kwargs["form"] = str(data.get("form", ""))
         kwargs["timeout_hours"] = float(timeout_hours)
         kwargs["on_timeout"] = on_timeout
+    elif typ in ("agent", "human"):
+        # 协作节点：任务发给员工的 SoulMate（agent）或人（human），按组织角色路由
+        task_text = _require(data, "task", str, where)
+        if not task_text.strip():
+            raise FlowDefError(f"{where}.task 不可为空")
+        user = str(data.get("user", "") or "")
+        role = str(data.get("role", "") or "")
+        if not user and not role:
+            raise FlowDefError(f"{where} 协作节点须指定 user 或 role（组织角色路由）")
+        timeout_hours = data.get("timeout_hours", 72)
+        if not isinstance(timeout_hours, (int, float)) or timeout_hours <= 0:
+            raise FlowDefError(f"{where}.timeout_hours 应为正数")
+        on_timeout = str(data.get("on_timeout", "fail"))
+        if on_timeout not in ON_TIMEOUT_VALUES:
+            raise FlowDefError(f"{where}.on_timeout 非法: {on_timeout!r}（fail | skip）")
+        target_agent = str(data.get("target_agent", "soulmate") or "soulmate")
+        kwargs["task"] = task_text
+        kwargs["user"] = user
+        kwargs["role"] = role
+        kwargs["target_agent"] = target_agent
+        kwargs["form"] = str(data.get("form", ""))
+        kwargs["timeout_hours"] = float(timeout_hours)
+        kwargs["on_timeout"] = on_timeout
+        kwargs["budget"] = _parse_budget(data.get("budget"), f"{where}.budget")
     elif typ == "action":
         kwargs["actions"] = _parse_actions(data.get("actions"), f"{where}.actions")
     return NodeSpec(**kwargs)
