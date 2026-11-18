@@ -41,3 +41,20 @@ def plugins_dir(tmp_path) -> Path:
 @pytest.fixture(autouse=True)
 def _isolate_tool_failure_db(tmp_path, monkeypatch):
     monkeypatch.setenv("TOOL_FAILURE_DB_PATH", str(tmp_path / "tool_failures.db"))
+
+
+@pytest.fixture(autouse=True)
+def _isolate_collab_side_effects(tmp_path, monkeypatch):
+    """协作层副作用统一进临时目录，禁写真实运行库/组织表/成本台账。
+
+    流程引擎审批闸会开协作工单（get_collab 单例缺省落 ~/openmate/data/collab-tasks），
+    既有流程测试也走此路径——不隔离会把测试工单写进真实运行目录。
+    测试自己再 setenv 时以测试为准。
+    """
+    monkeypatch.setenv("COLLAB_TASKS_DIR", str(tmp_path / "collab-tasks"))
+    monkeypatch.setenv("COLLAB_COST_DB", str(tmp_path / "collab-costs.db"))
+    monkeypatch.setenv("ORG_CHART_FILE", str(tmp_path / "org-chart.json"))
+    from plugin.flow_collab import reset_collab
+    reset_collab()          # 单例绑定本测试临时目录（防跨测试串写）
+    yield
+    reset_collab()

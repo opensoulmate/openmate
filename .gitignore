@@ -39,3 +39,5 @@ desktop/dist/
 # === 下载引擎构建产物（PyInstaller） ===
 core/dist/
 core/.freeze-venv/
+data/collab-tasks/
+data/flow-runs/
