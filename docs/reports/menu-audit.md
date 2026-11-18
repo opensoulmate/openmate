@@ -346,8 +346,8 @@ tabs：概览（现 dashboard 指标卡+健康点）/ 监控（并入 monitoring
 | **vein** /vein | ⚠️ **能力对、UI 重复**：Vein=存储是基础能力；但文件浏览/操作与 /workspace 文件浏览器两套 UI 重复（违收敛）。合理样：Vein=存储后端能力（配置/路径），文件 UI 收敛到 workspace | 真数据（files 有 tagged.txt 等真实文件） | **留**（存储能力）+改：文件 UI→workspace，vein 只留存储配置 |
 | **soma** /soma | ✅ **合理**：Soma=连接调度（五层集成架构）；但与 /discovery /capture 三处分裂同一能力（违收敛）。合理样：Soma=集成中枢，吸收 discovery+capture | capabilities 真（knowledge/rag/event/ocr/asr 全 true），但组件注册表空（total 0）；吸收 discovery(362 进程)/capture 后有真数据 | **留**（收敛）← discovery + capture |
 | **sense** /sense | ✅ **合理**：Sense=感知是基础能力，且是**真引擎**（tesseract OCR/ASR）；但只接 OCR 一条道，ASR/behavior 未接。合理样：感知能力（OCR/ASR/行为）作 agent 工具 | 真引擎（engines.ocr/asr available=true，tesseract chi_sim/eng） | **留**（真能力）+补 ASR/behavior 通道，归位 body-map |
-| **will** /will | ❌ **设计错**：Will=业务工作流，功能已在 /workflow，另立页面=重复；合理样：Will=workflow 能力，不单开页 | 页面 404（死链），无独立功能 | **删**（删菜单项，功能归位 /workflow） |
-| **mate** /mate | ❌ **设计错**：Mate=用户伙伴，功能已在 /chat，另立页面=重复；合理样：Mate=chat 伙伴能力，不单开页 | 页面 404（死链），无独立功能 | **删**（删菜单项，功能归位 /chat） |
+| **will** /will | ✅ **设计对（2026-11-18 用户改判）**：Will=业务工作流组件（有判断分支），flow_engine（plugin/flow_engine.py + flow-console 面板）就是其内核——原判"与 /workflow 重复"是**误判**（/workflow 是旧 CRUD 工作流，Will=引擎观察窗，组件→界面映射的正确归位）。合理样：/will=flow_engine 观察窗（流程定义/运行实例/判断分支可视化） | 已补建真页面：接 :8092 /flows* 真数据（定义/实例/decision when/then/else 分支图/审批/回放），decision 示例流程 greet-branch 双分支实测 | **留·补建**（撤销删）：/will 真页面落成，301 已撤 |
+| **mate** /mate | ⚠️ **设计特殊（2026-11-18 用户改判）**：Mate=OpenMate 整个客户端进程/产品本体（三进程 Soul/Soma/Mate 之客户端），**不是器官功能页**——"另立页面=重复"的原判对了一半：撤销 /mate 页面建设，但不是"删组件"，是**组件=进程本体**。合理样：身体图列产品自述条目（指向自身），不建功能面板 | 无独立功能（本体即产品）；/mate 301→/chat 保留为入口跳转 | **不建页面**：身体图自述条目落地（核心 8 齐整），/mate 301→/chat 保留 |
 
 ### 底座 8
 
@@ -379,7 +379,18 @@ tabs：概览（现 dashboard 指标卡+健康点）/ 监控（并入 monitoring
 ### C.1 处置汇总（三判定落点）
 
 - **留（合理有用/战略→归位整合，20 个）**：cortex / nerve / vein / soma / sense / immune / marrow / gland / gene / echo / mirror / link / hippo / **nest** / **reflex** / **pulse** / limb / voice / vision / mind —— 均为真能力或战略能力，归位 body-map 器官门户能力台。其中 **nest**（企业权限=战略必需品）、**reflex**（事件驱动快速应激层）、**pulse**（时间驱动后台自主循环）为**战略核心**，页面=子系统观察面板，功能实现另线接真数据；cortex/vein/mirror/link/sense/limb 附带接线补全。
-- **改（设计错→写明改造方向，3 个）**：soul（→/admin「Soul」adminOnly）、vital（→system「监控」tab）、heredity（→evolution「版本」tab，与 changelog 合并）。另 will/mate 为死链，菜单项删、功能归位 workflow/chat。
-- **删（仅死链，2 个）**：**will / mate**（页面不存在、功能已由 workflow/chat 承载，删菜单项+跳转）。
+- **改（设计错→写明改造方向，3 个）**：soul（→/admin「Soul」adminOnly）、vital（→system「监控」tab）、heredity（→evolution「版本」tab，与 changelog 合并）。
+- **will/mate 改判（2026-11-18 用户纠正，撤销原"删"判）**：P0 清死链时把 Will/Mate 两个核心件误删——**will=业务工作流组件（有判断分支，flow_engine=内核），/will 补建为 flow_engine 观察窗**（流程定义/运行实例/判断分支可视化真数据，组件→界面映射的正确归位）；**mate=OpenMate 整个客户端进程/产品本体（三进程 Soul/Soma/Mate），不是器官功能页**——撤销 /mate 页面建设，身体图列产品自述条目（指向自身），不建功能面板。核心 8 在身体图齐整可见。
 
-> 两轮反例改判（2026-11-18）：有用性判定须含**未来战略价值**维度，企业/战略能力类不得以"当前空数据/当前单用户/当前是壳"误杀——现状问题≠设计问题。① nest 曾以"仅 default 租户"误删，用户指出企业投入必然要完整权限管理→撤销删、**保留+补全**，权限体系（多用户/RBAC/资源级权限/租户隔离/审计）排 **P2 首位**；② reflex/pulse 曾以"CRUD 壳/空数据"误删，用户摆出原始设计：Reflex=事件驱动快速应激层（被动触发求快）、Pulse=时间驱动后台自主循环（主动轮询求持续），二者分工是**战略核心子系统**，菜单页只是观察窗→撤销删、**留·战略核心**（壳先恢复原状，功能实现另线）。reflex/pulse/nest 三者删除全部撤销，无器官级删除（仅 will/mate 死链清理）。权限体系（多用户/RBAC/资源级权限/租户隔离/审计）排进 **P2 首位**。
+> 两轮反例改判（2026-11-18）：有用性判定须含**未来战略价值**维度，企业/战略能力类不得以"当前空数据/当前单用户/当前是壳"误杀——现状问题≠设计问题。① nest 曾以"仅 default 租户"误删，用户指出企业投入必然要完整权限管理→撤销删、**保留+补全**，权限体系（多用户/RBAC/资源级权限/租户隔离/审计）排 **P2 首位**；② reflex/pulse 曾以"CRUD 壳/空数据"误删，用户摆出原始设计：Reflex=事件驱动快速应激层（被动触发求快）、Pulse=时间驱动后台自主循环（主动轮询求持续），二者分工是**战略核心子系统**，菜单页只是观察窗→撤销删、**留·战略核心**（壳先恢复原状，功能实现另线）。reflex/pulse/nest 三者删除全部撤销。**③ will/mate 同轮误删（P0 清死链）**，用户纠正改判：will=业务工作流组件（flow_engine=内核）→补建 /will 观察窗真页面；mate=OpenMate 进程本体非页面→身体图产品自述条目。权限体系（多用户/RBAC/资源级权限/租户隔离/审计）排进 **P2 首位**。
+
+### C.2 healer 归属判定（设计外组件，2026-11-18）
+
+**healer 不在 25 组件名单（Soul/Cortex/Nerve/Vein/Soma/Sense/Will/Mate + Immune/Vital/Marrow/Gland/Gene/Echo/Mirror/Link + Hippo/Reflex/Heredity/Nest/Pulse/Limb/Voice/Vision/Mind），属设计外组件**——历史遗留的"器官健康自检+自动修复"独立页，无设计宪法出处。
+
+**归属裁定：自愈能力归 Immune「自愈」子面**。理由：
+- 生物学隐喻下免疫系统=防御+修复双职能：入侵检测/风控/脱敏/限流（防御面）↔ 器官自检自愈（修复面），healer 的 health→symptoms→root_cause→action_taken 链路就是修复面；
+- 归位原则"新能力必须归位 25 组件既定组件不另立山头"——Immune 是既定组件，evolution 不是（进化=代码级自我改进的横向机制，混装运行时修复会污染其"DNA 双螺旋自编程"语义）；
+- 若未来出现**代码级自愈**（自动 revert/修 bug），那归 evolution（DNA 双螺旋），与本裁定分工不冲突：运行时器官修复→Immune，代码自修复→evolution。
+
+现状：菜单回滚后 /healer 恢复为独立活页（"宁可乱但全"），本裁定为**归位口径**，供后续收敛时并入 Immune「自愈」tab 依据，不产生新组件位。
