@@ -19,8 +19,8 @@ interface SuperEllipseProps {
   onClick?: () => void;
 }
 
-/** 生成 n=3 超椭圆 SVG path */
-function genPath(r: number, n = 3, segments = 72): string {
+/** 生成 n=3 超椭圆 SVG path（正方形） */
+export function genPath(r: number, n = 3, segments = 72): string {
   const pts: string[] = [];
   for (let i = 0; i <= segments; i++) {
     const theta = (i / segments) * Math.PI * 2;
@@ -28,6 +28,27 @@ function genPath(r: number, n = 3, segments = 72): string {
     const st = Math.sin(theta);
     const x = r + r * Math.sign(ct) * Math.pow(Math.abs(ct), 2 / n);
     const y = r + r * Math.sign(st) * Math.pow(Math.abs(st), 2 / n);
+    pts.push(`${x.toFixed(2)},${y.toFixed(2)}`);
+  }
+  return `M${pts.join(" L")} Z`;
+}
+
+/**
+ * 生成矩形超椭圆 SVG path（同设计语言 n=3，非正方形元素：画布节点卡片等）。
+ * a=w/2、b=h/2 的超椭圆 |x/a|^n+|y/b|^n=1，随宽高自适应圆角比例。
+ */
+export function genRectPath(w: number, h: number, n = 3, segments = 96): string {
+  const cx = w / 2;
+  const cy = h / 2;
+  const a = w / 2;
+  const b = h / 2;
+  const pts: string[] = [];
+  for (let i = 0; i <= segments; i++) {
+    const theta = (i / segments) * Math.PI * 2;
+    const ct = Math.cos(theta);
+    const st = Math.sin(theta);
+    const x = cx + a * Math.sign(ct) * Math.pow(Math.abs(ct), 2 / n);
+    const y = cy + b * Math.sign(st) * Math.pow(Math.abs(st), 2 / n);
     pts.push(`${x.toFixed(2)},${y.toFixed(2)}`);
   }
   return `M${pts.join(" L")} Z`;

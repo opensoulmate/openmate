@@ -27,20 +27,20 @@ interface PaletteItem {
 }
 
 const paletteItems: PaletteItem[] = [
-  // Flow control
-  { type: "start", labelKey: "nodePalette.start", icon: Play, color: "text-emerald-500", group: "flow" },
-  { type: "condition", labelKey: "nodePalette.condition", icon: GitBranch, color: "text-sky-500", group: "flow" },
-  { type: "loop", labelKey: "nodePalette.loop", icon: Repeat, color: "text-orange-500", group: "flow" },
-  { type: "end", labelKey: "nodePalette.end", icon: Square, color: "text-red-500", group: "flow" },
-  // Actions
-  { type: "llm", labelKey: "nodePalette.llm", icon: Bot, color: "text-violet-500", group: "action" },
-  { type: "http", labelKey: "nodePalette.http", icon: Globe, color: "text-blue-500", group: "action" },
-  { type: "notify", labelKey: "nodePalette.notify", icon: Bell, color: "text-amber-500", group: "action" },
-  { type: "organ", labelKey: "nodePalette.organ", icon: Zap, color: "text-pink-500", group: "action" },
-  { type: "knowledge", labelKey: "nodePalette.knowledge", icon: Database, color: "text-teal-500", group: "action" },
-  { type: "script", labelKey: "nodePalette.script", icon: Terminal, color: "text-orange-400", group: "action" },
-  { type: "tool", labelKey: "nodePalette.tool", icon: Wrench, color: "text-amber-500", group: "action" },
-  { type: "code", labelKey: "nodePalette.code", icon: Code2, color: "text-pink-500", group: "action" },
+  // Flow control（与画布节点同语义色：trigger/logic/end）
+  { type: "start", labelKey: "nodePalette.start", icon: Play, color: "text-success", group: "flow" },
+  { type: "condition", labelKey: "nodePalette.condition", icon: GitBranch, color: "text-warning", group: "flow" },
+  { type: "loop", labelKey: "nodePalette.loop", icon: Repeat, color: "text-warning", group: "flow" },
+  { type: "end", labelKey: "nodePalette.end", icon: Square, color: "text-error", group: "flow" },
+  // Actions（ai=主强调 / action=info）
+  { type: "llm", labelKey: "nodePalette.llm", icon: Bot, color: "text-primary", group: "action" },
+  { type: "http", labelKey: "nodePalette.http", icon: Globe, color: "text-info", group: "action" },
+  { type: "notify", labelKey: "nodePalette.notify", icon: Bell, color: "text-info", group: "action" },
+  { type: "organ", labelKey: "nodePalette.organ", icon: Zap, color: "text-info", group: "action" },
+  { type: "knowledge", labelKey: "nodePalette.knowledge", icon: Database, color: "text-primary", group: "action" },
+  { type: "script", labelKey: "nodePalette.script", icon: Terminal, color: "text-info", group: "action" },
+  { type: "tool", labelKey: "nodePalette.tool", icon: Wrench, color: "text-info", group: "action" },
+  { type: "code", labelKey: "nodePalette.code", icon: Code2, color: "text-info", group: "action" },
 ];
 
 const nodeTypeMap: Record<WorkflowNodeType, string> = {

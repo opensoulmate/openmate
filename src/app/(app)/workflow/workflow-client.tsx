@@ -21,7 +21,7 @@ import { useAppStore } from "@/stores/app-store";
 import { getApiBaseUrl, getToken } from "@/lib/api-client";
 import { friendlyAuthMessage } from "@/lib/auth-errors";
 import { PageLayout } from "@/components/page-layout";
-import { nodeTypes } from "./components/workflow-nodes";
+import { nodeTypes, prepareNodes, WorkflowFlowHealer } from "./components/workflow-nodes";
 import { edgeTypes, prepareEdges, buildEdge } from "./components/workflow-edges";
 import { WorkflowMiniMap } from "./components/workflow-minimap";
 import { NodePalette } from "./components/node-palette";
@@ -663,14 +663,14 @@ export function WorkflowClient() {
           <NodePalette />
           <div className="relative flex-1" ref={reactFlowWrapper}>
             <ReactFlow
-              nodes={nodes.map((n) => ({
+              nodes={prepareNodes(nodes.map((n) => ({
                 ...n,
                 selected: n.id === selectedNodeId,
                 data: {
                   ...n.data,
                   debugActive: n.id === debugNodeId,
                 },
-              }))}
+              })))}
               edges={prepareEdges(edges, debugNodeId)}
               onNodesChange={handleNodesChange}
               onEdgesChange={handleEdgesChange}
@@ -695,6 +695,7 @@ export function WorkflowClient() {
                 className="!rounded-[10px] !border-0 !bg-card/85 !shadow-[0_4px_16px_rgba(0,0,0,0.18)] backdrop-blur-sm"
               />
               <WorkflowMiniMap />
+              <WorkflowFlowHealer />
             </ReactFlow>
 
             {/* Empty state */}

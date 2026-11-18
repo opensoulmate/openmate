@@ -1089,3 +1089,26 @@ html.tauri-shell.tauri-maximized body { border-radius: 0; }
 .markdown-content tbody tr:nth-child(even) { background: rgba(255,255,255,0.03); }
 .markdown-content tbody tr:hover { background: rgba(255,255,255,0.06); }
 
+/* ─── 工作流画布（节点超椭圆壳 / 连线；鹰眼图见 workflow-minimap.tsx） ─── */
+.wf-node-stroke {
+  stroke: var(--color-border);
+  transition: stroke var(--transition-fast), stroke-width var(--transition-fast);
+}
+.wf-node:hover .wf-node-stroke {
+  stroke: color-mix(in srgb, var(--color-primary) 35%, var(--color-border));
+}
+.wf-node-stroke-selected {
+  stroke: var(--color-primary);
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--color-primary) 35%, transparent));
+}
+.wf-edge {
+  transition: stroke-width var(--transition-fast);
+}
+.wf-edge-animated {
+  stroke-dasharray: 6 4;
+  animation: wf-edge-flow 0.9s linear infinite;
+}
+@keyframes wf-edge-flow {
+  to { stroke-dashoffset: -10; }
+}
+
