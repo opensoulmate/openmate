@@ -4,13 +4,18 @@ import {
   Inbox, RefreshCw, Hand, HeartPulse, Send, BellRing, XCircle, CheckCircle2,
 } from "lucide-react";
 import { PageLayout } from "@/components/page-layout";
-import { getApiBaseUrl } from "@/lib/api-client";
 
 /* 任务收发台 — 对接 acp-proxy /collab/*（每人任务收件箱）
  * 数据源：plugin.collab_api（工单账=flow_collab.WorkOrderStore）
  * 三桶：在办 open / 交付 delivered / 超时 overdue（+已关闭 closed）
  * 动作：认领（抢占锁）/ 心跳续租 / 交付回流（流程续跑）/ 催办（Pulse 催办同源）
- * 预算看板：三档策略（company/agent/project）状态 ok/warning/hard_stop 直出。 */
+ * 预算看板：三档策略（company/agent/project）状态 ok/warning/hard_stop 直出。
+ * 注：/collab/* 在 acp-proxy :8092（非 OpenSoul :8090），须直连 acp 宿主。 */
+
+function acpBase(): string {
+  if (typeof window === "undefined") return "http://127.0.0.1:8092";
+  return `http://${window.location.hostname}:8092`;
+}
 
 export interface TaskView {
   task_id: string;
@@ -227,7 +232,7 @@ export function TasksClient() {
   const now = Date.now() / 1000;
 
   const reload = useCallback(async () => {
-    const base = getApiBaseUrl();
+    const base = acpBase();
     try {
       const params = new URLSearchParams({ bucket });
       if (assignee) params.set("assignee", assignee);
@@ -257,7 +262,7 @@ export function TasksClient() {
   const post = async (path: string, body: unknown) => {
     setBusyId(path);
     try {
-      const base = getApiBaseUrl();
+      const base = acpBase();
       await fetch(`${base}/collab/tasks/${path}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
