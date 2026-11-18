@@ -345,3 +345,153 @@ def test_wake_decision_drives_dispatch_and_create(tmp_path, no_cost_db):
     assert any(h["event"] == "wake-decision" and "cancel" in h["detail"]
                for h in out.history)
     assert len(channel.calls) == 1
+
+
+# ── B2 派发序（Person>Work>Recovery + 防饿死份额）──────────────────
+
+def test_dispatch_order_tiers_and_starvation_shares():
+    """B2：三级派发序 + 每第4名额 aging 防饿死 + recovery 保留名额"""
+    from plugin.flow_collab import dispatch_order
+    now = 1_000_000.0
+    # 防饿死：4 个新人单 + 1 个 2h 前的 work 单——aging 名额让老单第 4 位先做
+    persons = [{"task_id": f"p{i}", "origin": "person", "created_at": now - i}
+               for i in (4, 3, 2, 1)]
+    w_old = {"task_id": "w-old", "origin": "work", "created_at": now - 7200}
+    order = dispatch_order(persons + [w_old], now)
+    ids = [t["task_id"] for t in order]
+    assert ids[3] == "w-old"                    # 第 4 名额给最久等待者（防饿死）
+    assert ids[4] == "p1"                       # 最新人单让位（不再饿死旁人）
+    assert ids[:3] == ["p4", "p3", "p2"]        # 层内先到先做
+    # recovery 保留名额（第 2 位）：恢复不被新活挤死
+    r_old = {"task_id": "r1", "origin": "recovery", "created_at": now - 7200}
+    order2 = dispatch_order(
+        [{"task_id": "p1", "origin": "person", "created_at": now - 1},
+         {"task_id": "w1", "origin": "work", "created_at": now - 2},
+         r_old], now)
+    assert [t["task_id"] for t in order2] == ["p1", "r1", "w1"]
+    # 无 recovery 时纯层级序：person > work
+    order3 = dispatch_order(
+        [{"task_id": "w", "origin": "work", "created_at": now - 8},
+         {"task_id": "p", "origin": "person", "created_at": now - 7},
+         {"task_id": "w2", "origin": "work", "created_at": now - 9}], now)
+    assert [t["task_id"] for t in order3] == ["p", "w2", "w"]   # 层内先到先做
+
+
+def test_claim_next_follows_dispatch_order_and_funnel(tmp_path, no_cost_db):
+    """B2 集成：claim_next 按派发序领取；被占候选顺延（A5 决策漏斗）"""
+    store = WorkOrderStore(tmp_path / "collab")
+    now = 1_000_000.0
+    for i in (3, 2, 1):
+        store.create(task_id=f"TO-p{i}-x", kind="human", run_id=f"r{i}",
+                     node_id="n", assignee="alice", now=now - i)
+    # 最老 person 单先领
+    got = store.claim_next("alice", claimed_by="alice", now=now)
+    assert got is not None and got[0].task_id == "TO-p3-x"
+    # 已被他人持锁的候选顺延到下一个（漏斗留痕）
+    got2 = store.claim_next("alice", claimed_by="bob", now=now)
+    assert got2 is not None and got2[0].task_id == "TO-p2-x"
+    assert any(h["event"] == "claim-decision" and "skipped" in h["detail"]
+               for h in store.load("TO-p3-x").history)
+    store.claim_next("alice", claimed_by="carol", now=now)
+    assert store.claim_next("alice", claimed_by="dave", now=now) is None  # 领完
+
+
+# ── B3 三拍判死（Pulse 既有恢复账复用）────────────────────────────
+
+def test_three_beat_death_requeues_then_fails_bounded(tmp_path, no_cost_db):
+    """B3：三拍无心跳判死→runtime_offline 回队（origin=recovery）；有界 3 次→failed"""
+    clock = {"now": 1_000_000.0}
+    runtime = CollabRuntime(store=WorkOrderStore(tmp_path / "collab"),
+                            channel=_FakeChannel(),
+                            ledger=BudgetLedger(daily_budget_usd=100.0),
+                            clock=lambda: clock["now"])
+    task = runtime.create(kind="agent", run_id="r", flow_id="f", node_id="n",
+                          assignee="alice", instruction="活")
+    requeues_seen = []
+    for round_ in range(4):
+        runtime.store.claim(task.task_id, claimed_by="soulmate:a",
+                            lease_seconds=9999, now=clock["now"])
+        clock["now"] += 3 * runtime.beat_interval_s + 1    # 三拍无心跳
+        out = runtime.liveness_sweep(clock["now"])
+        reloaded = runtime.store.load(task.task_id)
+        if round_ < 3:
+            assert out["requeued"] == 1 and out["failed"] == 0
+            assert reloaded.status == "todo" and reloaded.origin == "recovery"
+            assert reloaded.requeues == round_ + 1 and reloaded.claimed_by == ""
+            assert any(h["event"] == "runtime_offline" for h in reloaded.history)
+            requeues_seen.append(reloaded.requeues)
+        else:
+            # 有界：3 次回队仍失联 → failed 显式收口（绝不静默）
+            assert out["failed"] == 1
+            assert reloaded.status == "failed"
+    assert requeues_seen == [1, 2, 3]
+
+
+def test_heartbeat_prevents_death_and_pulse_requeue_verdict(tmp_path, no_cost_db):
+    """B3：心跳即回 online；Pulse 超时恢复钩子判死→requeue（复用既有恢复账）"""
+    clock = {"now": 1_000_000.0}
+    runtime = CollabRuntime(store=WorkOrderStore(tmp_path / "collab"),
+                            channel=_FakeChannel(),
+                            ledger=BudgetLedger(daily_budget_usd=100.0),
+                            clock=lambda: clock["now"])
+    task = runtime.create(kind="human", run_id="r", flow_id="f", node_id="n",
+                          assignee="alice", instruction="活")
+    _, token = runtime.store.claim(task.task_id, claimed_by="alice",
+                                   now=clock["now"])
+    clock["now"] += 2 * runtime.beat_interval_s
+    runtime.store.heartbeat(task.task_id, token, now=clock["now"])   # 心跳续租
+    assert runtime.liveness_sweep(clock["now"]) == {"requeued": 0, "failed": 0}
+    # 心跳断了：Pulse 超时恢复钩子判死 → requeue 判决（Pulse 账记恢复）
+    clock["now"] += 3 * runtime.beat_interval_s + 1
+    verdict = runtime._on_pulse_overdue({"task_id": f"collab:{task.task_id}",
+                                         "recoveries": 0})
+    assert verdict["action"] == "requeue"
+    assert runtime.store.load(task.task_id).origin == "recovery"
+    # 活着的领取：催办 defer（不误判死）
+    task2 = runtime.create(kind="human", run_id="r2", flow_id="f", node_id="n2",
+                           assignee="bob", instruction="活")
+    runtime.store.claim(task2.task_id, claimed_by="bob", now=clock["now"])
+    verdict2 = runtime._on_pulse_overdue({"task_id": f"collab:{task2.task_id}",
+                                          "recoveries": 0})
+    assert verdict2["action"] == "defer"
+
+
+# ── E5 上下文卫生（history 有界 + 交付归档 + 接 Pi#5 压缩）──────────
+
+def test_history_bounded_and_context_hygiene_on_deliver(tmp_path, no_cost_db):
+    """E5：history 有界防累积；交付即归档任务包上下文并经 compress-handoff 接 Pi#5"""
+    store = WorkOrderStore(tmp_path / "collab")
+    task = store.create(task_id="TO-hy-x", kind="agent", run_id="r",
+                        node_id="n", assignee="alice",
+                        instruction="长任务包" * 200,
+                        payload={"upstream_snapshot": {"a": 1}}, now=1000.0)[0]
+    # history 有界（HISTORY_MAX），溢出计数留痕
+    for i in range(60):
+        task.note("tick", str(i))
+    assert len(task.history) == 50 and task.history_trimmed == 10
+    store.save(task)
+
+    class FakeEngine:
+        def __init__(self):
+            self.events = []
+
+        def emit(self, event, payload=None):
+            self.events.append((event, payload))
+            return []
+
+        async def resolve_delivery(self, *a, **k):
+            return None
+
+    runtime = CollabRuntime(store=store, channel=_FakeChannel(),
+                            ledger=BudgetLedger(), clock=lambda: 1000.0)
+    fake = FakeEngine()
+    runtime._engine = fake
+    asyncio.run(runtime.deliver_and_resume("TO-hy-x", "交付", delivered_by="soulmate"))
+    done = store.load("TO-hy-x")
+    assert done.archived is True
+    assert len(done.instruction) <= 310 and "已归档" in done.instruction
+    assert "upstream_snapshot" not in done.payload            # 上下文释放
+    assert any(h["event"] == "context-archived" for h in done.history)
+    # Pi#5 阶段压缩接线：compress-handoff 事件带压缩指令（驱动层 ContextCompressor）
+    assert fake.events and fake.events[0][0] == "compress-handoff"
+    assert "归档" in fake.events[0][1]["instructions"]

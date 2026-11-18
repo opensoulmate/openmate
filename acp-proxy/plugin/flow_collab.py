@@ -64,6 +64,9 @@ DEFAULT_LEASE_SECONDS = 600.0             # 抢占锁租约（心跳续租）
 DEFAULT_REMIND_INTERVAL_S = 3600.0        # 催办最小间隔（催办去重）
 DEFAULT_AGENT_DAILY_BUDGET_USD = float(os.environ.get("COLLAB_AGENT_DAILY_BUDGET_USD") or 5.0)
 DEFAULT_AGENT_DAILY_BUDGET_TOKENS = int(os.environ.get("COLLAB_AGENT_DAILY_BUDGET_TOKENS") or 2_000_000)
+HISTORY_MAX = 50                          # E5 工单 history 有界（防逐任务累积）
+DEFAULT_BEAT_INTERVAL_S = float(os.environ.get("COLLAB_BEAT_INTERVAL_S") or 15.0)  # B3 心跳拍距
+DEAD_BEATS = 3                            # B3 三拍判死（Multica 45s=3×15s 同位）
 
 TASK_ID_PATTERN_PREFIX = "TO-"
 
@@ -97,6 +100,47 @@ def wake_decision(facts: dict[str, Any]) -> dict[str, Any]:
     if same_task:
         return {"action": "coalesce", "reason": "merge-into-in-flight"}
     return {"action": "defer", "reason": "lock-held-queued"}
+
+
+# ---- B2 派发序（Person>Work>Recovery + 防饿死 aging 份额）----
+
+def dispatch_order(tasks: list, now: float, *, aging_after_s: float = 3600.0,
+                   share_every: int = 4) -> list:
+    """派发序（对位 queued-run-dispatch-order.ts）：层内就绪→年龄排序 + 防饿死份额。
+
+    三级派发序：person（人发起/人工节点）> work（agent 发起）> recovery（恢复回队），
+    层内按等待时长最久优先（先到先做）。
+    防饿死：每第 share_every 个名额给等待 >aging_after_s 的最老任务（OLDEST_DISPATCH_SHARE）；
+    每第 share_every 个名额（偏移 2）保留给 recovery 级（恢复不被新活挤死）。
+    纯函数：输入工单序列，输出派发顺序（不碰存储）。
+    """
+    tier = {"person": 0, "work": 1, "recovery": 2}
+
+    def _age(t):
+        return (t.get("created_at") or 0.0)
+
+    items = [t if isinstance(t, dict) else asdict(t) for t in tasks]
+    pool = sorted(items, key=lambda t: (tier.get(str(t.get("origin") or "person"), 1),
+                                        _age(t)))
+    ordered: list[dict] = []
+    while pool:
+        slot = len(ordered) + 1
+        chosen_index = 0
+        if slot % share_every == 0:
+            # 防饿死名额：等待 >aging_after_s 的最久者优先（不限层级）
+            aged = [i for i, t in enumerate(pool) if now - _age(t) > aging_after_s]
+            if aged:
+                chosen_index = min(aged, key=lambda i: _age(pool[i]))
+            else:
+                chosen_index = min(range(len(pool)), key=lambda i: _age(pool[i]))
+        elif slot % share_every == 2:
+            # recovery 保留名额（有则必占，无则回退正常序）
+            recovery = [i for i, t in enumerate(pool)
+                        if str(t.get("origin") or "") == "recovery"]
+            if recovery:
+                chosen_index = min(recovery)
+        ordered.append(pool.pop(chosen_index))
+    return ordered
 
 
 # ---- E1/E2 任务包组装（上下文隔离 + 快照 diff 告知变化）----
@@ -240,6 +284,8 @@ class WorkOrder:
     assignee_kind: str = "human"  # human | agent
     target_agent: str = ""        # agent 单：A2A 目标 SoulMate
     created_by: str = "flow"
+    origin: str = "person"        # B2 派发序三级：person(人发起) | work(agent 发起) | recovery(恢复)
+    requeues: int = 0             # B3 失联回队列计数（bounded，超限→failed）
     # 内容
     title: str = ""
     instruction: str = ""
@@ -275,6 +321,8 @@ class WorkOrder:
     over_budget: bool = False
     # 可观测
     history: list[dict[str, Any]] = field(default_factory=list)
+    history_trimmed: int = 0      # E5 有界裁剪计数（上下文卫生）
+    archived: bool = False        # E5 任务包上下文已归档释放
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -303,6 +351,11 @@ class WorkOrder:
         return "overdue" if self.is_overdue(now) else "open"
 
     def note(self, event: str, detail: str = "") -> None:
+        # E5 上下文卫生：history 有界（防逐任务累积），溢出计数留痕
+        if len(self.history) >= HISTORY_MAX:
+            dropped = len(self.history) - HISTORY_MAX + 1
+            self.history = self.history[dropped:]
+            self.history_trimmed += dropped
         self.history.append({"ts": time.time(), "event": event, "detail": detail[:500]})
         self.updated_at = time.time()
 
@@ -392,6 +445,9 @@ class WorkOrderStore:
                 self.save(existing)
                 return existing, False
             now = fields.pop("now", time.time())
+            # B2 派发序三级：人发起(person) > agent 发起(work) > 恢复(recovery)
+            fields.setdefault("origin",
+                              "person" if kind in (KIND_HUMAN, KIND_APPROVAL) else "work")
             task = WorkOrder(task_id=task_id, kind=kind, status=STATUS_TODO,
                              run_id=run_id, node_id=node_id,
                              created_at=now, updated_at=now, **fields)
@@ -582,6 +638,33 @@ class WorkOrderStore:
 
         task, _ = self._mutate(task_id, _do)
         return task
+
+    def claim_next(self, assignee: str, *, claimed_by: str = "",
+                   lease_seconds: float = DEFAULT_LEASE_SECONDS,
+                   now: float | None = None) -> tuple[WorkOrder, str] | None:
+        """B2 派发序认领（心跳协议"自查名下工单"的领取面）：
+
+        按 dispatch_order（Person>Work>Recovery+防饿死份额）从该收件人的开态工单
+        取下一个可领者认领；无可领返回 None（含排队等待归因留痕）。
+        """
+        now = time.time() if now is None else now
+        candidates = [t for t in self.list(assignee=assignee, limit=10_000, now=now)
+                      if t.is_open()]
+        if not candidates:
+            return None
+        for item in dispatch_order([t.to_dict() for t in candidates], now):
+            try:
+                return self.claim(item["task_id"],
+                                  claimed_by=claimed_by or assignee,
+                                  lease_seconds=lease_seconds, now=now)
+            except CollabError as e:
+                # 领取决策漏斗（A5）：被占/被取代→顺延下一个候选
+                task = self.find(str(item["task_id"]))
+                if task is not None:
+                    task.note("claim-decision", f"skipped: {e}")
+                    self.save(task)
+                continue
+        return None
 
 
 # ---- 组织角色路由（接 RBAC 角色表）----
@@ -1005,6 +1088,8 @@ class CollabRuntime:
         self._pulse = None
         self.remind_interval_s = float(os.environ.get("COLLAB_REMIND_INTERVAL_S")
                                        or DEFAULT_REMIND_INTERVAL_S)
+        self.beat_interval_s = DEFAULT_BEAT_INTERVAL_S   # B3 心跳拍距
+        self.max_recoveries = int(os.environ.get("COLLAB_MAX_RECOVERIES") or 3)
 
     # -- 接线 --
 
@@ -1062,17 +1147,100 @@ class CollabRuntime:
         return {"ok": True, "detail": f"status={task.status}"}
 
     def _on_pulse_overdue(self, task_dict: dict) -> dict:
-        """Pulse 超时恢复钩子：催办（defer 有界重试，耗尽→attention 可见）。"""
+        """Pulse 超时恢复钩子（复用既有恢复账，勿重建）：判死→requeue；否则催办 defer。"""
         tid = str(task_dict.get("task_id") or "").removeprefix("collab:")
         task = self.store.find(tid)
         if task is None or task.status in TERMINAL_STATUSES:
             return {"action": "attention", "detail": "工单已终态"}
+        # B3 三拍判死：领取已死 → 复用 Pulse 既有 requeue 恢复（有界计数在 Pulse 账）
+        if self._claim_dead(task):
+            self._requeue_offline(task)
+            return {"action": "requeue", "detail": "runtime_offline 三拍判死回队"}
         self.remind(tid, note="超时催办")
         recoveries = int(task_dict.get("recoveries") or 0)
         if recoveries + 1 < int(task_dict.get("max_recoveries") or 3):
             return {"action": "defer", "delay_s": self.remind_interval_s,
                     "detail": "已催办，等待交付"}
         return {"action": "attention", "detail": "催办多次未交付，需人工关注"}
+
+    # -- B3 三拍判死（Multica 15s 心跳/45s=3拍 同位；恢复复用既有语义）--
+
+    def _claim_dead(self, task: WorkOrder, now: float | None = None) -> bool:
+        """已领取工单是否三拍无心跳判死（心跳即回 online）。"""
+        now = self._clock() if now is None else now
+        if task.status != STATUS_WORKING:
+            return False
+        last_seen = max(task.heartbeat_at, task.claim_at)
+        return bool(last_seen) and now - last_seen > DEAD_BEATS * self.beat_interval_s
+
+    def _requeue_offline(self, task: WorkOrder) -> WorkOrder:
+        """runtime_offline 回队列（可重试来源）：清领取锁，origin=recovery（B2 恢复级）。"""
+        def _do(t: WorkOrder) -> None:
+            t.status = STATUS_TODO
+            t.claim_token = ""
+            t.claimed_by = ""
+            t.claim_at = 0.0
+            t.lease_expires_at = 0.0
+            t.origin = "recovery"
+            t.requeues += 1
+            if t.a2a_task_id:
+                t.note("runtime_offline",
+                       f"三拍判死（{DEAD_BEATS}×{self.beat_interval_s:g}s 无心跳）"
+                       f"→ 回队列 #{t.requeues}（旧 a2a 任务 {t.a2a_task_id} 作废）")
+                t.a2a_task_id = ""
+            else:
+                t.note("runtime_offline",
+                       f"三拍判死（{DEAD_BEATS}×{self.beat_interval_s:g}s 无心跳）"
+                       f"→ 回队列 #{t.requeues}")
+        task, _ = self.store._mutate(task.task_id, _do)
+        self._emit("task-requeued", task)
+        return task
+
+    def liveness_sweep(self, now: float | None = None) -> dict[str, int]:
+        """B3 判死清扫（调度器驱动，与 Pulse 心跳解耦）：三拍无心跳→回队列（有界）。
+
+        requeues < max_recoveries → runtime_offline 回队列（origin=recovery）；
+        超限仍失联 → failed 显式收口（绝不静默）。
+        """
+        now = self._clock() if now is None else now
+        requeued = failed = 0
+        for task in self.store.list(limit=10_000, now=now):
+            if not self._claim_dead(task, now):
+                continue
+            if task.requeues < self.max_recoveries:
+                self._requeue_offline(task)
+                requeued += 1
+            else:
+                self.store.close(task.task_id, STATUS_FAILED,
+                                 note=f"三拍判死反复失联（requeues={task.requeues}）")
+                self._emit("task-failed", self.store.load(task.task_id))
+                failed += 1
+        return {"requeued": requeued, "failed": failed}
+
+    # -- E5 上下文卫生（squad nap 对位；接 Pi#5 阶段压缩）--
+
+    def _context_hygiene(self, task: WorkOrder) -> None:
+        """交付后任务包上下文归档释放（防逐任务累积）+ run 级压缩指令接 Pi#5。"""
+        if task.archived:
+            return
+        task.archived = True
+        if len(task.instruction) > 300:
+            task.instruction = task.instruction[:300] + "…（已归档）"
+        task.payload.pop("upstream_snapshot", None)
+        task.note("context-archived", "任务包上下文归档释放（正文以工单账为准）")
+        self.store.save(task)
+        try:
+            engine = self._get_engine()
+            if engine is not None:
+                # 既有 compress-handoff 事件（Pi#5）：驱动层 ContextCompressor 接指令
+                engine.emit("compress-handoff", {
+                    "run_id": task.run_id, "flow_id": task.flow_id,
+                    "node": task.node_id, "task_id": task.task_id,
+                    "instructions": "任务已交付，任务包上下文压缩归档"
+                                    "（正文/台账以工单账为准，不在摘要中摘录）",
+                })
+        except Exception:  # noqa: BLE001 — 压缩旁路绝不阻断交付
+            pass
 
     def _emit(self, event: str, task: WorkOrder) -> None:
         """通知旁路：Reflex 事件流（任务到即应激）+ 注入式 notify，never-raise。"""
@@ -1207,6 +1375,7 @@ class CollabRuntime:
         if dup:
             return task  # 幂等：绝不二次恢复
         self._emit("task-delivered", task)
+        self._context_hygiene(task)   # E5 交付即归档任务包上下文（防逐任务累积）
         engine = self._get_engine()
         if task.run_id and engine is not None:
             try:
@@ -1244,6 +1413,14 @@ class CollabRuntime:
         """
         delivered = 0
         for task in self.store.list(kind=KIND_AGENT, limit=200):
+            # B3 恢复重派：判死回队的可重试单（requeues>0 且无在途）→ 重新派发
+            if task.status == STATUS_TODO and task.requeues > 0 and not task.a2a_task_id:
+                try:
+                    await self.dispatch(task)
+                except Exception as e:  # noqa: BLE001 — 重派失败留痕下拍再试
+                    task.note("redispatch-failed", f"{type(e).__name__}: {e}")
+                    self.store.save(task)
+                continue
             if task.status not in (STATUS_TODO, STATUS_WORKING) or not task.a2a_task_id:
                 continue
             if not task.claimed_by.startswith("soulmate:"):
@@ -1278,7 +1455,7 @@ class CollabRuntime:
         return delivered
 
     def check_timeouts(self, now: float | None = None) -> dict[str, int]:
-        """超时账（引擎 check_timeouts 的工单侧同步）：过期未交付 → 催办留痕。"""
+        """超时账（引擎侧同步）：过期催办 + B3 三拍判死清扫（调度器独立于 Pulse）。"""
         now = self._clock() if now is None else now
         reminded = 0
         for task in self.store.list(limit=10_000, now=now):
@@ -1289,7 +1466,10 @@ class CollabRuntime:
             if did:
                 reminded += 1
                 self._emit("task-reminded", updated)
-        return {"reminded": reminded}
+        alive = self.liveness_sweep(now)
+        return {"reminded": reminded,
+                "requeued": alive.get("requeued", 0),
+                "failed": alive.get("failed", 0)}
 
     def sync_timeout_close(self, task_id: str, on_timeout: str) -> WorkOrder:
         """引擎超时处置同步收口单据：fail→failed，skip→cancelled。"""

@@ -373,3 +373,32 @@ def test_config_fingerprint_changes_with_inputs():
     assert a == config_fingerprint("engineer", "soulmate", {"max_tokens": 10}, "full")
     assert a != config_fingerprint("engineer", "soulmate", {"max_tokens": 20}, "full")
     assert a != config_fingerprint("manager", "soulmate", {"max_tokens": 10}, "full")
+
+
+# ── B4 deadline 独立定时器 ─────────────────────────────────────────
+
+def test_next_deadline_wake_aligns_to_deadline():
+    """B4：唤醒对齐最近到期点（直派，延迟下限=timer 精度），无到期回落 interval"""
+    from plugin.flow_engine import next_deadline_wake
+    now = 1000.0
+    assert next_deadline_wake(now, [now + 5, now + 30], 20.0) == 5.0    # 对齐最近 deadline
+    assert next_deadline_wake(now, [now + 0.2], 20.0) == 0.5            # min_sleep 兜底
+    assert next_deadline_wake(now, [now - 5], 20.0) == 20.0             # 过期忽略
+    assert next_deadline_wake(now, [], 20.0) == 20.0                    # 无到期回落
+    assert next_deadline_wake(now, [now + 100], 20.0) == 20.0           # 不超 interval
+
+
+def test_upcoming_deadlines_from_gates_and_tasks(env):
+    """B4：到期清单=挂起闸 deadline + 工单 due_at（定时器对齐数据源，独立于心跳）"""
+    engine, runtime, calls = env
+    _register(engine, {
+        "id": "dl-flow", "name": "到期流", "triggers": [{"type": "manual"}],
+        "nodes": [{"id": "wait", "type": "human", "user": "x", "task": "交",
+                   "timeout_hours": 1}],
+    })
+    run = asyncio.run(engine.run_now("dl-flow", {"type": "manual"}))
+    task = runtime.store.load(run.approval.task_id)
+    deadlines = engine.upcoming_deadlines()
+    gate_due = run.approval.created_at + 1 * 3600
+    assert any(abs(d - gate_due) < 5 for d in deadlines)        # 闸 deadline
+    assert any(abs(d - task.due_at) < 5 for d in deadlines)     # 工单 due_at

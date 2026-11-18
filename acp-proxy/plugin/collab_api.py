@@ -39,6 +39,12 @@ class ClaimRequest(PydanticBaseModel):
     lease_seconds: float = 600.0
 
 
+class ClaimNextRequest(PydanticBaseModel):
+    assignee: str
+    claimed_by: str = ""
+    lease_seconds: float = 600.0
+
+
 class HeartbeatRequest(PydanticBaseModel):
     claim_token: str
 
@@ -140,6 +146,23 @@ def build_collab_router(runtime=None) -> APIRouter:
         view = _task_view(runtime, task, runtime._clock())
         view["history"] = task.history
         return view
+
+    @router.post("/claim-next")
+    async def claim_next(req: ClaimNextRequest) -> dict[str, Any]:
+        """B2 派发序认领（心跳协议「自查名下工单」领取面）：
+
+        按 Person>Work>Recovery+防饿死份额取下一个可领工单认领；无可领回
+        {task: null, reason}（排队等待归因，A5 决策漏斗同源）。
+        """
+        result = runtime.store.claim_next(
+            req.assignee, claimed_by=req.claimed_by or req.assignee,
+            lease_seconds=max(1.0, req.lease_seconds))
+        if result is None:
+            return {"task": None, "reason": "no-candidates",
+                    "assignee": req.assignee}
+        task, token = result
+        return {"task": _task_view(runtime, task, runtime._clock()),
+                "claim_token": token}
 
     @router.post("/tasks/{task_id}/claim")
     async def claim_task(task_id: str, req: ClaimRequest) -> dict[str, Any]:

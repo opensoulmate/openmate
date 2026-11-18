@@ -1341,6 +1341,23 @@ class FlowEngine:
         except FlowRunError:
             pass
 
+    def upcoming_deadlines(self, horizon_s: float = 86400.0) -> list[float]:
+        """B4：已知到期时间清单（挂起闸 deadline + 协作工单 due_at）——定时器对齐用。"""
+        now = time.time()
+        deadlines: list[float] = []
+        for run in self.store.list_runs(status=RUN_STATUS_WAITING, limit=200):
+            if run.approval is not None and run.approval.status == "pending":
+                deadlines.append(
+                    run.approval.created_at + run.approval.timeout_hours * 3600)
+        try:
+            from plugin.flow_collab import get_collab
+            for task in get_collab().store.list(limit=500, now=now):
+                if task.is_open() and task.due_at:
+                    deadlines.append(task.due_at)
+        except Exception:  # noqa: BLE001 — 工单账不可达不阻断定时器
+            pass
+        return [d for d in deadlines if 0 < d - now <= horizon_s]
+
     # 可观测（面板数据源，经 MCP 工具暴露）
     def run_summary(self, run: FlowRun) -> dict[str, Any]:
         nodes = []
@@ -1408,6 +1425,19 @@ def _fmt_ts(ts: float | None) -> str:
     return _dt.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
 
 
+def next_deadline_wake(now: float, deadlines: list[float], interval: float,
+                       *, min_sleep: float = 0.5) -> float:
+    """B4 deadline 独立定时器（对位 scheduled-work.ts）：已知到期时间直派——
+
+    唤醒对齐最近 deadline，延迟下限=timer 精度（不等心跳周期）；心跳只做兜底
+    recovery scan。无近期到期 → 回落固定 interval。
+    """
+    future = [d for d in deadlines if d > now]
+    if not future:
+        return interval
+    return max(min_sleep, min(min(future) - now, interval))
+
+
 # ---- 调度器（cron tick + 审批超时 + 断点续跑）----
 
 class FlowScheduler:
@@ -1434,14 +1464,19 @@ class FlowScheduler:
 
     async def _loop(self) -> None:
         while True:
-            await asyncio.sleep(self.interval_seconds)
+            # B4 deadline 独立定时器：唤醒对齐最近到期点（直派延迟下限=timer 精度），
+            # 心跳只做兜底 recovery——不等固定周期
+            await asyncio.sleep(next_deadline_wake(
+                time.time(), self.engine.upcoming_deadlines(), self.interval_seconds))
             try:
                 self.engine.tick()
                 self.engine.check_timeouts()
             except Exception as e:  # noqa: BLE001 — 调度循环绝不因单次失败退出
                 logger.warning("流程调度 tick 失败: %s", e)
             try:
-                await self.engine.collab().poll_agent_tasks()  # agent 工单结果回流
+                collab = self.engine.collab()
+                await collab.poll_agent_tasks()   # agent 工单结果回流
+                collab.check_timeouts()           # 催办 + B3 三拍判死清扫（独立于 Pulse）
             except Exception as e:  # noqa: BLE001
                 logger.warning("协作工单回流轮询失败: %s", e)
 
