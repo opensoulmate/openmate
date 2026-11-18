@@ -66,3 +66,4 @@ tools:
           description: 参考记录条数
 flows:
   - flows/daily-report.yaml
+  - flows/greet-branch.yaml

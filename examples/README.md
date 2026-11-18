@@ -14,6 +14,8 @@
   （经 MCP 工具注册桥，UI 与对话共用；`build_report` 演示 approval=always 人工确认闸）
 - **流程定义**：`flows/daily-report.yaml`（cron 触发 → 调工具（含重试/超时）→
   人工审批闸 → 出报告 → 收尾通知，可观测进 flow-console 运行台）
+  + `flows/greet-branch.yaml`（**decision 判断分支**样板：when/then/else 分流，
+  /will 观察窗「判断分支可视化」渲染的即此结构）
 
 想跑它：把 `demo-greeter/` 整目录复制（或软链）到 `plugins/` 下重启服务即可；
 用完删掉，`DELETE /flows/{flow_id}` 可清掉它注册的流程与实例。

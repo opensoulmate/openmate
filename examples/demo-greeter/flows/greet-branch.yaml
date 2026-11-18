@@ -1,0 +1,47 @@
+# 问候分支路由 — 判断分支示例流程（decision 节点 when/then/else 全形状）
+#
+# 链路：查问候记录（tool）→ 分流（decision：记录数>0 走 then 问候团队，否则走 else 直接收尾）
+#      → 问候团队（tool）→ 收尾通知
+# 目的：给流程开发者抄写的 decision 分支样板——/will 观察窗的「判断分支可视化」
+#      渲染的就是这类 when/then/else 结构；两条分支都可经 manual 触发实测走到
+#      （先跑一次记录为空走 else，跑过 daily-greet-report 产生记录后再跑走 then）。
+id: greet-branch
+name: 问候分支路由
+version: 1
+triggers:
+  - type: manual
+nodes:
+  - id: fetch-log
+    type: tool
+    tool: demo-greeter__greet_log
+    args:
+      limit: 5
+    retry:
+      max: 2
+      backoff: fixed
+      base_seconds: 1
+    timeout_seconds: 30
+  - id: route
+    type: decision
+    when: "$.fetch-log.count > 0"
+    then: greet-team
+    else: finish
+  - id: greet-team
+    type: tool
+    tool: demo-greeter__greet
+    args:
+      name: "团队"
+      style: casual
+    retry:
+      max: 1
+      backoff: fixed
+      base_seconds: 1
+    timeout_seconds: 30
+  - id: finish
+    type: action
+    actions:
+      - type: notify
+        channel: in-app
+        message: "问候分支路由完成"
+observability:
+  retain_runs: 20

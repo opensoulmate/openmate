@@ -125,4 +125,29 @@ def build_flow_router(engine: FlowEngine | None = None) -> APIRouter:
             "count": len(runs),
         }
 
+    # ⚠️ 必须注册在 /flows/runs* 之后：FastAPI 按定义顺序匹配，
+    # 先注册 /{flow_id} 会把 "runs" 吞成 flow_id。
+    @router.get("/{flow_id}")
+    async def get_flow(flow_id: str) -> dict[str, Any]:
+        """流程定义详情（Will 观察窗数据源：节点全量配置 + 判断分支 when/then/else）"""
+        from dataclasses import asdict
+
+        try:
+            defn = engine.get_flow(flow_id)
+        except FlowRunError:
+            raise HTTPException(status_code=404, detail=f"流程未注册: {flow_id}")
+        plugin_id = next(
+            (item["plugin_id"] for item in engine.list_flows() if item["id"] == flow_id),
+            "",
+        )
+        return {
+            "id": defn.id,
+            "name": defn.name,
+            "version": defn.version,
+            "plugin_id": plugin_id,
+            "triggers": [asdict(t) for t in defn.triggers],
+            "retain_runs": defn.retain_runs,
+            "nodes": [asdict(n) for n in defn.nodes],
+        }
+
     return router
