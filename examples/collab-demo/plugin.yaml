@@ -1,0 +1,27 @@
+id: collab-demo
+name: 协作流程演示
+version: 0.1.0
+description: 协作三件套示例——组织角色路由派单（agent_node→员工 SoulMate 干活回流→human_node 验收交付），流程 YAML 只写 role 不写人
+author: soulmate
+entry: main.py
+permissions:
+  - tool.register
+  - tool.call
+  - flow.register
+  - data.read
+tools:
+  - name: collect_summary
+    description: 汇总一段数据的条数与合计（示例取数节点，确定性计算）
+    handler: handle_collect_summary
+    permissions: [tool.call, data.read]
+    approval: never
+    input_schema:
+      type: object
+      properties:
+        numbers:
+          type: array
+          items: {type: number}
+          description: 待汇总数字列表
+      required: [numbers]
+flows:
+  - flows/team-handoff.yaml

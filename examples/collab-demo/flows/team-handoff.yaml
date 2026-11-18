@@ -1,0 +1,51 @@
+# 团队交接协作 — 协作三件套示例流程（组织角色路由 / agent_node / human_node / 预算）
+#
+# 验收链路：取数（tool）→ 分析（agent_node：按 role=engineer 路由到员工的 SoulMate，
+#   经 A2A 干活回流，结果进 $.analyze.result）→ 验收（human_node：按 role=manager
+#   路由到人，收件箱认领/交付回流）→ 收尾通知
+# D2 角色路由=数据：节点只写 role 不写人——谁接单由 org 表（rbac/org.py）+
+#   RBAC 角色表决定（成员满载沿 reports_to 汇报链找 backup）。
+# C1 预算：analyze 节点带预算块；员工 Agent 日预算（agent 档）超硬停线时派发前拦截，
+#   转 human 审批放行后原地续跑（C2 真闸，软预算禁硬杀）。
+id: team-handoff
+name: 团队交接协作
+version: 1
+triggers:
+  - type: manual
+nodes:
+  - id: fetch
+    type: tool
+    tool: collab-demo__collect_summary
+    args:
+      numbers: [3, 7, 11]
+    retry:
+      max: 2
+      backoff: fixed
+      base_seconds: 1
+    timeout_seconds: 30
+  - id: analyze
+    type: agent
+    role: engineer              # 只写 role 不写人（org 表/RBAC 决定接单人）
+    target_agent: soulmate      # 该员工的 SoulMate（A2A 目标）
+    task: "分析取数结果并给出结论"
+    timeout_hours: 24
+    on_timeout: fail
+    budget:
+      max_tokens: 100000
+      max_cost_usd: 1.0
+      max_duration_seconds: 600
+  - id: review
+    type: human
+    role: manager               # 只写 role（验收人=持有 manager 角色者）
+    task: "复核 SoulMate 分析结论并交付验收意见"
+    form: "验收意见（通过/驳回+说明）"
+    timeout_hours: 48
+    on_timeout: fail
+  - id: finish
+    type: action
+    actions:
+      - type: notify
+        channel: in-app
+        message: "团队交接协作完成（分析已验收）"
+observability:
+  retain_runs: 20
