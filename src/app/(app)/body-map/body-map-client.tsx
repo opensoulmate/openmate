@@ -22,7 +22,7 @@ interface OrganStatus {
 }
 
 // Organ layout: position each organ anatomically on the body
-// Coordinates are percentages relative to the SVG viewBox
+// Coordinates are viewBox units on a 176x100 canvas（宽幅 fit-to-screen 布局；30 器官 7 行防碰撞网格，中英日三语标签零叠字）
 // healthKey: /api/health/all 器官键映射（soma 后端键是 soma-connector）
 // self: 产品自述条目（Mate=OpenMate 进程本体，无器官功能页）
 const ORGAN_LAYOUT: Array<{
@@ -38,60 +38,60 @@ const ORGAN_LAYOUT: Array<{
   self?: boolean;
 }> = [
   // Brain area (head)
-  { key: "soul", label: "灵魂", emoji: "🧠", category: "core", x: 50, y: 6, href: "/dashboard", system: "brain" },
-  { key: "cortex", label: "皮层", emoji: "🧩", category: "core", x: 38, y: 10, href: "/cortex", system: "brain" },
-  { key: "hippo", label: "海马体", emoji: "🧠", category: "organ", x: 62, y: 10, href: "/hippo", system: "brain" },
-  { key: "mind", label: "心智", emoji: "💭", category: "organ", x: 50, y: 13, href: "/mind", system: "brain" },
-  { key: "reflex", label: "反射", emoji: "⚡", category: "organ", x: 30, y: 13, href: "/reflex", system: "brain" },
+  { key: "soul", label: "灵魂", emoji: "🧠", category: "core", x: 88, y: 5, href: "/dashboard", system: "brain" },
+  { key: "cortex", label: "皮层", emoji: "🧩", category: "core", x: 49, y: 5, href: "/cortex", system: "brain" },
+  { key: "hippo", label: "海马体", emoji: "🧠", category: "organ", x: 127, y: 5, href: "/hippo", system: "brain" },
+  { key: "mind", label: "心智", emoji: "💭", category: "organ", x: 88, y: 19, href: "/mind", system: "brain" },
+  { key: "reflex", label: "反射", emoji: "⚡", category: "organ", x: 12, y: 5, href: "/reflex", system: "brain" },
 
   // Eyes/Sense (face)
-  { key: "sense", label: "感官", emoji: "👁", category: "service", x: 42, y: 17, href: "/sense", system: "sensory" },
-  { key: "vision", label: "视觉", emoji: "🎨", category: "organ", x: 58, y: 17, href: "/vision", system: "sensory" },
-  { key: "capture", label: "捕获", emoji: "📸", category: "service", x: 35, y: 19, href: "/capture", system: "sensory" },
+  { key: "sense", label: "感官", emoji: "👁", category: "service", x: 12, y: 19, href: "/sense", system: "sensory" },
+  { key: "vision", label: "视觉", emoji: "🎨", category: "organ", x: 49, y: 19, href: "/vision", system: "sensory" },
+  { key: "capture", label: "捕获", emoji: "📸", category: "service", x: 127, y: 19, href: "/capture", system: "sensory" },
 
   // Voice (throat)
-  { key: "voice", label: "声带", emoji: "🎤", category: "organ", x: 50, y: 22, href: "/voice", system: "sensory" },
-  { key: "echo", label: "回声", emoji: "🔊", category: "service", x: 40, y: 24, href: "/echo", system: "sensory" },
+  { key: "voice", label: "声带", emoji: "🎤", category: "organ", x: 67, y: 33, href: "/voice", system: "sensory" },
+  { key: "echo", label: "回声", emoji: "🔊", category: "service", x: 164, y: 19, href: "/echo", system: "sensory" },
 
   // Chest area
-  { key: "vital", label: "体征", emoji: "📊", category: "service", x: 45, y: 32, href: "/vital", system: "circulatory" },
-  { key: "pulse", label: "脉搏", emoji: "💓", category: "organ", x: 55, y: 30, href: "/pulse", system: "circulatory" },
-  { key: "immune", label: "免疫", emoji: "🛡", category: "service", x: 38, y: 36, href: "/immune", system: "immune" },
+  { key: "vital", label: "体征", emoji: "📊", category: "service", x: 49, y: 47, href: "/vital", system: "circulatory" },
+  { key: "pulse", label: "脉搏", emoji: "💓", category: "organ", x: 109, y: 33, href: "/pulse", system: "circulatory" },
+  { key: "immune", label: "免疫", emoji: "🛡", category: "service", x: 12, y: 47, href: "/immune", system: "immune" },
 
   // Arms (Nerve/Will)
-  { key: "nerve", label: "神经", emoji: "⚡", category: "service", x: 20, y: 32, href: "/nerve", system: "nervous" },
-  { key: "will", label: "意志", emoji: "✨", category: "core", x: 80, y: 32, href: "/will", system: "nervous" },
+  { key: "nerve", label: "神经", emoji: "⚡", category: "service", x: 21, y: 33, href: "/nerve", system: "nervous" },
+  { key: "will", label: "意志", emoji: "✨", category: "core", x: 155, y: 33, href: "/will", system: "nervous" },
 
   // Core (torso center)
-  { key: "gland", label: "腺体", emoji: "🧪", category: "service", x: 50, y: 40, href: "/gland", system: "endocrine" },
-  { key: "heredity", label: "遗传链", emoji: "🔗", category: "organ", x: 58, y: 38, href: "/heredity", system: "endocrine" },
+  { key: "gland", label: "腺体", emoji: "🧪", category: "service", x: 88, y: 47, href: "/gland", system: "endocrine" },
+  { key: "heredity", label: "遗传链", emoji: "🔗", category: "organ", x: 127, y: 47, href: "/heredity", system: "endocrine" },
 
   // Vein (vascular system - spread across body)
-  { key: "vein", label: "血管", emoji: "🩸", category: "core", x: 30, y: 40, href: "/vein", system: "circulatory" },
+  { key: "vein", label: "血管", emoji: "🩸", category: "core", x: 164, y: 47, href: "/vein", system: "circulatory" },
 
   // Soma/Mate（核心 8 补齐：躯体采集层 + 共生伙伴本体）
-  { key: "soma", label: "躯体", emoji: "🤖", category: "core", x: 66, y: 43, href: "/soma", system: "motor", healthKey: "soma-connector" },
-  { key: "mate", label: "伙伴", emoji: "🤝", category: "core", x: 65, y: 25, href: "", system: "brain", self: true },
+  { key: "soma", label: "躯体", emoji: "🤖", category: "core", x: 67, y: 61, href: "/soma", system: "motor", healthKey: "soma-connector" },
+  { key: "mate", label: "伙伴", emoji: "🤝", category: "core", x: 164, y: 5, href: "", system: "brain", self: true },
 
   // Hands (Limb/Link)
-  { key: "limb", label: "四肢", emoji: "💪", category: "organ", x: 15, y: 44, href: "/limb", system: "motor" },
-  { key: "link", label: "突触", emoji: "🔗", category: "service", x: 85, y: 44, href: "/link", system: "motor" },
+  { key: "limb", label: "四肢", emoji: "💪", category: "organ", x: 21, y: 61, href: "/limb", system: "motor" },
+  { key: "link", label: "突触", emoji: "🔗", category: "service", x: 155, y: 61, href: "/link", system: "motor" },
 
   // Abdomen
-  { key: "marrow", label: "骨髓", emoji: "🦴", category: "service", x: 42, y: 48, href: "/marrow", system: "immune" },
-  { key: "gene", label: "基因", emoji: "🧬", category: "service", x: 58, y: 48, href: "/gene", system: "endocrine" },
+  { key: "marrow", label: "骨髓", emoji: "🦴", category: "service", x: 109, y: 61, href: "/marrow", system: "immune" },
+  { key: "gene", label: "基因", emoji: "🧬", category: "service", x: 109, y: 75, href: "/gene", system: "endocrine" },
 
   // Lower torso
-  { key: "nest", label: "巢穴", emoji: "🏠", category: "organ", x: 50, y: 55, href: "/nest", system: "isolation" },
-  { key: "mirror", label: "镜像", emoji: "🪞", category: "service", x: 38, y: 58, href: "/mirror", system: "isolation" },
+  { key: "nest", label: "巢穴", emoji: "🏠", category: "organ", x: 67, y: 75, href: "/nest", system: "isolation" },
+  { key: "mirror", label: "镜像", emoji: "🪞", category: "service", x: 21, y: 75, href: "/mirror", system: "isolation" },
 
   // Legs (Foundation)
-  { key: "trajectory", label: "轨迹", emoji: "📊", category: "system", x: 42, y: 68, href: "/trajectory", system: "foundation" },
-  { key: "mcp", label: "MCP", emoji: "🔌", category: "system", x: 58, y: 68, href: "/mcp", system: "foundation" },
+  { key: "trajectory", label: "轨迹", emoji: "📊", category: "system", x: 88, y: 89, href: "/trajectory", system: "foundation" },
+  { key: "mcp", label: "MCP", emoji: "🔌", category: "system", x: 155, y: 75, href: "/mcp", system: "foundation" },
 
   // Feet (Infrastructure)
-  { key: "learn", label: "Learn", emoji: "📚", category: "system", x: 45, y: 80, href: "/learn", system: "foundation" },
-  { key: "diagnostics", label: "Diagnostics", emoji: "🩺", category: "system", x: 55, y: 80, href: "/monitoring", system: "foundation" },
+  { key: "learn", label: "Learn", emoji: "📚", category: "system", x: 44, y: 89, href: "/learn", system: "foundation" },
+  { key: "diagnostics", label: "Diagnostics", emoji: "🩺", category: "system", x: 132, y: 89, href: "/monitoring", system: "foundation" },
 ];
 
 const SYSTEM_COLORS: Record<string, { fill: string; stroke: string; glow: string }> = {
@@ -247,7 +247,7 @@ const RELATIONS: Array<{ id: string; from: string; to: string; dir: "oneway" | "
 ];
 
 // 拖动位置持久化（localStorage；重置按钮恢复解剖默认位）
-const POSITIONS_KEY = "openmate-body-map-positions";
+const POSITIONS_KEY = "openmate-body-map-positions-v2"; // v2=160x100 宽幅画布（旧 100x100 缓存不兼容）
 type PosMap = Record<string, { x: number; y: number }>;
 const DEFAULT_POSITIONS: PosMap = Object.fromEntries(
   ORGAN_LAYOUT.map((o) => [o.key, { x: o.x, y: o.y }]),
@@ -297,27 +297,27 @@ function OrganNode({
         <circle
           cx={pos.x}
           cy={pos.y}
-          r="4.5"
+          r="5.2"
           fill="none"
           stroke={colors.fill}
           strokeWidth="0.3"
           opacity="0.4"
         >
-          <animate attributeName="r" from="4.5" to="8" dur="2s" repeatCount="indefinite" />
+          <animate attributeName="r" from="5.9" to="10" dur="2s" repeatCount="indefinite" />
           <animate attributeName="opacity" from="0.4" to="0" dur="2s" repeatCount="indefinite" />
         </circle>
       )}
 
       {/* 悬停/选中高亮环（关联邻居可视） */}
       {active && (
-        <circle cx={pos.x} cy={pos.y} r="6.2" fill="none" stroke={colors.fill} strokeWidth="0.55" opacity={0.9} />
+        <circle cx={pos.x} cy={pos.y} r="7.9" fill="none" stroke={colors.fill} strokeWidth="0.6" opacity={0.9} />
       )}
 
       {/* Main circle */}
       <circle
         cx={pos.x}
         cy={pos.y}
-        r="4"
+        r="5.0"
         fill={isError ? "#ef4444" : isLoading ? "#6b7280" : colors.fill}
         stroke={isError ? "#dc2626" : colors.stroke}
         strokeWidth="0.5"
@@ -326,18 +326,18 @@ function OrganNode({
 
       {/* Status indicator */}
       {isOk && (
-        <circle cx={pos.x + 3} cy={pos.y - 3} r="1.2" fill="#22c55e" stroke="#16a34a" strokeWidth="0.3" />
+        <circle cx={pos.x + 3.8} cy={pos.y - 3.8} r="1.5" fill="#22c55e" stroke="#16a34a" strokeWidth="0.3" />
       )}
       {isError && (
-        <circle cx={pos.x + 3} cy={pos.y - 3} r="1.2" fill="#ef4444" stroke="#dc2626" strokeWidth="0.3" />
+        <circle cx={pos.x + 3.8} cy={pos.y - 3.8} r="1.5" fill="#ef4444" stroke="#dc2626" strokeWidth="0.3" />
       )}
 
       {/* Emoji */}
       <text
         x={pos.x}
-        y={pos.y + 1.2}
+        y={pos.y + 1.7}
         textAnchor="middle"
-        fontSize="4"
+        fontSize="5.4"
         className="select-none pointer-events-none"
       >
         {organ.emoji}
@@ -346,9 +346,9 @@ function OrganNode({
       {/* Label */}
       <text
         x={pos.x}
-        y={pos.y + 7}
+        y={pos.y + 6.8}
         textAnchor="middle"
-        fontSize="2.2"
+        fontSize="2.8"
         fill="currentColor"
         fontWeight="500"
         className="select-none pointer-events-none"
@@ -403,14 +403,18 @@ export function BodyMapClient() {
     try { localStorage.removeItem(POSITIONS_KEY); } catch { /* 忽略 */ }
   };
 
+  // viewBox 176x100 fit-to-screen：preserveAspectRatio=meet 时按最小缩放比+居中偏移反算
   const svgCoords = (clientX: number, clientY: number) => {
     const svg = svgRef.current;
     if (!svg) return null;
     const rect = svg.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return null;
+    const scale = Math.min(rect.width / 176, rect.height / 100);
+    const offX = (rect.width - 176 * scale) / 2;
+    const offY = (rect.height - 100 * scale) / 2;
     return {
-      x: Math.min(97, Math.max(3, ((clientX - rect.left) / rect.width) * 100)),
-      y: Math.min(97, Math.max(3, ((clientY - rect.top) / rect.height) * 100)),
+      x: Math.min(172, Math.max(4, (clientX - rect.left - offX) / scale)),
+      y: Math.min(96, Math.max(4, (clientY - rect.top - offY) / scale)),
     };
   };
 
@@ -589,9 +593,9 @@ export function BodyMapClient() {
         <div className="body-map-content flex-1 flex items-center justify-center p-3 lg:p-6">
           <svg
             ref={svgRef}
-            viewBox="0 0 100 100"
-            className="w-full max-w-2xl h-auto"
-            style={{ maxHeight: "100%", touchAction: "none" }}
+            viewBox="0 0 176 100"
+            className="h-full w-full"
+            style={{ touchAction: "none" }}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
             onPointerLeave={handlePointerUp}
@@ -616,7 +620,8 @@ export function BodyMapClient() {
             <rect width="100" height="100" fill="url(#grid)" />
             <rect width="100" height="100" fill="url(#bodyGlow)" />
 
-            {/* Body outline (simplified) */}
+            {/* Body outline (simplified) — x1.76 宽幅拉伸配 176x100 画布 */}
+            <g transform="scale(1.76 1)">
             {/* Head */}
             <ellipse cx="50" cy="10" rx="10" ry="9" fill="none" stroke="currentColor" strokeWidth="0.2" opacity="0.15" />
             {/* Neck */}
@@ -637,6 +642,7 @@ export function BodyMapClient() {
             <path d="M 40 72 L 38 82 L 37 92 L 36 97" fill="none" stroke="currentColor" strokeWidth="0.2" opacity="0.1" />
             {/* Right leg */}
             <path d="M 60 72 L 62 82 L 63 92 L 64 97" fill="none" stroke="currentColor" strokeWidth="0.2" opacity="0.1" />
+            </g>
 
             {/* 关系连线（组件真实关系；拖动跟随；悬停高亮关联、其余淡化） */}
             {RELATIONS.map((rel) => {
