@@ -358,10 +358,14 @@ def _on_plugin_installed(grown: dict) -> None:
 
 
 from plugin.flow_api import build_flow_router  # noqa: E402
+from plugin.flow_studio_api import build_flow_studio_router  # noqa: E402
 from plugin.forge_api import build_forge_router  # noqa: E402
 from plugin.collab_api import build_collab_router  # noqa: E402
 from plugin.governance_api import build_governance_router  # noqa: E402
 
+# ⚠️ 建流零门槛（flow_studio：模板/一句话建流/预览/保存/YAML 导出）必须先于
+# build_flow_router 注册：FastAPI 按注册序匹配，/flows/templates 会被 /flows/{flow_id} 吞掉。
+app.include_router(build_flow_studio_router())
 app.include_router(build_flow_router())
 app.include_router(build_collab_router())   # 任务收发台（每人收件箱 API）
 app.include_router(build_governance_router())  # MCP 治理观察面（策略+审计）
