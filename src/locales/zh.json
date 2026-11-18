@@ -4072,63 +4072,291 @@
       "diagnostics": "Diagnostics"
     },
     "rel": {
-      "mate-will": {
-        "note": "Mate 下达业务流：用户意图经意志编排为业务工作流"
-      },
       "mate-soul": {
-        "note": "Mate 默认直连 Soul：检索/问答 ↔ 知识记忆（三层架构核心规则）"
+        "note": "Mate 客户端拉 Soul 健康总览/知识库接口"
       },
-      "soma-sense": {
-        "note": "Soma 只读采集 → Sense 多模态解析（看/听进来）"
+      "mate-cortex": {
+        "note": "Mate 调 Cortex 课程/推理规划接口"
       },
-      "sense-nerve": {
-        "note": "感知结果 → Nerve 事件总线分发"
+      "mate-hippo": {
+        "note": "Mate 拉 Hippo 记忆健康接口"
       },
-      "nerve-soma": {
-        "note": "Nerve → Soma 分布式节点消息分发（采集调度下行）"
+      "mate-mind": {
+        "note": "Mate 拉 Mind 人格/情感接口"
       },
-      "nerve-soul": {
-        "note": "事件/轨迹 → Soul 存储（trajectory_events）"
+      "mate-reflex": {
+        "note": "Mate 观察面板读 Reflex 事件/统计（acp-proxy :8092）"
+      },
+      "mate-sense": {
+        "note": "Mate 拉 Sense 感知健康接口"
+      },
+      "mate-vision": {
+        "note": "Mate 拉 Vision 图像生成记录"
+      },
+      "mate-capture": {
+        "note": "Mate 拉 Capture 捕获列表"
+      },
+      "mate-voice": {
+        "note": "Mate 拉 Voice 合成统计"
+      },
+      "mate-echo": {
+        "note": "Mate 拉 Echo 广播健康接口"
+      },
+      "mate-vital": {
+        "note": "Mate 拉 Vital 体征健康接口"
+      },
+      "mate-pulse": {
+        "note": "Mate 观察面板读 Pulse 心跳状态（acp-proxy :8092）"
+      },
+      "mate-immune": {
+        "note": "Mate 拉 Immune 防护健康接口"
+      },
+      "mate-nerve": {
+        "note": "Mate 拉 Nerve 健康/事件/订阅接口"
+      },
+      "mate-will": {
+        "note": "Mate 直连 Will 工作流引擎（acp-proxy :8092 /flows）"
+      },
+      "mate-gland": {
+        "note": "Mate 拉 Gland 模型调度健康接口"
+      },
+      "mate-heredity": {
+        "note": "Mate 拉 Heredity 平台兼容接口"
+      },
+      "mate-vein": {
+        "note": "Mate 拉 Vein 文件版本/存储接口"
+      },
+      "mate-soma": {
+        "note": "Mate 拉 Soma 连接器健康接口"
+      },
+      "mate-limb": {
+        "note": "Mate 拉 Limb 任务/历史接口"
+      },
+      "mate-link": {
+        "note": "Mate 拉 Link 连接器健康接口"
+      },
+      "mate-marrow": {
+        "note": "Mate 拉 Marrow 备份健康接口"
+      },
+      "mate-gene": {
+        "note": "Mate 拉 Gene 模板健康接口"
+      },
+      "mate-nest": {
+        "note": "Mate 拉 Nest 租户/策略健康接口"
+      },
+      "mate-mirror": {
+        "note": "Mate 拉 Mirror 沙箱健康接口"
+      },
+      "mate-trajectory": {
+        "note": "Mate 拉 Trajectory 轨迹统计/会话"
+      },
+      "mate-mcp": {
+        "note": "Mate 拉 MCP 服务器/工具接口"
+      },
+      "mate-learn": {
+        "note": "Mate 调 Learn 课程生成接口"
+      },
+      "mate-diagnostics": {
+        "note": "Mate 触发 Diagnostics 全器官健康巡检"
+      },
+      "soul-nerve": {
+        "note": "Soul 大脑经 Nerve 事件桥发指令/事件"
+      },
+      "soma-nerve": {
+        "note": "Soma 经 Nerve 事件桥推事件；Soma 侧事件总线接线"
+      },
+      "echo-nerve": {
+        "note": "Echo 广播经 Nerve 事件桥分发"
+      },
+      "immune-nerve": {
+        "note": "Immune 防护事件经 Nerve 事件桥上报"
+      },
+      "link-nerve": {
+        "note": "Link 集成事件经 Nerve 事件桥分发"
+      },
+      "marrow-nerve": {
+        "note": "Marrow 备份/迁移事件经 Nerve 事件桥上报"
+      },
+      "vein-nerve": {
+        "note": "Vein 文件事件经 Nerve 事件桥分发"
+      },
+      "mirror-nerve": {
+        "note": "Mirror 沙箱事件经 Nerve 事件桥上报"
       },
       "vein-soul": {
-        "note": "Vein 文件/资源流转 → Soul 知识存储"
+        "note": "Vein 文件/资源写 Soul 存储"
       },
-      "cortex-soul": {
-        "note": "Cortex 高级推理 ↔ Soul 记忆内核（RAG/图谱供给，推理结果回流）"
+      "soul-cortex": {
+        "note": "Soul 调 Cortex 多智能体协调；Cortex GraphRAG 读 Soul 知识库"
       },
-      "will-soma": {
-        "note": "Will 工作流编排 → Soma 采集调度"
+      "soul-hippo": {
+        "note": "Soul 记忆内核走 Hippo 存储管线；Hippo 回写 Soul 三库记忆"
       },
-      "link-limb": {
-        "note": "Link 双向集成 → Limb RPA 写入执行"
+      "soul-mind": {
+        "note": "Soul 情感决策读 Mind 情感分析；Mind 落 Soul 库"
       },
-      "pulse-will": {
-        "note": "Pulse 时间驱动循环 ↔ Will 定时业务流（心跳/节拍触发）"
+      "soul-learn": {
+        "note": "Soul 思考读 Learn 经验记忆；Learn 落 Soul 库"
       },
-      "reflex-nerve": {
-        "note": "Nerve 传递信号 ↔ Reflex 快速应答"
+      "soul-mirror": {
+        "note": "Soul 反思调 Mirror 元认知；Mirror 落 Soul 库"
       },
-      "reflex-will": {
-        "note": "Reflex 应激快答/熔断 ↔ Will 业务流协同"
+      "soul-heredity": {
+        "note": "Soul 主控记录自进化；Heredity 落 Soul 库"
       },
-      "gene-will": {
-        "note": "Gene 工作流模板 → Will 一键配置"
+      "soul-trajectory": {
+        "note": "Soul 检索命中记 Trajectory 轨迹；Trajectory 事件落 Soul 库"
+      },
+      "soul-gene": {
+        "note": "Soul 启动引导加载 Gene 模板引擎；Gene 模板库读 Soul 存储"
+      },
+      "soul-vital": {
+        "note": "Soul 服务启动挂 Vital 告警管理；Vital 采集器写 Soul 库"
+      },
+      "soul-nest": {
+        "note": "Soul 租户绑定经 Nest 租户管理"
+      },
+      "mcp-soul": {
+        "note": "MCP Server 读 Soul 存储（Meilisearch/Postgres）"
+      },
+      "hippo-mcp": {
+        "note": "Hippo 会话授权经 MCP 会话门"
+      },
+      "hippo-will": {
+        "note": "Hippo 记忆衰减后台任务进 Will 任务队列"
+      },
+      "hippo-gland": {
+        "note": "Hippo 记忆蒸馏调 Gland 模型路由"
+      },
+      "hippo-immune": {
+        "note": "Hippo 记忆入库前经 Immune 内容审核脱敏"
       },
       "gland-cortex": {
-        "note": "Gland 模型统一调度 → Cortex 推理供给"
+        "note": "Gland 模型路由复用 Cortex 重试策略"
       },
-      "hippo-soul": {
-        "note": "Soul 永久存储 ↔ Hippo 记忆生命周期（归档/遗忘/过期）"
+      "gland-hippo": {
+        "note": "Gland 路由决策记 Hippo 决策日志"
       },
-      "mirror-will": {
-        "note": "Mirror 沙箱 → Will 工作流/连接器调试试跑"
+      "gland-immune": {
+        "note": "Gland 模型输出经 Immune 内容审核"
+      },
+      "sense-gland": {
+        "note": "Sense OCR 推理经 Gland 模型路由"
+      },
+      "sense-trajectory": {
+        "note": "Sense 行为感知写 Trajectory 事件"
+      },
+      "trajectory-cortex": {
+        "note": "Trajectory 分支摘要用 Cortex token 归因"
+      },
+      "trajectory-gland": {
+        "note": "Trajectory 摘要生成调 Gland 模型路由"
+      },
+      "will-nest": {
+        "note": "Will 流程检查点经 Nest 租户隔离"
+      },
+      "will-learn": {
+        "note": "Will 任务执行收集 Learn 经验"
+      },
+      "will-heredity": {
+        "note": "Will 主动行为触发 Heredity 进化周期"
+      },
+      "will-soul": {
+        "note": "Will 工作流状态落 Soul 库"
+      },
+      "heredity-learn": {
+        "note": "Heredity 自进化读 Learn 长期学习"
+      },
+      "learn-nest": {
+        "note": "Learn 课程引擎经 Nest 租户隔离"
+      },
+      "capture-soul": {
+        "note": "Capture 捕获入库 Soul 知识库"
+      },
+      "capture-soma": {
+        "note": "Soma 浏览器采集插件投递页面捕获"
+      },
+      "immune-soul": {
+        "note": "Immune 审计日志落 Soul 库"
+      },
+      "diagnostics-soul": {
+        "note": "Diagnostics 健康探针巡检 Soul /api/health"
+      },
+      "diagnostics-nerve": {
+        "note": "Diagnostics 健康探针巡检 Nerve /api/nerve/health"
+      },
+      "diagnostics-vital": {
+        "note": "Diagnostics 健康探针巡检 Vital /api/vital/health"
+      },
+      "vision-soul": {
+        "note": "Vision 生成记录落 Soul 库"
+      },
+      "limb-soul": {
+        "note": "Limb 任务执行记录落 Soul 库"
+      },
+      "soma-reflex": {
+        "note": "Soma 协调核挂 Reflex 快速应激（MCP 调用捕获→应激）"
+      },
+      "soma-pulse": {
+        "note": "Soma 协调核挂 Pulse 心跳守卫"
+      },
+      "soma-gland": {
+        "note": "Soma 调 Gland 模型引擎 LLMEngine"
+      },
+      "soma-immune": {
+        "note": "Soma 输出经 Immune 注入审计门/密钥脱敏"
+      },
+      "soma-echo": {
+        "note": "Soma 回合记忆走 Echo 回声标记"
+      },
+      "soma-gene": {
+        "note": "Soma 接线 Gene 基因模板"
+      },
+      "soma-hippo": {
+        "note": "Soma 持久记忆写 Hippo 记忆库（MEMORY.md）"
+      },
+      "soma-marrow": {
+        "note": "Soma 会话文件进 Marrow 索引（index.db）"
+      },
+      "soma-vein": {
+        "note": "Soma 文件下发/下载走 Vein 数据通道"
+      },
+      "soma-limb": {
+        "note": "Soma 挂 Limb 浏览器执行器（Playwright/CDP）"
+      },
+      "soma-voice": {
+        "note": "Soma 挂 Voice 语音合成 TTSTools"
+      },
+      "soma-vision": {
+        "note": "Soma 挂 Vision 图像生成/编辑 ImageTools"
+      },
+      "soma-trajectory": {
+        "note": "Soma 回合轨迹记录 TrajectoryRecorder"
+      },
+      "soma-mcp": {
+        "note": "Soma MCP 资源接线 mcp_resources"
+      },
+      "soma-diagnostics": {
+        "note": "Soma 健康自检 HealthChecker"
+      },
+      "will-pulse": {
+        "note": "Will 工单挂 Pulse 心跳推进/超时催办"
+      },
+      "will-reflex": {
+        "note": "Will 工单异常进 Reflex 快速应激"
+      },
+      "reflex-pulse": {
+        "note": "Pulse 自检发现旁路进 Reflex 应激（on_error）"
       }
     },
     "dragHint": "拖动器官可重排布局（自动记住）；悬停看关联邻居，点击看关系说明",
     "resetLayout": "重置布局",
     "relations": "关联",
-    "noRelations": "无既定关联记载",
-    "mateAbout": "Mate = OpenMate 本体——三进程之一（Soul/Soma/Mate）的客户端进程，即你正在使用的这个统一客户端/共生伙伴入口。不设独立器官功能页（产品自述）。"
+    "noRelations": "未接线（无真实代码接线证据）",
+    "mateAbout": "Mate = OpenMate 本体——三进程之一（Soul/Soma/Mate）的客户端进程，即你正在使用的这个统一客户端/共生伙伴入口。不设独立器官功能页（产品自述）。",
+    "evidence": "证据",
+    "wiringNote": "关系边=系统真实代码接线（每条附 file:line 调用证据）；设计文档仅定义器官身份，无证据的边不画",
+    "wiredCount": "真实接线"
   },
   "topology": {
     "title": "系统拓扑 · Topology",

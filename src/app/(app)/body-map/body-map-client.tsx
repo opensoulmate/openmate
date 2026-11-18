@@ -147,30 +147,103 @@ const TORSO_OUTLINE = `
   Z
 `;
 
-// ── 器官关系（25 组件三层架构真实关系；出处：knowledge-brain/docs/open-soma-architecture.md
-//    分层架构图 + 关键边界区分表 + 组件职能表，勿编造）────────────────────────
-// dir: oneway = 上下游数据/控制流（箭头指向 to）；twoway = 层内协作/双向关系
-const RELATIONS: Array<{ id: string; from: string; to: string; dir: "oneway" | "twoway" }> = [
-  // 核心 8 主链（分层架构图：Mate ↓ Will ↓ 感知/采集层 ↓ 总线层 ↓ 大脑层）
-  { id: "mate-will", from: "mate", to: "will", dir: "oneway" },
-  { id: "mate-soul", from: "mate", to: "soul", dir: "twoway" },
-  { id: "soma-sense", from: "soma", to: "sense", dir: "oneway" },
-  { id: "sense-nerve", from: "sense", to: "nerve", dir: "oneway" },
-  { id: "nerve-soma", from: "nerve", to: "soma", dir: "oneway" },
-  { id: "nerve-soul", from: "nerve", to: "soul", dir: "oneway" },
-  { id: "vein-soul", from: "vein", to: "soul", dir: "oneway" },
-  { id: "cortex-soul", from: "cortex", to: "soul", dir: "twoway" },
-  { id: "will-soma", from: "will", to: "soma", dir: "oneway" },
-  { id: "link-limb", from: "link", to: "limb", dir: "oneway" },
-  // 应激/时序协同（Pulse=时间驱动循环、Reflex=事件驱动快速应激 ↔ Will 业务流）
-  { id: "pulse-will", from: "pulse", to: "will", dir: "twoway" },
-  { id: "reflex-nerve", from: "reflex", to: "nerve", dir: "twoway" },
-  { id: "reflex-will", from: "reflex", to: "will", dir: "twoway" },
-  // 底座支撑（组件职能表）
-  { id: "gene-will", from: "gene", to: "will", dir: "oneway" },
-  { id: "gland-cortex", from: "gland", to: "cortex", dir: "oneway" },
-  { id: "hippo-soul", from: "hippo", to: "soul", dir: "twoway" },
-  { id: "mirror-will", from: "mirror", to: "will", dir: "oneway" },
+// ── 器官关系 = 系统真实代码接线（每条边均有 file:line 调用证据，证据来源：
+//    ① 前端→后端真实 HTTP 调用 ② opensoul/acp-proxy 模块间真实 import/调用
+//    ③ 数据真实落盘流向 ④ 服务进程间真实链路；设计文档仅定义器官身份，无证据不画）──
+// dir: oneway = 调用方向（箭头指向被调方）；twoway = 双向真实接线
+const RELATIONS: Array<{ id: string; from: string; to: string; dir: "oneway" | "twoway"; note: string; evidence: string }> = [
+  { id: "mate-soul", from: "mate", to: "soul", dir: "oneway", note: "Mate 客户端拉 Soul 健康总览/知识库接口", evidence: "openmate/src/app/(app)/soul/soul-client.tsx:66 fetch /api/health/all" },
+  { id: "mate-cortex", from: "mate", to: "cortex", dir: "oneway", note: "Mate 调 Cortex 课程/推理规划接口", evidence: "openmate/src/app/(app)/cortex/cortex-client.tsx:180 fetch /api/cortex/plan" },
+  { id: "mate-hippo", from: "mate", to: "hippo", dir: "oneway", note: "Mate 拉 Hippo 记忆健康接口", evidence: "openmate/src/app/(app)/hippo/hippo-client.tsx:120 fetch /api/hippo/health" },
+  { id: "mate-mind", from: "mate", to: "mind", dir: "oneway", note: "Mate 拉 Mind 人格/情感接口", evidence: "openmate/src/app/(app)/mind/mind-client.tsx:71 fetch /api/mind/personalities" },
+  { id: "mate-reflex", from: "mate", to: "reflex", dir: "oneway", note: "Mate 观察面板读 Reflex 事件/统计（acp-proxy :8092）", evidence: "openmate/src/app/(app)/reflex/reflex-client.tsx:94 fetch /api/reflex/stats" },
+  { id: "mate-sense", from: "mate", to: "sense", dir: "oneway", note: "Mate 拉 Sense 感知健康接口", evidence: "openmate/src/app/(app)/sense/sense-client.tsx:91 fetch /api/sense/health" },
+  { id: "mate-vision", from: "mate", to: "vision", dir: "oneway", note: "Mate 拉 Vision 图像生成记录", evidence: "openmate/src/app/(app)/vision/vision-workspace.tsx:55 fetch /api/vision/generations" },
+  { id: "mate-capture", from: "mate", to: "capture", dir: "oneway", note: "Mate 拉 Capture 捕获列表", evidence: "openmate/src/app/(app)/capture/capture-client.tsx:83 fetch /api/capture/list" },
+  { id: "mate-voice", from: "mate", to: "voice", dir: "oneway", note: "Mate 拉 Voice 合成统计", evidence: "openmate/src/app/(app)/voice/voice-client.tsx:105 fetch /api/voice/stats" },
+  { id: "mate-echo", from: "mate", to: "echo", dir: "oneway", note: "Mate 拉 Echo 广播健康接口", evidence: "openmate/src/app/(app)/echo/echo-client.tsx:63 fetch /api/echo/health" },
+  { id: "mate-vital", from: "mate", to: "vital", dir: "oneway", note: "Mate 拉 Vital 体征健康接口", evidence: "openmate/src/app/(app)/vital/vital-client.tsx:147 fetch /api/vital/health" },
+  { id: "mate-pulse", from: "mate", to: "pulse", dir: "oneway", note: "Mate 观察面板读 Pulse 心跳状态（acp-proxy :8092）", evidence: "openmate/src/app/(app)/pulse/pulse-client.tsx:105 fetch /api/pulse/status" },
+  { id: "mate-immune", from: "mate", to: "immune", dir: "oneway", note: "Mate 拉 Immune 防护健康接口", evidence: "openmate/src/app/(app)/immune/immune-client.tsx:89 fetch /api/immune/health" },
+  { id: "mate-nerve", from: "mate", to: "nerve", dir: "oneway", note: "Mate 拉 Nerve 健康/事件/订阅接口", evidence: "openmate/src/app/(app)/nerve/nerve-client.tsx:90 fetch /api/nerve/health" },
+  { id: "mate-will", from: "mate", to: "will", dir: "oneway", note: "Mate 直连 Will 工作流引擎（acp-proxy :8092 /flows）", evidence: "openmate/src/app/(app)/will/will-client.tsx:134 fetch ${acpBase}/flows" },
+  { id: "mate-gland", from: "mate", to: "gland", dir: "oneway", note: "Mate 拉 Gland 模型调度健康接口", evidence: "openmate/src/app/(app)/gland/gland-client.tsx:83 fetch /api/gland/health" },
+  { id: "mate-heredity", from: "mate", to: "heredity", dir: "oneway", note: "Mate 拉 Heredity 平台兼容接口", evidence: "openmate/src/app/(app)/heredity/heredity-client.tsx:103 fetch /api/heredity/platform" },
+  { id: "mate-vein", from: "mate", to: "vein", dir: "oneway", note: "Mate 拉 Vein 文件版本/存储接口", evidence: "openmate/src/app/(app)/vein/vein-client.tsx:185 fetch /api/vein/files/…/versions" },
+  { id: "mate-soma", from: "mate", to: "soma", dir: "oneway", note: "Mate 拉 Soma 连接器健康接口", evidence: "openmate/src/app/(app)/soma/soma-connector-client.tsx:120 fetch /api/soma/health" },
+  { id: "mate-limb", from: "mate", to: "limb", dir: "oneway", note: "Mate 拉 Limb 任务/历史接口", evidence: "openmate/src/app/(app)/limb/limb-client.tsx:100 fetch /api/limb/health" },
+  { id: "mate-link", from: "mate", to: "link", dir: "oneway", note: "Mate 拉 Link 连接器健康接口", evidence: "openmate/src/app/(app)/link/link-client.tsx:56 fetch /api/link/health" },
+  { id: "mate-marrow", from: "mate", to: "marrow", dir: "oneway", note: "Mate 拉 Marrow 备份健康接口", evidence: "openmate/src/app/(app)/marrow/marrow-client.tsx:89 fetch /api/marrow/health" },
+  { id: "mate-gene", from: "mate", to: "gene", dir: "oneway", note: "Mate 拉 Gene 模板健康接口", evidence: "openmate/src/app/(app)/gene/gene-client.tsx:145 fetch /api/gene/health" },
+  { id: "mate-nest", from: "mate", to: "nest", dir: "oneway", note: "Mate 拉 Nest 租户/策略健康接口", evidence: "openmate/src/app/(app)/nest/nest-client.tsx:104 fetch /api/nest/health" },
+  { id: "mate-mirror", from: "mate", to: "mirror", dir: "oneway", note: "Mate 拉 Mirror 沙箱健康接口", evidence: "openmate/src/app/(app)/mirror/mirror-client.tsx:59 fetch /api/mirror/health" },
+  { id: "mate-trajectory", from: "mate", to: "trajectory", dir: "oneway", note: "Mate 拉 Trajectory 轨迹统计/会话", evidence: "openmate/src/app/(app)/trajectory/trajectory-client.tsx:85 fetch /api/trajectory/stats" },
+  { id: "mate-mcp", from: "mate", to: "mcp", dir: "oneway", note: "Mate 拉 MCP 服务器/工具接口", evidence: "openmate/src/app/(app)/mcp/mcp-client.tsx:96 fetch /api/mcp/servers" },
+  { id: "mate-learn", from: "mate", to: "learn", dir: "oneway", note: "Mate 调 Learn 课程生成接口", evidence: "openmate/src/app/(app)/learn/create/create-course-client.tsx:125 fetch /api/learn/courses/generate" },
+  { id: "mate-diagnostics", from: "mate", to: "diagnostics", dir: "oneway", note: "Mate 触发 Diagnostics 全器官健康巡检", evidence: "openmate/src/app/(app)/monitoring/monitoring-client.tsx:779 fetch /api/diagnostics/check-all" },
+  { id: "soul-nerve", from: "soul", to: "nerve", dir: "oneway", note: "Soul 大脑经 Nerve 事件桥发指令/事件", evidence: "opensoul/src/api/brain.py:401 from src.nerve.event_bridge import emit" },
+  { id: "soma-nerve", from: "soma", to: "nerve", dir: "twoway", note: "Soma 经 Nerve 事件桥推事件；Soma 侧事件总线接线", evidence: "opensoul/src/api/soma_connector.py:20 push_event / openmate/acp-proxy/agent/soulmate_agent.py:97 event_bus" },
+  { id: "echo-nerve", from: "echo", to: "nerve", dir: "oneway", note: "Echo 广播经 Nerve 事件桥分发", evidence: "opensoul/src/api/echo.py:9 from src.nerve.event_bridge import push_event" },
+  { id: "immune-nerve", from: "immune", to: "nerve", dir: "oneway", note: "Immune 防护事件经 Nerve 事件桥上报", evidence: "opensoul/src/api/immune.py:18 from src.nerve.event_bridge import push_event" },
+  { id: "link-nerve", from: "link", to: "nerve", dir: "oneway", note: "Link 集成事件经 Nerve 事件桥分发", evidence: "opensoul/src/api/link.py:7 from src.nerve.event_bridge import push_event" },
+  { id: "marrow-nerve", from: "marrow", to: "nerve", dir: "oneway", note: "Marrow 备份/迁移事件经 Nerve 事件桥上报", evidence: "opensoul/src/api/marrow.py:11 from src.nerve.event_bridge import push_event" },
+  { id: "vein-nerve", from: "vein", to: "nerve", dir: "oneway", note: "Vein 文件事件经 Nerve 事件桥分发", evidence: "opensoul/src/api/vein.py:9 from src.nerve.event_bridge import push_event" },
+  { id: "mirror-nerve", from: "mirror", to: "nerve", dir: "oneway", note: "Mirror 沙箱事件经 Nerve 事件桥上报", evidence: "opensoul/src/api/mirror.py:11 from src.nerve.event_bridge import push_event" },
+  { id: "vein-soul", from: "vein", to: "soul", dir: "oneway", note: "Vein 文件/资源写 Soul 存储", evidence: "opensoul/src/api/vein.py:10 from src.database.postgres import db_pool（文件库 data/vein/files，vein/file_store.py:56）" },
+  { id: "soul-cortex", from: "soul", to: "cortex", dir: "twoway", note: "Soul 调 Cortex 多智能体协调；Cortex GraphRAG 读 Soul 知识库", evidence: "opensoul/src/api/brain.py:1006 MultiAgentCoordinator / opensoul/src/cortex/graphrag.py:14" },
+  { id: "soul-hippo", from: "soul", to: "hippo", dir: "twoway", note: "Soul 记忆内核走 Hippo 存储管线；Hippo 回写 Soul 三库记忆", evidence: "opensoul/src/api/brain.py:111 memory_persist / opensoul/src/api/hippo.py:1266 services.memory_kb" },
+  { id: "soul-mind", from: "soul", to: "mind", dir: "twoway", note: "Soul 情感决策读 Mind 情感分析；Mind 落 Soul 库", evidence: "opensoul/src/api/brain.py:191 EmotionDrivenDecision / opensoul/src/api/mind.py:10" },
+  { id: "soul-learn", from: "soul", to: "learn", dir: "twoway", note: "Soul 思考读 Learn 经验记忆；Learn 落 Soul 库", evidence: "opensoul/src/api/brain.py:189 ExperienceMemory / opensoul/src/learn/experience.py:392" },
+  { id: "soul-mirror", from: "soul", to: "mirror", dir: "twoway", note: "Soul 反思调 Mirror 元认知；Mirror 落 Soul 库", evidence: "opensoul/src/api/brain.py:297 metacognition / opensoul/src/mirror/metacognition.py:460" },
+  { id: "soul-heredity", from: "soul", to: "heredity", dir: "twoway", note: "Soul 主控记录自进化；Heredity 落 Soul 库", evidence: "opensoul/src/api/brain.py:889 SelfEvolution / opensoul/src/heredity/self_evolution.py:478" },
+  { id: "soul-trajectory", from: "soul", to: "trajectory", dir: "twoway", note: "Soul 检索命中记 Trajectory 轨迹；Trajectory 事件落 Soul 库", evidence: "opensoul/src/api/search.py:336 trajectory_store / opensoul/src/trajectory/store.py:11 db_pool" },
+  { id: "soul-gene", from: "soul", to: "gene", dir: "twoway", note: "Soul 启动引导加载 Gene 模板引擎；Gene 模板库读 Soul 存储", evidence: "opensoul/src/system/bootstrap.py:245 TemplateEngine / opensoul/src/api/gene.py:17" },
+  { id: "soul-vital", from: "soul", to: "vital", dir: "twoway", note: "Soul 服务启动挂 Vital 告警管理；Vital 采集器写 Soul 库", evidence: "opensoul/src/main.py:108 AlertManager / opensoul/src/vital/collector.py:198" },
+  { id: "soul-nest", from: "soul", to: "nest", dir: "oneway", note: "Soul 租户绑定经 Nest 租户管理", evidence: "opensoul/src/services/tenant_binding.py:242 from src.nest.tenant import TenantManager" },
+  { id: "mcp-soul", from: "mcp", to: "soul", dir: "oneway", note: "MCP Server 读 Soul 存储（Meilisearch/Postgres）", evidence: "opensoul/src/mcp/server.py:21 meili_client / db_pool" },
+  { id: "hippo-mcp", from: "hippo", to: "mcp", dir: "oneway", note: "Hippo 会话授权经 MCP 会话门", evidence: "opensoul/src/api/hippo.py:15 from src.mcp.session_grants import default_gate" },
+  { id: "hippo-will", from: "hippo", to: "will", dir: "oneway", note: "Hippo 记忆衰减后台任务进 Will 任务队列", evidence: "opensoul/src/api/hippo.py:850 from src.will.job_handlers / src.will.job_queue" },
+  { id: "hippo-gland", from: "hippo", to: "gland", dir: "oneway", note: "Hippo 记忆蒸馏调 Gland 模型路由", evidence: "opensoul/src/hippo/dream_distiller.py:24 from src.gland.router import extract_chat_text" },
+  { id: "hippo-immune", from: "hippo", to: "immune", dir: "oneway", note: "Hippo 记忆入库前经 Immune 内容审核脱敏", evidence: "opensoul/src/hippo/memory_redact.py:52 from src.immune.moderator import ContentModerator" },
+  { id: "gland-cortex", from: "gland", to: "cortex", dir: "oneway", note: "Gland 模型路由复用 Cortex 重试策略", evidence: "opensoul/src/gland/router.py:224 from src.cortex.llm_retry import is_retryable_status" },
+  { id: "gland-hippo", from: "gland", to: "hippo", dir: "oneway", note: "Gland 路由决策记 Hippo 决策日志", evidence: "opensoul/src/gland/route_policy.py:138 from src.hippo.decision_log import get_decision_log" },
+  { id: "gland-immune", from: "gland", to: "immune", dir: "oneway", note: "Gland 模型输出经 Immune 内容审核", evidence: "opensoul/src/gland/router.py:36 from src.immune.moderator import ContentModerator" },
+  { id: "sense-gland", from: "sense", to: "gland", dir: "oneway", note: "Sense OCR 推理经 Gland 模型路由", evidence: "opensoul/src/sense/ocr.py:203 from src.gland.router import TaskType" },
+  { id: "sense-trajectory", from: "sense", to: "trajectory", dir: "oneway", note: "Sense 行为感知写 Trajectory 事件", evidence: "opensoul/src/sense/behavior.py:127 from src.trajectory.store import TrajectoryEvent" },
+  { id: "trajectory-cortex", from: "trajectory", to: "cortex", dir: "oneway", note: "Trajectory 分支摘要用 Cortex token 归因", evidence: "opensoul/src/trajectory/branch_summary.py:61 from src.cortex.token_attribution import estimate_tokens" },
+  { id: "trajectory-gland", from: "trajectory", to: "gland", dir: "oneway", note: "Trajectory 摘要生成调 Gland 模型路由", evidence: "opensoul/src/trajectory/branch_summary.py:589 from src.gland.router import ModelRouter" },
+  { id: "will-nest", from: "will", to: "nest", dir: "oneway", note: "Will 流程检查点经 Nest 租户隔离", evidence: "opensoul/src/will/checkpoint.py:38 from src.nest.isolation import IsolationEngine" },
+  { id: "will-learn", from: "will", to: "learn", dir: "oneway", note: "Will 任务执行收集 Learn 经验", evidence: "opensoul/src/will/job_handlers.py:89 from src.learn.experience_collector import ExperienceCollector" },
+  { id: "will-heredity", from: "will", to: "heredity", dir: "oneway", note: "Will 主动行为触发 Heredity 进化周期", evidence: "opensoul/src/will/proactive_behaviors.py:187 from src.heredity.self_evolution import run_evolution_cycle" },
+  { id: "will-soul", from: "will", to: "soul", dir: "oneway", note: "Will 工作流状态落 Soul 库", evidence: "opensoul/src/will/proactive_behaviors.py:38 from src.database.postgres import db_pool" },
+  { id: "heredity-learn", from: "heredity", to: "learn", dir: "oneway", note: "Heredity 自进化读 Learn 长期学习", evidence: "opensoul/src/heredity/self_evolution.py:16 from src.learn.long_term import …" },
+  { id: "learn-nest", from: "learn", to: "nest", dir: "oneway", note: "Learn 课程引擎经 Nest 租户隔离", evidence: "opensoul/src/learn/course_engine.py:15 from src.nest.isolation import IsolationEngine" },
+  { id: "capture-soul", from: "capture", to: "soul", dir: "oneway", note: "Capture 捕获入库 Soul 知识库", evidence: "opensoul/src/api/capture.py:17 from src.database.postgres import db_pool（'stores them in the knowledge base'）" },
+  { id: "capture-soma", from: "capture", to: "soma", dir: "oneway", note: "Soma 浏览器采集插件投递页面捕获", evidence: "openmate/browser-extension/src/background.ts:18 POST http://localhost:8090/api/capture" },
+  { id: "immune-soul", from: "immune", to: "soul", dir: "oneway", note: "Immune 审计日志落 Soul 库", evidence: "opensoul/src/api/immune.py:19 from src.services.tenant_binding import bind_identity / db_pool" },
+  { id: "diagnostics-soul", from: "diagnostics", to: "soul", dir: "oneway", note: "Diagnostics 健康探针巡检 Soul /api/health", evidence: "opensoul/src/api/diagnostics.py:16 器官健康注册表 → /api/health" },
+  { id: "diagnostics-nerve", from: "diagnostics", to: "nerve", dir: "oneway", note: "Diagnostics 健康探针巡检 Nerve /api/nerve/health", evidence: "opensoul/src/api/diagnostics.py:18 → /api/nerve/health" },
+  { id: "diagnostics-vital", from: "diagnostics", to: "vital", dir: "oneway", note: "Diagnostics 健康探针巡检 Vital /api/vital/health", evidence: "opensoul/src/api/diagnostics.py:23 → /api/vital/health" },
+  { id: "vision-soul", from: "vision", to: "soul", dir: "oneway", note: "Vision 生成记录落 Soul 库", evidence: "opensoul/src/api/vision.py:11 from src.database.postgres import db_pool" },
+  { id: "limb-soul", from: "limb", to: "soul", dir: "oneway", note: "Limb 任务执行记录落 Soul 库", evidence: "opensoul/src/api/limb.py:11 from src.services.tenant_binding import bind_identity / db_pool" },
+  { id: "soma-reflex", from: "soma", to: "reflex", dir: "twoway", note: "Soma 协调核挂 Reflex 快速应激（MCP 调用捕获→应激）", evidence: "openmate/acp-proxy/agent/soulmate_agent.py:187 from agent.reflex import get_reflex / :1096 _reflex_hub().on_mcp_call" },
+  { id: "soma-pulse", from: "soma", to: "pulse", dir: "twoway", note: "Soma 协调核挂 Pulse 心跳守卫", evidence: "openmate/acp-proxy/agent/soulmate_agent.py:188 from agent.pulse import … / :2351 _pulse_guard_provider" },
+  { id: "soma-gland", from: "soma", to: "gland", dir: "oneway", note: "Soma 调 Gland 模型引擎 LLMEngine", evidence: "openmate/acp-proxy/agent/soulmate_agent.py:44 from agent.llm_engine import LLMEngine" },
+  { id: "soma-immune", from: "soma", to: "immune", dir: "oneway", note: "Soma 输出经 Immune 注入审计门/密钥脱敏", evidence: "openmate/acp-proxy/agent/soulmate_agent.py:61-62 output_guard / infection_guard InfectionGate" },
+  { id: "soma-echo", from: "soma", to: "echo", dir: "oneway", note: "Soma 回合记忆走 Echo 回声标记", evidence: "openmate/acp-proxy/agent/soulmate_agent.py:71 from agent import memory_echo" },
+  { id: "soma-gene", from: "soma", to: "gene", dir: "oneway", note: "Soma 接线 Gene 基因模板", evidence: "openmate/acp-proxy/agent/soulmate_agent.py:74 from agent import gene_wire" },
+  { id: "soma-hippo", from: "soma", to: "hippo", dir: "oneway", note: "Soma 持久记忆写 Hippo 记忆库（MEMORY.md）", evidence: "openmate/acp-proxy/agent/soulmate_agent.py:82 PersistentMemory（落盘 ~/.hermes/soulmate/memory/MEMORY.md，persistent_memory.py:24）" },
+  { id: "soma-marrow", from: "soma", to: "marrow", dir: "oneway", note: "Soma 会话文件进 Marrow 索引（index.db）", evidence: "openmate/acp-proxy/agent/soulmate_agent.py:1926 _file_index.index_file（索引库 ~/.hermes/soulmate/file-index/index.db，file_index.py:45）" },
+  { id: "soma-vein", from: "soma", to: "vein", dir: "oneway", note: "Soma 文件下发/下载走 Vein 数据通道", evidence: "openmate/acp-proxy/agent/soulmate_agent.py:181 SendFileTools / :183 DownloadTools" },
+  { id: "soma-limb", from: "soma", to: "limb", dir: "oneway", note: "Soma 挂 Limb 浏览器执行器（Playwright/CDP）", evidence: "openmate/acp-proxy/agent/soulmate_agent.py:164 from agent.browser_tools import BrowserTools" },
+  { id: "soma-voice", from: "soma", to: "voice", dir: "oneway", note: "Soma 挂 Voice 语音合成 TTSTools", evidence: "openmate/acp-proxy/agent/soulmate_agent.py:179 from agent.tts_tools import TTSTools" },
+  { id: "soma-vision", from: "soma", to: "vision", dir: "oneway", note: "Soma 挂 Vision 图像生成/编辑 ImageTools", evidence: "openmate/acp-proxy/agent/soulmate_agent.py:180 from agent.image_tools import ImageTools" },
+  { id: "soma-trajectory", from: "soma", to: "trajectory", dir: "oneway", note: "Soma 回合轨迹记录 TrajectoryRecorder", evidence: "openmate/acp-proxy/agent/soulmate_agent.py:109 from agent.trajectory_recorder import TrajectoryRecorder" },
+  { id: "soma-mcp", from: "soma", to: "mcp", dir: "oneway", note: "Soma MCP 资源接线 mcp_resources", evidence: "openmate/acp-proxy/agent/soulmate_agent.py:64 from agent.mcp_resources import …" },
+  { id: "soma-diagnostics", from: "soma", to: "diagnostics", dir: "oneway", note: "Soma 健康自检 HealthChecker", evidence: "openmate/acp-proxy/agent/soulmate_agent.py:100 from agent.health_checker import HealthChecker" },
+  { id: "will-pulse", from: "will", to: "pulse", dir: "twoway", note: "Will 工单挂 Pulse 心跳推进/超时催办", evidence: "openmate/acp-proxy/plugin/flow_collab.py:1105-1114 attach_pulse → loop.set_task_overdue_handler" },
+  { id: "will-reflex", from: "will", to: "reflex", dir: "oneway", note: "Will 工单异常进 Reflex 快速应激", evidence: "openmate/acp-proxy/plugin/flow_collab.py:1253 from agent.reflex import get_reflex" },
+  { id: "reflex-pulse", from: "reflex", to: "pulse", dir: "twoway", note: "Pulse 自检发现旁路进 Reflex 应激（on_error）", evidence: "openmate/acp-proxy/routes/pulse.py:177-178 from agent.reflex import get_reflex → on_error" },
 ];
 
 // 拖动位置持久化（localStorage；重置按钮恢复解剖默认位）
@@ -733,8 +806,9 @@ function OrganDetailsBlock({
           {/* 关系说明（点击器官查看：上下游数据流/层内协作） */}
           <div>
             <h4 className="text-xs font-semibold text-muted-foreground mb-1.5">{t("bodyMap.relations", "关联")}</h4>
+            <p className="mb-1.5 text-[9px] leading-relaxed text-muted-foreground/60">{t("bodyMap.wiringNote", "关系边=系统真实代码接线（每条附 file:line 调用证据）；设计文档仅定义器官身份，无证据的边不画")}</p>
             {organRelations(selectedOrganData.key).length === 0 ? (
-              <p className="text-[11px] text-muted-foreground">{t("bodyMap.noRelations", "无既定关联记载")}</p>
+              <p className="text-[11px] text-muted-foreground">{t("bodyMap.noRelations", "未接线（无真实代码接线证据）")}</p>
             ) : (
               <div className="space-y-1.5">
                 {organRelations(selectedOrganData.key).map((rel) => {
@@ -745,7 +819,8 @@ function OrganDetailsBlock({
                       <span className="font-medium">
                         {rel.dir === "twoway" ? "↔" : outgoing ? "→" : "←"} {organLabel(other)}
                       </span>
-                      <p className="text-muted-foreground">{t(`bodyMap.rel.${rel.id}.note`, rel.id)}</p>
+                      <p className="text-muted-foreground">{t(`bodyMap.rel.${rel.id}.note`, rel.note)}</p>
+                      <p className="mt-0.5 font-mono text-[9px] leading-relaxed text-muted-foreground/70 break-all">{t("bodyMap.evidence", "证据")}: {rel.evidence}</p>
                     </div>
                   );
                 })}

@@ -3909,63 +3909,291 @@
       "diagnostics": "Diagnostics"
     },
     "rel": {
-      "mate-will": {
-        "note": "Mate が業務フローを下达：ユーザー意图を Will が業務ワークフローに編成"
-      },
       "mate-soul": {
-        "note": "Mate は Soul に直結：検索/问答 ↔ 知識・記憶（三層アーキテクチャ基本規則）"
+        "note": "MateクライアントがSoulのヘルス/知識APIを呼ぶ"
       },
-      "soma-sense": {
-        "note": "Soma 収集（読み取り専用）→ Sense マルチモーダル解析（見る/聞く）"
+      "mate-cortex": {
+        "note": "MateがCortex計画APIを呼ぶ"
       },
-      "sense-nerve": {
-        "note": "知覚結果 → Nerve イベントバス配信"
+      "mate-hippo": {
+        "note": "MateがHippo記憶ヘルスAPIを呼ぶ"
       },
-      "nerve-soma": {
-        "note": "Nerve → Soma 分散ノードメッセージ配信（収集スケジューリング下行）"
+      "mate-mind": {
+        "note": "MateがMind人格APIを呼ぶ"
       },
-      "nerve-soul": {
-        "note": "イベント/軌跡 → Soul 保存（trajectory_events）"
+      "mate-reflex": {
+        "note": "Mate観察パネルがReflex統計を読む(:8092)"
+      },
+      "mate-sense": {
+        "note": "MateがSenseヘルスAPIを呼ぶ"
+      },
+      "mate-vision": {
+        "note": "MateがVision生成履歴を呼ぶ"
+      },
+      "mate-capture": {
+        "note": "MateがCapture一覧を呼ぶ"
+      },
+      "mate-voice": {
+        "note": "MateがVoice統計を呼ぶ"
+      },
+      "mate-echo": {
+        "note": "MateがEchoヘルスAPIを呼ぶ"
+      },
+      "mate-vital": {
+        "note": "MateがVitalヘルスAPIを呼ぶ"
+      },
+      "mate-pulse": {
+        "note": "Mate観察パネルがPulse状態を読む(:8092)"
+      },
+      "mate-immune": {
+        "note": "MateがImmuneヘルスAPIを呼ぶ"
+      },
+      "mate-nerve": {
+        "note": "MateがNerveヘルス/イベントAPIを呼ぶ"
+      },
+      "mate-will": {
+        "note": "MateがWillフロー(:8092 /flows)を駆動"
+      },
+      "mate-gland": {
+        "note": "MateがGlandヘルスAPIを呼ぶ"
+      },
+      "mate-heredity": {
+        "note": "MateがHeredity互換APIを呼ぶ"
+      },
+      "mate-vein": {
+        "note": "MateがVeinファイル版APIを呼ぶ"
+      },
+      "mate-soma": {
+        "note": "MateがSomaヘルスAPIを呼ぶ"
+      },
+      "mate-limb": {
+        "note": "MateがLimbタスクAPIを呼ぶ"
+      },
+      "mate-link": {
+        "note": "MateがLinkヘルスAPIを呼ぶ"
+      },
+      "mate-marrow": {
+        "note": "MateがMarrowヘルスAPIを呼ぶ"
+      },
+      "mate-gene": {
+        "note": "MateがGeneヘルスAPIを呼ぶ"
+      },
+      "mate-nest": {
+        "note": "MateがNestヘルスAPIを呼ぶ"
+      },
+      "mate-mirror": {
+        "note": "MateがMirrorヘルスAPIを呼ぶ"
+      },
+      "mate-trajectory": {
+        "note": "MateがTrajectory統計を呼ぶ"
+      },
+      "mate-mcp": {
+        "note": "MateがMCPサーバーAPIを呼ぶ"
+      },
+      "mate-learn": {
+        "note": "MateがLearn講座生成を呼ぶ"
+      },
+      "mate-diagnostics": {
+        "note": "MateがDiagnostics一括診断を起動"
+      },
+      "soul-nerve": {
+        "note": "SoulがNerveイベント橋で指令を発"
+      },
+      "soma-nerve": {
+        "note": "SomaがNerve橋でイベント推送／自イベントバス"
+      },
+      "echo-nerve": {
+        "note": "Echo放送をNerve橋で配信"
+      },
+      "immune-nerve": {
+        "note": "Immune警報をNerve橋で上報"
+      },
+      "link-nerve": {
+        "note": "LinkイベントをNerve橋で配信"
+      },
+      "marrow-nerve": {
+        "note": "MarrowバックアップイベントをNerve橋で上報"
+      },
+      "vein-nerve": {
+        "note": "VeinファイルイベントをNerve橋で配信"
+      },
+      "mirror-nerve": {
+        "note": "MirrorイベントをNerve橋で上報"
       },
       "vein-soul": {
-        "note": "Vein ファイル/資源フロー → Soul 知識保存"
+        "note": "VeinファイルをSoulストアへ"
       },
-      "cortex-soul": {
-        "note": "Cortex 高度推論 ↔ Soul 記憶コア（RAG/グラフ供給、推論結果還流）"
+      "soul-cortex": {
+        "note": "Soul→Cortex協調／Cortex GraphRAGがSoulを読む"
       },
-      "will-soma": {
-        "note": "Will ワークフロー編成 → Soma 収集スケジューリング"
+      "soul-hippo": {
+        "note": "Soul記憶核がHippo経由／HippoがSoul三層記憶へ書込"
       },
-      "link-limb": {
-        "note": "Link 双方向統合 → Limb RPA 書き込み実行"
+      "soul-mind": {
+        "note": "Soul感情判断がMind参照／MindはSoulへ永続化"
       },
-      "pulse-will": {
-        "note": "Pulse 時間駆動ループ ↔ Will 定時業務フロー（心拍/ティック起動）"
+      "soul-learn": {
+        "note": "SoulがLearn経験を読む／LearnはSoulへ永続化"
       },
-      "reflex-nerve": {
-        "note": "Nerve 信号伝達 ↔ Reflex 高速応答"
+      "soul-mirror": {
+        "note": "Soul反思がMirrorメタ認知／MirrorはSoulへ永続化"
       },
-      "reflex-will": {
-        "note": "Reflex 即応/遮断 ↔ Will 業務フロー協調"
+      "soul-heredity": {
+        "note": "Soulが自己進化をHeredity記録／Soulへ永続化"
       },
-      "gene-will": {
-        "note": "Gene ワークフローテンプレート → Will ワンクリック設定"
+      "soul-trajectory": {
+        "note": "Soul検索をTrajectory記録／TrajectoryはSoulへ永続化"
+      },
+      "soul-gene": {
+        "note": "Soul起動がGeneテンプレ読込／GeneはSoulを読む"
+      },
+      "soul-vital": {
+        "note": "Soul起動がVital警報掛込／Vital収集はSoul書込"
+      },
+      "soul-nest": {
+        "note": "Soulテナント束縛がNest経由"
+      },
+      "mcp-soul": {
+        "note": "MCP ServerがSoulストアを読む"
+      },
+      "hippo-mcp": {
+        "note": "Hippoセッション権限がMCPゲート経由"
+      },
+      "hippo-will": {
+        "note": "Hippo減衰ジョブがWillキューへ"
+      },
+      "hippo-gland": {
+        "note": "Hippo蒸留がGlandモデルルータを呼ぶ"
+      },
+      "hippo-immune": {
+        "note": "Hippo記憶はImmune審査・秘匿を通過"
       },
       "gland-cortex": {
-        "note": "Gland モデル統合调度 → Cortex 推論供給"
+        "note": "GlandルータがCortex再試行戦略を再利用"
       },
-      "hippo-soul": {
-        "note": "Soul 永久保存 ↔ Hippo 記憶ライフサイクル（アーカイブ/減衰/失効）"
+      "gland-hippo": {
+        "note": "Gland経路判断をHippo決定ログへ"
       },
-      "mirror-will": {
-        "note": "Mirror サンドボックス → Will ワークフロー/コネクタ調試試走"
+      "gland-immune": {
+        "note": "Gland出力はImmune内容審査を通過"
+      },
+      "sense-gland": {
+        "note": "Sense OCR推論がGlandルータ経由"
+      },
+      "sense-trajectory": {
+        "note": "Sense行動イベントがTrajectory書込"
+      },
+      "trajectory-cortex": {
+        "note": "Trajectory分岐要約がCortexトークン帰因を使用"
+      },
+      "trajectory-gland": {
+        "note": "Trajectory要約生成がGlandルータを呼ぶ"
+      },
+      "will-nest": {
+        "note": "WillチェックポイントがNest分離経由"
+      },
+      "will-learn": {
+        "note": "WillジョブがLearn経験を収集"
+      },
+      "will-heredity": {
+        "note": "Will能動行動がHeredity進化周期を起動"
+      },
+      "will-soul": {
+        "note": "Will状態はSoulへ永続化"
+      },
+      "heredity-learn": {
+        "note": "Heredity自己進化がLearn長期学習を読む"
+      },
+      "learn-nest": {
+        "note": "Learn講座エンジンがNest分離経由"
+      },
+      "capture-soul": {
+        "note": "CaptureはSoul知識庫へ格納"
+      },
+      "capture-soma": {
+        "note": "Somaブラウザ拡張がキャプチャを投函"
+      },
+      "immune-soul": {
+        "note": "Immune監査ログはSoulへ永続化"
+      },
+      "diagnostics-soul": {
+        "note": "DiagnosticsがSoulヘルスを巡回点検"
+      },
+      "diagnostics-nerve": {
+        "note": "DiagnosticsがNerveヘルスを巡回点検"
+      },
+      "diagnostics-vital": {
+        "note": "DiagnosticsがVitalヘルスを巡回点検"
+      },
+      "vision-soul": {
+        "note": "Vision生成記録はSoulへ永続化"
+      },
+      "limb-soul": {
+        "note": "Limb実行記録はSoulへ永続化"
+      },
+      "soma-reflex": {
+        "note": "Soma核がReflex即応を接続"
+      },
+      "soma-pulse": {
+        "note": "Soma核がPulse心拍ガードを接続"
+      },
+      "soma-gland": {
+        "note": "SomaがGland LLMエンジンを呼ぶ"
+      },
+      "soma-immune": {
+        "note": "Soma出力はImmuneゲート通過"
+      },
+      "soma-echo": {
+        "note": "Somaターン記憶がEchoマーク経由"
+      },
+      "soma-gene": {
+        "note": "SomaがGeneテンプレを配線"
+      },
+      "soma-hippo": {
+        "note": "Soma永続記憶がHippoへ書込"
+      },
+      "soma-marrow": {
+        "note": "SomaセッションファイルがMarrow索引へ"
+      },
+      "soma-vein": {
+        "note": "Somaファイル送受信がVein経由"
+      },
+      "soma-limb": {
+        "note": "SomaがLimbブラウザ実行器を駆動"
+      },
+      "soma-voice": {
+        "note": "SomaがVoice TTSを駆動"
+      },
+      "soma-vision": {
+        "note": "SomaがVision画像ツールを駆動"
+      },
+      "soma-trajectory": {
+        "note": "SomaがTrajectoryRecorderで記録"
+      },
+      "soma-mcp": {
+        "note": "SomaがMCPリソースを配線"
+      },
+      "soma-diagnostics": {
+        "note": "SomaがHealthCheckerで自己点検"
+      },
+      "will-pulse": {
+        "note": "Will工单がPulse心拍/超過催促に乗る"
+      },
+      "will-reflex": {
+        "note": "Will異常がReflex即応へ"
+      },
+      "reflex-pulse": {
+        "note": "Pulse自検所見がReflex on_errorへ"
       }
     },
     "dragHint": "器官をドラッグで並べ替え（レイアウト記憶）。ホバーで関連強調、クリックで関連説明",
     "resetLayout": "レイアウト初期化",
     "relations": "関連",
-    "noRelations": "記載された関連なし",
-    "mateAbout": "Mate = OpenMate 本体——3プロセス（Soul/Soma/Mate）のクライアントプロセスで、今使っている統一クライアント/共生パートナー入口です。独立した器官ページは設けません（製品自己紹介）。"
+    "noRelations": "未接続（実コード接続の証拠なし）",
+    "mateAbout": "Mate = OpenMate 本体——3プロセス（Soul/Soma/Mate）のクライアントプロセスで、今使っている統一クライアント/共生パートナー入口です。独立した器官ページは設けません（製品自己紹介）。",
+    "evidence": "証拠",
+    "wiringNote": "辺=実コード接続（各辺に file:line 呼出証拠）；設計文書は器官の身元定義のみ、証拠なき辺は描かない",
+    "wiredCount": "実配線"
   },
   "topology": {
     "title": "システムトポロジー",

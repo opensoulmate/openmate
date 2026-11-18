@@ -4063,63 +4063,291 @@
       "diagnostics": "Diagnostics"
     },
     "rel": {
-      "mate-will": {
-        "note": "Mate issues business flows: user intent is orchestrated by Will"
-      },
       "mate-soul": {
-        "note": "Mate connects directly to Soul: search/Q&A ↔ knowledge & memory (core rule)"
+        "note": "Mate client polls Soul health/knowledge APIs"
       },
-      "soma-sense": {
-        "note": "Soma read-only collection → Sense multimodal parsing (seeing/hearing in)"
+      "mate-cortex": {
+        "note": "Mate calls Cortex planning API"
       },
-      "sense-nerve": {
-        "note": "Perception results → Nerve event bus distribution"
+      "mate-hippo": {
+        "note": "Mate polls Hippo memory health API"
       },
-      "nerve-soma": {
-        "note": "Nerve → Soma distributed node message dispatch (collection scheduling downstream)"
+      "mate-mind": {
+        "note": "Mate pulls Mind personalities API"
       },
-      "nerve-soul": {
-        "note": "Events/trajectory → Soul storage (trajectory_events)"
+      "mate-reflex": {
+        "note": "Mate observation panel reads Reflex stats (:8092)"
+      },
+      "mate-sense": {
+        "note": "Mate polls Sense health API"
+      },
+      "mate-vision": {
+        "note": "Mate pulls Vision generations"
+      },
+      "mate-capture": {
+        "note": "Mate pulls Capture list"
+      },
+      "mate-voice": {
+        "note": "Mate pulls Voice stats"
+      },
+      "mate-echo": {
+        "note": "Mate polls Echo health API"
+      },
+      "mate-vital": {
+        "note": "Mate polls Vital health API"
+      },
+      "mate-pulse": {
+        "note": "Mate observation panel reads Pulse status (:8092)"
+      },
+      "mate-immune": {
+        "note": "Mate polls Immune health API"
+      },
+      "mate-nerve": {
+        "note": "Mate polls Nerve health/events APIs"
+      },
+      "mate-will": {
+        "note": "Mate drives Will flow engine (:8092 /flows)"
+      },
+      "mate-gland": {
+        "note": "Mate polls Gland health API"
+      },
+      "mate-heredity": {
+        "note": "Mate pulls Heredity platform API"
+      },
+      "mate-vein": {
+        "note": "Mate pulls Vein file versions API"
+      },
+      "mate-soma": {
+        "note": "Mate polls Soma connector health"
+      },
+      "mate-limb": {
+        "note": "Mate pulls Limb tasks API"
+      },
+      "mate-link": {
+        "note": "Mate polls Link connectors health"
+      },
+      "mate-marrow": {
+        "note": "Mate polls Marrow backup health"
+      },
+      "mate-gene": {
+        "note": "Mate polls Gene template health"
+      },
+      "mate-nest": {
+        "note": "Mate polls Nest tenants health"
+      },
+      "mate-mirror": {
+        "note": "Mate polls Mirror sandbox health"
+      },
+      "mate-trajectory": {
+        "note": "Mate pulls Trajectory stats/sessions"
+      },
+      "mate-mcp": {
+        "note": "Mate pulls MCP servers API"
+      },
+      "mate-learn": {
+        "note": "Mate calls Learn course generation"
+      },
+      "mate-diagnostics": {
+        "note": "Mate triggers Diagnostics check-all"
+      },
+      "soul-nerve": {
+        "note": "Soul emits commands via Nerve event bridge"
+      },
+      "soma-nerve": {
+        "note": "Soma pushes events via Nerve bridge / own event bus"
+      },
+      "echo-nerve": {
+        "note": "Echo broadcasts via Nerve event bridge"
+      },
+      "immune-nerve": {
+        "note": "Immune reports via Nerve event bridge"
+      },
+      "link-nerve": {
+        "note": "Link events via Nerve event bridge"
+      },
+      "marrow-nerve": {
+        "note": "Marrow backup events via Nerve bridge"
+      },
+      "vein-nerve": {
+        "note": "Vein file events via Nerve bridge"
+      },
+      "mirror-nerve": {
+        "note": "Mirror events via Nerve bridge"
       },
       "vein-soul": {
-        "note": "Vein file/resource flow → Soul knowledge storage"
+        "note": "Vein files persist to Soul store"
       },
-      "cortex-soul": {
-        "note": "Cortex advanced reasoning ↔ Soul memory core (RAG/graph supply, results flow back)"
+      "soul-cortex": {
+        "note": "Soul→Cortex coordination / Cortex GraphRAG reads Soul"
       },
-      "will-soma": {
-        "note": "Will workflow orchestration → Soma collection scheduling"
+      "soul-hippo": {
+        "note": "Soul memory core via Hippo store / Hippo writes 3-lib memory"
       },
-      "link-limb": {
-        "note": "Link bidirectional integration → Limb RPA write execution"
+      "soul-mind": {
+        "note": "Soul emotion-decision reads Mind / Mind persists to Soul"
       },
-      "pulse-will": {
-        "note": "Pulse time-driven loop ↔ Will scheduled flows (heartbeat/tick triggers)"
+      "soul-learn": {
+        "note": "Soul reads Learn experience / Learn persists to Soul"
       },
-      "reflex-nerve": {
-        "note": "Nerve signal transmission ↔ Reflex rapid response"
+      "soul-mirror": {
+        "note": "Soul reflection via Mirror metacognition / persists to Soul"
       },
-      "reflex-will": {
-        "note": "Reflex rapid response/circuit breaking ↔ Will flow coordination"
+      "soul-heredity": {
+        "note": "Soul logs self-evolution to Heredity / persists to Soul"
       },
-      "gene-will": {
-        "note": "Gene workflow templates → Will one-click configuration"
+      "soul-trajectory": {
+        "note": "Soul search logs to Trajectory / Trajectory persists to Soul"
+      },
+      "soul-gene": {
+        "note": "Soul bootstrap loads Gene templates / Gene reads Soul store"
+      },
+      "soul-vital": {
+        "note": "Soul boots Vital alert manager / Vital collector writes Soul"
+      },
+      "soul-nest": {
+        "note": "Soul tenant binding via Nest"
+      },
+      "mcp-soul": {
+        "note": "MCP Server reads Soul store"
+      },
+      "hippo-mcp": {
+        "note": "Hippo session grants via MCP gate"
+      },
+      "hippo-will": {
+        "note": "Hippo decay jobs enqueue into Will job queue"
+      },
+      "hippo-gland": {
+        "note": "Hippo dream distillation calls Gland model router"
+      },
+      "hippo-immune": {
+        "note": "Hippo memories pass Immune moderation/redaction"
       },
       "gland-cortex": {
-        "note": "Gland unified model routing → Cortex reasoning supply"
+        "note": "Gland router reuses Cortex retry policy"
       },
-      "hippo-soul": {
-        "note": "Soul permanent storage ↔ Hippo memory lifecycle (archive/decay/expire)"
+      "gland-hippo": {
+        "note": "Gland routing decisions log to Hippo"
       },
-      "mirror-will": {
-        "note": "Mirror sandbox → Will workflow/connector debug trials"
+      "gland-immune": {
+        "note": "Gland model output passes Immune moderation"
+      },
+      "sense-gland": {
+        "note": "Sense OCR inference via Gland router"
+      },
+      "sense-trajectory": {
+        "note": "Sense behavior events write Trajectory"
+      },
+      "trajectory-cortex": {
+        "note": "Trajectory branch summary uses Cortex token attribution"
+      },
+      "trajectory-gland": {
+        "note": "Trajectory summary generation calls Gland router"
+      },
+      "will-nest": {
+        "note": "Will checkpoints via Nest tenant isolation"
+      },
+      "will-learn": {
+        "note": "Will job handlers collect Learn experience"
+      },
+      "will-heredity": {
+        "note": "Will proactive behaviors trigger Heredity evolution cycle"
+      },
+      "will-soul": {
+        "note": "Will workflow state persists to Soul"
+      },
+      "heredity-learn": {
+        "note": "Heredity self-evolution reads Learn long-term"
+      },
+      "learn-nest": {
+        "note": "Learn course engine via Nest isolation"
+      },
+      "capture-soul": {
+        "note": "Capture stores into Soul knowledge base"
+      },
+      "capture-soma": {
+        "note": "Soma browser extension posts captures"
+      },
+      "immune-soul": {
+        "note": "Immune audit log persists to Soul"
+      },
+      "diagnostics-soul": {
+        "note": "Diagnostics probes Soul health endpoint"
+      },
+      "diagnostics-nerve": {
+        "note": "Diagnostics probes Nerve health"
+      },
+      "diagnostics-vital": {
+        "note": "Diagnostics probes Vital health"
+      },
+      "vision-soul": {
+        "note": "Vision generations persist to Soul"
+      },
+      "limb-soul": {
+        "note": "Limb task records persist to Soul"
+      },
+      "soma-reflex": {
+        "note": "Soma core hooks Reflex fast-path"
+      },
+      "soma-pulse": {
+        "note": "Soma core hooks Pulse heartbeat guard"
+      },
+      "soma-gland": {
+        "note": "Soma calls Gland LLM engine"
+      },
+      "soma-immune": {
+        "note": "Soma output via Immune gates"
+      },
+      "soma-echo": {
+        "note": "Soma turn memory via Echo recall-mark"
+      },
+      "soma-gene": {
+        "note": "Soma wires Gene templates"
+      },
+      "soma-hippo": {
+        "note": "Soma persistent memory writes Hippo store"
+      },
+      "soma-marrow": {
+        "note": "Soma session files into Marrow index"
+      },
+      "soma-vein": {
+        "note": "Soma file send/download via Vein channel"
+      },
+      "soma-limb": {
+        "note": "Soma drives Limb browser executor"
+      },
+      "soma-voice": {
+        "note": "Soma drives Voice TTS tools"
+      },
+      "soma-vision": {
+        "note": "Soma drives Vision image tools"
+      },
+      "soma-trajectory": {
+        "note": "Soma records turns via TrajectoryRecorder"
+      },
+      "soma-mcp": {
+        "note": "Soma wires MCP resources"
+      },
+      "soma-diagnostics": {
+        "note": "Soma self-checks via HealthChecker"
+      },
+      "will-pulse": {
+        "note": "Will work-orders ride Pulse heartbeat/timeout"
+      },
+      "will-reflex": {
+        "note": "Will order errors into Reflex fast-path"
+      },
+      "reflex-pulse": {
+        "note": "Pulse findings bypass into Reflex on_error"
       }
     },
     "dragHint": "Drag organs to rearrange (layout is remembered); hover to highlight relations, click for details",
     "resetLayout": "Reset Layout",
     "relations": "Relations",
-    "noRelations": "No documented relations",
-    "mateAbout": "Mate = OpenMate itself — the client process of the three processes (Soul/Soma/Mate): the unified client / symbiotic partner entry you are using now. No separate organ page (product self-description)."
+    "noRelations": "Not wired (no real code wiring evidence)",
+    "mateAbout": "Mate = OpenMate itself — the client process of the three processes (Soul/Soma/Mate): the unified client / symbiotic partner entry you are using now. No separate organ page (product self-description).",
+    "evidence": "Evidence",
+    "wiringNote": "Edges = real code wiring (each cites file:line call evidence); design docs only define organ identity — edges without evidence are not drawn",
+    "wiredCount": "Real wirings"
   },
   "topology": {
     "title": "System Topology",
