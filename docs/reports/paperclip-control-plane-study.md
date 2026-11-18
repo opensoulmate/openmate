@@ -161,58 +161,58 @@ budget_policies 三档 scope（company/agent/project）、warn%/hard stop、rese
 
 | # | 抄什么 | 出处 | 怎么抄 |
 |---|---|---|---|
-| A1 | **执行锁列 + 原子领取** | Paperclip `issues.executionRunId/executionLockedAt` + `bindClaimedIssueExecution`；Multica `ClaimAgentTask` 单语句 `UPDATE…FOR UPDATE SKIP LOCKED` | agent_node 派发前原子领取：`UPDATE flow_node_runs SET status='claimed', execution_run_id=?, locked_at=? WHERE id=? AND status='queued'`（条件 UPDATE 即锁，SQLite/PG 通用）；锁不住就不发 SoulMate。SQLite 场景退化为 IMMEDIATE 事务 + `WHERE status='queued'` 计数校验 |
-| A2 | **唯一约束兜底防重复执行** | `issues_open_routine_execution_uq`、`idx_one_pending_task_per_issue_agent_v2` | node_runs 表加 `UNIQUE(flow_run_id, node_id) WHERE status IN ('claimed','running')`（PG 部分唯一索引；SQLite 用触发器/应用层校验）——双保险 |
-| A3 | **前任未清场拒领** | `predecessor_still_executing`/`predecessor_cleanup_pending` | 回流落库前校验 execution_run_id 归属；重派（retry）必须等上一次 run 终态+清理完成 |
-| A4 | **输入合并防重复** | Multica `coalesced_comment_ids` + 投递回执 CAS；Paperclip wake coalesce/defer/proceed | 同一 agent_node 未完成时到达的重复下发（人工补发/重试按钮）合并进在途任务或 defer，不新开 run；投递回执带 CAS（防旧 handler 覆盖新领取） |
-| A5 | **领取决策可观测** | `task_claim_decision.go` 漏斗（claimed/candidates_unclaimed/no_visible_candidates…） | flow_run 事件表记录每次派发决策+拒绝原因（no_capacity/locked/superseded…），排查"为什么没派出去" |
+| ✅A1 | **执行锁列 + 原子领取** | Paperclip `issues.executionRunId/executionLockedAt` + `bindClaimedIssueExecution`；Multica `ClaimAgentTask` 单语句 `UPDATE…FOR UPDATE SKIP LOCKED` | agent_node 派发前原子领取：`UPDATE flow_node_runs SET status='claimed', execution_run_id=?, locked_at=? WHERE id=? AND status='queued'`（条件 UPDATE 即锁，SQLite/PG 通用）；锁不住就不发 SoulMate。SQLite 场景退化为 IMMEDIATE 事务 + `WHERE status='queued'` 计数校验 |
+| ✅A2 | **唯一约束兜底防重复执行** | `issues_open_routine_execution_uq`、`idx_one_pending_task_per_issue_agent_v2` | node_runs 表加 `UNIQUE(flow_run_id, node_id) WHERE status IN ('claimed','running')`（PG 部分唯一索引；SQLite 用触发器/应用层校验）——双保险 |
+| ✅A3 | **前任未清场拒领** | `predecessor_still_executing`/`predecessor_cleanup_pending` | 回流落库前校验 execution_run_id 归属；重派（retry）必须等上一次 run 终态+清理完成 |
+| ✅A4 | **输入合并防重复** | Multica `coalesced_comment_ids` + 投递回执 CAS；Paperclip wake coalesce/defer/proceed | 同一 agent_node 未完成时到达的重复下发（人工补发/重试按钮）合并进在途任务或 defer，不新开 run；投递回执带 CAS（防旧 handler 覆盖新领取） |
+| ✅A5 | **领取决策可观测** | `task_claim_decision.go` 漏斗（claimed/candidates_unclaimed/no_visible_candidates…） | flow_run 事件表记录每次派发决策+拒绝原因（no_capacity/locked/superseded…），排查"为什么没派出去" |
 
 ### B. 心跳调度 → Pulse（调度内核）
 
 | # | 抄什么 | 出处 | 怎么抄 |
 |---|---|---|---|
-| B1 | **唤醒三态决策** | `wake-queue/domain/policy.ts`（proceed/coalesce/defer，纯函数+facts 对象，不碰 DB） | Pulse 的"新任务撞上执行中"分支抽成纯函数策略（可单测、可换存储）；同角色在途→defer 排队，同任务补消息→coalesce |
-| B2 | **派发序分层+防饿死** | 四层（Person>Work>Recovery）+ 每 4 个名额给 60min+ 老任务 | 我们工单分"人发起/agent 发起/恢复"三级，加 aging 份额——人工节点产生的任务永远优先，深树不饿死旁人 |
-| B3 | **3 拍判死 + 失联回收** | Multica 15s 心跳/45s missing/`runtime_offline` 自动 requeue | SoulMate ACP worker 心跳（15s 级）+3 拍离线判死 + 在途 agent_node 自动回队列（可重试来源）；带外 wake+轮询兜底双通道 |
-| B4 | **deadline 独立于心跳** | Paperclip scheduled-work.ts（已知到期时间自己 timer，心跳只兜底） | flow_engine 已有 cron trigger；补"到点直派"而非等下次心跳——例行任务延迟下限=timer 精度 |
+| ✅B1 | **唤醒三态决策** | `wake-queue/domain/policy.ts`（proceed/coalesce/defer，纯函数+facts 对象，不碰 DB） | Pulse 的"新任务撞上执行中"分支抽成纯函数策略（可单测、可换存储）；同角色在途→defer 排队，同任务补消息→coalesce |
+| ✅B2 | **派发序分层+防饿死** | 四层（Person>Work>Recovery）+ 每 4 个名额给 60min+ 老任务 | 我们工单分"人发起/agent 发起/恢复"三级，加 aging 份额——人工节点产生的任务永远优先，深树不饿死旁人 |
+| ✅B3 | **3 拍判死 + 失联回收** | Multica 15s 心跳/45s missing/`runtime_offline` 自动 requeue | SoulMate ACP worker 心跳（15s 级）+3 拍离线判死 + 在途 agent_node 自动回队列（可重试来源）；带外 wake+轮询兜底双通道 |
+| ✅B4 | **deadline 独立于心跳** | Paperclip scheduled-work.ts（已知到期时间自己 timer，心跳只兜底） | flow_engine 已有 cron trigger；补"到点直派"而非等下次心跳——例行任务延迟下限=timer 精度 |
 
 ### C. 预算隔离 → 成本护栏
 
 | # | 抄什么 | 出处 | 怎么抄 |
 |---|---|---|---|
-| C1 | **三档 scope 策略表** | Paperclip budget_policies（company/agent×project × window × warn% × hard stop） | budget 表：scope(公司/角色/流程)、窗口(月/终身)、warn 阈值、硬停分值；状态 ok/warning/hard_stop 直出看板 |
-| C2 | **派发前拦截** | `getInvocationBlock` 在 run-dispatch 事实对象里先查预算 | agent_node 领取（A1）之前查 budgetBlock；被挡→节点挂起转 human_node（人工审批放行）或 skip（on_error 语义已有） |
-| C3 | **超限暂停+恢复续跑** | pauseReason='budget' + budget-resume continuation | 硬停后该角色/流程新任务不再派；充值/调额后从挂起点 resume（对应 flow 已有 goto 续跑语义） |
-| C4 | **先记账后放行的防重** | `budgetDispatch.handedOffAt` 在进 provider 前写标记 | agent_node 发出前写 handedOffAt 标记，重启恢复时凭标记区分"发过了没回"与"没发过"——防双发双扣 |
-| C5 | **软超时不动手** | 我们铁律与 Paperclip 软预算同向；Multica 反面教材（timeout 把花完钱的 run 直接扔） | 保持 timeout 只记 over_budget；真正的止损靠 C2/C3 预算闸，不靠超时杀 |
+| ✅C1 | **三档 scope 策略表** | Paperclip budget_policies（company/agent×project × window × warn% × hard stop） | budget 表：scope(公司/角色/流程)、窗口(月/终身)、warn 阈值、硬停分值；状态 ok/warning/hard_stop 直出看板 |
+| ✅C2 | **派发前拦截** | `getInvocationBlock` 在 run-dispatch 事实对象里先查预算 | agent_node 领取（A1）之前查 budgetBlock；被挡→节点挂起转 human_node（人工审批放行）或 skip（on_error 语义已有） |
+| ✅C3 | **超限暂停+恢复续跑** | pauseReason='budget' + budget-resume continuation | 硬停后该角色/流程新任务不再派；充值/调额后从挂起点 resume（对应 flow 已有 goto 续跑语义） |
+| ✅C4 | **先记账后放行的防重** | `budgetDispatch.handedOffAt` 在进 provider 前写标记 | agent_node 发出前写 handedOffAt 标记，重启恢复时凭标记区分"发过了没回"与"没发过"——防双发双扣 |
+| ✅C5 | **软超时不动手** | 我们铁律与 Paperclip 软预算同向；Multica 反面教材（timeout 把花完钱的 run 直接扔） | 保持 timeout 只记 over_budget；真正的止损靠 C2/C3 预算闸，不靠超时杀 |
 
 ### D. 组织架构路由 → 角色路由
 
 | # | 抄什么 | 出处 | 怎么抄 |
 |---|---|---|---|
-| D1 | **reportsTo 递归链** | `agent-reporting-chain.ts` 递归 CTE | org 表（role/member/reports_to/team）；agent_node 带 `role` 字段，派发解析 role→在线成员；成员不在线沿 reportsTo 向上找 backup/审批人 |
-| D2 | **label/角色路由表** | Squad `squad:*` 标签路由 + routing.md | 角色路由做成数据（role→SoulMate 绑定表+兜底规则文件），不写死在流程定义里；流程 YAML 只写 role 不写人 |
-| D3 | **单 assignee + sub-issue 拆解** | Paperclip TASKS.md | 一个 agent_node 实例只绑一个执行者；复杂节点用 parallel 分支+子任务承接"多人协作"，责任不分摊 |
-| D4 | **RBAC 映射** | Multica owner/admin/member × 每成员可跑哪些 agent；Paperclip connection permissions + responsible user | 我们 RBAC：角色→可触发流程/可看工单/可接管 agent_node 的权限矩阵；每个 agent_node 挂"责任人"（human_node 审批人默认=责任人） |
-| D5 | **case handoff 交办** | caseHandoffs（版本号+状态机+被取代即作废） | 转派/升级（员工→主管）做成带版本校验的交接单，避免"转了一半被旧任务覆盖" |
+| ✅D1 | **reportsTo 递归链** | `agent-reporting-chain.ts` 递归 CTE | org 表（role/member/reports_to/team）；agent_node 带 `role` 字段，派发解析 role→在线成员；成员不在线沿 reportsTo 向上找 backup/审批人 |
+| ✅D2 | **label/角色路由表** | Squad `squad:*` 标签路由 + routing.md | 角色路由做成数据（role→SoulMate 绑定表+兜底规则文件），不写死在流程定义里；流程 YAML 只写 role 不写人 |
+| ✅D3 | **单 assignee + sub-issue 拆解** | Paperclip TASKS.md | 一个 agent_node 实例只绑一个执行者；复杂节点用 parallel 分支+子任务承接"多人协作"，责任不分摊 |
+| ◐D4 | **RBAC 映射** | Multica owner/admin/member × 每成员可跑哪些 agent；Paperclip connection permissions + responsible user | 我们 RBAC：角色→可触发流程/可看工单/可接管 agent_node 的权限矩阵；每个 agent_node 挂"责任人"（human_node 审批人默认=责任人） |
+| ✅D5 | **case handoff 交办** | caseHandoffs（版本号+状态机+被取代即作废） | 转派/升级（员工→主管）做成带版本校验的交接单，避免"转了一半被旧任务覆盖" |
 
 ### E. 上下文共享/隔离 + 成果回流
 
 | # | 抄什么 | 出处 | 怎么抄 |
 |---|---|---|---|
-| E1 | **任务包组装** | task-context.ts（continuation summary/wake comments/plan/两档 assignment markdown） | agent_node 入参标准化"任务包"：目标+验收+上游节点输出（`$.<node>.<field>` 已有寻址）+变更摘要，full/compact 两档防上下文爆 |
-| E2 | **快照 diff 告知变化** | Multica `issue_snapshot`（本次派发与上次的 issue 状态对比） | 每次派发记录上游输出快照；重派时告诉 SoulMate"自上次以来变了什么"，不整包重灌 |
-| E3 | **配置指纹换代** | session-fingerprint-inputs.ts（有效输入分类+变更即弃会话） | 角色/Skill/模型配置变更→下个节点边界生效并丢弃旧会话缓存（correctness over continuity），指纹输入表驱动 |
-| E4 | **review gate 成果回流** | Multica "work lands in review, not in main"；Paperclip artifacts+段落批注 | agent_node 产出→human_node 验收门→才算节点完成；产物+run log 留档，`flow_receipts` 已有雏形直接挂验收结论 |
-| E5 | **上下文卫生** | Squad `squad nap`（压缩/修剪/归档）；CAMEL shared_memory 可选共享 | OpenSoul 承接公司级共享知识；run 结束做记忆压缩归档，避免逐任务累积 |
+| ✅E1 | **任务包组装** | task-context.ts（continuation summary/wake comments/plan/两档 assignment markdown） | agent_node 入参标准化"任务包"：目标+验收+上游节点输出（`$.<node>.<field>` 已有寻址）+变更摘要，full/compact 两档防上下文爆 |
+| ✅E2 | **快照 diff 告知变化** | Multica `issue_snapshot`（本次派发与上次的 issue 状态对比） | 每次派发记录上游输出快照；重派时告诉 SoulMate"自上次以来变了什么"，不整包重灌 |
+| ✅E3 | **配置指纹换代** | session-fingerprint-inputs.ts（有效输入分类+变更即弃会话） | 角色/Skill/模型配置变更→下个节点边界生效并丢弃旧会话缓存（correctness over continuity），指纹输入表驱动 |
+| ✅E4 | **review gate 成果回流** | Multica "work lands in review, not in main"；Paperclip artifacts+段落批注 | agent_node 产出→human_node 验收门→才算节点完成；产物+run log 留档，`flow_receipts` 已有雏形直接挂验收结论 |
+| ✅E5 | **上下文卫生** | Squad `squad nap`（压缩/修剪/归档）；CAMEL shared_memory 可选共享 | OpenSoul 承接公司级共享知识；run 结束做记忆压缩归档，避免逐任务累积 |
 
 ### F. MCP/工具治理（借 Paperclip 网关思想）
 
 | # | 抄什么 | 出处 | 怎么抄 |
 |---|---|---|---|
-| F1 | **Profile+Binding+Policy 三件套** | MCP-ACCESS-GOVERNANCE.md（allow/deny 包绑 scope，调用时 allow/block/require_approval/rate_limit，deny 优先） | flow_engine tool 节点/MCP 调用前过策略层：工具白名单包（绑角色/流程）+高危工具 require_approval 转 human_node |
-| F2 | **风险分级+审计** | Catalog read/write/destructive + Call Event log | 工具注册表带风险级；每次调用落审计事件（谁/哪个节点/参数摘要/结果） |
-| F3 | **配置注入钉死 MCP 集** | Multica `--strict-mcp-config`+黑名单防绕过 | SoulMate 下发受控 MCP 清单，worker 参数层禁改 |
+| ✅F1 | **Profile+Binding+Policy 三件套** | MCP-ACCESS-GOVERNANCE.md（allow/deny 包绑 scope，调用时 allow/block/require_approval/rate_limit，deny 优先） | flow_engine tool 节点/MCP 调用前过策略层：工具白名单包（绑角色/流程）+高危工具 require_approval 转 human_node |
+| ✅F2 | **风险分级+审计** | Catalog read/write/destructive + Call Event log | 工具注册表带风险级；每次调用落审计事件（谁/哪个节点/参数摘要/结果） |
+| ❌F3 | **配置注入钉死 MCP 集** | Multica `--strict-mcp-config`+黑名单防绕过 | SoulMate 下发受控 MCP 清单，worker 参数层禁改 |
 
 ### 不抄（避坑）
 
@@ -226,3 +226,44 @@ budget_policies 三档 scope（company/agent/project）、warn%/hard stop、rese
 ## 5. 结论（一句话版）
 
 Paperclip 的本质经验：**控制面=工单锁+派发序+预算闸+组织链四件套，agent 只是"能收心跳的员工"**；Multica 证明领取原子性（SKIP LOCKED+串行化）和 3 拍判死可以做得极简；两者在预算上一个真闸一个假护栏，我们直接抄真闸。落到 deleg 三件套：agent_node 抄 A1-A5（原子领取+唯一约束+合并防重），human_node 抄 C2/E4（预算闸转人工+review gate），角色路由抄 D1-D3（递归汇报链+路由表+单 assignee），Pulse 抄 B1-B3（三态唤醒+分层派发+3 拍判死），预算抄 C1-C4。
+
+---
+
+## 6. 落地总账（打勾 · 2026-11-18 协作三件套+研究表清零收口）
+
+> 纪律：整合优先勿平行造轮子 / 每步测试过再下一步 / PYTHONPATH=. ~/opensoul/.venv/bin/python -m pytest /
+> git 显式路径提交 / 软预算禁硬杀。验证口径：纯函数真值 + 引擎真链 + HTTP 真面 + 真文件台账 +
+> 真双 agent（A2A HTTP+ACP WS+SoulMate 真干活）E2E。
+
+| 项 | 状态 | 落点（commit / 文件） |
+|---|---|---|
+| A1 原子领取+执行锁 | ✅ | f99b5fab · plugin/flow_collab.py（条件转移 CAS+租约+心跳+过期抢占；锁不住不发 SoulMate） |
+| A2 开态唯一防重复 | ✅ | f99b5fab · WorkOrderStore.create（(run_id,node_id,kind) 锁内查重 ≙ 部分唯一索引） |
+| A3 前任未清场拒领 | ✅ | f99b5fab · claim(predecessor_still_executing)+回流 CAS 归属校验 |
+| A4 合并防重 | ✅ | f99b5fab+829bcc8e · 交付幂等回执 + wake_decision coalesce |
+| A5 领取决策漏斗 | ✅ | f99b5fab+efc5bec6 · claim-decision/skipped 留痕（claim_next 顺延同源） |
+| B1 唤醒三态 | ✅ | 829bcc8e · wake_decision 纯函数（proceed/coalesce/defer/cancel）进三唤醒点 |
+| B2 派发序+防饿死 | ✅ | efc5bec6 · origin 三级 + dispatch_order（aging 名额+recovery 名额）+ claim_next |
+| B3 三拍判死 | ✅ | efc5bec6 · _claim_dead/liveness_sweep 有界回队；Pulse _recover_task 既有恢复账复用（requeue/defer/attention 不重建） |
+| B4 deadline 定时器 | ✅ | efc5bec6 · next_deadline_wake 对齐最近到期（timer 精度），心跳只兜底 |
+| C1 三档预算策略 | ✅ | f99b5fab · BudgetPolicy(company/agent/project×窗口×warn%/hard_stop) |
+| C2 派发前拦截转人工 | ✅ | f99b5fab · blocked()→budget-gate human 闸 |
+| C3 超限暂停+恢复续跑 | ✅ | f99b5fab · grant/take_waiver 一次性豁免原地续跑 |
+| C4 交接标记防双发 | ✅ | f99b5fab · handed_off_at 先记后发 |
+| C5 软超时不动手 | ✅ | f99b5fab · timeout 只记 over_budget，止损靠派发闸 |
+| D1 递归汇报链 | ✅ | f99b5fab · rbac/org.py reporting_chain（防环≤32 层）+ backup_for |
+| D2 路由=数据 | ✅ | f99b5fab · org 表+RBAC 兜底，YAML 只写 role（examples/collab-demo 样板） |
+| D3 单 assignee | ✅ | 工单语义内建（单归属+claim）；多人协作走既有 parallel 分支 |
+| D4 RBAC 权限矩阵 | ◐ | 角色路由接 RBAC 已落（f99b5fab）；收件箱「可看/可接管」权限矩阵未做（候补） |
+| D5 case handoff | ✅ | db34ed61 · handoff 版本校验（case_handoff_superseded）+交接清场 |
+| E1 任务包两档 | ✅ | 41ea9ed3 · build_task_package full/compact + 上下文隔离（$. 引用收口） |
+| E2 快照 diff | ✅ | 41ea9ed3 · upstream_snapshot +【变更摘要】 |
+| E3 配置指纹 | ✅ | 41ea9ed3 · config_fingerprint 换代留痕丢连续性 |
+| E4 review gate | ✅ | 41ea9ed3 · review:true 验收门 + flow_receipts 凭证 |
+| E5 上下文卫生 | ✅ | efc5bec6 · history 有界+交付归档+compress-handoff 接 Pi#5 ContextCompressor |
+| F1 Profile/Binding/Policy | ✅ | a8ead711 · plugin/tool_governance.py（deny 优先四动作）+ require_approval 转 human 真闸 |
+| F2 风险分级+审计 | ✅ | a8ead711 · Catalog read/write/destructive + CallEvent 滚动台账（脱敏） |
+| F3 配置注入钉死 MCP | ❌ | 未做——SoulMate 下发受控 MCP 清单+worker 参数层禁改（独立专项，勿与本轮混收） |
+
+**统计：27 项中 25 ✅ / 1 ◐（D4 权限矩阵候补）/ 1 ❌（F3 独立专项）。**
+测试基线：全量 202 过零新增失败（协作 46 + 治理 9 + 流程 35 + pulse/reflex 70 + 插件 42）。
