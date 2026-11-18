@@ -61,6 +61,13 @@ class RemindRequest(PydanticBaseModel):
     note: str = ""
 
 
+class HandoffRequest(PydanticBaseModel):
+    to_assignee: str
+    decided_by: str = ""
+    note: str = ""
+    expect_version: int | None = None   # D5 版本校验（缺省不校验）
+
+
 class CancelRequest(PydanticBaseModel):
     reason: str = ""
 
@@ -94,6 +101,7 @@ def _task_view(runtime, task: WorkOrder, now: float) -> dict[str, Any]:
         "a2a_task_id": task.a2a_task_id,
         "reminders": task.reminders,
         "last_remind_at": task.last_remind_at,
+        "handoff_version": task.handoff_version,
         "over_budget": task.over_budget,
         "budget": task.budget,
         "usage": task.usage,
@@ -200,6 +208,19 @@ def build_collab_router(runtime=None) -> APIRouter:
         task = runtime.remind(task_id, note=req.note)
         return {"task": _task_view(runtime, task, runtime._clock()),
                 "reminders": task.reminders}
+
+    @router.post("/tasks/{task_id}/handoff")
+    async def handoff_task(task_id: str, req: HandoffRequest) -> dict[str, Any]:
+        """D5 case handoff 交办/转派（带版本校验，被取代即作废 409 case_handoff_superseded）。"""
+        _load(task_id)
+        try:
+            task = runtime.store.handoff(
+                task_id, to_assignee=req.to_assignee, by=req.decided_by,
+                note=req.note, expect_version=req.expect_version)
+        except CollabError as e:
+            raise HTTPException(status_code=409, detail=str(e))
+        return {"task": _task_view(runtime, task, runtime._clock()),
+                "handoff_version": task.handoff_version}
 
     @router.post("/tasks/{task_id}/cancel")
     async def cancel_task(task_id: str, req: CancelRequest) -> dict[str, Any]:

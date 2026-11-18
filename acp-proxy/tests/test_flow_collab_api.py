@@ -154,6 +154,43 @@ def test_remind_cancel_and_404(env):
     assert client.get("/collab/tasks/TO-none").status_code == 404
 
 
+def test_case_handoff_versioned_reassignment(env):
+    """D5 case handoff：版本校验交办（转派/升级），被取代即作废，交接即清场"""
+    client, engine, runtime = env
+    t = runtime.create(kind="human", run_id="r", flow_id="f", node_id="n",
+                       assignee="alice", instruction="办件")
+    _, token = runtime.store.claim(t.task_id, claimed_by="alice")
+    # 带版本交办：alice → 主管 bob（升级），锁清场
+    resp = client.post(f"/collab/tasks/{t.task_id}/handoff",
+                       json={"to_assignee": "bob", "decided_by": "alice",
+                             "note": "升级主管", "expect_version": 0})
+    assert resp.status_code == 200 and resp.json()["handoff_version"] == 1
+    body = resp.json()["task"]
+    assert body["assignee"] == "bob" and body["claimed_by"] == ""
+    assert body["status"] == "todo"
+    # 前任令牌作废（交接即清场）
+    resp = client.post(f"/collab/tasks/{t.task_id}/deliver",
+                       json={"result": "x", "claim_token": token})
+    assert resp.status_code == 409
+    # 旧版本交办被取代即作废（case_handoff_superseded）
+    resp = client.post(f"/collab/tasks/{t.task_id}/handoff",
+                       json={"to_assignee": "carol", "expect_version": 0})
+    assert resp.status_code == 409 and "case_handoff_superseded" in resp.json()["detail"]
+    # 新版本交办成功（v1→v2），交办历史留痕
+    resp = client.post(f"/collab/tasks/{t.task_id}/handoff",
+                       json={"to_assignee": "carol", "expect_version": 1})
+    assert resp.status_code == 200 and resp.json()["handoff_version"] == 2
+    detail = client.get(f"/collab/tasks/{t.task_id}").json()
+    assert detail["assignee"] == "carol" and detail["handoff_version"] == 2
+    reloaded = runtime.store.load(t.task_id)
+    assert [h["to"] for h in reloaded.handoffs] == ["bob", "carol"]
+    # 终态不可交办
+    runtime.store.close(t.task_id, "cancelled", note="done")
+    resp = client.post(f"/collab/tasks/{t.task_id}/handoff",
+                       json={"to_assignee": "dave"})
+    assert resp.status_code == 409 and "closed" in resp.json()["detail"]
+
+
 def test_agent_task_visible_in_inbox_with_claim_lock(env):
     """agent 工单进收件台：派发后带领取锁与 a2a_task_id（A1 领取可见）"""
     client, engine, runtime = env

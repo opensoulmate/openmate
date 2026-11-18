@@ -264,6 +264,9 @@ class WorkOrder:
     # 催办
     reminders: int = 0
     last_remind_at: float = 0.0
+    # D5 case handoff（带版本校验的交办事务，被取代即作废）
+    handoff_version: int = 0
+    handoffs: list[dict[str, Any]] = field(default_factory=list)
     # agent 通道 / 预算
     a2a_task_id: str = ""
     handed_off_at: float = 0.0   # C4：派发交接标记（先记后发，防双发双扣）
@@ -492,7 +495,8 @@ class WorkOrderStore:
                 return True  # 幂等：结果已固化，绝不覆盖（防重复执行）
             if task.status in (STATUS_FAILED, STATUS_CANCELLED):
                 raise CollabError(f"工单已终态({task.status})，不可交付: {task_id}")
-            if claim_token and task.claim_token and task.claim_token != claim_token:
+            if claim_token and task.claim_token != claim_token:
+                # CAS 回执：令牌必须匹配当前领取（含交接清场后的空令牌=前任令牌作废）
                 raise CollabError("claim_token 无效，交付被拒（防并发双写）")
             task.status = STATUS_DELIVERED
             task.result = result
@@ -537,6 +541,47 @@ class WorkOrderStore:
 
         task, did = self._mutate(task_id, _do)
         return task, did
+
+    def handoff(self, task_id: str, *, to_assignee: str, by: str = "",
+                note: str = "", expect_version: int | None = None,
+                now: float | None = None) -> WorkOrder:
+        """D5 case handoff 交办（对位 Paperclip caseHandoffs：版本号+状态机+被取代即作废）。
+
+        - 带版本校验：expect_version 与当前不符 → case_handoff_superseded 拒绝
+          （转派/升级途中被新交办取代的旧请求一律作废，防"转了一半被旧任务覆盖"）
+        - 交接即清场：释放前任领取锁（claim_token 作废），新归属重新认领
+        - 终态不可交办（closed 显式报因）
+        """
+        now = time.time() if now is None else now
+
+        def _do(task: WorkOrder) -> None:
+            if task.status in TERMINAL_STATUSES:
+                raise CollabError(f"closed: 工单已终态({task.status})，不可交办: {task_id}")
+            if expect_version is not None and expect_version != task.handoff_version:
+                raise CollabError(
+                    f"case_handoff_superseded: 交办版本不符"
+                    f"（当前 v{task.handoff_version}，期望 v{expect_version}）——已被取代即作废")
+            if not to_assignee:
+                raise CollabError("交办必须指定新归属 to_assignee")
+            previous = task.assignee
+            task.handoff_version += 1
+            task.handoffs.append({
+                "version": task.handoff_version,
+                "from": previous, "to": to_assignee, "by": by,
+                "note": note[:200], "ts": now,
+            })
+            task.assignee = to_assignee
+            task.claim_token = ""        # 交接即清场：前任锁作废
+            task.claimed_by = ""
+            task.claim_at = 0.0
+            task.lease_expires_at = 0.0
+            if task.status == STATUS_WORKING:
+                task.status = STATUS_TODO
+            task.note("handoff",
+                      f"v{task.handoff_version}: {previous}→{to_assignee} by={by or '-'} {note}".strip())
+
+        task, _ = self._mutate(task_id, _do)
+        return task
 
 
 # ---- 组织角色路由（接 RBAC 角色表）----
@@ -1164,13 +1209,20 @@ class CollabRuntime:
         self._emit("task-delivered", task)
         engine = self._get_engine()
         if task.run_id and engine is not None:
-            if task.kind == KIND_APPROVAL:
-                await engine.resolve_approval(
-                    task.run_id, "approve", decided_by=task.delivered_by,
-                    note=str(result or "")[:500])
-            else:
-                await engine.resolve_delivery(
-                    task.run_id, result, decided_by=task.delivered_by)
+            try:
+                if task.kind == KIND_APPROVAL:
+                    await engine.resolve_approval(
+                        task.run_id, "approve", decided_by=task.delivered_by,
+                        note=str(result or "")[:500])
+                else:
+                    await engine.resolve_delivery(
+                        task.run_id, result, decided_by=task.delivered_by)
+            except Exception as e:  # noqa: BLE001 — 独立工单/实例不在：显式留痕不吞交付
+                if type(e).__name__ == "FlowRunError":
+                    task.note("resume-skipped", f"流程实例不可恢复: {e}")
+                    self.store.save(task)
+                else:
+                    raise
         return task
 
     def remind(self, task_id: str, note: str = "",
