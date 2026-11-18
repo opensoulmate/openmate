@@ -281,6 +281,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Pulse heartbeat failed to start: %s", e)
 
+    # 协作收发台接 Pulse：开单登记长任务账（心跳推进/超时恢复催办），失败不阻断
+    try:
+        from plugin.flow_collab import get_collab
+        get_collab().attach_pulse()
+    except Exception as e:
+        logger.warning("协作工单 Pulse 接线失败(非致命): %s", e)
+
     yield
     if flow_scheduler:
         try:
@@ -352,8 +359,10 @@ def _on_plugin_installed(grown: dict) -> None:
 
 from plugin.flow_api import build_flow_router  # noqa: E402
 from plugin.forge_api import build_forge_router  # noqa: E402
+from plugin.collab_api import build_collab_router  # noqa: E402
 
 app.include_router(build_flow_router())
+app.include_router(build_collab_router())   # 任务收发台（每人收件箱 API）
 app.include_router(build_forge_router(
     PLUGINS_DIR,
     include_router=app.include_router,
