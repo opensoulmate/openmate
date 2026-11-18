@@ -426,6 +426,115 @@ def parse_flow(data: Any, *, source: str = "<flow>") -> FlowDefinition:
     )
 
 
+def _dump_retry(retry: RetrySpec) -> dict[str, Any] | None:
+    if retry == RetrySpec():
+        return None
+    data: dict[str, Any] = {"max": retry.max}
+    if retry.backoff != "fixed":
+        data["backoff"] = retry.backoff
+    if retry.base_seconds != 1.0:
+        data["base_seconds"] = retry.base_seconds
+    return data
+
+
+def _dump_node(node: NodeSpec) -> dict[str, Any]:
+    """NodeSpec → 可 parse_flow 回读的映射（克隆/编辑参数持久化用）"""
+    data: dict[str, Any] = {"id": node.id, "type": node.type}
+    retry = _dump_retry(node.retry)
+    if retry is not None:
+        data["retry"] = retry
+    if node.timeout_seconds:
+        data["timeout_seconds"] = node.timeout_seconds
+    if node.on_error != "fail":
+        data["on_error"] = node.on_error
+    if node.type == "tool":
+        data["tool"] = node.tool
+        if node.args:
+            data["args"] = dict(node.args)
+    elif node.type == "decision":
+        data["when"] = node.when
+        data["then"] = node.then
+        data["else"] = node.else_
+    elif node.type == "parallel":
+        data["branches"] = [
+            {k: v for k, v in
+             {"id": b.id, "tool": b.tool, **({"args": dict(b.args)} if b.args else {})}.items()}
+            for b in node.branches
+        ]
+        if node.max_concurrency:
+            data["max_concurrency"] = node.max_concurrency
+    elif node.type == "loop":
+        data["over"] = node.over
+        data["body"] = list(node.body)
+    elif node.type == "approval":
+        if node.form:
+            data["form"] = node.form
+        if node.timeout_hours != 72.0:
+            data["timeout_hours"] = node.timeout_hours
+        if node.on_timeout != "fail":
+            data["on_timeout"] = node.on_timeout
+    elif node.type in ("agent", "human"):
+        data["task"] = node.task
+        if node.user:
+            data["user"] = node.user
+        if node.role:
+            data["role"] = node.role
+        if node.target_agent != "soulmate":
+            data["target_agent"] = node.target_agent
+        if node.form:
+            data["form"] = node.form
+        if node.timeout_hours != 72.0:
+            data["timeout_hours"] = node.timeout_hours
+        if node.on_timeout != "fail":
+            data["on_timeout"] = node.on_timeout
+        budget = _dump_budget(node.budget)
+        if budget:
+            data["budget"] = budget
+        if node.package != "full":
+            data["package"] = node.package
+        if node.review:
+            data["review"] = True
+    elif node.type == "action":
+        data["actions"] = [
+            {k: v for k, v in
+             {"type": a.type, "channel": a.channel, "message": a.message,
+              "event": a.event, "panel": a.panel}.items() if v}
+            for a in node.actions
+        ]
+    return data
+
+
+def _dump_budget(budget: BudgetSpec) -> dict[str, Any]:
+    data: dict[str, Any] = {}
+    if budget.max_tokens:
+        data["max_tokens"] = budget.max_tokens
+    if budget.max_cost_usd:
+        data["max_cost_usd"] = budget.max_cost_usd
+    if budget.max_duration_seconds:
+        data["max_duration_seconds"] = budget.max_duration_seconds
+    return data
+
+
+def dump_flow(defn: FlowDefinition) -> dict[str, Any]:
+    """FlowDefinition → 可 parse_flow 回读/可存 YAML 的映射（编辑参数/克隆序列化）"""
+    triggers: list[dict[str, Any]] = []
+    for trigger in defn.triggers:
+        item: dict[str, Any] = {"type": trigger.type}
+        if trigger.type == "cron":
+            item["cron"] = trigger.cron
+        elif trigger.type == "event":
+            item["event"] = trigger.event
+        triggers.append(item)
+    return {
+        "id": defn.id,
+        "name": defn.name,
+        "version": defn.version,
+        "triggers": triggers,
+        "nodes": [_dump_node(n) for n in defn.nodes],
+        "observability": {"retain_runs": defn.retain_runs},
+    }
+
+
 def _node_refs(node: NodeSpec) -> list[tuple[str, str]]:
     refs: list[tuple[str, str]] = []
     if node.type == "decision":

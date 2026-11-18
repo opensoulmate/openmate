@@ -17,6 +17,7 @@ import datetime as _dt
 import hashlib
 import json
 import logging
+import re
 import shutil
 import time
 import uuid
@@ -31,8 +32,10 @@ from plugin.flow_def import (
     FlowDefinition,
     NodeSpec,
     cron_matches,
+    dump_flow,
     eval_expr,
     load_flow_file,
+    parse_flow,
     resolve_value,
 )
 
@@ -178,7 +181,8 @@ class FlowStore:
     def save(self, run: FlowRun) -> None:
         run.updated_at = time.time()
         path = self._run_path(run.flow_id, run.run_id)
-        tmp = path.with_suffix(".json.tmp")
+        # 唯一临时名：触达线程与执行线程并发保存不互踩（原子替换，后写胜）
+        tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex[:8]}.tmp")
         tmp.write_text(
             json.dumps(run.to_dict(), ensure_ascii=False, indent=1), encoding="utf-8"
         )
@@ -191,7 +195,8 @@ class FlowStore:
         return FlowRun.from_dict(json.loads(path.read_text(encoding="utf-8")))
 
     def list_runs(self, flow_id: str | None = None, status: str | None = None,
-                  limit: int = 50) -> list[FlowRun]:
+                  limit: int = 50, since: float | None = None,
+                  until: float | None = None) -> list[FlowRun]:
         runs: list[FlowRun] = []
         flow_dirs = [self.runs_dir / flow_id] if flow_id else [
             d for d in sorted(self.runs_dir.iterdir()) if d.is_dir()
@@ -207,6 +212,10 @@ class FlowStore:
                 except (json.JSONDecodeError, KeyError, TypeError):
                     continue
                 if status and run.status != status:
+                    continue
+                if since is not None and run.created_at < since:
+                    continue
+                if until is not None and run.created_at > until:
                     continue
                 runs.append(run)
         runs.sort(key=lambda r: r.created_at, reverse=True)
@@ -326,6 +335,12 @@ class FlowExecutor:
             self._log(run, "-", "run-failed", str(e))
         self.engine.store.save(run)
         self.engine._trim(run.flow_id)
+        # 结果触达（状态迁移点恰好一次；重试后再失败是新迁移，会再触达）
+        if run.status == RUN_STATUS_COMPLETED:
+            self.engine.notify_run(run, "completed", dedupe_key=str(run.finished_at))
+        elif run.status == RUN_STATUS_FAILED:
+            self.engine.notify_run(run, "failed", node=_last_failed_node(run),
+                                   dedupe_key=str(run.finished_at))
         return run
 
     # ── 节点执行 ──
@@ -597,6 +612,11 @@ class FlowExecutor:
                   f"assignee={run.approval.assignee or '-'} "
                   f"超时 {node.timeout_hours:g}h，on_timeout={node.on_timeout}）")
         self.engine.store.save(run)
+        # 结果触达：「该我审批了」（新建审批记录恰好一次，幂等重挂不重复发）
+        self.engine.notify_run(
+            run, "waiting-approval", node=node.id,
+            detail=node.form or ("交付" if kind not in ("approval",) else "审批"),
+            dedupe_key=f"{node.id}:{run.approval.created_at}")
         return {"waiting": True, "node": node.id, "kind": kind,
                 "task_id": run.approval.task_id, "form": node.form}
 
@@ -908,6 +928,14 @@ def _summarize(value: Any, limit: int = 200) -> str:
     return text if len(text) <= limit else text[:limit] + "…"
 
 
+def _last_failed_node(run: FlowRun) -> str:
+    """失败归因节点（先失败者即祸首：后续节点未执行）"""
+    for node_id, record in run.nodes.items():
+        if record.status == NODE_STATUS_FAILED:
+            return node_id
+    return ""
+
+
 # ---- 引擎门面 ----
 
 class FlowEngine:
@@ -919,9 +947,62 @@ class FlowEngine:
         self._tool_caller = tool_caller
         self._locks: dict[str, asyncio.Lock] = {}
         self._executed_cron_slots: set[str] = set()  # 进程内防重复触发（幂等键表兜底跨重启）
+        # 用户面流程定义仓（克隆/编辑参数持久化 + 暂停态）：插件注册有同 id 覆盖件时以覆盖件为准
+        import os as _os
+        default_defs = self.store.runs_dir.parent / "flow-defs"
+        self.defs_dir = Path(_os.environ.get("FLOW_DEFS_DIR") or default_defs)
+        self.defs_dir.mkdir(parents=True, exist_ok=True)
+        self._paused: dict[str, bool] = {}
+        self._state_path = self.defs_dir / "_state.json"
+        self._load_state()
+        self._load_overlays()
+
+    # ── 用户面定义仓（覆盖件）──
+
+    def _load_state(self) -> None:
+        try:
+            data = json.loads(self._state_path.read_text(encoding="utf-8"))
+            self._paused = dict(data.get("paused") or {})
+        except (OSError, json.JSONDecodeError, TypeError):
+            self._paused = {}
+
+    def _save_state(self) -> None:
+        try:
+            self._state_path.write_text(
+                json.dumps({"paused": self._paused}, ensure_ascii=False, indent=1),
+                encoding="utf-8")
+        except OSError as e:
+            logger.warning("流程状态落盘失败: %s", e)
+
+    def _overlay_path(self, flow_id: str) -> Path:
+        return self.defs_dir / f"{flow_id}.yaml"
+
+    def _load_overlays(self) -> None:
+        """启动装载用户覆盖件（克隆件/编辑件）——早于插件注册，注册时覆盖件优先"""
+        import yaml
+        for path in sorted(self.defs_dir.glob("*.yaml")):
+            try:
+                defn = load_flow_file(path)
+                self._flows[defn.id] = (defn, "user")
+            except Exception as e:  # noqa: BLE001 — 单个坏覆盖件不阻断装载
+                logger.warning("流程覆盖件装载失败 %s: %s", path, e)
+
+    def _save_overlay(self, defn: FlowDefinition) -> None:
+        import yaml
+        path = self._overlay_path(defn.id)
+        path.write_text(
+            yaml.safe_dump(dump_flow(defn), allow_unicode=True, sort_keys=False),
+            encoding="utf-8")
 
     # 注册
     def register_flow(self, defn: FlowDefinition, plugin_id: str) -> None:
+        overlay = self._overlay_path(defn.id)
+        if overlay.is_file():
+            # 用户编辑/克隆覆盖件优先于插件自带定义（编辑过的参数不被插件重载冲掉）
+            try:
+                defn = load_flow_file(overlay)
+            except Exception as e:  # noqa: BLE001 — 覆盖件坏了退回插件原版
+                logger.warning("流程覆盖件解析失败 %s（用插件原版）: %s", overlay, e)
         self._flows[defn.id] = (defn, plugin_id)
         logger.info("流程已注册: %s (plugin=%s, triggers=%s)",
                     defn.id, plugin_id, [t.type for t in defn.triggers])
@@ -938,15 +1019,167 @@ class FlowEngine:
         return len(names)
 
     def delete_flow(self, flow_id: str) -> dict[str, Any]:
-        """删除流程定义 + 清空实例/幂等键（防再生：另需移除插件侧 flows: 注册源）"""
+        """删除流程定义 + 清空实例/幂等键 + 用户覆盖件/暂停态（防再生：另需移除插件侧 flows: 注册源）"""
         entry = self._flows.pop(flow_id, None)
         purged = self.store.purge_flow(flow_id)
         self._locks.pop(flow_id, None)
+        self._overlay_path(flow_id).unlink(missing_ok=True)
+        if self._paused.pop(flow_id, None) is not None:
+            self._save_state()
         stale = {k for k in self._executed_cron_slots if k.startswith(f"cron:{flow_id}:")}
         self._executed_cron_slots -= stale
         if entry is not None:
             logger.info("流程已删除: %s (清实例 %d 条)", flow_id, purged)
         return {"removed_definition": entry is not None, "purged_runs": purged}
+
+    # ── 一键操作面（克隆 / 编辑参数 / 暂停 / 从失败节点重试）──
+
+    def clone_flow(self, flow_id: str, new_id: str = "", new_name: str = "") -> dict[str, Any]:
+        """克隆流程定义为用户件（独立 id/实例/触发，参数随后可编辑）"""
+        defn = self.get_flow(flow_id)
+        target = (new_id or "").strip()
+        if not target:
+            base = f"{flow_id}-copy"
+            target, index = base, 2
+            while target in self._flows:
+                target = f"{base}{index}"
+                index += 1
+        if not re.fullmatch(r"[a-z][a-z0-9-]{0,63}", target):
+            raise FlowRunError(
+                f"新流程 id 非法: {target!r}（小写字母开头，仅小写字母/数字/连字符）")
+        if target in self._flows:
+            raise FlowRunError(f"流程 id 已存在: {target}")
+        data = dump_flow(defn)
+        data["id"] = target
+        data["name"] = (new_name or f"{defn.name} 副本").strip() or f"{defn.name} 副本"
+        try:
+            clone = parse_flow(data, source=f"clone:{flow_id}")
+        except FlowDefError as e:
+            raise FlowRunError(f"克隆校验失败: {e}") from e
+        self._save_overlay(clone)
+        self._flows[clone.id] = (clone, "user")
+        logger.info("流程已克隆: %s → %s", flow_id, clone.id)
+        return {"id": clone.id, "name": clone.name, "version": clone.version,
+                "plugin_id": "user", "cloned_from": flow_id,
+                "triggers": [asdict(t) for t in clone.triggers],
+                "nodes": [{"id": n.id, "type": n.type} for n in clone.nodes],
+                "retain_runs": clone.retain_runs, "paused": False}
+
+    def update_flow(self, flow_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+        """编辑流程参数（name/triggers/nodes/retain_runs 任意子集）→ 校验 → 覆盖件落盘。
+
+        覆盖件优先于插件定义（register_flow 同 id 覆盖），编辑不被插件重载冲掉。
+        """
+        defn = self.get_flow(flow_id)
+        plugin_id = self._flows[flow_id][1]
+        data = dump_flow(defn)
+        for key in ("name", "version", "triggers", "nodes"):
+            if key in patch and patch[key] is not None:
+                data[key] = patch[key]
+        if patch.get("retain_runs") is not None:
+            data.setdefault("observability", {})
+            data["observability"]["retain_runs"] = patch["retain_runs"]
+        data["id"] = flow_id
+        # 节点兼容两种拼写：GET /flows/{id} 序列化是 else_，YAML/校验口径是 else
+        for node in data.get("nodes") or []:
+            if isinstance(node, dict) and "else_" in node and "else" not in node:
+                node["else"] = node.pop("else_")
+        try:
+            updated = parse_flow(data, source=f"edit:{flow_id}")
+        except FlowDefError as e:
+            raise FlowRunError(f"参数校验失败: {e}") from e
+        self._save_overlay(updated)
+        self.register_flow(updated, plugin_id)
+        logger.info("流程参数已编辑: %s (version=%d)", flow_id, updated.version)
+        return {"id": updated.id, "name": updated.name, "version": updated.version,
+                "plugin_id": plugin_id,
+                "triggers": [asdict(t) for t in updated.triggers],
+                "nodes": [{"id": n.id, "type": n.type} for n in updated.nodes],
+                "retain_runs": updated.retain_runs,
+                "paused": self.is_paused(flow_id)}
+
+    def pause_flow(self, flow_id: str, paused: bool = True) -> dict[str, Any]:
+        """暂停/恢复：暂停挡自动触发（cron/event）与手动触发（force 可越权立即触发）"""
+        self.get_flow(flow_id)   # 不存在即报错
+        self._paused[flow_id] = paused
+        self._save_state()
+        logger.info("流程 %s: %s", flow_id, "已暂停" if paused else "已恢复")
+        return {"id": flow_id, "paused": paused}
+
+    def is_paused(self, flow_id: str) -> bool:
+        return bool(self._paused.get(flow_id))
+
+    async def retry_run(self, run_id: str, from_node: str = "") -> FlowRun:
+        """从失败节点续跑（同实例原地重试）——失败可修；整体重跑请用回放"""
+        run = self.store.find_run(run_id)
+        if run is None:
+            raise FlowRunError(f"流程实例不存在: {run_id}")
+        if run.status != RUN_STATUS_FAILED:
+            raise FlowRunError(
+                f"只有失败实例可从失败节点重试（当前 {run.status}）；整体重跑请用回放")
+        defn = self.get_flow(run.flow_id)
+        target = from_node
+        if not target:
+            for node_id, record in run.nodes.items():
+                if record.status == NODE_STATUS_FAILED:
+                    target = node_id
+                    break
+        target = target or run.cursor or defn.first_node_id()
+        if target not in defn.node_map:
+            raise FlowRunError(f"重试起点节点不存在: {target}")
+        record = run.nodes.get(target)
+        if record is None:
+            record = NodeRun(node_id=target, type=defn.node_map[target].type)
+            run.nodes[target] = record
+        record.status = NODE_STATUS_PENDING
+        record.error = None
+        record.attempts = 0
+        record.retries = 0
+        record.started_at = None
+        record.finished_at = None
+        record.duration_ms = None
+        run.status = RUN_STATUS_RUNNING
+        run.error = None
+        run.finished_at = None
+        run.cursor = target
+        self._log(run, target, "retry-resume", f"从失败节点 {target} 原地续跑")
+        self.store.save(run)
+        return await self.execute(run_id, start_at=target)
+
+    def run_stats(self, flow_id: str = "", since: float | None = None,
+                  until: float | None = None, limit: int = 1000) -> dict[str, Any]:
+        """运行历史统计（按流程/时间筛选：成败计数/成功率/平均与最差耗时）"""
+        runs = self.store.list_runs(
+            flow_id=flow_id or None, limit=max(1, min(limit, 5000)),
+            since=since, until=until)
+        counts: dict[str, int] = {}
+        durations: list[float] = []
+        by_flow: dict[str, dict[str, Any]] = {}
+        for run in runs:
+            counts[run.status] = counts.get(run.status, 0) + 1
+            if run.finished_at:
+                durations.append((run.finished_at - run.created_at) * 1000)
+            bucket = by_flow.setdefault(run.flow_id, {
+                "flow_id": run.flow_id, "flow_name": run.flow_name,
+                "total": 0, "completed": 0, "failed": 0, "waiting-approval": 0,
+                "running": 0})
+            bucket["total"] += 1
+            bucket[run.status] = bucket.get(run.status, 0) + 1
+        done = counts.get(RUN_STATUS_COMPLETED, 0) + counts.get(RUN_STATUS_FAILED, 0)
+        return {
+            "total": len(runs),
+            "completed": counts.get(RUN_STATUS_COMPLETED, 0),
+            "failed": counts.get(RUN_STATUS_FAILED, 0),
+            "running": counts.get(RUN_STATUS_RUNNING, 0),
+            "waiting_approval": counts.get(RUN_STATUS_WAITING, 0),
+            "success_rate": round(
+                counts.get(RUN_STATUS_COMPLETED, 0) / done * 100, 1) if done else None,
+            "avg_duration_ms": round(sum(durations) / len(durations), 1) if durations else None,
+            "max_duration_ms": round(max(durations), 1) if durations else None,
+            "by_flow": sorted(by_flow.values(), key=lambda b: -b["total"]),
+            "since": _fmt_ts(since) if since else "",
+            "until": _fmt_ts(until) if until else "",
+        }
 
     def get_flow(self, flow_id: str) -> FlowDefinition:
         entry = self._flows.get(flow_id)
@@ -965,6 +1198,7 @@ class FlowEngine:
                 "triggers": [asdict(t) for t in defn.triggers],
                 "nodes": [{"id": n.id, "type": n.type} for n in defn.nodes],
                 "retain_runs": defn.retain_runs,
+                "paused": self.is_paused(defn.id),
             })
         return sorted(result, key=lambda item: item["id"])
 
@@ -975,6 +1209,16 @@ class FlowEngine:
     def _log(self, run: FlowRun, node_id: str, event: str, detail: str) -> None:
         """运行日志追加（FlowExecutor._log 同源）"""
         FlowExecutor._log(run, node_id, event, detail)
+
+    def notify_run(self, run: FlowRun, kind: str, *, node: str = "",
+                   detail: str = "", dedupe_key: str = "") -> None:
+        """结果触达旁路（微信 gateway + Reflex 事件流）：never-raise、不阻断执行"""
+        try:
+            from plugin import flow_notify
+            flow_notify.notify_run_event(
+                self, run, kind, node=node, detail=detail, dedupe_key=dedupe_key)
+        except Exception as e:  # noqa: BLE001 — 触达旁路绝不阻断主流程
+            logger.warning("流程触达旁路失败: %s", e)
 
     async def call_tool(self, tool_name: str, args: dict[str, Any],
                         approved: bool = False,
@@ -1029,9 +1273,13 @@ class FlowEngine:
     # 触发
     def start_run(self, flow_id: str, trigger: dict[str, Any],
                   inputs: dict[str, Any] | None = None,
-                  idempotency_key: str = "", now: float | None = None) -> FlowRun:
+                  idempotency_key: str = "", now: float | None = None,
+                  force: bool = False) -> FlowRun:
         """创建实例（幂等：同 key 直接返回既有实例，不重复执行）"""
         defn = self.get_flow(flow_id)
+        if self.is_paused(flow_id) and not force:
+            raise FlowRunError(
+                f"流程已暂停: {flow_id}（先恢复再触发；紧急可 force 立即触发）")
         if idempotency_key:
             existing_id = self.store.lookup_key(flow_id, idempotency_key)
             if existing_id:
@@ -1061,9 +1309,9 @@ class FlowEngine:
 
     async def run_now(self, flow_id: str, trigger: dict[str, Any],
                       inputs: dict[str, Any] | None = None,
-                      idempotency_key: str = "") -> FlowRun:
+                      idempotency_key: str = "", force: bool = False) -> FlowRun:
         """创建并立即执行（到完成或审批挂起）"""
-        run = self.start_run(flow_id, trigger, inputs, idempotency_key)
+        run = self.start_run(flow_id, trigger, inputs, idempotency_key, force=force)
         return await self.execute(run.run_id)
 
     async def execute(self, run_id: str, start_at: str | None = None) -> FlowRun:
@@ -1132,6 +1380,8 @@ class FlowEngine:
                 self._log(run, approval_node.id, "review-rejected",
                           f"by={decided_by or '用户'}: {str(result)[:200]}")
                 self.store.save(run)
+                self.notify_run(run, "failed", node=approval_node.id,
+                                dedupe_key=str(run.finished_at))
                 return run
             self._log(run, approval_node.id, "review-accepted",
                       f"by={decided_by or '用户'}")
@@ -1141,6 +1391,8 @@ class FlowEngine:
             run.error = f"人工审批驳回: {note or '无说明'}"
             self._log(run, run.approval.node_id, "approval-rejected", note or "（无说明）")
             self.store.save(run)
+            self.notify_run(run, "failed", node=run.approval.node_id,
+                            dedupe_key=str(run.finished_at))
             return run
         if run.approval.kind in ("human", "agent", "budget-gate", "tool-gate"):
             run.outputs[run.approval.node_id] = {
@@ -1256,6 +1508,8 @@ class FlowEngine:
                     record.error = run.error
                 self._log(run, approval.node_id, "approval-timeout", "超时，按 on_timeout=fail 终止")
                 self.store.save(run)
+                self.notify_run(run, "failed", node=approval.node_id,
+                                dedupe_key=str(run.finished_at))
         return handled
 
     # 回放
@@ -1282,6 +1536,8 @@ class FlowEngine:
         ).hexdigest()[:16]
         started: list[FlowRun] = []
         for defn, _plugin_id in self._flows.values():
+            if self.is_paused(defn.id):
+                continue   # 暂停：不接事件触发
             for trigger in defn.triggers:
                 if trigger.type == "event" and trigger.event == event:
                     key = f"event:{defn.id}:{event}:{payload_hash}"
@@ -1301,6 +1557,8 @@ class FlowEngine:
         slot = moment.strftime("%Y%m%d%H%M")
         started: list[FlowRun] = []
         for defn, _plugin_id in self._flows.values():
+            if self.is_paused(defn.id):
+                continue   # 暂停：不接 cron 触发
             for trigger in defn.triggers:
                 if trigger.type != "cron":
                     continue
@@ -1360,6 +1618,7 @@ class FlowEngine:
 
     # 可观测（面板数据源，经 MCP 工具暴露）
     def run_summary(self, run: FlowRun) -> dict[str, Any]:
+        from plugin.flow_errors import normalize_error
         nodes = []
         for node_id, record in run.nodes.items():
             nodes.append({
@@ -1371,6 +1630,8 @@ class FlowEngine:
                 "duration_ms": round(record.duration_ms or 0.0, 1),
                 "over_budget": record.over_budget,
                 "error": record.error or "",
+                "error_norm": normalize_error(record.error, where=node_id)
+                if record.error else None,
                 "output": record.output_summary or "",
             })
         return {
@@ -1387,6 +1648,8 @@ class FlowEngine:
             "duration_ms": round(
                 ((run.finished_at or time.time()) - run.created_at) * 1000, 1),
             "error": run.error or "",
+            "error_norm": normalize_error(run.error) if run.error else None,
+            "failed_node": _last_failed_node(run) if run.status == RUN_STATUS_FAILED else "",
             "nodes": nodes,
             "notifications": run.notifications,
         }
@@ -1479,6 +1742,12 @@ class FlowScheduler:
                 collab.check_timeouts()           # 催办 + B3 三拍判死清扫（独立于 Pulse）
             except Exception as e:  # noqa: BLE001
                 logger.warning("协作工单回流轮询失败: %s", e)
+            try:
+                from plugin import flow_notify
+                flow_notify.urge_pending(self.engine)   # 待审批微信催办（间隔去重）
+                flow_notify.retry_deferred(self.engine)  # iLink 窗口补投（deferred 通知）
+            except Exception as e:  # noqa: BLE001
+                logger.warning("待审批催办失败: %s", e)
 
 
 # ---- 进程级单例（app.py / flow_api / 插件 handler 共用）----
