@@ -129,4 +129,13 @@ export const flowApi = {
       `/flows/${encodeURIComponent(flowId)}/yaml`),
   getFlow: (flowId: string) =>
     jsonFetch<Record<string, unknown>>(`/flows/${encodeURIComponent(flowId)}`),
+  // 编辑参数（PATCH /flows/{id}：name/triggers/nodes/retain_runs 任意子集，parse_flow 校验+落盘）
+  update: (flowId: string, patch: {
+    name?: string; triggers?: TriggerSpec[]; nodes?: FlowNodeSpec[]; retain_runs?: number;
+  }) =>
+    jsonFetch<Record<string, unknown>>(`/flows/${encodeURIComponent(flowId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    }),
 };

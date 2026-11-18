@@ -3532,7 +3532,13 @@
     "noteError": "配信失敗",
     "noteSending": "送信中",
     "noteDeferred": "再送待ち",
-    "confirmBatchDelete": "選択した {{count}} 件のフローを削除しますか？インスタンスと冪等キーも消去されます"
+    "confirmBatchDelete": "選択した {{count}} 件のフローを削除しますか？インスタンスと冪等キーも消去されます",
+    "studioEdDialogTitle": "フローを編集",
+    "studioEdFormMode": "フォームモード",
+    "studioEdAdvanced": "詳細モード（JSON）",
+    "studioEdAdvancedHint": "詳細モード：トリガー/ノードを JSON で直接編集（フォームにない項目はこちら）、検証・保存は同じ",
+    "studioEdEntryHint": "フローをクリックして統一エディタを開く：フォーム編集が主、右上で「詳細モード（JSON）」に切替可能",
+    "studioEdJsonInvalid": "JSON 不正（トリガー/ノードはいずれも配列が必要）"
   },
   "trajectory": {
     "title": "トラジェクトリー",

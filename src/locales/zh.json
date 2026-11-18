@@ -3638,7 +3638,13 @@
     "noteError": "投递失败",
     "noteSending": "发送中",
     "noteDeferred": "待补投",
-    "confirmBatchDelete": "确认删除所选 {{count}} 条流程？其实例与幂等键将一并清空"
+    "confirmBatchDelete": "确认删除所选 {{count}} 条流程？其实例与幂等键将一并清空",
+    "studioEdDialogTitle": "编辑流程",
+    "studioEdFormMode": "表单模式",
+    "studioEdAdvanced": "高级模式（JSON）",
+    "studioEdAdvancedHint": "高级模式：触发器/节点全量 JSON 直改（表单未覆盖的字段从这里改），仍走同一校验与保存",
+    "studioEdEntryHint": "点流程打开统一编辑器：表单改参为主，右上角可切「高级模式（JSON）」直改全量配置",
+    "studioEdJsonInvalid": "JSON 不合法（触发器/节点均须为数组）"
   },
   "trajectory": {
     "title": "轨迹追踪",

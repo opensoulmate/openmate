@@ -3,7 +3,8 @@
 // 建流工坊（Flow Studio）— 建流零门槛三件套，/will 沉淀为工作台常驻入口：
 // ① 一句话建流：自然语言 → LLM 生成流程定义 → 节点图实时预览 → 点头存为常驻流程
 // ② 流程模板库：定时对账/文件监听处理/人工审批链/多 Agent 协作，一键套用改参数
-// ③ 可视化编辑：触发器/节点配置/审批人全表单改参（不碰 YAML），YAML 仍可导出
+// ③ 可视化编辑：触发器/节点配置/审批人全表单改参（不碰 YAML），YAML 仍可导出；
+//    统一编辑器 FlowEditDialog（表单=主，JSON=高级模式）与 will 流程列表「编辑」同一入口。
 // 数据口=flow-api.ts（acp-proxy :8092 /flows/studio*）；节点图=flow-graph.tsx 共用组件。
 // 生成失败只报因（422 带报因），不做正则兜底假造。
 
@@ -13,6 +14,7 @@ import { cn } from "@/lib/utils";
 import {
   Sparkles, LayoutTemplate, Pencil, Save, FileDown, CheckCircle, XCircle,
   Loader2, Plus, Trash2, Copy, Download, RefreshCw, AlertTriangle, Wand2,
+  Braces,
 } from "lucide-react";
 import { BranchGraph, type FlowDef, type FlowNode } from "./flow-graph";
 import {
@@ -659,70 +661,114 @@ function NodeEditor({ node, index, onChange }: {
   );
 }
 
-function EditorPane({ flows, onSaved }: {
-  flows: Array<{ id: string; name: string; plugin_id: string }>;
+function TriggerEditor({ triggers, onChange }: {
+  triggers: FlowDefData["triggers"];
+  onChange: (triggers: FlowDefData["triggers"]) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-2">
+      <div className="text-xs font-semibold text-muted-foreground">
+        {t("will.studioEdTriggers", "触发器")}
+      </div>
+      {triggers.map((tr, i) => (
+        <div key={i} className="grid grid-cols-2 lg:grid-cols-4 gap-2 items-end">
+          <SelectField label={t("will.studioEdTriggerType", "类型")}
+            value={tr.type}
+            onChange={(v) => {
+              const next = [...triggers];
+              next[i] = {
+                type: v,
+                cron: v === "cron" ? (tr.cron || "0 9 * * *") : undefined,
+                event: v === "event" ? (tr.event || "") : undefined,
+              };
+              onChange(next);
+            }}
+            options={[
+              { value: "cron", label: "cron" },
+              { value: "event", label: "event" },
+              { value: "manual", label: "manual" },
+            ]} />
+          {tr.type === "cron" && (
+            <Field label={t("will.studioEdCron", "cron（分 时 日 月 周）")} value={tr.cron || ""} mono
+              onChange={(v) => { const next = [...triggers]; next[i] = { ...tr, cron: v }; onChange(next); }} />
+          )}
+          {tr.type === "event" && (
+            <Field label={t("will.studioEdEvent", "事件名")} value={tr.event || ""} mono
+              onChange={(v) => { const next = [...triggers]; next[i] = { ...tr, event: v }; onChange(next); }} />
+          )}
+          <button
+            onClick={() => onChange(triggers.filter((_, ri) => ri !== i))}
+            className={cn(BTN_GHOST_CLS, "text-red-500")}
+          >
+            <Trash2 size={12} /> {t("will.studioRemove", "删除")}
+          </button>
+        </div>
+      ))}
+      <button
+        onClick={() => onChange([...triggers, { type: "manual" }])}
+        className={BTN_GHOST_CLS}
+      >
+        <Plus size={12} /> {t("will.studioEdAddTrigger", "加触发器")}
+      </button>
+    </div>
+  );
+}
+
+// ── 统一流程编辑器：表单=主，JSON=高级模式（同一入口）——
+//    will 流程列表「编辑」与建流工坊「可视化编辑」都进这里，不再有第二套 JSON 对话框 ──
+
+export function FlowEditDialog({ flow, onClose, onSaved, showMsg }: {
+  flow: { id: string; name: string; plugin_id?: string };
+  onClose: () => void;
   onSaved: () => void;
+  showMsg?: (type: "ok" | "err", text: string) => void;
 }) {
   const { t } = useTranslation();
   const [defn, setDefn] = useState<FlowDefData | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+  const [advanced, setAdvanced] = useState(false);
+  const [triggersText, setTriggersText] = useState("");
+  const [nodesText, setNodesText] = useState("");
+  const [jsonErr, setJsonErr] = useState("");
   const [showYaml, setShowYaml] = useState(false);
   const [yamlText, setYamlText] = useState("");
 
-  const open = async (flowId: string) => {
+  useEffect(() => {
+    let alive = true;
     setBusy(true);
-    setMessage(null);
-    try {
-      const raw = await flowApi.getFlow(flowId);
-      setDefn(normalizeDetail(raw));
-      setShowYaml(false);
-      setYamlText("");
-    } catch (e) {
-      setMessage({ type: "err", text: String(e) });
-    } finally {
-      setBusy(false);
-    }
-  };
+    flowApi.getFlow(flow.id)
+      .then((raw) => {
+        if (!alive) return;
+        const d = normalizeDetail(raw);
+        setDefn(d);
+        setTriggersText(JSON.stringify(d.triggers ?? [], null, 2));
+        setNodesText(JSON.stringify(d.nodes ?? [], null, 2));
+      })
+      .catch((e) => { if (alive) setMessage({ type: "err", text: String(e) }); })
+      .finally(() => { if (alive) setBusy(false); });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flow.id]);
 
-  const validate = async () => {
-    if (!defn) return;
-    setBusy(true);
+  // 高级模式 JSON → 定义（合法返回合并定义；不合法只报因，绝不覆盖表单状态）
+  const collect = (): FlowDefData | null => {
+    if (!defn) return null;
+    if (!advanced) return defn;
     try {
-      const res = await flowApi.preview(defn);
-      setMessage({ type: "ok", text: t("will.studioValidOk", { id: res.flow_id, defaultValue: "校验通过：{{id}}" }) });
-    } catch (e) {
-      setMessage({ type: "err", text: String(e) });
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const save = async () => {
-    if (!defn) return;
-    setBusy(true);
-    try {
-      const res = await flowApi.save(defn);
-      setMessage({ type: "ok", text: t("will.studioSaved", { id: res.flow_id, defaultValue: "已存为常驻流程 {{id}}（重启不丢）" }) });
-      onSaved();
-    } catch (e) {
-      setMessage({ type: "err", text: String(e) });
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const exportYaml = async () => {
-    if (!defn) return;
-    setBusy(true);
-    try {
-      const res = await flowApi.exportYaml(defn.id);
-      setYamlText(res.yaml);
-      setShowYaml(true);
-    } catch (e) {
-      setMessage({ type: "err", text: String(e) });
-    } finally {
-      setBusy(false);
+      const triggers = JSON.parse(triggersText || "[]");
+      const nodes = JSON.parse(nodesText || "[]");
+      if (!Array.isArray(triggers) || !Array.isArray(nodes)) throw new Error("not array");
+      setJsonErr("");
+      return {
+        ...defn,
+        triggers: triggers as FlowDefData["triggers"],
+        nodes: nodes as FlowNodeSpec[],
+      };
+    } catch {
+      setJsonErr(t("will.studioEdJsonInvalid", "JSON 不合法（触发器/节点均须为数组）"));
+      return null;
     }
   };
 
@@ -732,6 +778,218 @@ function EditorPane({ flows, onSaved }: {
     nodes[index] = { ...nodes[index], ...patch };
     setDefn({ ...defn, nodes });
   };
+
+  const validate = async () => {
+    const d = collect();
+    if (!d) return;
+    setBusy(true);
+    try {
+      const res = await flowApi.preview(d);
+      setMessage({
+        type: "ok",
+        text: t("will.studioValidOk", { id: res.flow_id, defaultValue: "校验通过：{{id}}" }),
+      });
+    } catch (e) {
+      setMessage({ type: "err", text: String(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const save = async () => {
+    const d = collect();
+    if (!d) return;
+    setBusy(true);
+    try {
+      await flowApi.update(d.id, {
+        name: d.name,
+        triggers: d.triggers,
+        nodes: d.nodes,
+        retain_runs: d.observability?.retain_runs ?? 50,
+      });
+      const text = t("will.savedOk", "参数已保存");
+      setMessage({ type: "ok", text });
+      showMsg?.("ok", text);
+      onSaved();
+    } catch (e) {
+      const msg = String(e instanceof Error ? e.message : e);
+      setMessage({ type: "err", text: msg });
+      showMsg?.("err", msg);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const exportYaml = async () => {
+    setBusy(true);
+    try {
+      const res = await flowApi.exportYaml(flow.id);
+      setYamlText(res.yaml);
+      setShowYaml(true);
+    } catch (e) {
+      setMessage({ type: "err", text: String(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toAdvanced = () => {
+    if (!defn) return;
+    setTriggersText(JSON.stringify(defn.triggers ?? [], null, 2));
+    setNodesText(JSON.stringify(defn.nodes ?? [], null, 2));
+    setJsonErr("");
+    setAdvanced(true);
+  };
+  const toForm = () => {
+    const d = collect();
+    if (!d) return; // JSON 不合法：留在高级模式改到合法为止
+    setDefn(d);
+    setJsonErr("");
+    setAdvanced(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+      <div className="rounded-xl border border-border bg-card w-full max-w-3xl p-4 space-y-3 max-h-[88vh] overflow-y-auto">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Pencil size={15} className="text-primary shrink-0" />
+          <div className="text-sm font-semibold">
+            {t("will.studioEdDialogTitle", "编辑流程")} ·{" "}
+            <code className="text-xs text-muted-foreground">{flow.id}</code>
+          </div>
+          <div className="flex-1" />
+          {/* 同一编辑器两个模式：表单=主，JSON=高级模式 */}
+          <div className="flex items-center gap-1 rounded-lg bg-muted p-1">
+            <button
+              onClick={toForm}
+              disabled={!advanced}
+              className={cn(
+                "flex items-center gap-1 rounded-md px-3 py-1 text-[10px] font-medium transition-colors disabled:opacity-60",
+                !advanced ? "bg-primary/10 text-primary" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <Wand2 size={11} /> {t("will.studioEdFormMode", "表单模式")}
+            </button>
+            <button
+              onClick={toAdvanced}
+              disabled={advanced}
+              className={cn(
+                "flex items-center gap-1 rounded-md px-3 py-1 text-[10px] font-medium transition-colors disabled:opacity-60",
+                advanced ? "bg-primary/10 text-primary" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <Braces size={11} /> {t("will.studioEdAdvanced", "高级模式（JSON）")}
+            </button>
+          </div>
+        </div>
+
+        {!defn ? (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Loader2 size={12} className="animate-spin" /> {t("will.loading", "加载中…")}
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+              <Field label={t("will.studioName", "流程名称")} value={defn.name}
+                onChange={(v) => setDefn({ ...defn, name: v })} />
+              <label className="block space-y-1">
+                <span className="text-[10px] text-muted-foreground">{t("will.studioFlowId", "流程 id")}</span>
+                <input value={defn.id} readOnly
+                  className={cn(INPUT_CLS, "opacity-60 cursor-not-allowed")} />
+              </label>
+              <NumField label={t("will.studioEdRetain", "保留实例数 retain_runs")}
+                value={defn.observability?.retain_runs ?? 50}
+                onChange={(v) => setDefn({ ...defn, observability: { retain_runs: v } })} />
+              <div className="text-[10px] text-muted-foreground self-end pb-1.5">
+                {advanced
+                  ? t("will.studioEdAdvancedHint", "高级模式：触发器/节点全量 JSON 直改（表单未覆盖的字段从这里改），仍走同一校验与保存")
+                  : t("will.studioEdHint", "改触发器/节点参数/审批人，不用碰 YAML；YAML 仍可导出")}
+              </div>
+            </div>
+
+            {advanced ? (
+              <>
+                <label className="block space-y-1">
+                  <span className="text-xs text-muted-foreground">
+                    {t("will.triggersJson", "触发器（JSON 数组）")}
+                  </span>
+                  <textarea
+                    value={triggersText}
+                    onChange={(e) => { setTriggersText(e.target.value); setJsonErr(""); }}
+                    rows={3} spellCheck={false}
+                    className={cn(INPUT_CLS, "font-mono resize-y", jsonErr && "border-red-500/50")}
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-xs text-muted-foreground">
+                    {t("will.nodesJson", "节点全量配置（JSON 数组：tool/args/when/then…）")}
+                  </span>
+                  <textarea
+                    value={nodesText}
+                    onChange={(e) => { setNodesText(e.target.value); setJsonErr(""); }}
+                    rows={12} spellCheck={false}
+                    className={cn(INPUT_CLS, "font-mono resize-y", jsonErr && "border-red-500/50")}
+                  />
+                </label>
+                {jsonErr && (
+                  <div className="rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2 text-xs text-red-500 flex items-start gap-2">
+                    <AlertTriangle size={12} className="mt-0.5 shrink-0" /> {jsonErr}
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <TriggerEditor triggers={defn.triggers}
+                  onChange={(triggers) => setDefn({ ...defn, triggers })} />
+                <div className="space-y-2">
+                  <div className="text-xs font-semibold text-muted-foreground">
+                    {t("will.studioEdNodes", "节点配置")}
+                  </div>
+                  {defn.nodes.map((node, i) => (
+                    <NodeEditor key={`${node.id}-${i}`} node={node} index={i}
+                      onChange={(patch) => patchNode(i, patch)} />
+                  ))}
+                </div>
+              </>
+            )}
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <button onClick={validate} disabled={busy} className={BTN_GHOST_CLS}>
+                {busy ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle size={12} />}
+                {t("will.studioValidate", "校验")}
+              </button>
+              <button onClick={save} disabled={busy} className={BTN_PRIMARY_CLS}>
+                {busy ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                {t("will.save", "保存")}
+              </button>
+              <button onClick={exportYaml} disabled={busy} className={BTN_GHOST_CLS}>
+                <FileDown size={12} /> {t("will.studioExportYaml", "导出 YAML")}
+              </button>
+              <div className="flex-1" />
+              <button onClick={onClose} className={BTN_GHOST_CLS}>
+                {t("will.cancel", "取消")}
+              </button>
+            </div>
+
+            {showYaml && (
+              <YamlPanel yaml={yamlText} title={t("will.studioYamlTitle", "流程定义 YAML（可导出）")} />
+            )}
+            <MessageBar message={message} />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── ③ 可视化编辑（入口：点流程 → 统一编辑器 FlowEditDialog）──
+
+function EditorPane({ flows, onSaved }: {
+  flows: Array<{ id: string; name: string; plugin_id: string }>;
+  onSaved: () => void;
+}) {
+  const { t } = useTranslation();
+  const [picked, setPicked] = useState<{ id: string; name: string; plugin_id: string } | null>(null);
 
   return (
     <div className="space-y-3">
@@ -747,14 +1005,8 @@ function EditorPane({ flows, onSaved }: {
           {flows.map((flow) => (
             <button
               key={flow.id}
-              onClick={() => open(flow.id)}
-              disabled={busy}
-              className={cn(
-                "rounded-lg border px-2.5 py-1.5 text-[10px] transition-colors disabled:opacity-50",
-                defn?.id === flow.id
-                  ? "border-primary/50 bg-primary/10 text-primary"
-                  : "border-border text-muted-foreground hover:bg-muted hover:text-foreground",
-              )}
+              onClick={() => setPicked(flow)}
+              className="rounded-lg border border-border px-2.5 py-1.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
             >
               {flow.name}
               <code className="ml-1 opacity-60">{flow.id}</code>
@@ -766,105 +1018,17 @@ function EditorPane({ flows, onSaved }: {
             </span>
           )}
         </div>
+        <div className="text-[10px] text-muted-foreground">
+          {t("will.studioEdEntryHint", "点流程打开统一编辑器：表单改参为主，右上角可切「高级模式（JSON）」直改全量配置")}
+        </div>
       </div>
 
-      {defn && (
-        <div className="rounded-xl border border-border bg-card p-3 lg:p-4 space-y-3">
-          {/* 流程级参数 */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-            <Field label={t("will.studioName", "流程名称")} value={defn.name}
-              onChange={(v) => setDefn({ ...defn, name: v })} />
-            <Field label={t("will.studioFlowId", "流程 id")} value={defn.id} mono
-              onChange={(v) => setDefn({ ...defn, id: v.trim() })} />
-            <NumField label={t("will.studioEdVersion", "版本 version")} value={defn.version}
-              onChange={(v) => setDefn({ ...defn, version: v })} />
-            <NumField label={t("will.studioEdRetain", "保留实例数 retain_runs")}
-              value={defn.observability?.retain_runs ?? 50}
-              onChange={(v) => setDefn({ ...defn, observability: { retain_runs: v } })} />
-          </div>
-
-          {/* 触发器 */}
-          <div className="space-y-2">
-            <div className="text-xs font-semibold text-muted-foreground">
-              {t("will.studioEdTriggers", "触发器")}
-            </div>
-            {defn.triggers.map((tr, i) => (
-              <div key={i} className="grid grid-cols-2 lg:grid-cols-4 gap-2 items-end">
-                <SelectField label={t("will.studioEdTriggerType", "类型")}
-                  value={tr.type}
-                  onChange={(v) => {
-                    const triggers = [...defn.triggers];
-                    triggers[i] = { type: v, cron: v === "cron" ? (tr.cron || "0 9 * * *") : undefined, event: v === "event" ? (tr.event || "") : undefined };
-                    setDefn({ ...defn, triggers });
-                  }}
-                  options={[
-                    { value: "cron", label: "cron" },
-                    { value: "event", label: "event" },
-                    { value: "manual", label: "manual" },
-                  ]} />
-                {tr.type === "cron" && (
-                  <Field label={t("will.studioEdCron", "cron（分 时 日 月 周）")} value={tr.cron || ""} mono
-                    onChange={(v) => {
-                      const triggers = [...defn.triggers];
-                      triggers[i] = { ...tr, cron: v };
-                      setDefn({ ...defn, triggers });
-                    }} />
-                )}
-                {tr.type === "event" && (
-                  <Field label={t("will.studioEdEvent", "事件名")} value={tr.event || ""} mono
-                    onChange={(v) => {
-                      const triggers = [...defn.triggers];
-                      triggers[i] = { ...tr, event: v };
-                      setDefn({ ...defn, triggers });
-                    }} />
-                )}
-                <button
-                  onClick={() => setDefn({ ...defn, triggers: defn.triggers.filter((_, ri) => ri !== i) })}
-                  className={cn(BTN_GHOST_CLS, "text-red-500")}
-                >
-                  <Trash2 size={12} /> {t("will.studioRemove", "删除")}
-                </button>
-              </div>
-            ))}
-            <button
-              onClick={() => setDefn({ ...defn, triggers: [...defn.triggers, { type: "manual" }] })}
-              className={BTN_GHOST_CLS}
-            >
-              <Plus size={12} /> {t("will.studioEdAddTrigger", "加触发器")}
-            </button>
-          </div>
-
-          {/* 节点参数 */}
-          <div className="space-y-2">
-            <div className="text-xs font-semibold text-muted-foreground">
-              {t("will.studioEdNodes", "节点配置")}
-            </div>
-            {defn.nodes.map((node, i) => (
-              <NodeEditor key={`${node.id}-${i}`} node={node} index={i}
-                onChange={(patch) => patchNode(i, patch)} />
-            ))}
-          </div>
-
-          {/* 操作 */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <button onClick={validate} disabled={busy} className={BTN_GHOST_CLS}>
-              {busy ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle size={12} />}
-              {t("will.studioValidate", "校验")}
-            </button>
-            <button onClick={save} disabled={busy} className={BTN_PRIMARY_CLS}>
-              {busy ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-              {t("will.studioSave", "存为常驻流程")}
-            </button>
-            <button onClick={exportYaml} disabled={busy} className={BTN_GHOST_CLS}>
-              <FileDown size={12} /> {t("will.studioExportYaml", "导出 YAML")}
-            </button>
-          </div>
-
-          {showYaml && (
-            <YamlPanel yaml={yamlText} title={t("will.studioYamlTitle", "流程定义 YAML（可导出）")} />
-          )}
-          <MessageBar message={message} />
-        </div>
+      {picked && (
+        <FlowEditDialog
+          flow={picked}
+          onClose={() => setPicked(null)}
+          onSaved={() => { setPicked(null); onSaved(); }}
+        />
       )}
     </div>
   );

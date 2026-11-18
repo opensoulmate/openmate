@@ -3632,7 +3632,13 @@
     "noteError": "Delivery failed",
     "noteSending": "Sending",
     "noteDeferred": "Queued for retry",
-    "confirmBatchDelete": "Delete the selected {{count}} flow(s)? Their runs and idempotency keys will be purged too"
+    "confirmBatchDelete": "Delete the selected {{count}} flow(s)? Their runs and idempotency keys will be purged too",
+    "studioEdDialogTitle": "Edit flow",
+    "studioEdFormMode": "Form mode",
+    "studioEdAdvanced": "Advanced (JSON)",
+    "studioEdAdvancedHint": "Advanced: edit triggers/nodes as raw JSON (fields the form doesn't expose); same validate & save",
+    "studioEdEntryHint": "Click a flow to open the unified editor: form-first editing, switch to “Advanced (JSON)” for raw config",
+    "studioEdJsonInvalid": "Invalid JSON (triggers/nodes must both be arrays)"
   },
   "trajectory": {
     "title": "Trajectory",

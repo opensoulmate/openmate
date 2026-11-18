@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { PageLayout } from "@/components/page-layout";
 import { genRectPath } from "@/components/ui/super-ellipse";
-import { FlowStudio } from "./flow-studio";
+import { FlowStudio, FlowEditDialog } from "./flow-studio";
 
 // ── acp-proxy 直连（flow 引擎宿主 :8092，CORS *；与 plugin-manager 同款取法）──
 function acpBase(): string {
@@ -783,11 +783,10 @@ export function WillClient() {
           />
         )}
 
-        {/* 编辑参数对话框 */}
+        {/* 统一流程编辑器（表单=主，JSON=高级模式；与建流工坊同一入口） */}
         {editFlow && (
-          <EditFlowDialog
+          <FlowEditDialog
             flow={editFlow}
-            base={base}
             onClose={() => setEditFlow(null)}
             onSaved={() => {
               setEditFlow(null);
@@ -853,105 +852,6 @@ function RunParamsDialog({ flow, busy, onCancel, onRun }: {
             className="flex items-center gap-1 rounded-lg bg-primary/10 text-primary px-3 py-1.5 text-xs font-medium hover:bg-primary/20 disabled:opacity-50">
             {busy ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
             {t("will.triggerNow", "立即触发")}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── 编辑参数对话框（名称/触发器/节点全量 JSON/保留实例数）──
-function EditFlowDialog({ flow, base, onClose, onSaved, showMsg }: {
-  flow: FlowDef;
-  base: string;
-  onClose: () => void;
-  onSaved: () => void;
-  showMsg: (type: "ok" | "err", text: string) => void;
-}) {
-  const { t } = useTranslation();
-  const [name, setName] = useState(flow.name);
-  const [triggersText, setTriggersText] = useState(JSON.stringify(flow.triggers || [], null, 1));
-  const [nodesText, setNodesText] = useState("");
-  const [retainRuns, setRetainRuns] = useState(String(flow.retain_runs ?? 50));
-  const [err, setErr] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  // 节点全量配置（含 args/when/then…）：从 /flows/{id} 拉真数据
-  useEffect(() => {
-    fetch(`${base}/flows/${flow.id}`)
-      .then((r) => r.json())
-      .then((data: FlowDef) => setNodesText(JSON.stringify(data.nodes || [], null, 1)))
-      .catch(() => setNodesText(JSON.stringify(flow.nodes || [], null, 1)));
-  }, [base, flow.id, flow.nodes]);
-
-  const save = async () => {
-    setBusy(true);
-    try {
-      const triggers = JSON.parse(triggersText || "[]");
-      const nodes = JSON.parse(nodesText || "[]");
-      const res = await fetch(`${base}/flows/${flow.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name, triggers, nodes,
-          retain_runs: parseInt(retainRuns, 10) || 50,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "update failed");
-      showMsg("ok", t("will.savedOk", "参数已保存"));
-      onSaved();
-    } catch (e) {
-      const msg = String(e instanceof Error ? e.message : e);
-      setErr(msg);
-      showMsg("err", msg);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-      <div className="rounded-xl border border-border bg-card w-full max-w-2xl p-4 space-y-3 max-h-[85vh] overflow-y-auto">
-        <div className="text-sm font-semibold">
-          {t("will.editParams", "编辑参数")} · <code className="text-xs text-muted-foreground">{flow.id}</code>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <label className="space-y-1">
-            <span className="text-xs text-muted-foreground">{t("will.name", "名称")}</span>
-            <input value={name} onChange={(e) => setName(e.target.value)}
-              className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30" />
-          </label>
-          <label className="space-y-1">
-            <span className="text-xs text-muted-foreground">{t("will.retainRuns", "保留实例数")}</span>
-            <input value={retainRuns} onChange={(e) => setRetainRuns(e.target.value)}
-              className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-xs tabular-nums focus:outline-none focus:ring-2 focus:ring-primary/30" />
-          </label>
-        </div>
-        <label className="block space-y-1">
-          <span className="text-xs text-muted-foreground">{t("will.triggersJson", "触发器（JSON 数组）")}</span>
-          <textarea value={triggersText} onChange={(e) => setTriggersText(e.target.value)} rows={3} spellCheck={false}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-primary/30" />
-        </label>
-        <label className="block space-y-1">
-          <span className="text-xs text-muted-foreground">{t("will.nodesJson", "节点全量配置（JSON 数组：tool/args/when/then…）")}</span>
-          <textarea value={nodesText} onChange={(e) => setNodesText(e.target.value)} rows={12} spellCheck={false}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-primary/30" />
-        </label>
-        {err && (
-          <div className="rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2 text-xs text-red-500 flex items-start gap-2">
-            <AlertTriangle size={12} className="mt-0.5 shrink-0" /> {err}
-          </div>
-        )}
-        <div className="flex items-center gap-2 justify-end">
-          <button onClick={onClose}
-            className="rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-muted">
-            {t("will.cancel", "取消")}
-          </button>
-          <button onClick={save} disabled={busy}
-            className="flex items-center gap-1 rounded-lg bg-primary/10 text-primary px-3 py-1.5 text-xs font-medium hover:bg-primary/20 disabled:opacity-50">
-            {busy ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle size={12} />}
-            {t("will.save", "保存")}
           </button>
         </div>
       </div>
