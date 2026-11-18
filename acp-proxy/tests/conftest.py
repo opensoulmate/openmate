@@ -55,7 +55,11 @@ def _isolate_collab_side_effects(tmp_path, monkeypatch):
     monkeypatch.setenv("COLLAB_COST_DB", str(tmp_path / "collab-costs.db"))
     monkeypatch.setenv("ORG_CHART_FILE", str(tmp_path / "org-chart.json"))
     monkeypatch.setenv("FLOW_RECEIPTS_FILE", str(tmp_path / "receipts.json"))
+    monkeypatch.setenv("TOOL_CALL_AUDIT_FILE", str(tmp_path / "tool-call-audit.json"))
     from plugin.flow_collab import reset_collab
+    from plugin.tool_governance import reset_governance
     reset_collab()          # 单例绑定本测试临时目录（防跨测试串写）
+    reset_governance()      # 治理单例同纪律（审计台账/策略配置不串测试）
     yield
     reset_collab()
+    reset_governance()

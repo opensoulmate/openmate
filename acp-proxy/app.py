@@ -360,9 +360,11 @@ def _on_plugin_installed(grown: dict) -> None:
 from plugin.flow_api import build_flow_router  # noqa: E402
 from plugin.forge_api import build_forge_router  # noqa: E402
 from plugin.collab_api import build_collab_router  # noqa: E402
+from plugin.governance_api import build_governance_router  # noqa: E402
 
 app.include_router(build_flow_router())
 app.include_router(build_collab_router())   # 任务收发台（每人收件箱 API）
+app.include_router(build_governance_router())  # MCP 治理观察面（策略+审计）
 app.include_router(build_forge_router(
     PLUGINS_DIR,
     include_router=app.include_router,

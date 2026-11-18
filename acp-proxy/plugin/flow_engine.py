@@ -347,6 +347,7 @@ class FlowExecutor:
         try:
             if node.type == "tool":
                 output = await self._run_tool_node(run, defn, node, record)
+                suspended = bool(isinstance(output, dict) and output.get("waiting"))
             elif node.type == "decision":
                 output = self._run_decision(run, defn, node, record)
             elif node.type == "loop":
@@ -406,7 +407,9 @@ class FlowExecutor:
                       f"#{attempt} tool={node.tool} args={_summarize(args)}")
             try:
                 output = await self.engine.call_tool(
-                    node.tool, args if isinstance(args, dict) else {}, approved=approved)
+                    node.tool, args if isinstance(args, dict) else {}, approved=approved,
+                    ctx={"run_id": run.run_id, "flow_id": run.flow_id,
+                         "node_id": node.id, "role": node.role})
             except Exception as e:  # noqa: BLE001 — 节点失败细分报因，按 retry/on_error 处理
                 elapsed_ms = (time.time() - started) * 1000
                 self._check_budget(run, node, record, elapsed_ms)
@@ -415,6 +418,27 @@ class FlowExecutor:
                     record.error = f"{e}"
                     self._log(run, node.id, "node-failed",
                               f"工具需用户审批（未放行）: {e}")
+                    return self._on_error(run, defn, node, record)
+                if type(e).__name__ == "ToolGovernanceNeedsApproval":
+                    if node.id in defn.node_map:
+                        # F1 require_approval 转 human_node：人工放行后原地续跑（真闸）
+                        gate_task = self._open_tool_gate_task(run, node, str(e))
+                        self._log(run, node.id, "tool-gate",
+                                  f"策略要求人工放行 {node.tool}：{e}"
+                                  f" → 转人工（工单 {getattr(gate_task, 'task_id', '-')}）")
+                        return self._suspend_for_approval(
+                            run, node, kind="tool-gate", task=gate_task,
+                            resume_at=node.id)
+                    # parallel 合成节点不挂全局闸：显式报因按分支隔离处置
+                    record.error = f"{e}"
+                    self._log(run, node.id, "node-failed",
+                              f"策略要求人工放行（合成节点不挂全局闸）: {e}")
+                    return self._on_error(run, defn, node, record)
+                if type(e).__name__ == "ToolGovernanceBlocked":
+                    # 治理拦截：重试无意义，按 on_error 处置
+                    record.error = f"{e}"
+                    self._log(run, node.id, "node-failed",
+                              f"治理策略拦截（重试无意义）: {e}")
                     return self._on_error(run, defn, node, record)
                 if attempt <= node.retry.max:
                     record.retries += 1
@@ -506,7 +530,9 @@ class FlowExecutor:
                       f"loop#{index + 1} #{attempt} tool={body.tool} args={_summarize(args)}")
             try:
                 output = await self.engine.call_tool(
-                    body.tool, args if isinstance(args, dict) else {}, approved=approved)
+                    body.tool, args if isinstance(args, dict) else {}, approved=approved,
+                    ctx={"run_id": run.run_id, "flow_id": run.flow_id,
+                         "node_id": body.id, "role": body.role})
                 record.status = NODE_STATUS_OK
                 record.finished_at = time.time()
                 record.output_summary = _summarize(output)
@@ -590,6 +616,24 @@ class FlowExecutor:
                 on_timeout=node.on_timeout, budget=node.budget)
         except Exception as e:  # noqa: BLE001 — 开单失败不吞挂起（日志显式报因）
             self._log(run, node.id, "collab-task-error", f"开单失败: {e}")
+            return None
+
+    def _open_tool_gate_task(self, run: FlowRun, node: NodeSpec, reason: str):
+        """F1 工具放行闸开单（require_approval 转 human，人工放行后一次性豁免续跑）。"""
+        try:
+            collab = self.engine.collab()
+            assignee, role = collab.router.resolve(
+                role=node.role, user=node.user or "用户", kind="human")
+            return collab.create(
+                kind="human", run_id=run.run_id, flow_id=run.flow_id, node_id=node.id,
+                assignee=assignee, role=role, assignee_kind="human",
+                title=f"工具放行闸：{node.tool}",
+                instruction=f"工具 {node.tool} 被治理策略要求人工放行。原因：{reason}",
+                form="审批放行（approve=一次性放行该工具）",
+                timeout_hours=node.timeout_hours, on_timeout=node.on_timeout,
+                payload={"gate": "tool-policy", "tool": node.tool})
+        except Exception as e:  # noqa: BLE001
+            self._log(run, node.id, "collab-task-error", f"工具放行开单失败: {e}")
             return None
 
     def _refresh_task_package(self, run: FlowRun, node: NodeSpec, instruction: Any,
@@ -933,10 +977,54 @@ class FlowEngine:
         FlowExecutor._log(run, node_id, event, detail)
 
     async def call_tool(self, tool_name: str, args: dict[str, Any],
-                        approved: bool = False) -> dict[str, Any]:
+                        approved: bool = False,
+                        ctx: dict[str, Any] | None = None) -> dict[str, Any]:
+        """工具调用唯一咽喉（tool/loop/parallel 全走此）：F 组治理网关先过闸。
+
+        判定序（deny 优先）：profile deny → policy block → require_approval(未批)
+        → rate_limit 超限 → allow；每次调用落审计台账（F2，参数脱敏）。
+        """
         if self._tool_caller is None:
             raise FlowRunError("流程引擎未接工具调用（tool_caller 未注入）")
-        return await self._tool_caller(tool_name, args, approved)
+        from plugin.tool_governance import (
+            ToolGovernanceBlocked, ToolGovernanceNeedsApproval, get_governance)
+        governance = get_governance()
+        ctx = dict(ctx or {})
+        decision = governance.evaluate(
+            tool_name, flow_id=str(ctx.get("flow_id") or ""),
+            role=str(ctx.get("role") or ""), node_id=str(ctx.get("node_id") or ""),
+            approved=approved)
+        if not decision.allowed:
+            if decision.action == "require_approval":
+                # F1 真闸：转 human 审批放行（tool-gate 原地续跑，一次性豁免）
+                gate_key = f"{ctx.get('run_id', '')}:{ctx.get('node_id', '')}"
+                if gate_key.strip(":") and governance.take_waiver(gate_key):
+                    decision.reason += "（已放行）"
+                else:
+                    governance.record_call(tool=tool_name, decision=decision,
+                                           ok=False, error=decision.reason,
+                                           args=args, ctx=ctx)
+                    raise ToolGovernanceNeedsApproval(tool_name, decision.reason)
+            else:
+                governance.record_call(tool=tool_name, decision=decision,
+                                       ok=False, error=decision.reason,
+                                       args=args, ctx=ctx)
+                raise ToolGovernanceBlocked(tool_name, decision.reason)
+        started = time.perf_counter()
+        try:
+            result = await self._tool_caller(tool_name, args, approved)
+        except Exception as e:  # noqa: BLE001 — 审计留痕后原样上抛
+            governance.record_call(
+                tool=tool_name, decision=decision, ok=False,
+                error=f"{type(e).__name__}: {e}",
+                duration_ms=(time.perf_counter() - started) * 1000,
+                args=args, ctx=ctx)
+            raise
+        governance.record_call(
+            tool=tool_name, decision=decision, ok=True,
+            duration_ms=(time.perf_counter() - started) * 1000,
+            args=args, ctx=ctx)
+        return result
 
     # 触发
     def start_run(self, flow_id: str, trigger: dict[str, Any],
@@ -1020,6 +1108,14 @@ class FlowEngine:
                     f"{run.run_id}:{run.approval.node_id}")
             except Exception as e:  # noqa: BLE001
                 logger.warning("预算放行标记失败: %s", e)
+        if decision == "approve" and run.approval.kind == "tool-gate":
+            # F1 工具放行闸：一次性豁免下一次 require_approval 拦截，原地续跑
+            try:
+                from plugin.tool_governance import get_governance
+                get_governance().grant_waiver(
+                    f"{run.run_id}:{run.approval.node_id}")
+            except Exception as e:  # noqa: BLE001
+                logger.warning("工具放行标记失败: %s", e)
         if decision == "approve" and run.approval.kind == "human" \
                 and approval_node is not None and approval_node.review:
             # E4 review gate：验收驳回不算节点完成（成果回流挂 flow_receipts 凭证）
@@ -1046,7 +1142,7 @@ class FlowEngine:
             self._log(run, run.approval.node_id, "approval-rejected", note or "（无说明）")
             self.store.save(run)
             return run
-        if run.approval.kind in ("human", "agent", "budget-gate"):
+        if run.approval.kind in ("human", "agent", "budget-gate", "tool-gate"):
             run.outputs[run.approval.node_id] = {
                 "kind": run.approval.kind, "task_id": run.approval.task_id,
                 "assignee": run.approval.assignee, "role": run.approval.role,
@@ -1144,8 +1240,8 @@ class FlowEngine:
                 self._log(run, approval.node_id, "approval-timeout",
                           "超时，按 on_timeout=skip 跳过")
                 self.store.save(run)
-                if approval.kind == "budget-gate":
-                    # 预算闸超时跳过=跳过整个节点（cursor 是本节点，不能原地续跑兜圈）
+                if approval.kind in ("budget-gate", "tool-gate"):
+                    # 闸超时跳过=跳过整个节点（cursor 是本节点，不能原地续跑兜圈）
                     run.cursor = defn.next_node_id(approval.node_id)
                 resume_from = self._resume_cursor(defn, run, approval_node)
                 if resume_from:
