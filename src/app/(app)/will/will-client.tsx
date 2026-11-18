@@ -3,6 +3,7 @@
 // Will 意志 · 业务工作流引擎面板 —— flow_engine 的观察窗（核心 8 组件之一，/will）
 // 数据源=acp-proxy :8092 flow_engine 真数据（/flows, /flows/{id}, /flows/runs*）：
 // 流程定义 / 运行实例 / 判断分支可视化（decision when/then/else 真分支图）。
+// 建流工坊：一句话建流/模板库/可视化编辑三件套（flow-studio，独立 Tab）。
 // 不新建引擎——flow_engine（plugin/flow_engine.py + flow-console 面板）就是内核。
 
 import { useEffect, useState, useCallback } from "react";
@@ -14,6 +15,7 @@ import {
   AlertTriangle, Zap,
 } from "lucide-react";
 import { PageLayout } from "@/components/page-layout";
+import { FlowStudio } from "./flow-studio";
 
 // ── acp-proxy 直连（flow 引擎宿主 :8092，CORS *；与 plugin-manager 同款取法）──
 function acpBase(): string {
@@ -82,7 +84,7 @@ interface RunDetail extends RunSummary {
   approval: { decision?: string; decided_by?: string; note?: string } | null;
 }
 
-type Tab = "flows" | "runs";
+type Tab = "flows" | "runs" | "studio";
 
 const NODE_TYPE_LABEL: Record<string, string> = {
   tool: "will.ntTool", decision: "will.ntDecision", loop: "will.ntLoop",
@@ -293,7 +295,7 @@ export function WillClient() {
 
         {/* Tab 切换 */}
         <div className="flex items-center gap-1 rounded-lg bg-muted p-1 w-fit">
-          {([["flows", t("will.tabFlows", "流程定义")], ["runs", t("will.tabRuns", "运行实例")]] as const).map(([id, label]) => (
+          {([["flows", t("will.tabFlows", "流程定义")], ["runs", t("will.tabRuns", "运行实例")], ["studio", t("will.tabStudio", "建流工坊")]] as const).map(([id, label]) => (
             <button
               key={id}
               onClick={() => setTab(id as Tab)}
@@ -372,7 +374,7 @@ export function WillClient() {
               </div>
             ))}
           </div>
-        ) : (
+        ) : tab === "runs" ? (
           /* ── 运行实例 ── */
           <div className="space-y-2">
             {runs.length === 0 && (
@@ -421,6 +423,12 @@ export function WillClient() {
               );
             })}
           </div>
+        ) : (
+          /* ── 建流工坊（一句话建流/模板库/可视化编辑） ── */
+          <FlowStudio
+            flows={flows.map((f) => ({ id: f.id, name: f.name, plugin_id: f.plugin_id }))}
+            onSaved={() => { setFlowDetails({}); refresh(); }}
+          />
         )}
 
         {/* 实例详情 */}
