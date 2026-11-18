@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 import httpx
 
+from .util import O_BINARY, pwrite
 from .models import (
     DownloadTask,
     TaskStatus,
@@ -311,7 +312,7 @@ class HttpEngine:
             if rec.cancel.is_set():
                 raise asyncio.CancelledError()
             os.makedirs(task.dir or ".", exist_ok=True)
-            fd = os.open(task.dest, os.O_RDWR | os.O_CREAT, 0o644)
+            fd = os.open(task.dest, os.O_RDWR | os.O_CREAT | O_BINARY, 0o644)
             try:
                 if task.total_bytes > 0:
                     os.ftruncate(fd, max(task.total_bytes, os.fstat(fd).st_size))
@@ -438,7 +439,7 @@ class HttpEngine:
                         if not chunk:
                             continue
                         await self._limiter.acquire(len(chunk))
-                        os.pwrite(fd, chunk, want_start)
+                        pwrite(fd, chunk, want_start)
                         want_start += len(chunk)
                         seg.done += len(chunk)
                         task.downloaded_bytes += len(chunk)

@@ -23,6 +23,7 @@ from .lsd import LsdClient
 from .magnet import Magnet, parse as parse_magnet
 from .models import DownloadTask, TaskStatus, TaskType
 from .picker import PiecePicker
+from .util import O_BINARY, pread, pwrite
 
 MAX_PEERS = 30
 MAX_METADATA_PEERS = 24
@@ -90,9 +91,9 @@ class PieceWriter:
             parent = os.path.dirname(full)
             if parent:
                 os.makedirs(parent, exist_ok=True)
-            fd = os.open(full, os.O_RDWR | os.O_CREAT, 0o644)
+            fd = os.open(full, os.O_RDWR | os.O_CREAT | O_BINARY, 0o644)
             try:
-                os.pwrite(fd, data[pos : pos + ln], off)
+                pwrite(fd, data[pos : pos + ln], off)
             finally:
                 os.close(fd)
             pos += ln
@@ -101,9 +102,9 @@ class PieceWriter:
         chunks = []
         for path, off, ln in self._map(offset, length):
             full = os.path.join(self.base, *path.split("/"))
-            fd = os.open(full, os.O_RDONLY)
+            fd = os.open(full, os.O_RDONLY | O_BINARY)
             try:
-                chunks.append(os.pread(fd, ln, off))
+                chunks.append(pread(fd, ln, off))
             finally:
                 os.close(fd)
         return b"".join(chunks)

@@ -20,6 +20,7 @@ from urllib.parse import unquote, urlsplit
 
 from .http_engine import SpeedLimiter
 from .models import DownloadTask, TaskStatus, TaskType, filename_from_url
+from .util import O_BINARY, pwrite
 
 CHUNK_SIZE = 64 * 1024
 CONNECT_TIMEOUT = 20.0
@@ -270,7 +271,7 @@ class FtpEngine:
                         raise
                 sock.setblocking(False)
                 rec.sock = sock
-                fd = os.open(task.dest, os.O_RDWR | os.O_CREAT, 0o644)
+                fd = os.open(task.dest, os.O_RDWR | os.O_CREAT | O_BINARY, 0o644)
                 try:
                     pos = offset
                     while not rec.cancel:
@@ -278,7 +279,7 @@ class FtpEngine:
                         if not chunk:
                             break
                         await self._limiter.acquire(len(chunk))
-                        os.pwrite(fd, chunk, pos)
+                        pwrite(fd, chunk, pos)
                         pos += len(chunk)
                         rec.offset = pos
                         task.downloaded_bytes = pos
