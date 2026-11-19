@@ -46,7 +46,10 @@ MSG_TURN_MARKER = "[统一消息回合"
 
 CHANNEL_OPENMATE = "openmate"
 CHANNEL_WECHAT = "wechat"
-CHANNELS = (CHANNEL_OPENMATE, CHANNEL_WECHAT)
+CHANNEL_DINGTALK = "dingtalk"
+CHANNEL_FEISHU = "feishu"
+DOMESTIC_CHANNELS = (CHANNEL_DINGTALK, CHANNEL_FEISHU)
+CHANNELS = (CHANNEL_OPENMATE, CHANNEL_WECHAT, CHANNEL_DINGTALK, CHANNEL_FEISHU)
 
 _DEFAULT_ROUTER_DB = os.path.expanduser(
     "~/.hermes/soulmate/memory/message_router.db")
@@ -299,6 +302,9 @@ class UnifiedMessageRouter:
         if channel == CHANNEL_WECHAT:
             return await self._route_wechat(msg)
 
+        if channel in DOMESTIC_CHANNELS:
+            return await self._route_domestic(msg)
+
         # ── openmate 通道 ──
         sid = str(msg.session_id or "").strip()
         if not sid:
@@ -367,6 +373,49 @@ class UnifiedMessageRouter:
         self.stats.inbound_failed += 1
         return RouteResult(
             "error", CHANNEL_WECHAT, target=str(msg.sender or ""),
+            session_id=sid, detail=f"桥返回: {status}")
+
+    async def _route_domestic(self, msg: ChannelMessage) -> RouteResult:
+        """钉钉/飞书通道整体委托国内网关桥（去重/回合/回复单一 owner=DomesticBridge）。"""
+        from agent.domestic_bridge import DomesticMessage, get_domestic_bridge
+
+        channel = str(msg.channel or "").strip().lower()
+        dmsg = DomesticMessage(
+            channel=channel,
+            msg_id=str(msg.msg_id),
+            from_user=str(msg.sender or ""),
+            content=str(msg.text),
+            from_name=str(msg.sender or ""),
+            received_at_ms=int(msg.received_at_ms),
+            media=list(msg.media or []),
+        )
+        bridge = get_domestic_bridge(channel)
+        try:
+            status = await bridge.deliver(dmsg)
+        except Exception as e:
+            self.stats.inbound_failed += 1
+            self._note_error(f"国内网关投递异常({msg.msg_id}): {e}")
+            return RouteResult(
+                "error", channel, target=str(msg.sender or ""),
+                detail=f"桥投递异常: {e}")
+        sid = ""
+        try:
+            sid = str(bridge.session_for(msg.sender) or "")
+        except Exception:
+            sid = ""
+        if status == "duplicate":
+            self.stats.inbound_duplicates += 1
+            return RouteResult(
+                "duplicate", channel, target=str(msg.sender or ""),
+                session_id=sid, detail="重复投递/重启重放，回合不双跑")
+        if status == "delivered":
+            self.stats.inbound_ok += 1
+            return RouteResult(
+                "delivered", channel, target=str(msg.sender or ""),
+                session_id=sid, reply_sent=True, detail="桥已处理并回复")
+        self.stats.inbound_failed += 1
+        return RouteResult(
+            "error", channel, target=str(msg.sender or ""),
             session_id=sid, detail=f"桥返回: {status}")
 
     # ── 出站 ───────────────────────────────────────────────────
@@ -484,6 +533,9 @@ class UnifiedMessageRouter:
                 "delivered", ch, target=tgt, reply_sent=True,
                 detail=f"已发{'+'.join(parts)}给微信peer「{tgt}」")
 
+        if ch in DOMESTIC_CHANNELS:
+            return await self._send_domestic(ch, tgt, body, atts)
+
         # ── openmate 出站：落库 + relay 补推（正连前端实时可见） ──
         out_kind = "media" if (atts and not body.strip()) else "text"
         try:
@@ -502,6 +554,56 @@ class UnifiedMessageRouter:
         return RouteResult(
             "delivered", ch, target=tgt, session_id=tgt, reply_sent=True,
             detail=f"已落库消息行#{row_id}（turn_origin={MSG_TURN_ORIGIN}，正连前端实时可见）")
+
+    async def _send_domestic(
+        self, channel: str, target: str, text: str,
+        media: Sequence[MediaAttachment] = ()) -> RouteResult:
+        """钉钉/飞书出站（对齐微信体验两级）：
+
+        - **Level 1 webhook 快路**：target 是 http(s) webhook 地址 → echo 口径直推
+          （用户只需给一个 webhook 地址即能收到 SoulMate 真消息，验收钩子）；
+        - **Level 2 / 配置传输**：target 是 peer → 国内网关桥 send_proactive
+          （自建应用全双工或已配置的 webhook 传输）。
+        echo 口径为文本/卡片，不承载媒体附件（诚实边界）。
+        """
+        from agent.domestic_bridge import get_domestic_bridge, send_webhook
+
+        tgt = str(target or "").strip()
+        if media and not text.strip():
+            self.stats.outbound_failed += 1
+            return RouteResult(
+                "error", channel, target=tgt,
+                detail="国内网关 webhook 快路不支持纯媒体推送（echo 口径为文本/卡片）")
+        if tgt.startswith("http://") or tgt.startswith("https://"):
+            ok, detail = send_webhook(channel, tgt, "SoulMate", text)
+            if ok:
+                self.stats.outbound_ok += 1
+                self._record_out(channel, tgt, "text", "sent", blocks=1,
+                                 text_preview=text)
+                return RouteResult(
+                    "delivered", channel, target=tgt, reply_sent=True,
+                    detail=f"webhook 快路已推送（echo 口径）：{detail}")
+            self.stats.outbound_failed += 1
+            self._note_error(f"国内网关 webhook 推送失败({tgt}): {detail}")
+            self._record_out(channel, tgt, "text", "failed", text_preview=text)
+            return RouteResult(
+                "error", channel, target=tgt, detail=f"webhook 推送失败: {detail}")
+
+        bridge = get_domestic_bridge(channel)
+        try:
+            sent = await bridge.send_proactive(tgt, text)
+        except Exception as e:
+            self.stats.outbound_failed += 1
+            self._note_error(f"国内网关主动发送异常({tgt}): {e}")
+            return RouteResult("error", channel, target=tgt, detail=f"发送失败: {e}")
+        if sent <= 0:
+            self.stats.outbound_failed += 1
+            return RouteResult(
+                "error", channel, target=tgt, detail="发送失败：0 块成功（传输拒发/全失败）")
+        self.stats.outbound_ok += 1
+        return RouteResult(
+            "delivered", channel, target=tgt, reply_sent=True,
+            detail=f"已发{sent}块给「{tgt}」")
 
     # ── 观测 ───────────────────────────────────────────────────
 
