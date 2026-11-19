@@ -1098,17 +1098,34 @@ html.tauri-shell.tauri-maximized body { border-radius: 0; }
 .markdown-content tbody tr:nth-child(even) { background: rgba(255,255,255,0.03); }
 .markdown-content tbody tr:hover { background: rgba(255,255,255,0.06); }
 
-/* ─── 工作流画布（节点超椭圆壳 / 连线；鹰眼图见 workflow-minimap.tsx） ─── */
-.wf-node-stroke {
-  stroke: var(--color-border);
-  transition: stroke var(--transition-fast), stroke-width var(--transition-fast);
+/* ─── 工作流画布（节点卡=wf-node-card 与左栏面板同规格 / 连线；鹰眼图见 workflow-minimap.tsx） ─── */
+/* ─── 工作流节点卡（左栏节点面板与画布节点同规格：普通圆角矩形，一套样式两处用） ─── */
+.wf-node-card {
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  background: var(--color-background);
+  transition:
+    border-color var(--transition-fast),
+    background var(--transition-fast),
+    box-shadow var(--transition-fast);
 }
-.wf-node:hover .wf-node-stroke {
-  stroke: color-mix(in srgb, var(--color-primary) 35%, var(--color-border));
+.wf-node-card:hover,
+.wf-node:hover .wf-node-card {
+  border-color: color-mix(in srgb, var(--color-primary) 40%, var(--color-border));
+  background: var(--color-accent);
 }
-.wf-node-stroke-selected {
-  stroke: var(--color-primary);
-  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--color-primary) 35%, transparent));
+/* 画布选中态（面板无此态）：主强调描边 + 柔光 */
+.wf-node-card-selected,
+.wf-node-card-selected:hover,
+.wf-node:hover .wf-node-card-selected {
+  border-color: var(--color-primary);
+  background: var(--color-background);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--color-primary) 35%, transparent);
+}
+/* 画布调试态：warning 虚线框 */
+.wf-node-debug {
+  border-radius: var(--radius-lg);
+  border: 1.5px dashed var(--color-warning);
 }
 .wf-edge {
   transition: stroke-width var(--transition-fast);
@@ -1121,7 +1138,7 @@ html.tauri-shell.tauri-maximized body { border-radius: 0; }
   to { stroke-dashoffset: -10; }
 }
 
-/* ── 画布控件（React Flow Controls/连接线/选区）：设计令牌 + 超椭圆语言 ── */
+/* ── 画布控件（React Flow Controls/连接线/选区）：设计令牌 + 普通圆角矩形 ── */
 .wf-flow.react-flow {
   --xy-connectionline-stroke-default: color-mix(in srgb, var(--color-primary) 65%, var(--color-border));
   --xy-connectionline-stroke-width-default: 1.6;
@@ -1129,7 +1146,7 @@ html.tauri-shell.tauri-maximized body { border-radius: 0; }
   --xy-selection-border-default: 1px dotted color-mix(in srgb, var(--color-primary) 55%, transparent);
 }
 
-/* 控件组：毛玻璃超椭圆壳（与鹰眼图同语言：圆角+柔影），按钮=超椭圆 chip */
+/* 控件组：毛玻璃圆角壳（与鹰眼图同语言：圆角+柔影），按钮=普通圆角矩形 chip */
 .wf-controls.react-flow__controls {
   --xy-controls-button-background-color-default: transparent;
   --xy-controls-button-background-color-hover-default: color-mix(in srgb, var(--color-primary) 14%, transparent);
@@ -1142,7 +1159,6 @@ html.tauri-shell.tauri-maximized body { border-radius: 0; }
   background: color-mix(in srgb, var(--color-card) 88%, transparent);
   backdrop-filter: blur(8px);
   border-radius: var(--radius-md);
-  corner-shape: squircle;
   box-shadow:
     0 4px 16px rgba(0, 0, 0, 0.18),
     0 0 0 1px color-mix(in srgb, var(--color-border) 45%, transparent);
@@ -1153,7 +1169,6 @@ html.tauri-shell.tauri-maximized body { border-radius: 0; }
   border: none;
   border-bottom: none;
   border-radius: var(--radius-sm);
-  corner-shape: squircle;
   transition:
     background var(--transition-fast),
     color var(--transition-fast),
@@ -1177,7 +1192,7 @@ html.tauri-shell.tauri-maximized body { border-radius: 0; }
   height: 10px;
   min-width: 10px;
   min-height: 10px;
-  border: 2px solid var(--color-card);
+  border: 2px solid var(--color-background);
   border-radius: 100%;
   background-color: var(--wf-port-fill, var(--color-port-neutral));
   transition: scale var(--transition-fast), box-shadow var(--transition-fast);
@@ -1192,9 +1207,8 @@ html.tauri-shell.tauri-maximized body { border-radius: 0; }
   rotate: 45deg;
 }
 
-/* ── 小徽章/标签：超椭圆统一语言（设计令牌定档 radius-sm，与节点壳/图标框同曲率分级） ── */
+/* ── 小徽章/标签：普通圆角矩形（设计令牌定档 radius-xs 徽章/标签档，杜绝胶囊观感） ── */
 .wf-chip {
-  border-radius: var(--radius-sm);
-  corner-shape: squircle;
+  border-radius: var(--radius-xs);
 }
 

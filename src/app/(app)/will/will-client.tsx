@@ -19,7 +19,7 @@ import {
   Wrench, Filter, SquareCheck,
 } from "lucide-react";
 import { PageLayout } from "@/components/page-layout";
-import { genRectPath } from "@/components/ui/super-ellipse";
+import { BranchGraph, NODE_TYPE_LABEL } from "./flow-graph";
 import { FlowStudio, FlowEditDialog } from "./flow-studio";
 
 // ── acp-proxy 直连（flow 引擎宿主 :8092，CORS *；与 plugin-manager 同款取法）──
@@ -144,11 +144,7 @@ interface Stats {
 type Tab = "flows" | "runs" | "studio";
 type TimeRange = "all" | "today" | "7d" | "30d";
 
-const NODE_TYPE_LABEL: Record<string, string> = {
-  tool: "will.ntTool", decision: "will.ntDecision", loop: "will.ntLoop",
-  approval: "will.ntApproval", action: "will.ntAction", agent: "will.ntAgent",
-  human: "will.ntHuman", parallel: "will.ntParallel", verify: "will.ntVerify",
-};
+// NODE_TYPE_LABEL 收口 flow-graph.tsx（分支图/实例详情共用一套）
 
 /** 双轴配色（监督闭环一列定生死）：verified 绿 | reported done 黄 | not run 灰 */
 function confidenceColor(confidence?: string): { dot: string; badge: string } {
@@ -888,96 +884,7 @@ function RunParamsDialog({ flow, busy, onCancel, onRun }: {
   );
 }
 
-// ── 判断分支可视化（decision when/then/else 真分支图；节点=超椭圆设计语言）──
-function BranchGraph({ defn }: { defn: FlowDef }) {
-  const { t } = useTranslation();
-  const nodes = defn.nodes;
-  const rowH = 54;
-  const height = Math.max(nodes.length * rowH + 20, 120);
-  const centerX = 150;
-  const nodePath = genRectPath(140, 32);
-  const typeColor: Record<string, string> = {
-    tool: "var(--color-info)", decision: "var(--color-warning)", loop: "var(--color-warning)",
-    approval: "var(--color-success)", action: "var(--color-info)", agent: "var(--color-primary)",
-    human: "var(--color-success)", parallel: "var(--color-info)",
-  };
-
-  return (
-    <div className="overflow-x-auto">
-      <svg viewBox={`0 0 340 ${height}`} className="w-full min-w-[320px]" style={{ maxHeight: 360 }}>
-        <defs>
-          <marker id="will-arrow" markerWidth={6} markerHeight={6} refX={5} refY={3} orient="auto">
-            <path d="M 0 0 L 6 3 L 0 6 z" fill="currentColor" opacity={0.6} />
-          </marker>
-        </defs>
-        {nodes.map((node, i) => {
-          const y = 14 + i * rowH;
-          const color = typeColor[node.type] || "var(--color-muted-foreground)";
-          return (
-            <g key={node.id}>
-              {/* 顺序连接线（非分支后继） */}
-              {i < nodes.length - 1 && (
-                <line x1={centerX} y1={y + 18} x2={centerX} y2={y + rowH - 18}
-                  stroke="currentColor" strokeWidth={1} opacity={0.18} strokeDasharray="3 3" />
-              )}
-              <path d={nodePath} transform={`translate(${centerX - 70}, ${y - 16})`}
-                fill={color} fillOpacity={0.1} stroke={color} strokeWidth={1.2} />
-              <text x={centerX - 58} y={y + 1} fontSize={10} fill="currentColor" fontWeight={600}>{node.id}</text>
-              <text x={centerX - 58} y={y + 11} fontSize={8} fill="currentColor" opacity={0.7}>
-                {t(NODE_TYPE_LABEL[node.type] || node.type, node.type)}
-                {node.type === "tool" && node.tool ? ` · ${node.tool}` : ""}
-              </text>
-              {/* decision 分支弧线 */}
-              {node.type === "decision" && (
-                <>
-                  {node.then && (
-                    <BranchEdge nodes={nodes} fromY={y} targetId={node.then}
-                      side="right" color="var(--color-branch-then)" label={`then → ${node.then}`} />
-                  )}
-                  {node.else_ && (
-                    <BranchEdge nodes={nodes} fromY={y} targetId={node.else_}
-                      side="left" color="var(--color-branch-else)" label={`else → ${node.else_}`} />
-                  )}
-                  {node.when && (
-                    <text x={centerX + 78} y={y + 3} fontSize={8} fill="currentColor" opacity={0.75}>
-                      {t("will.when", "条件")}: {node.when.length > 42 ? node.when.slice(0, 42) + "…" : node.when}
-                    </text>
-                  )}
-                </>
-              )}
-            </g>
-          );
-        })}
-      </svg>
-    </div>
-  );
-}
-
-function BranchEdge({ nodes, fromY, targetId, side, color, label }: {
-  nodes: FlowNode[]; fromY: number; targetId: string;
-  side: "left" | "right"; color: string; label: string;
-}) {
-  const rowH = 54;
-  const centerX = 150;
-  const idx = nodes.findIndex((n) => n.id === targetId);
-  if (idx < 0) return null;
-  const toY = 14 + idx * rowH;
-  const laneX = side === "right" ? 315 : 25;
-  const startX = side === "right" ? centerX + 70 : centerX - 70;
-  return (
-    <g>
-      <path
-        d={`M ${startX} ${fromY} C ${laneX} ${fromY}, ${laneX} ${toY}, ${startX} ${toY}`}
-        fill="none" stroke={color} strokeWidth={1.2} opacity={0.75} strokeDasharray="4 3"
-        markerEnd="url(#will-arrow)"
-      />
-      <text x={laneX} y={(fromY + toY) / 2 + 3} fontSize={7.5} fill={color}
-        textAnchor={side === "right" ? "end" : "start"} fontWeight={600}>
-        {label}
-      </text>
-    </g>
-  );
-}
+// ── 判断分支可视化：收口 flow-graph.tsx 的 BranchGraph（与建流工坊共用一套，禁平行两套）──
 
 // ── 实例详情（节点状态 + 事件日志 + 失败归因 + 通知送达 + 审批/重试/回放）──
 function RunDetailCard({ run, busy, approvalNote, setApprovalNote, onDecide, onReplay, onRetry, onClose }: {

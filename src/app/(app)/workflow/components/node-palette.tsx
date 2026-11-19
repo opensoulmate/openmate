@@ -87,8 +87,9 @@ export function NodePalette() {
                 draggable
                 onDragStart={(e) => onDragStart(e, item)}
                 className={cn(
-                  "flex cursor-grab items-center gap-2.5 rounded-lg border border-border bg-background px-3 py-2",
-                  "transition-colors hover:border-primary/40 hover:bg-accent active:cursor-grabbing",
+                  // 与画布节点同组件规格（wf-node-card）：拖进画布=左栏里那个样子
+                  "wf-node-card flex cursor-grab items-center gap-2.5 px-3 py-2",
+                  "transition-colors active:cursor-grabbing",
                 )}
               >
                 <item.icon size={15} className={item.color} />
@@ -107,8 +108,9 @@ export function NodePalette() {
                 draggable
                 onDragStart={(e) => onDragStart(e, item)}
                 className={cn(
-                  "flex cursor-grab items-center gap-2.5 rounded-lg border border-border bg-background px-3 py-2",
-                  "transition-colors hover:border-primary/40 hover:bg-accent active:cursor-grabbing",
+                  // 与画布节点同组件规格（wf-node-card）：拖进画布=左栏里那个样子
+                  "wf-node-card flex cursor-grab items-center gap-2.5 px-3 py-2",
+                  "transition-colors active:cursor-grabbing",
                 )}
               >
                 <item.icon size={15} className={item.color} />

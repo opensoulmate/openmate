@@ -12,7 +12,6 @@ import {
 import { useTranslation } from "react-i18next";
 import i18n from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { genPath, genRectPath } from "@/components/ui/super-ellipse";
 import type { WorkflowNodeData, WorkflowNodeType } from "@/stores/workflow-store";
 import {
   Play,
@@ -120,14 +119,14 @@ function estimateTextWidth(text: string, fontSize: number): number {
 }
 
 /** 节点宽度随内容收紧凑（左内距 + 图标 + 间距 + 文本 + 调试徽章 + 右内距），区间夹紧。
- *  副标题文案取 i18n 实际渲染串（与显示一致，防止宽估不足截断） */
+ *  与左栏节点面板同规格（px-3 + 图标 + gap-2.5）；副标题文案取 i18n 实际渲染串 */
 export function nodeWidth(data: WorkflowNodeData, debugActive?: boolean): number {
   const label = String(data.label ?? "");
   const desc =
     String(data.description ?? "").trim() ||
     i18n.t(`nodeDesc.${data.type}`, nodeDescFallback[data.type] ?? "");
   const textW = Math.max(estimateTextWidth(label, 12), estimateTextWidth(desc, 10), 40);
-  const width = 16 + 30 + 10 + textW + (debugActive ? 48 : 0) + 12;
+  const width = 12 + 17 + 10 + textW + (debugActive ? 48 : 0) + 12;
   return Math.round(Math.min(NODE_MAX_WIDTH, Math.max(NODE_MIN_WIDTH, width)));
 }
 
@@ -138,17 +137,6 @@ export function prepareNodes(nodes: Node<WorkflowNodeData>[]): Node<WorkflowNode
     width: nodeWidth(n.data, Boolean((n.data as { debugActive?: boolean }).debugActive)),
     height: NODE_HEIGHT,
   }));
-}
-
-/** 超椭圆壳 path（按宽度分档缓存，同档只算一次） */
-const shellPathCache = new Map<number, string>();
-function shellPath(width: number): string {
-  let d = shellPathCache.get(width);
-  if (!d) {
-    d = genRectPath(width, NODE_HEIGHT);
-    shellPathCache.set(width, d);
-  }
-  return d;
 }
 
 // ── 测量尺寸（超椭圆 path 需要真实宽高）────────────────────────────────
@@ -192,7 +180,6 @@ function BaseNodeInner({
   const color = nodeTypeColor(data.type);
   const Icon = nodeIcons[data.type];
   const w = nodeWidth(data, debug);
-  const d = shellPath(w);
   const showDataHandle = DATA_OUT_TYPES.has(data.type);
   // 副标题：自述优先，缺省用描述性文案（禁止复读类型名）；与标题雷同时隐藏
   const subtitle =
@@ -211,54 +198,15 @@ function BaseNodeInner({
         transition: "transform var(--transition-fast)",
       }}
     >
-      {/* 超椭圆形状层：卡底 ±类型微染 + 左侧类型色条 */}
+      {/* 节点卡：与左栏节点面板同规格（wf-node-card 普通圆角矩形）；调试态 warning 虚线框 */}
       <div
-        className="absolute inset-0"
-        style={{ clipPath: `path('${d}')`, overflow: "hidden" }}
-      >
-        <div className="absolute inset-0" style={{ background: "var(--color-card)" }} />
-        <div className="absolute inset-0" style={{ background: color, opacity: 0.055 }} />
-        <div
-          className="absolute inset-y-0 left-0 w-[3.5px]"
-          style={{ background: color, opacity: 0.9 }}
-        />
-      </div>
+        className={cn("wf-node-card absolute inset-0", selected && "wf-node-card-selected")}
+      />
+      {debug && <div className="wf-node-debug absolute inset-0 pointer-events-none" />}
 
-      {/* 超椭圆描边层：hover 描边提亮、选中主强调描边+柔光、调试态 warning 虚线 */}
-      <svg
-        className="pointer-events-none absolute inset-0"
-        width={w}
-        height={NODE_HEIGHT}
-        style={{ overflow: "visible" }}
-      >
-        <path
-          d={d}
-          fill="none"
-          strokeWidth={selected ? 1.5 : 1}
-          className={cn("wf-node-stroke", selected && "wf-node-stroke-selected")}
-        />
-        {debug && (
-          <path
-            d={d}
-            fill="none"
-            stroke="var(--color-warning)"
-            strokeWidth={1.5}
-            strokeDasharray="5 4"
-          />
-        )}
-      </svg>
-
-      {/* 内容层：图标 chip + 名称/说明双行 */}
-      <div className="relative flex h-full items-center gap-2.5 pl-4 pr-3">
-        <div
-          className="flex h-[30px] w-[30px] shrink-0 items-center justify-center"
-          style={{
-            clipPath: `path('${genPath(15)}')`,
-            background: `color-mix(in srgb, ${color} 15%, transparent)`,
-          }}
-        >
-          <Icon size={17} style={{ color }} strokeWidth={2} />
-        </div>
+      {/* 内容层：纯色图标（与面板同款无框）+ 名称/说明双行 */}
+      <div className="relative flex h-full items-center gap-2.5 px-3">
+        <Icon size={17} style={{ color }} strokeWidth={2} className="shrink-0" />
         <div className="flex-1 min-w-0">
           <p className="truncate text-xs font-medium leading-4 text-foreground">{data.label}</p>
           {showSubtitle && (

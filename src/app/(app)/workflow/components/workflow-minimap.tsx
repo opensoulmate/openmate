@@ -1,7 +1,7 @@
 "use client";
 
 // ── 工作流鹰眼图（MiniMap 重画）────────────────────────────────────────
-// 不用默认灰块样式：缩略节点色块与主画布一致（卡底微染 + 左侧类型色条），
+// 不用默认灰块样式：缩略节点与主画布节点同规格（普通圆角矩形卡 + 类型色描边），
 // 视口框=描边+半透明填充+圆角，容器无边框（圆角+柔影），随深浅主题联动。
 
 import { memo, useEffect } from "react";
@@ -11,7 +11,7 @@ import type { WorkflowNodeData } from "@/stores/workflow-store";
 
 const VIEWPORT_FILL_CLASS = "wf-minimap-viewport-fill";
 
-/** 缩略节点：卡底 + 类型微染 + 左侧类型色条（与主画布节点同语言），选中描主强调 */
+/** 缩略节点：普通圆角矩形卡（与左栏/画布节点同语言：卡底 + 类型色描边），选中描主强调 */
 const MiniMapTile = memo(function MiniMapTile({
   x,
   y,
@@ -24,7 +24,6 @@ const MiniMapTile = memo(function MiniMapTile({
   className,
 }: MiniMapNodeProps) {
   const r = Math.max(1, Math.min(borderRadius, height / 2, width / 2));
-  const stripW = Math.max(2, Math.min(3, width * 0.14));
   return (
     <g className={className} shapeRendering={shapeRendering}>
       <rect
@@ -33,9 +32,12 @@ const MiniMapTile = memo(function MiniMapTile({
         width={width}
         height={height}
         rx={r}
-        style={{ fill: `color-mix(in srgb, ${color} 14%, var(--color-card))` }}
+        style={{
+          fill: "var(--color-background)",
+          stroke: `color-mix(in srgb, ${color} 55%, transparent)`,
+          strokeWidth: 1,
+        }}
       />
-      <rect x={x} y={y} width={stripW} height={height} rx={Math.min(r, stripW / 2)} style={{ fill: color }} />
       {selected && (
         <rect
           x={x - 0.5}

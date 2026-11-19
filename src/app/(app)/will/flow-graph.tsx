@@ -37,7 +37,7 @@ export interface FlowDef {
 export const NODE_TYPE_LABEL: Record<string, string> = {
   tool: "will.ntTool", decision: "will.ntDecision", loop: "will.ntLoop",
   approval: "will.ntApproval", action: "will.ntAction", agent: "will.ntAgent",
-  human: "will.ntHuman", parallel: "will.ntParallel",
+  human: "will.ntHuman", parallel: "will.ntParallel", verify: "will.ntVerify",
 };
 
 function nodeElse(node: FlowNode): string {
