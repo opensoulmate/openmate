@@ -1,0 +1,14 @@
+{
+  "agent_id": "mimo",
+  "prompt": "请只回答数字：26+16等于多少？",
+  "started_at": "2026-11-20 01:05:43",
+  "chunks": [
+    "[[update:available_commands_update]]"
+  ],
+  "text": "",
+  "prompt_response": null,
+  "error": "; prompt timed out",
+  "session_id": "ses_e0b3a822bffeSiLiucOcBwtDkj",
+  "result": "FAIL",
+  "finished_at": "2026-11-20 01:09:46"
+}

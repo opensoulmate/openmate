@@ -46,6 +46,17 @@ _OPENSOUL_ROOT = os.environ.get("OPENSOUL_ROOT", "/home/climbing/opensoul")
 _ACPPROXY_DIR = os.path.dirname(os.path.abspath(__file__))
 _USER_HOME = os.environ.get("USER_HOME", "/home/climbing")
 
+# PATH 归一（2026-11-20 真测踩坑）：opencode/claude/codex 等 CLI 装在
+# ~/.npm-global/bin、~/.local/bin，systemd 单元的 PATH 不含这些目录 →
+# execvp 报 No such file or directory（opencode 路由 session/new 即死）。
+# 模块加载时补齐一次，pty.fork 的 execvp 与 create_subprocess_exec 的 env 两分支同享。
+_EXTRA_BIN_DIRS = [
+    os.path.join(_USER_HOME, ".local", "bin"),
+    os.path.join(_USER_HOME, ".npm-global", "bin"),
+    "/usr/local/bin",
+]
+os.environ["PATH"] = ":".join(_EXTRA_BIN_DIRS + [os.environ.get("PATH", "")]).rstrip(":")
+
 # JWT配置
 _OPSOUL_ENV = {}
 _env_path = f"{_OPENSOUL_ROOT}/.env"
@@ -73,6 +84,14 @@ AGENT_ROUTES = {
     "opencode":  {"cmd": ["opencode", "acp"], "cwd": _USER_HOME},
     # 自研适配器（ollama 无生态桥，已实测可用）
     "ollama":    {"cmd": [sys.executable, "-m", "agent.ollama_acp"], "cwd": _ACPPROXY_DIR},
+    # 一次性 CLI agent 的通用 ACP 适配器（2026-11-20 真装真测接入：
+    # aider/qwen/gemini/interpreter/copilot 不原生讲 ACP，由 agent.cli_acp
+    # 按 profile 转接；失败（缺凭据/报错）如实回 JSON-RPC error，不假成功）
+    "aider":       {"cmd": [sys.executable, "-m", "agent.cli_acp", "aider"], "cwd": _ACPPROXY_DIR, "probe_timeout": 15},
+    "qwen":        {"cmd": [sys.executable, "-m", "agent.cli_acp", "qwen"], "cwd": _ACPPROXY_DIR, "probe_timeout": 15},
+    "gemini":      {"cmd": [sys.executable, "-m", "agent.cli_acp", "gemini"], "cwd": _ACPPROXY_DIR, "probe_timeout": 15},
+    "interpreter": {"cmd": [sys.executable, "-m", "agent.cli_acp", "interpreter"], "cwd": _ACPPROXY_DIR, "probe_timeout": 15},
+    "copilot":     {"cmd": [sys.executable, "-m", "agent.cli_acp", "copilot"], "cwd": _ACPPROXY_DIR, "probe_timeout": 15},
     # 生态标准 ACP 桥包（AionUi 同款姿势：不逐一自写，用官方/社区桥）
     "codex":       {"cmd": ["npx", "-y", "@zed-industries/codex-acp@0.16.0"], "cwd": _USER_HOME, "probe_timeout": 30},
     "pi":          {"cmd": ["npx", "-y", "pi-acp@0.0.34"], "cwd": _USER_HOME, "probe_timeout": 30},

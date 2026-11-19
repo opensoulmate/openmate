@@ -1,0 +1,28 @@
+{
+  "agent_id": "hermes",
+  "prompt": "请只回答数字：26+16等于多少？",
+  "started_at": "2026-11-20 01:05:27",
+  "chunks": [
+    "[[update:available_commands_update]]",
+    "[[update:usage_update]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "42",
+    "[[update:usage_update]]"
+  ],
+  "text": "42",
+  "prompt_response": {
+    "stopReason": "end_turn",
+    "usage": {
+      "cachedReadTokens": 1408,
+      "inputTokens": 19759,
+      "outputTokens": 8,
+      "thoughtTokens": 0,
+      "totalTokens": 19767
+    }
+  },
+  "error": null,
+  "session_id": "ccf4a343-0b0b-4e77-a15a-8a10f3d5a0c2",
+  "result": "PASS",
+  "finished_at": "2026-11-20 01:05:37"
+}

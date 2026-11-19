@@ -1,0 +1,16 @@
+{
+  "agent_id": "gemini",
+  "prompt": "请只回答数字：26+16等于多少？",
+  "started_at": "2026-11-20 01:58:09",
+  "chunks": [],
+  "text": "{\"code\": -32000, \"message\": \"gemini failed: cli exit 41: Please set an Auth method in your /home/climbing/.gemini/settings.json or specify one of the following environment variables before running: GEMINI_API_KEY, GOOGLE_GENAI_USE_VERTEXAI, GOOGLE_GENAI_USE_GCA\"}",
+  "prompt_response": {
+    "code": -32000,
+    "message": "gemini failed: cli exit 41: Please set an Auth method in your /home/climbing/.gemini/settings.json or specify one of the following environment variables before running: GEMINI_API_KEY, GOOGLE_GENAI_USE_VERTEXAI, GOOGLE_GENAI_USE_GCA"
+  },
+  "error": "; expected marker '42' not in reply",
+  "session_id": "gemini-aef219f30902",
+  "result": "FAIL",
+  "finished_at": "2026-11-20 01:58:11",
+  "expect": "42"
+}

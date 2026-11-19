@@ -1,0 +1,19 @@
+{
+  "agent_id": "claude-code",
+  "prompt": "请只回答数字：26+16等于多少？",
+  "started_at": "2026-11-20 01:59:31",
+  "chunks": [
+    "[[update:available_commands_update]]",
+    "[[update:available_commands_update]]"
+  ],
+  "text": "{\"code\": -32000, \"message\": \"Authentication required\"}",
+  "prompt_response": {
+    "code": -32000,
+    "message": "Authentication required"
+  },
+  "error": "; expected marker '42' not in reply",
+  "session_id": "02661725-2014-4156-8bea-bf47118119fc",
+  "result": "FAIL",
+  "finished_at": "2026-11-20 01:59:52",
+  "expect": "42"
+}

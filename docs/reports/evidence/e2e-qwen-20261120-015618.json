@@ -1,0 +1,17 @@
+{
+  "agent_id": "qwen",
+  "prompt": "请只回答数字：26+16等于多少？",
+  "started_at": "2026-11-20 01:55:22",
+  "chunks": [
+    "26+16=42"
+  ],
+  "text": "26+16=42",
+  "prompt_response": {
+    "stopReason": "endTurn"
+  },
+  "error": null,
+  "session_id": "qwen-fa6cdd87514c",
+  "result": "PASS",
+  "finished_at": "2026-11-20 01:56:18",
+  "expect": "42"
+}

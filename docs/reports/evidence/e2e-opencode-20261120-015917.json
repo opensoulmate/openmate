@@ -1,0 +1,42 @@
+{
+  "agent_id": "opencode",
+  "prompt": "请只回答数字：26+16等于多少？",
+  "started_at": "2026-11-20 01:59:08",
+  "chunks": [
+    "[[update:available_commands_update]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "42",
+    "[[update:usage_update]]"
+  ],
+  "text": "42",
+  "prompt_response": {
+    "stopReason": "end_turn",
+    "usage": {
+      "inputTokens": 27814,
+      "outputTokens": 3,
+      "totalTokens": 28887,
+      "thoughtTokens": 46,
+      "cachedReadTokens": 1024
+    },
+    "_meta": {}
+  },
+  "error": null,
+  "session_id": "ses_e0b0999ddffeSJzl1c8lvlzslr",
+  "result": "PASS",
+  "finished_at": "2026-11-20 01:59:17",
+  "expect": "42"
+}

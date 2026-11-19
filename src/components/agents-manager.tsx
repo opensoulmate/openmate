@@ -12,7 +12,15 @@ interface AgentInfo {
   available: boolean; version?: string; path?: string; installCommand?: string; os?: string;
   skillsManaged?: boolean;
   provider?: string; model?: string;
+  /** 实测支持分级（与 docs/reports/agent-support-matrix.md 同源，禁虚标） */
+  support_tier?: 'e2e-ok' | 'needs-credentials' | 'catalog-only';
 }
+
+const TIER_LABEL: Record<string, { text: string; cls: string }> = {
+  'e2e-ok': { text: '端到端好使', cls: 'bg-green-500/15 text-green-500 border-green-500/30' },
+  'needs-credentials': { text: '缺凭据', cls: 'bg-amber-500/15 text-amber-500 border-amber-500/30' },
+  'catalog-only': { text: '目录项·非对话Agent', cls: 'bg-muted text-muted-foreground border-border' },
+};
 
 interface InstallState {
   status: 'idle' | 'starting' | 'running' | 'done' | 'error';
@@ -281,6 +289,11 @@ export function AgentsClient() {
             { label: '二进制', value: detailItem.data.binary || 'N/A' },
             { label: '路径', value: detailItem.data.path || 'N/A' },
             { label: '操作系统', value: detailItem.data.os || 'N/A' },
+            {
+              label: '实测状态',
+              value: TIER_LABEL[(detailItem.data as AgentInfo).support_tier || '']?.text
+                || '未实测（目录项）',
+            },
           ],
         },
         {
@@ -387,6 +400,11 @@ export function AgentsClient() {
                       <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-green-500/10 text-green-600 shrink-0">{t('agents.installed')}{agent.version ? ` v${agent.version}` : ''}</span>
                     ) : (
                       <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-muted text-muted-foreground shrink-0">{t('agents.unavailable')}</span>
+                    )}
+                    {agent.support_tier && (
+                      <span className={`px-1.5 py-0.5 rounded-full text-[10px] border shrink-0 ${TIER_LABEL[agent.support_tier]?.cls || ''}`}>
+                        {TIER_LABEL[agent.support_tier]?.text || agent.support_tier}
+                      </span>
                     )}
                   </div>
                   {agent.description && <p className="text-xs text-muted-foreground truncate hidden sm:block">{agent.description}</p>}

@@ -1,0 +1,16 @@
+{
+  "agent_id": "aider",
+  "prompt": "请只回答数字：26+16等于多少？",
+  "started_at": "2026-11-20 01:54:17",
+  "chunks": [
+    "────────────────────────────────────────────────────────────────────────────────\nYou can skip this check with --no-gitignore\nAdded .aider* to .gitignore\n('Connection aborted.', ConnectionResetError(104, 'Connection reset by peer'))\nWarning: ollama_chat/qwen2.5:0.5b expects these environment variables\n- OLLAMA_API_BASE: Not set\nYou can skip this check with --no-show-model-warnings\n\nhttps://aider.chat/docs/llms/warnings.html\n\nAider v0.86.2\nModel: ollama_chat/qwen2.5:0.5b with whole edit format\nGit repo: .git with 0 files\nRepo-map: using 4096.0 tokens, auto refresh\n\n26+16=42                                                                        \n\nTokens: 611 sent, 9 received."
+  ],
+  "text": "────────────────────────────────────────────────────────────────────────────────\nYou can skip this check with --no-gitignore\nAdded .aider* to .gitignore\n('Connection aborted.', ConnectionResetError(104, 'Connection reset by peer'))\nWarning: ollama_chat/qwen2.5:0.5b expects these environment variables\n- OLLAMA_API_BASE: Not set\nYou can skip this check with --no-show-model-warnings\n\nhttps://aider.chat/docs/llms/warnings.html\n\nAider v0.86.2\nModel: ollama_chat/qwen2.5:0.5b with whole edit format\nGit repo: .git with 0 files\nRepo-map: using 4096.0 tokens, auto refresh\n\n26+16=42                                                                        \n\nTokens: 611 sent, 9 received.",
+  "prompt_response": {
+    "stopReason": "endTurn"
+  },
+  "error": null,
+  "session_id": "aider-b33823cf67bf",
+  "result": "PASS",
+  "finished_at": "2026-11-20 01:54:32"
+}

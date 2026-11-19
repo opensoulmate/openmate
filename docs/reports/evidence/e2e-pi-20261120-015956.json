@@ -1,0 +1,13 @@
+{
+  "agent_id": "pi",
+  "prompt": "请只回答数字：26+16等于多少？",
+  "started_at": "2026-11-20 01:59:52",
+  "chunks": [],
+  "text": "",
+  "prompt_response": null,
+  "error": "session/new error: {'code': -32603, 'message': 'Internal error: Cannot call write after a stream was destroyed', 'data': {}}",
+  "session_id": null,
+  "result": "FAIL",
+  "finished_at": "2026-11-20 01:59:56",
+  "expect": "42"
+}

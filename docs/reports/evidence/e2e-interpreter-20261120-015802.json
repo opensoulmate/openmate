@@ -1,0 +1,17 @@
+{
+  "agent_id": "interpreter",
+  "prompt": "请只回答数字：26+16等于多少？",
+  "started_at": "2026-11-20 01:57:51",
+  "chunks": [
+    "26+16=42"
+  ],
+  "text": "26+16=42",
+  "prompt_response": {
+    "stopReason": "endTurn"
+  },
+  "error": null,
+  "session_id": "interpreter-23aef010f917",
+  "result": "PASS",
+  "finished_at": "2026-11-20 01:58:02",
+  "expect": "42"
+}

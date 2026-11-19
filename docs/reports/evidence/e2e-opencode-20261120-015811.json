@@ -1,0 +1,13 @@
+{
+  "agent_id": "opencode",
+  "prompt": "请只回答数字：26+16等于多少？",
+  "started_at": "2026-11-20 01:58:11",
+  "chunks": [],
+  "text": "",
+  "prompt_response": null,
+  "error": "session/new error: {'code': -32603, 'message': 'Agent opencode unavailable: [Errno 2] No such file or directory'}",
+  "session_id": null,
+  "result": "FAIL",
+  "finished_at": "2026-11-20 01:58:11",
+  "expect": "42"
+}

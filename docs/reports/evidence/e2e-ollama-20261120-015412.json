@@ -1,0 +1,17 @@
+{
+  "agent_id": "ollama",
+  "prompt": "请只回答数字：26+16等于多少？",
+  "started_at": "2026-11-20 01:54:11",
+  "chunks": [
+    "4",
+    "2"
+  ],
+  "text": "42",
+  "prompt_response": {
+    "stopReason": "endTurn"
+  },
+  "error": null,
+  "session_id": "ollama-3e19310e19a8",
+  "result": "PASS",
+  "finished_at": "2026-11-20 01:54:12"
+}

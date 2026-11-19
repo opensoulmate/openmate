@@ -1,0 +1,20 @@
+{
+  "agent_id": "openclaw",
+  "prompt": "请只回答数字：26+16等于多少？",
+  "started_at": "2026-11-20 02:10:16",
+  "chunks": [
+    "[[update:session_info_update]]",
+    "[[update:available_commands_update]]",
+    "42",
+    "[[update:session_info_update]]"
+  ],
+  "text": "42",
+  "prompt_response": {
+    "stopReason": "end_turn"
+  },
+  "error": null,
+  "session_id": "5365b4c9-0697-44ce-95fe-b097a23a7ddf",
+  "result": "PASS",
+  "finished_at": "2026-11-20 02:10:42",
+  "expect": "42"
+}

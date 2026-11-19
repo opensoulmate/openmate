@@ -61,7 +61,7 @@ export const LOCAL_AGENT_DEFS: Omit<DetectedAgent, "status" | "detectedAt">[] = 
     description: "Anthropic Claude CLI client.",
     icon: MessageSquare,
     color: "text-orange-400",
-    installCommand: "npm install -g @anthropic-ai/claude-cli",
+    installCommand: "npm install -g @anthropic-ai/claude-code",
     taskTypes: ["chat", "code", "reasoning"],
   },
   {
@@ -85,7 +85,7 @@ export const LOCAL_AGENT_DEFS: Omit<DetectedAgent, "status" | "detectedAt">[] = 
     description: i18n.t("agentTypes.openHandsDesc"),
     icon: Terminal,
     color: "text-blue-400",
-    installCommand: "npm install -g opencode",
+    installCommand: "npm install -g opencode-ai",
     taskTypes: ["code", "chat"],
   },
   {

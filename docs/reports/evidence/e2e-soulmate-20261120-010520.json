@@ -1,0 +1,16 @@
+{
+  "agent_id": "soulmate",
+  "prompt": "请只回答数字：26+16等于多少？",
+  "started_at": "2026-11-20 01:05:03",
+  "chunks": [
+    "42"
+  ],
+  "text": "42",
+  "prompt_response": {
+    "stopReason": "end_turn"
+  },
+  "error": null,
+  "session_id": "om-670eec03b8f4",
+  "result": "PASS",
+  "finished_at": "2026-11-20 01:05:20"
+}
