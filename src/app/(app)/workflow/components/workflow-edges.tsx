@@ -4,19 +4,18 @@
 // 三类语义连线，与节点语义色体系同源（主强调 1 + 语义 4，全站 token 对齐）：
 //   exec  执行流   —— 主强调紫，实线
 //   data  数据流   —— info 青，虚线（数据口菱形 → 节点）
-//   branch 判断分支 —— then=branch-then 沉稳绿 / else=branch-else 中性淡紫灰，实线 + then/else 骑线徽章
+//   branch 判断分支 —— then=branch-then 沉稳绿 / else=branch-else 中性淡紫灰，实线（分支标签贴右缘出点旁，见 workflow-nodes）
 // 动效克制：仅调试/执行途经的连线做虚线流动，其余静态。
 
 import {
   BaseEdge,
-  EdgeLabelRenderer,
   getBezierPath,
   MarkerType,
   type Edge,
   type EdgeProps,
 } from "@xyflow/react";
 import { cn } from "@/lib/utils";
-import { BranchChip, branchVar } from "./workflow-nodes";
+import { branchVar } from "./workflow-nodes";
 
 export type WorkflowEdgeKind = "exec" | "data" | "branch";
 
@@ -86,7 +85,7 @@ export function buildEdge(params: {
   };
 }
 
-/** 单一连线渲染器：类型色 + 贝塞尔 + 箭头 + 分支徽章 */
+/** 单一连线渲染器：类型色 + 贝塞尔 + 箭头 */
 export function WorkflowEdge({
   id,
   sourceX,
@@ -102,7 +101,7 @@ export function WorkflowEdge({
   const d = (data ?? {}) as WorkflowEdgeData;
   const kind: WorkflowEdgeKind = d.kind ?? "exec";
   const stroke = edgeStrokeVar(d);
-  const [path, labelX, labelY] = getBezierPath({
+  const [path] = getBezierPath({
     sourceX,
     sourceY,
     sourcePosition,
@@ -125,18 +124,6 @@ export function WorkflowEdge({
         }}
         className={cn("wf-edge", selected && "wf-edge-selected", d.animated && "wf-edge-animated")}
       />
-      {kind === "branch" && d.branch && (
-        <EdgeLabelRenderer>
-          <div
-            className="absolute nodrag nopan pointer-events-none"
-            style={{
-              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
-            }}
-          >
-            <BranchChip branch={d.branch} />
-          </div>
-        </EdgeLabelRenderer>
-      )}
     </>
   );
 }

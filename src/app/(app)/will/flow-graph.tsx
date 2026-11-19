@@ -82,16 +82,16 @@ export function BranchGraph({ defn }: { defn: FlowDef }) {
                 {t(NODE_TYPE_LABEL[node.type] || node.type, node.type)}
                 {node.type === "tool" && node.tool ? ` · ${node.tool}` : ""}
               </text>
-              {/* decision 分支弧线 */}
+              {/* decision 分支弧线：右缘出发（上=then 下=else，双泳道），与画布端口语义一致 */}
               {node.type === "decision" && (
                 <>
                   {node.then && (
-                    <BranchEdge nodes={nodes} fromY={y} targetId={node.then}
-                      side="right" color="var(--color-branch-then)" label={`then → ${node.then}`} />
+                    <BranchEdge nodes={nodes} fromY={y - 8} targetId={node.then}
+                      laneX={320} color="var(--color-branch-then)" label={`then → ${node.then}`} />
                   )}
                   {nodeElse(node) && (
-                    <BranchEdge nodes={nodes} fromY={y} targetId={nodeElse(node)}
-                      side="left" color="var(--color-branch-else)" label={`else → ${nodeElse(node)}`} />
+                    <BranchEdge nodes={nodes} fromY={y + 8} targetId={nodeElse(node)}
+                      laneX={288} color="var(--color-branch-else)" label={`else → ${nodeElse(node)}`} />
                   )}
                   {node.when && (
                     <text x={centerX + 78} y={y + 3} fontSize={8} fill="currentColor" opacity={0.75}>
@@ -108,17 +108,16 @@ export function BranchGraph({ defn }: { defn: FlowDef }) {
   );
 }
 
-function BranchEdge({ nodes, fromY, targetId, side, color, label }: {
+function BranchEdge({ nodes, fromY, targetId, laneX, color, label }: {
   nodes: FlowNode[]; fromY: number; targetId: string;
-  side: "left" | "right"; color: string; label: string;
+  laneX: number; color: string; label: string;
 }) {
   const rowH = 54;
   const centerX = 150;
   const idx = nodes.findIndex((n) => n.id === targetId);
   if (idx < 0) return null;
   const toY = 14 + idx * rowH;
-  const laneX = side === "right" ? 315 : 25;
-  const startX = side === "right" ? centerX + 70 : centerX - 70;
+  const startX = centerX + 70;
   return (
     <g>
       <path
@@ -127,7 +126,7 @@ function BranchEdge({ nodes, fromY, targetId, side, color, label }: {
         markerEnd="url(#will-arrow)"
       />
       <text x={laneX} y={(fromY + toY) / 2 + 3} fontSize={7.5} fill={color}
-        textAnchor={side === "right" ? "end" : "start"} fontWeight={600}>
+        textAnchor="end" fontWeight={600}>
         {label}
       </text>
     </g>

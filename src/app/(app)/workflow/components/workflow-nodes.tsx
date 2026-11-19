@@ -227,7 +227,7 @@ function BaseNodeInner({
         )}
       </div>
 
-      {/* 连接点：顶部入点 / 底部执行出点 / 右侧菱形数据出点（统一 wf-port 语言：同尺寸同描边同视觉重量） */}
+      {/* 连接点：顶部入点 / 底部执行出点 / 条件分支右侧双出点（上=then 下=else）/ 右侧菱形数据出点（统一 wf-port 语言） */}
       {showTarget && (
         <Handle type="target" position={Position.Top} className="wf-port" />
       )}
@@ -239,17 +239,17 @@ function BaseNodeInner({
         <>
           <Handle
             type="source"
-            position={Position.Bottom}
+            position={Position.Right}
             id="true"
             className="wf-port"
-            style={{ left: "30%", "--wf-port-fill": branchVar.then } as CSSProperties}
+            style={{ top: "30%", "--wf-port-fill": branchVar.then } as CSSProperties}
           />
           <Handle
             type="source"
-            position={Position.Bottom}
+            position={Position.Right}
             id="false"
             className="wf-port"
-            style={{ left: "70%", "--wf-port-fill": branchVar.else } as CSSProperties}
+            style={{ top: "70%", "--wf-port-fill": branchVar.else } as CSSProperties}
           />
         </>
       )}
@@ -308,7 +308,7 @@ export const branchVar: Record<"then" | "else", string> = {
   else: "var(--color-branch-else)",
 };
 
-/** 分支标签（骑线小徽章：实底 punch 线条 + 彩点 + 前景文字，双主题 WCAG 安全；wf-chip 超椭圆统一语言） */
+/** 分支标签（出点旁小徽章：实底 punch 线条 + 彩点 + 前景文字，双主题 WCAG 安全；wf-chip 普通圆角矩形） */
 export function BranchChip({ branch, className }: { branch: "then" | "else"; className?: string }) {
   const color = branchVar[branch];
   return (
@@ -339,16 +339,16 @@ export const ConditionNode = memo(function ConditionNode({ data, selected }: Nod
         selected={selected}
         sourceHandleCount={2}
       />
-      {/* then/else 双分支标签：骑在出线起点上，随 30%/70% 双出点对齐 */}
+      {/* then/else 双分支标签：贴在右缘出点旁（上=then 下=else），实底 punch 骑线，不挂矩形下方 */}
       <div
-        className="pointer-events-none absolute flex justify-center"
-        style={{ left: "30%", top: "calc(100% + 12px)", transform: "translateX(-50%)" }}
+        className="pointer-events-none absolute flex items-center"
+        style={{ left: "calc(100% + 14px)", top: "30%", transform: "translateY(-50%)" }}
       >
         <BranchChip branch="then" />
       </div>
       <div
-        className="pointer-events-none absolute flex justify-center"
-        style={{ left: "70%", top: "calc(100% + 12px)", transform: "translateX(-50%)" }}
+        className="pointer-events-none absolute flex items-center"
+        style={{ left: "calc(100% + 14px)", top: "70%", transform: "translateY(-50%)" }}
       >
         <BranchChip branch="else" />
       </div>
