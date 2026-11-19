@@ -7073,6 +7073,31 @@ You can send files to the user natively: to deliver a file, write a brief confir
         self._schedule_prefetch(sid, cwd)
         return acp.NewSessionResponse(session_id=sid)
 
+    async def _implicit_triage(self, session_id: str, user_text: str) -> str:
+        """对话内隐式三级分流（2026-11-19 归位，无第二入口）：
+        用户只在对话里说事，SoulMate 沟通中自己判级——小=直接干（返回空串走原回合），
+        中/大=自动转 AI 群组/流程化并透明告知（"这事适合协作，我转到群组了"），不让用户选。
+
+        仅限真·用户对话回合：headless 内部实例（wakeup/子代理/群组真身）、带回合出身
+        标记的回合（wakeup/cron/wechat/消息路由）、系统派发标记消息一律不判——
+        隐式分流只属于用户说话的对话。失败绝不破坏会话流（返回空串=SoulMate 自己办）。"""
+        try:
+            if os.environ.get("SOULMATE_IMPLICIT_TRIAGE", "1") == "0":
+                return ""
+            if self._client is None:  # 无客户端=内部 headless 回合，非用户对话
+                return ""
+            if (getattr(self, "_turn_origin", None) or {}).get(session_id):
+                return ""  # wakeup/cron/wechat/消息路由回合不隐式分流
+            text = (user_text or "").strip()
+            if len(text) < 6 or "非用户消息" in text:
+                return ""  # 短语/寒暄/系统派发标记消息不判级
+            from plugin.task_triage import conversation_triage
+            outcome = await conversation_triage(text, session_id=session_id)
+            return (outcome or {}).get("notice", "") or ""
+        except Exception as e:  # noqa: BLE001 — 判级/分流故障绝不打断对话
+            logger.info("[triage] 隐式分流跳过（回落 SoulMate 直接办）: %s", e)
+            return ""
+
     async def prompt(
         self,
         prompt: list,
@@ -7388,6 +7413,27 @@ You can send files to the user natively: to deliver a file, write a brief confir
         if not user_text.strip():
             return PromptResponse(stop_reason="end_turn")
 
+        # ── 隐式三级分流（2026-11-19 归位，无第二入口）：用户只在对话里说事，
+        # SoulMate 沟通中自己判级——小=直接干（走原回合），中/大=自动转 AI 群组/
+        # 流程化并透明告知（"这事适合协作，我转到群组了"），不让用户选轨道。
+        # 带附件的消息不判（附件是给 SoulMate 直接处理的素材）。──
+        if not file_parts and not audio_parts:
+            _triage_notice = await self._implicit_triage(session_id, user_text)
+            if _triage_notice:
+                session["messages"].append({"role": "user", "content": user_text})
+                self._save_message(session_id, "user", user_text)
+                session["messages"].append({"role": "assistant", "content": _triage_notice})
+                self._save_message(session_id, "assistant", _triage_notice,
+                                   metadata=json.dumps({"triage": "conversation_auto"}))
+                await self._notify_client(session_id, _triage_notice)
+                logger.info(f"[triage] 对话内自动分流完成: {session_id}")
+                try:
+                    if run_span:
+                        self._observability.finish_span(run_span.span_id, SpanStatus.SUCCESS)
+                except Exception:  # noqa: BLE001
+                    pass
+                return PromptResponse(stop_reason="end_turn")
+
         # ── trajectory span接线（langfuse Trace层）：回合根span ──
         # user_input(root) → llm_call → tool_call×N嵌套树的根；落opensoul
         # :8090 /api/trajectory（09-17轮建的观察面首个真实写入方）。失败返回
@@ -7699,10 +7745,11 @@ You can send files to the user natively: to deliver a file, write a brief confir
                     )
                     messages.insert(0, {"role": "system", "content": intent_ctx})
 
-                # 2. 长期记忆召回
+                # 2. 长期记忆召回（MEM-Semantic ③：mode=hybrid 语义+关键词混合——
+                # 「上周聊的X」类非字面查询命中；旧服务端忽略多余字段=兼容）
                 ltm_resp = await _client.post(
                     "http://127.0.0.1:8090/api/hippo/ltm/context",
-                    json={"query": user_text, "limit": 3}, timeout=2,
+                    json={"query": user_text, "limit": 3, "mode": "hybrid"}, timeout=2,
                 )
                 if ltm_resp.status_code == 200:
                     ltm_data = ltm_resp.json()
