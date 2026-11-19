@@ -131,7 +131,6 @@ export function CommandMenu() {
     { id: "nav-body-map", label: "身体地图", labelEn: "Body Map", labelJa: "ボディマップ", icon: <Bot size={16} />, action: () => router.push("/body-map"), keywords: ["body", "map", "身体", "器官"], group: "系统", groupEn: "System", groupJa: "システム" },
 
     // Quick actions
-    { id: "task-triage", label: "任务下达", labelEn: "Dispatch Task", labelJa: "タスク投入", icon: <Sparkles size={16} />, action: () => window.dispatchEvent(new Event("openmate:triage-open")), keywords: ["任务", "下达", "triage", "分流", "dispatch", "task"], group: "快捷操作", groupEn: "Quick Actions", groupJa: "クイックアクション" },
     { id: "new-chat", label: "新建对话", labelEn: "New Chat", labelJa: "新しいチャット", icon: <Plus size={16} />, action: () => router.push("/chat"), keywords: ["new", "新建", "chat"], group: "快捷操作", groupEn: "Quick Actions", groupJa: "クイックアクション" },
     { id: "new-knowledge", label: "新建知识", labelEn: "New Knowledge", labelJa: "新しいナレッジ", icon: <Plus size={16} />, action: () => router.push("/knowledge"), keywords: ["new", "新建", "knowledge"], group: "快捷操作", groupEn: "Quick Actions", groupJa: "クイックアクション" },
     { id: "new-learn", label: "新建课程", labelEn: "New Course", labelJa: "新しいコース", icon: <Plus size={16} />, action: () => router.push("/learn"), keywords: ["new", "新建", "course"], group: "快捷操作", groupEn: "Quick Actions", groupJa: "クイックアクション" },

@@ -1,22 +1,20 @@
 "use client";
 
-/* 任务三级分流门（task triage gate）— 统一下达入口
- * 用户说一句话 → AI 自动判级（小/中/大）→ 三轨分流：
- *   小 → 开/续 SoulMate 会话直接办（/chat 深链自动送达）
- *   中 → AI 群组发起（自动建组 + 任务发布 + 拆解执行）
- *   大 → 流程化（flow_studio 草稿 → 预览 → 装载跑）
- * 判级建议 + 一键换轨（会话↔群组↔流程，上下文带过去）+ 三轨结果统一回看板
- * 个人/企业双语义：流程化 = 一人公司 / 企业内部流程（模式随设置切换文案与模板偏好）
- * 后端：acp-proxy :8092 /triage/*（plugin/task_triage*.py，纯 Python）。
+/* 任务三级分流·共享件（2026-11-19 归位：显式入口 → 对话内隐式分流）
+ * 用户裁定：不再设"下达任务"独立入口——用户只在对话里跟 SoulMate 说事，
+ * SoulMate 沟通中自己判级（小=直接干 / 中=自动转 AI 群组拆解 / 大=自动转流程化），
+ * 升级时透明告知（"这事适合协作，我转到群组了"）。判级/分流引擎在
+ * acp-proxy :8092 /triage/*（plugin/task_triage*.py）。
+ *
+ * 本文件保留分流能力的共享面（归位不砍杀，迁移优先于删除）：
+ *   - triageApi：/triage/* HTTP 面（判级/分流/换轨/看板/双语义模式）
+ *   - ModeBadge：个人/企业双语义（一人公司 / 企业内部流程，/will 同源展示）
+ *   - TriageBoard + TriageRecordsPanel：三轨产物统一回看（对话内自动分流的任务可查、可换轨）
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Sparkles, MessageSquare, LayoutDashboard, Send, Repeat,
-  CheckCircle2, Loader2, FileText, ArrowRight, X,
-} from "lucide-react";
-import { SuperAvatar } from "@/components/ui/super-ellipse";
+import { LayoutDashboard, ArrowRight, Repeat } from "lucide-react";
 
 function triageBase(): string {
   if (typeof window === "undefined") return "http://127.0.0.1:8092";
@@ -60,6 +58,7 @@ export interface TriageArtifact {
   flow_id?: string;
   run_id?: string;
   subtasks_count?: number;
+  name?: string;
   draft_name?: string;
 }
 
@@ -74,7 +73,7 @@ export interface TriageRecord {
   status: string;
   context: Record<string, unknown>;
   artifact: TriageArtifact;
-  detail: { definition?: FlowDraftDef; yaml?: string; name?: string; error?: string };
+  detail: { definition?: FlowDraftDef; yaml?: string; name?: string; error?: string; confirm_error?: string };
   switched_from: string;
   switched_to: string;
   tenant_mode: string;
@@ -88,14 +87,6 @@ interface FlowDraftDef {
   id: string;
   name: string;
   nodes: Array<{ id: string; type: string; task?: string; tool?: string }>;
-}
-
-interface JudgeResult {
-  level: TriageLevel;
-  confidence: number;
-  reasons: string[];
-  source: string;
-  track: TriageTrack;
 }
 
 const TRACKS: TriageTrack[] = ["chat", "group", "flow"];
@@ -115,11 +106,6 @@ const TRACK_KEY: Record<TriageTrack, string> = {
   chat: "triage.trackChat",
   group: "triage.trackGroup",
   flow: "triage.trackFlow",
-};
-const TRACK_DESC_KEY: Record<TriageTrack, string> = {
-  chat: "triage.trackChatDesc",
-  group: "triage.trackGroupDesc",
-  flow: "triage.trackFlowDesc",
 };
 
 // 实时状态 → 展示（看板「状态」列）
@@ -177,7 +163,7 @@ export function TriageBoard({
   if (!records.length) {
     return (
       <div className="text-sm text-muted-foreground py-6 text-center">
-        {t("triage.boardEmpty", "（暂无下达记录——用上方输入框一句话下达）")}
+        {t("triage.boardEmpty", "（暂无分流记录——在对话里跟 SoulMate 说事，需要协作时会自动转进来）")}
       </div>
     );
   }
@@ -249,41 +235,23 @@ export function TriageBoard({
   );
 }
 
-/* ── 分流门主体（模态内嵌 / /tasks 顶部内嵌共用）── */
-export function TaskTriageGate({ embedded = false, onOpenLink }: {
-  embedded?: boolean;
-  onOpenLink?: (link: string) => void;
-}) {
+/* ── 分流记录面板（三轨产物统一回看）：SoulMate 对话内自动分流的任务在这里可查，
+ * 带一键换轨（会话↔群组↔流程，上下文带过去）。无下达输入框——分流是对话内隐式的。── */
+export function TriageRecordsPanel() {
   const { t } = useTranslation();
-  const [prompt, setPrompt] = useState("");
-  const [mode, setMode] = useState("personal");
-  const [phase, setPhase] = useState<"input" | "judging" | "judged" | "dispatching" | "result">("input");
-  const [judge, setJudge] = useState<JudgeResult | null>(null);
-  const [pickedTrack, setPickedTrack] = useState<TriageTrack>("chat");
-  const [record, setRecord] = useState<TriageRecord | null>(null);
   const [records, setRecords] = useState<TriageRecord[]>([]);
-  const [tab, setTab] = useState<"dispatch" | "board">("dispatch");
-  const [error, setError] = useState("");
+  const [mode, setMode] = useState("personal");
   const [busyId, setBusyId] = useState("");
-  const [flowRunning, setFlowRunning] = useState(false);
-  const [showYaml, setShowYaml] = useState(false);
-  const promptRef = useRef("");
+  const [error, setError] = useState("");
 
-  const loadMode = useCallback(() => {
+  const load = useCallback(() => {
+    triageFetch("/triage/records").then((d) => setRecords(d.records || [])).catch((e) => setError(String(e)));
     triageFetch("/triage/mode").then((d) => setMode(d.mode || "personal")).catch(() => {});
   }, []);
-  const loadBoard = useCallback(() => {
-    triageFetch("/triage/records").then((d) => setRecords(d.records || [])).catch(() => {});
-  }, []);
-  useEffect(() => { loadMode(); loadBoard(); }, [loadMode, loadBoard]);
-
-  const openLink = useCallback((link: string) => {
-    if (onOpenLink) onOpenLink(link);
-    else if (typeof window !== "undefined") window.location.href = link;
-  }, [onOpenLink]);
+  useEffect(() => { load(); }, [load]);
 
   const toggleMode = useCallback(async () => {
-    const next = mode === "personal" ? "enterprise" : "personal";
+    const next = mode === "enterprise" ? "personal" : "enterprise";
     try {
       await triageFetch("/triage/mode", { method: "PUT", body: JSON.stringify({ mode: next }) });
       setMode(next);
@@ -292,371 +260,37 @@ export function TaskTriageGate({ embedded = false, onOpenLink }: {
     }
   }, [mode]);
 
-  const analyze = useCallback(async () => {
-    if (!prompt.trim() || phase === "judging") return;
-    promptRef.current = prompt.trim();
-    setPhase("judging");
-    setError("");
-    try {
-      const d = await triageFetch("/triage/analyze", {
-        method: "POST", body: JSON.stringify({ prompt: prompt.trim() }),
-      });
-      const j: JudgeResult = { level: d.level, confidence: d.confidence, reasons: d.reasons || [], source: d.source, track: d.track };
-      setJudge(j);
-      setPickedTrack(j.track);
-      setPhase("judged");
-    } catch (e) {
-      setError(String(e));
-      setPhase("input");
-    }
-  }, [prompt, phase]);
-
-  const dispatchTo = useCallback(async (track: TriageTrack) => {
-    setPhase("dispatching");
-    setError("");
-    try {
-      const d = await triageFetch("/triage/dispatch", {
-        method: "POST",
-        body: JSON.stringify({
-          prompt: promptRef.current,
-          track,
-          level: judge?.level || "",
-          reasons: judge?.reasons || [],
-          level_source: judge?.source || "",
-        }),
-      });
-      setRecord(d.record);
-      setPhase("result");
-      loadBoard();
-    } catch (e) {
-      setError(String(e));
-      setPhase("judged");
-    }
-  }, [judge, loadBoard]);
-
-  const confirmFlow = useCallback(async () => {
-    if (!record) return;
-    setFlowRunning(true);
-    setError("");
-    try {
-      const d = await triageFetch(`/triage/records/${record.id}/confirm`, { method: "POST" });
-      setRecord(d.record);
-      loadBoard();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setFlowRunning(false);
-    }
-  }, [record, loadBoard]);
-
   const switchTrack = useCallback(async (rec: TriageRecord, to: TriageTrack) => {
     setBusyId(rec.id);
     setError("");
     try {
-      const d = await triageFetch(`/triage/records/${rec.id}/switch`, {
+      await triageFetch(`/triage/records/${rec.id}/switch`, {
         method: "POST", body: JSON.stringify({ to_track: to }),
       });
-      setRecord(d.record);
-      setPhase("result");
-      setTab("dispatch");
-      loadBoard();
+      load();
     } catch (e) {
       setError(String(e));
     } finally {
       setBusyId("");
     }
-  }, [loadBoard]);
+  }, [load]);
 
-  const startOver = useCallback(() => {
-    setPrompt(""); setJudge(null); setRecord(null); setPhase("input"); setError("");
-  }, []);
-
-  const draft = record?.detail?.definition;
-  const recordLink = record ? (record.link || record.artifact?.link || "") : "";
   return (
-    <div className={`flex flex-col gap-3 ${embedded ? "" : ""}`} data-testid="triage-gate">
-      {/* 顶行：标题 + 模式徽章 + 视图切换 */}
+    <div className="rounded-xl border border-border/60 p-4 flex flex-col gap-3" data-testid="triage-records-panel">
       <div className="flex items-center gap-2 flex-wrap">
-        <Sparkles className="w-4 h-4 text-primary" />
-        <span className="text-sm font-medium">{t("triage.title", "任务下达 · 三级分流门")}</span>
+        <LayoutDashboard className="w-4 h-4 text-primary" />
+        <span className="text-sm font-medium">{t("triage.boardTitle", "分流记录")}</span>
         <ModeBadge mode={mode} onToggle={toggleMode} />
         <div className="flex-1" />
-        <div className="flex items-center gap-1">
-          {(["dispatch", "board"] as const).map((k) => (
-            <button
-              key={k}
-              className={`text-xs px-2.5 py-1 rounded-lg ${tab === k ? "bg-primary text-primary-foreground" : "border border-border/60 hover:bg-muted"}`}
-              onClick={() => { setTab(k); if (k === "board") loadBoard(); }}
-            >
-              {k === "dispatch"
-                ? <><Send className="inline w-3 h-3 mr-1" />{t("triage.tabDispatch", "下达")}</>
-                : <><LayoutDashboard className="inline w-3 h-3 mr-1" />{t("triage.boardTitle", "统一看板")}</>}
-            </button>
-          ))}
-        </div>
+        <button
+          className="text-xs px-2 py-1 rounded-lg border border-border/60 hover:bg-muted"
+          onClick={load}
+        >
+          {t("triage.refresh", "刷新")}
+        </button>
       </div>
-
-      {tab === "dispatch" ? (
-        <>
-          {/* 一句话输入 */}
-          <div className="flex flex-col gap-2">
-            <textarea
-              className="w-full text-sm rounded-lg border border-border/60 bg-background p-3 focus:outline-none focus:border-primary/60 resize-y min-h-[64px]"
-              placeholder={t("triage.placeholder", "一句话下达任务：小任务进会话、中任务进 AI 群组、大任务进流程化…")}
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              disabled={phase !== "input"}
-              data-testid="triage-input"
-            />
-            <div className="flex items-center gap-2 flex-wrap">
-              <button
-                className="flex items-center gap-1.5 text-sm px-3.5 py-1.5 rounded-lg bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50"
-                onClick={phase === "input" ? analyze : startOver}
-                disabled={!prompt.trim() && phase === "input"}
-                data-testid="triage-analyze"
-              >
-                {phase === "judging"
-                  ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />{t("triage.analyzing", "AI 判级中…")}</>
-                  : phase === "input"
-                    ? <><Sparkles className="w-3.5 h-3.5" />{t("triage.analyze", "AI 判级")}</>
-                    : <>{t("triage.newTask", "下达新任务")}</>}
-              </button>
-              {phase === "judged" ? (
-                <span className="text-xs text-muted-foreground">
-                  {t("triage.judgeHint", "判级只是建议——可一键改判到任意轨道")}
-                </span>
-              ) : null}
-            </div>
-          </div>
-
-          {/* 判级结果 + 三轨选择 */}
-          {judge && (phase === "judged" || phase === "dispatching") ? (
-            <div className="rounded-lg border border-border/60 p-3 flex flex-col gap-2" data-testid="triage-judge">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs text-muted-foreground">{t("triage.level", "判级")}</span>
-                <span className={`text-xs px-2 py-0.5 rounded ${LEVEL_CLASS[judge.level]}`} data-testid="triage-level">
-                  {t(LEVEL_KEY[judge.level], judge.level)}
-                </span>
-                <span className="text-[10px] text-muted-foreground">
-                  {judge.source === "llm" ? t("triage.sourceLlm", "AI 判级") : t("triage.sourceHeuristic", "规则判级")}
-                  {judge.confidence ? ` · ${(judge.confidence * 100).toFixed(0)}%` : ""}
-                </span>
-              </div>
-              {judge.reasons.length ? (
-                <ul className="text-xs text-muted-foreground list-disc pl-4">
-                  {judge.reasons.map((r, i) => <li key={i}>{r}</li>)}
-                </ul>
-              ) : null}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                {TRACKS.map((tr) => {
-                  const suggested = tr === judge.track;
-                  const picked = tr === pickedTrack;
-                  return (
-                    <button
-                      key={tr}
-                      onClick={() => setPickedTrack(tr)}
-                      className={`flex flex-col items-start gap-1 rounded-lg border p-2.5 text-left transition-colors ${
-                        picked ? "border-primary/70 bg-primary/12" : "border-border/60 hover:bg-muted"
-                      }`}
-                      data-testid={`triage-track-${tr}`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <SuperAvatar src={TRACK_ICON[tr]} size={22} bg="bg-muted" />
-                        <span className="text-sm">{t(TRACK_KEY[tr], tr)}</span>
-                        {suggested ? (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary text-primary-foreground">
-                            {t("triage.suggested", "建议")}
-                          </span>
-                        ) : null}
-                      </div>
-                      <span className="text-xs text-muted-foreground">
-                        {t(TRACK_DESC_KEY[tr], "")}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  className="flex items-center gap-1.5 text-sm px-3.5 py-1.5 rounded-lg bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50"
-                  onClick={() => dispatchTo(pickedTrack)}
-                  disabled={phase === "dispatching"}
-                  data-testid="triage-dispatch"
-                >
-                  {phase === "dispatching"
-                    ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />{t("triage.dispatching", "下达中…")}</>
-                    : <><ArrowRight className="w-3.5 h-3.5" />{t("triage.dispatchTo", "按所选轨道下达")}</>}
-                </button>
-                {pickedTrack !== judge.track ? (
-                  <span className="text-xs text-amber-500">
-                    {t("triage.overrode", "已手动改判（原建议：{{track}}）", {
-                      track: t(TRACK_KEY[judge.track], judge.track),
-                    })}
-                  </span>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
-
-          {/* 分流结果（三轨各自产物面） */}
-          {record && phase === "result" ? (
-            <div className="rounded-lg border border-border/60 p-3 flex flex-col gap-2" data-testid="triage-result">
-              <div className="flex items-center gap-2 flex-wrap">
-                <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                <span className="text-sm">
-                  {record.track === "chat"
-                    ? t("triage.dispatchedChat", "已开 SoulMate 会话，任务直达办理")
-                    : record.track === "group"
-                      ? t("triage.dispatchedGroup", "已建 AI 群组并发布任务（自动拆解执行中）")
-                      : t("triage.dispatchedFlow", "已生成流程草稿——预览后装载跑")}
-                </span>
-                <span className="font-mono text-[10px] text-muted-foreground">{record.id}</span>
-              </div>
-
-              {/* 流程草稿预览（大任务轨：所见即所得） */}
-              {record.track === "flow" && draft ? (
-                <div className="flex flex-col gap-1.5 rounded-lg bg-muted/30 p-2.5">
-                  <div className="flex items-center gap-2 text-xs">
-                    <FileText className="w-3.5 h-3.5 text-primary" />
-                    <span className="font-medium">{t("triage.flowDraft", "流程草稿")}</span>
-                    <span>{draft.name}</span>
-                    <span className="text-muted-foreground">
-                      {t("triage.flowNodes", "{{n}} 个节点", { n: draft.nodes?.length || 0 })}
-                    </span>
-                    <button
-                      className="text-[10px] px-1.5 py-0.5 rounded border border-border/60 hover:bg-muted"
-                      onClick={() => setShowYaml((v) => !v)}
-                    >
-                      YAML
-                    </button>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {(draft.nodes || []).map((n) => (
-                      <span key={n.id} className="text-[10px] px-1.5 py-0.5 rounded bg-background border border-border/60">
-                        {n.id} · {n.type}{n.task ? ` · ${n.task.slice(0, 18)}` : ""}
-                      </span>
-                    ))}
-                  </div>
-                  {showYaml && record.detail?.yaml ? (
-                    <pre className="text-[10px] font-mono whitespace-pre-wrap max-h-40 overflow-auto rounded bg-background border border-border/60 p-2">
-                      {record.detail.yaml}
-                    </pre>
-                  ) : null}
-                  <div className="flex items-center gap-2">
-                    {record.status === "draft_ready" ? (
-                      <button
-                        className="flex items-center gap-1.5 text-sm px-3.5 py-1.5 rounded-lg bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50"
-                        onClick={confirmFlow}
-                        disabled={flowRunning}
-                        data-testid="triage-flow-load-run"
-                      >
-                        {flowRunning
-                          ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />{t("triage.flowLoading", "装载跑中…")}</>
-                          : <><ArrowRight className="w-3.5 h-3.5" />{t("triage.flowLoadRun", "装载跑")}</>}
-                      </button>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">
-                        {t("triage.flowRunningHint", "已装载运行")}
-                        {record.artifact?.run_id ? ` · run:${record.artifact.run_id}` : ""}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              ) : null}
-
-              <div className="flex items-center gap-2 flex-wrap">
-                {recordLink ? (
-                  <button
-                    className="flex items-center gap-1.5 text-sm px-3.5 py-1.5 rounded-lg bg-primary text-primary-foreground hover:opacity-90"
-                    onClick={() => openLink(recordLink)}
-                    data-testid="triage-go-artifact"
-                  >
-                    {record.track === "chat"
-                      ? t("triage.goChat", "去会话办理")
-                      : record.track === "group"
-                        ? t("triage.goGroup", "去群组看执行")
-                        : t("triage.goFlow", "去流程面板")}
-                  </button>
-                ) : null}
-                <button
-                  className="text-xs px-2.5 py-1.5 rounded-lg border border-border/60 hover:bg-muted"
-                  onClick={() => { setTab("board"); loadBoard(); }}
-                >
-                  <LayoutDashboard className="inline w-3 h-3 mr-1" />
-                  {t("triage.viewBoard", "回看板")}
-                </button>
-                <button
-                  className="text-xs px-2.5 py-1.5 rounded-lg border border-border/60 hover:bg-muted"
-                  onClick={startOver}
-                >
-                  {t("triage.newTask", "下达新任务")}
-                </button>
-              </div>
-            </div>
-          ) : null}
-
-          {error ? <div className="text-xs text-red-500" data-testid="triage-error">{error}</div> : null}
-        </>
-      ) : (
-        <>
-          <TriageBoard records={records} busyId={busyId} onSwitch={switchTrack} onRefresh={loadBoard} />
-          {error ? <div className="text-xs text-red-500">{error}</div> : null}
-        </>
-      )}
-    </div>
-  );
-}
-
-/* ── 全局快速下达入口（任一页悬浮球 → 模态；CommandMenu 也发同一事件）── */
-export function TaskTriageLauncher() {
-  const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    const handler = () => setOpen(true);
-    window.addEventListener("openmate:triage-open", handler);
-    return () => window.removeEventListener("openmate:triage-open", handler);
-  }, []);
-
-  return (
-    <>
-      <button
-        onClick={() => setOpen(true)}
-        title={t("triage.title", "任务下达 · 三级分流门")}
-        data-testid="triage-fab"
-        className="fixed bottom-6 right-6 z-[90] flex items-center gap-2 rounded-lg bg-primary text-primary-foreground px-3.5 py-2.5 shadow-lg hover:opacity-90"
-      >
-        <Sparkles className="w-4 h-4" />
-        <span className="text-sm">{t("triage.fab", "下达任务")}</span>
-      </button>
-      {open ? (
-        <div className="fixed inset-0 z-[100] flex items-start justify-center pt-[10vh]">
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setOpen(false)} />
-          <div className="relative z-50 w-full max-w-2xl overflow-hidden rounded-xl border border-border bg-card shadow-2xl">
-            <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
-              <div className="flex items-center gap-2">
-                <MessageSquare className="w-4 h-4 text-primary" />
-                <span className="text-sm font-medium">{t("triage.title", "任务下达 · 三级分流门")}</span>
-              </div>
-              <button className="p-1 rounded-lg hover:bg-muted" onClick={() => setOpen(false)}>
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="p-4 max-h-[75vh] overflow-auto">
-              <TaskTriageGate onOpenLink={(link) => { setOpen(false); window.location.href = link; }} />
-            </div>
-          </div>
-        </div>
-      ) : null}
-    </>
-  );
-}
-
-/* ── /tasks 顶部内嵌面板（统一下达入口之一）── */
-export function TaskTriagePanel() {
-  return (
-    <div className="rounded-xl border border-border/60 p-4">
-      <TaskTriageGate embedded />
+      <TriageBoard records={records} busyId={busyId} onSwitch={switchTrack} />
+      {error ? <div className="text-xs text-red-500">{error}</div> : null}
     </div>
   );
 }
@@ -665,6 +299,5 @@ export const TRIAGE_TRACKS = TRACKS;
 export const TRIAGE_TRACK_ICON = TRACK_ICON;
 export const TRIAGE_LEVEL_KEY = LEVEL_KEY;
 export const TRIAGE_TRACK_KEY = TRACK_KEY;
-export const TRIAGE_TRACK_DESC_KEY = TRACK_DESC_KEY;
 export const TRIAGE_LEVEL_CLASS = LEVEL_CLASS;
 export const triageApi = { triageFetch, triageBase };

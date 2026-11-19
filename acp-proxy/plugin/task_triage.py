@@ -280,7 +280,8 @@ def heuristic_level(prompt: str) -> dict[str, Any]:
     return {"level": level, "confidence": 0.5, "reasons": reasons, "source": "heuristic"}
 
 
-async def analyze_level(prompt: str, *, chat: ChatFn | None = None) -> dict[str, Any]:
+async def analyze_level(prompt: str, *, chat: ChatFn | None = None,
+                        system_prompt: str = TRIAGE_SYSTEM_PROMPT) -> dict[str, Any]:
     """一句话 → 判级。LLM 生成唯一入口（LLMEngine）；失败回落规则判级（如实标注）。"""
     prompt = (prompt or "").strip()
     if not prompt:
@@ -289,7 +290,7 @@ async def analyze_level(prompt: str, *, chat: ChatFn | None = None) -> dict[str,
     if chat is None:
         chat = _default_chat
     messages = [
-        {"role": "system", "content": TRIAGE_SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": f"【任务】{prompt}"},
     ]
     try:
@@ -411,7 +412,7 @@ async def dispatch_group(rec: dict[str, Any], *, auth: str | None = None) -> dic
         auth=auth,
     )
     artifact = {"type": "group", "group_id": gid, "task_id": task.get("task_id", ""),
-                "subtasks_count": task.get("subtasks_count", 0)}
+                "subtasks_count": task.get("subtasks_count", 0), "name": f"任务组·{name}"}
     artifact["link"] = _artifact_link(artifact)
     return update_record(rec["id"], track="group", status="dispatched",
                          artifact=artifact) or rec
@@ -491,6 +492,130 @@ async def switch_track(rec: dict[str, Any], to_track: str, *,
     new_rec = await dispatch(new_rec, to_track, auth=auth)
     update_record(rec["id"], status=STATUS_SWITCHED, switched_to=new_rec["id"])
     return new_rec
+
+
+# ─────────────────────── 对话内隐式分流（2026-11-19 归位）───────────────────────────
+# 用户裁定：不设第二入口——用户只在对话里跟 SoulMate 说事，SoulMate 沟通中自己判级：
+# 小=直接干完；中=自动转 AI 群组拆解；大=自动转流程化。升级时向用户透明告知
+# （"这事适合协作，我转到群组了"），而非让用户选。判级引擎能力保留，入口形态从
+# 显式（FAB/下达面板）变隐式（所想即所见）。
+
+CONVERSATION_TRIAGE_SYSTEM_PROMPT = (
+    "你是对话中的任务分级器。用户在和 SoulMate 聊天，判断这条消息是不是「现在就要动手办的"
+    "任务」以及难度级别：\n"
+    "- small（小任务）：闲聊/追问/澄清/回答 SoulMate 的问题/一句话就能办完的小事——"
+    "SoulMate 在会话里自己直接办。\n"
+    "- medium（中任务）：需要多个 AI 角色集思广益、拆解分工、讨论共识才能做好的任务，"
+    "如调研对比、出方案、设计评审、多角度分析、内容策划。\n"
+    "- large（大任务）：复杂流程化工作——多阶段、带审批/工单/预算闸、需要例行化或长期运行，"
+    "如定时对账、发布保障流程、报销审批流、跨部门制度性工作。\n"
+    "注意：用户还在讨论需求、没让现在动手时判 small。只输出 JSON 本体："
+    "{\"level\":\"small|medium|large\",\"confidence\":0到1,\"reasons\":[\"判级理由1\"]}"
+    "（reasons 用用户语言，1-2条）。"
+)
+
+# 升级判据：LLM 判级且置信达线才自动转轨；LLM 不可用/低置信 → 不惊动用户、不假造
+# 升级，SoulMate 自己接着办（不制造假分流）。
+CONVERSATION_ESCALATE_MIN_CONFIDENCE = 0.6
+
+
+def conversation_notice(rec: dict[str, Any]) -> str:
+    """升级透明告知（SoulMate 口吻）：只讲转到哪了+怎么跟进，用户不需要做任何选择。"""
+    art = rec.get("artifact") or {}
+    link = art.get("link") or ""
+    if rec["track"] == "group":
+        name = art.get("name") or "任务组"
+        return (
+            "🤝 这事适合协作，我转到群组了。\n"
+            f"已建「{name}」并发布任务：Hermes（顾问）/ 我（执行）/ MiMo（验证）"
+            "会拆解分工推进。\n"
+            f"查看讨论与进展：{link}\n"
+            "有结果我会同步你；想让我自己直接办也可以直说。"
+        )
+    detail = rec.get("detail") or {}
+    name = detail.get("name") or art.get("draft_name") or "该任务"
+    if rec.get("status") == "running":
+        return (
+            "🧩 这事适合流程化，我转成流程在跑了。\n"
+            f"「{name}」已按多阶段流程执行（含人工确认节点，需要你拍板时会来找你）。\n"
+            f"查看流程：{link}"
+        )
+    err = detail.get("confirm_error")
+    tail = f"（自动装载未成功：{err}，预览确认后即开跑）" if err else "（预览确认后即开跑）"
+    return (
+        "🧩 这事适合流程化，流程草稿已生成。\n"
+        f"「{name}」：{link} {tail}"
+    )
+
+
+async def conversation_triage(user_text: str, *, session_id: str = "",
+                              chat: ChatFn | None = None,
+                              auth: str | None = None) -> dict[str, Any] | None:
+    """对话内隐式分流（无第二入口）：判级为中/大且置信达线 → 自动转群组/流程化，
+    返回 {"level","track","record","notice"}；小任务/低置信/分流执行失败 → 返回 None
+    （SoulMate 在会话里直接办，不打断对话）。
+
+    大任务自动起流程（dispatch_flow 草稿 → confirm_flow 装载跑）——隐式形态没有
+    预览确认入口，流程引擎自身的人工节点/预算闸是安全闸；装载失败如实降级为
+    "草稿已就绪"告知，不假装已跑。
+    """
+    text = (user_text or "").strip()
+    if not text:
+        return None
+    judged = await analyze_level(text, chat=chat,
+                                 system_prompt=CONVERSATION_TRIAGE_SYSTEM_PROMPT)
+    if judged["level"] == "small":
+        return None
+    if (judged.get("source") != "llm"
+            or float(judged.get("confidence") or 0) < CONVERSATION_ESCALATE_MIN_CONFIDENCE):
+        logger.info("对话分流不升级（source=%s conf=%s）：SoulMate 直接办",
+                    judged.get("source"), judged.get("confidence"))
+        return None
+    rec = create_record(
+        prompt=text, level=judged["level"], confidence=judged["confidence"],
+        reasons=judged["reasons"], level_source="llm", track=judged["track"],
+        status="created",
+        context={"source": "conversation", "session_id": session_id},
+    )
+    try:
+        if rec["track"] == "group":
+            rec = await dispatch_group(rec, auth=auth)
+        else:
+            rec = await dispatch_flow(rec)
+            try:
+                rec = await confirm_flow(rec)  # 隐式形态：大任务自动起流程
+            except Exception as e:  # 草稿在，先补救，最终如实降级（不假装已跑）
+                if "无可用成员" in str(e):
+                    # 生成物引用了无人可派的组织角色（如"发布负责人"）→ 重申可执行性
+                    # 约束重生成一次再装载：human 节点派给本人、agent 节点派 soulmate
+                    logger.info("对话分流流程装载卡在派单解析，带约束重生成: %s", e)
+                    retry = await dispatch_flow({
+                        **rec,
+                        "prompt": (
+                            f"{text}\n\n【可执行性约束】human 节点的 user 一律填「用户」"
+                            "（即本人拍板），不要用组织角色名；agent 节点 target_agent 用 soulmate。"
+                        ),
+                    })
+                    try:
+                        rec = await confirm_flow(retry)
+                    except Exception as e2:
+                        logger.warning("对话分流流程装载重试仍失败（保留草稿）: %s", e2)
+                        rec = update_record(
+                            rec["id"],
+                            detail={**(rec.get("detail") or {}), "confirm_error": str(e2)},
+                        ) or rec
+                else:
+                    logger.warning("对话分流流程装载失败（保留草稿）: %s", e)
+                    rec = update_record(
+                        rec["id"],
+                        detail={**(rec.get("detail") or {}), "confirm_error": str(e)},
+                    ) or rec
+    except Exception as e:
+        logger.warning("对话分流执行失败（回落 SoulMate 直接办）: %s", e)
+        update_record(rec["id"], status="failed", detail={"error": str(e)})
+        return None
+    return {"level": judged["level"], "track": rec["track"], "record": rec,
+            "notice": conversation_notice(rec)}
 
 
 # ─────────────────────────── 回看板（三轨产物统一）───────────────────────────

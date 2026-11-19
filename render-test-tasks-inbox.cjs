@@ -44,7 +44,7 @@ fs.mkdirSync(path.join(outDir, 'components'), { recursive: true });
 fs.writeFileSync(path.join(outDir, 'components/page-layout.js'),
   "const React=require('react');exports.PageLayout=(p)=>React.createElement('div',{'data-testid':'page-layout'},p.title,React.createElement('div',null,p.children));");
 fs.writeFileSync(path.join(outDir, 'components/task-triage-gate.js'),
-  "const React=require('react');exports.TaskTriagePanel=()=>React.createElement('div',{'data-testid':'triage-stub'});");
+  "const React=require('react');exports.TriageRecordsPanel=()=>React.createElement('div',{'data-testid':'triage-stub'});");
 fs.writeFileSync(path.join(outDir, 'lib-api-client-stub.js'),
   "exports.getApiBaseUrl=()=>'http://127.0.0.1:8092';");
 fs.mkdirSync(path.join(outDir, 'lib'), { recursive: true });

@@ -1,0 +1,61 @@
+{
+  "tag": 1795101332,
+  "checks": [
+    {
+      "name": "W0 真会话建立（用户只说话的对话面）",
+      "ok": true,
+      "detail": "om-17e3e730eea0"
+    },
+    {
+      "name": "P1a 小任务 SoulMate 直接回答",
+      "ok": true,
+      "detail": "向量数据库是专门存储和检索「向量嵌入」（高维数值数组）的数据库，核心能力是按语义相似度快速找最近邻——比如用一句话去搜含义最接近的文档。常见产品有 Milvus、Pinecone、Qdrant，广泛用于 RAG、以图搜图、推荐系统。"
+    },
+    {
+      "name": "P1b 小任务零打扰（无升级告知）",
+      "ok": true,
+      "detail": "向量数据库是专门存储和检索「向量嵌入」（高维数值数组）的数据库，核心能力是按语义相似度快速找最近邻——比如用一句话去搜含义最接近的文档。常见产品有 Milvus、Pinecone、Qdrant，广泛用于 RAG、以图搜图、推荐系统。"
+    },
+    {
+      "name": "P2a 中任务透明告知「转到群组了」",
+      "ok": true,
+      "detail": "🤝 这事适合协作，我转到群组了。 已建「任务组·帮我调研对比 Notion 和 」并发布任务：Hermes（顾问）/ 我（执行）/ MiMo（验证）会拆解分工推进。 查看讨论与进展：/ai-groups?group=82b7ed92 有结果我会同步你；想让我自己直接办也可以直说。"
+    },
+    {
+      "name": "P2b 告知含群组产物深链",
+      "ok": true,
+      "detail": "🤝 这事适合协作，我转到群组了。 已建「任务组·帮我调研对比 Notion 和 」并发布任务：Hermes（顾问）/ 我（执行）/ MiMo（验证）会拆解分工推进。 查看讨论与进展：/ai-groups?group=82b7ed92 有结果我会同步你；想让我自己直接办也可以直说。"
+    },
+    {
+      "name": "P3a 大任务透明告知流程化",
+      "ok": true,
+      "detail": "🧩 这事适合流程化，我转成流程在跑了。 「每周发布对账审批流程」已按多阶段流程执行（含人工确认节点，需要你拍板时会来找你）。 查看流程：/will?flow=weekly-release-recon-approval"
+    },
+    {
+      "name": "P3b 大任务自动起流程（非等确认）",
+      "ok": true,
+      "detail": "🧩 这事适合流程化，我转成流程在跑了。 「每周发布对账审批流程」已按多阶段流程执行（含人工确认节点，需要你拍板时会来找你）。 查看流程：/will?flow=weekly-release-recon-approval"
+    },
+    {
+      "name": "R1 分流记录留痕（会话 id 归属）",
+      "ok": true,
+      "detail": "[{\"id\": \"tri-9ccd8055\", \"track\": \"flow\", \"status\": \"running\", \"session\": \"om-17e3e730eea0\"}, {\"id\": \"tri-6e23945c\", \"track\": \"group\", \"status\": \"dispatched\", \"session\": \"om-17e3e730eea0\"}]"
+    },
+    {
+      "name": "R2 群组真建+任务真发布（OpenSoul 真源回读）",
+      "ok": true,
+      "detail": "gid=82b7ed92 http=200 tasks=5"
+    },
+    {
+      "name": "R3 流程实例真跑（run_id 回读）",
+      "ok": true,
+      "detail": "{\"status\": \"running\", \"flow_id\": \"weekly-release-recon-approval\", \"run_id\": \"run_20261119231808_eecb8f9d\"}"
+    },
+    {
+      "name": "R4 小任务不落分流记录（小=会话内直接办）",
+      "ok": true,
+      "detail": "新记录数=2 轨道=['flow', 'group']"
+    }
+  ],
+  "pass": true
+}
