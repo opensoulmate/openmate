@@ -81,6 +81,16 @@ interface RunNode {
   error: string;
   error_norm?: ErrorNorm | null;
   output: string;
+  // 双轴（reported done ≠ verified）：黄=自报，绿=验收翻档
+  status_axis?: string;
+  confidence?: string;
+  claim_source?: string;
+  executed_by?: string;
+  verified?: boolean;
+  verified_by?: string;
+  verify_evidence?: string;
+  settle_rejects?: number;
+  fix_rounds?: number;
 }
 
 interface NotifyNote {
@@ -108,6 +118,8 @@ interface RunSummary {
   error: string;
   error_norm?: ErrorNorm | null;
   failed_node?: string;
+  verdict?: string;              // verified | done·unverified | 进行态原词
+  verdict_reasons?: Array<{ node: string; reason: string }>;
   nodes: RunNode[];
   notifications: NotifyNote[];
 }
@@ -135,8 +147,19 @@ type TimeRange = "all" | "today" | "7d" | "30d";
 const NODE_TYPE_LABEL: Record<string, string> = {
   tool: "will.ntTool", decision: "will.ntDecision", loop: "will.ntLoop",
   approval: "will.ntApproval", action: "will.ntAction", agent: "will.ntAgent",
-  human: "will.ntHuman", parallel: "will.ntParallel",
+  human: "will.ntHuman", parallel: "will.ntParallel", verify: "will.ntVerify",
 };
+
+/** 双轴配色（监督闭环一列定生死）：verified 绿 | reported done 黄 | not run 灰 */
+function confidenceColor(confidence?: string): { dot: string; badge: string } {
+  if (confidence === "verified") {
+    return { dot: "bg-emerald-500", badge: "bg-emerald-500/10 text-emerald-500" };
+  }
+  if (confidence === "reported done") {
+    return { dot: "bg-amber-500", badge: "bg-amber-500/10 text-amber-500" };
+  }
+  return { dot: "bg-muted-foreground/40", badge: "bg-muted text-muted-foreground" };
+}
 
 function statusColor(status: string): { dot: string; badge: string } {
   switch (status) {
@@ -740,9 +763,15 @@ export function WillClient() {
                       <span>{run.trigger}</span>
                     </div>
                   </div>
-                  <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-medium", color.badge)}>
+                  <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-medium",
+                    run.status === "completed"
+                      ? confidenceColor(run.verdict === "verified" ? "verified" : "reported done").badge
+                      : color.badge)}>
                     {run.status === "waiting-approval" ? t("will.waiting", "待审批")
-                      : run.status === "completed" ? t("will.completed", "已完成")
+                      : run.status === "completed"
+                        ? (run.verdict === "verified"
+                            ? t("will.verified", "已验证")
+                            : t("will.doneUnverified", "完成·未验证"))
                       : run.status === "failed" ? t("will.failed", "失败")
                       : t("will.running", "运行中")}
                   </span>
@@ -978,6 +1007,14 @@ function RunDetailCard({ run, busy, approvalNote, setApprovalNote, onDecide, onR
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-semibold">{run.flow_name}</span>
             <code className="text-[10px] text-muted-foreground bg-muted rounded px-1.5 py-0.5">{run.run_id}</code>
+            {run.status === "completed" && (
+              <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-medium",
+                confidenceColor(run.verdict === "verified" ? "verified" : "reported done").badge)}>
+                {run.verdict === "verified"
+                  ? t("will.verified", "已验证")
+                  : t("will.doneUnverified", "完成·未验证")}
+              </span>
+            )}
           </div>
           <div className="text-[10px] text-muted-foreground mt-0.5">
             {t("will.startedAt", "开始时间")} {run.created_at} · {Math.round(run.duration_ms)}ms · {run.trigger}
@@ -1039,6 +1076,18 @@ function RunDetailCard({ run, busy, approvalNote, setApprovalNote, onDecide, onR
         </div>
       )}
 
+      {/* done·unverified 归因（监督日清：为什么还不敢标绿） */}
+      {(run.verdict_reasons || []).length > 0 && (
+        <div className="px-4 pt-3">
+          <div className="text-xs font-semibold text-amber-500 mb-1">
+            {t("will.unverifiedReasons", "done·unverified 归因")}
+          </div>
+          <div className="text-[10px] text-muted-foreground">
+            {(run.verdict_reasons || []).map((r) => `${r.node}: ${r.reason}`).join(" · ")}
+          </div>
+        </div>
+      )}
+
       {/* 节点状态 */}
       <div className="px-4 pt-3">
         <div className="text-xs font-semibold text-muted-foreground mb-2">{t("will.nodeStatus", "节点状态")}</div>
@@ -1054,7 +1103,20 @@ function RunDetailCard({ run, busy, approvalNote, setApprovalNote, onDecide, onR
                 <span className={cn("w-1.5 h-1.5 rounded-full", c.dot)} />
                 <code className="font-medium">{n.node}</code>
                 <span className="text-muted-foreground">({t(NODE_TYPE_LABEL[n.type] || n.type, n.type)})</span>
-                <span className={cn("rounded-full px-1.5 py-0.5 text-[10px]", c.badge)}>{n.status}</span>
+                <span className={cn("rounded-full px-1.5 py-0.5 text-[10px]",
+                  n.status === "ok" ? confidenceColor(n.confidence).badge : c.badge)}>
+                  {n.status === "ok"
+                    ? (n.verified
+                        ? t("will.verified", "已验证")
+                        : t("will.reportedDone", "已交付·未验证"))
+                    : n.status}
+                </span>
+                {n.status === "ok" && n.verified && (
+                  <span className="text-[10px] text-emerald-500 truncate max-w-[140px]">✓ {n.verified_by}</span>
+                )}
+                {n.status === "ok" && !n.verified && (
+                  <span className="text-[10px] text-amber-500">{t("will.selfReport", "自报")}{n.settle_rejects ? ` ×${n.settle_rejects}` : ""}</span>
+                )}
                 {n.retries > 0 && <span className="text-[10px] text-muted-foreground">↻{n.retries}</span>}
                 {n.duration_ms > 0 && <span className="text-[10px] text-muted-foreground">{Math.round(n.duration_ms)}ms</span>}
                 {isFailed && n.error_norm && (

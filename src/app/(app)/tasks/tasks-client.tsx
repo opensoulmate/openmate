@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   Inbox, RefreshCw, Hand, HeartPulse, Send, BellRing, XCircle, CheckCircle2,
+  BadgeCheck,
 } from "lucide-react";
 import { PageLayout } from "@/components/page-layout";
 import { TaskTriagePanel } from "@/components/task-triage-gate";
@@ -38,6 +39,14 @@ export interface TaskView {
   a2a_task_id: string;
   reminders: number;
   over_budget: boolean;
+  // 双轴（reported done ≠ verified）：黄=自报交付，绿=验收翻档
+  verified?: boolean;
+  verified_by?: string;
+  verify_evidence?: string;
+  claim_source?: string;
+  confidence?: string;
+  status_axis?: string;
+  settle_rejects?: number;
 }
 
 export interface BudgetPolicyView {
@@ -92,10 +101,15 @@ export function TaskTable(props: {
   onHeartbeat?: (t: TaskView) => void;
   onDeliver?: (t: TaskView, result: string) => void;
   onRemind?: (t: TaskView) => void;
+  onVerify?: (t: TaskView, evidence: string) => void;
   deliverId?: string;
   deliverDraft?: string;
   setDeliverId?: (id: string) => void;
   setDeliverDraft?: (text: string) => void;
+  verifyId?: string;
+  verifyDraft?: string;
+  setVerifyId?: (id: string) => void;
+  setVerifyDraft?: (text: string) => void;
 }) {
   const { tasks, now } = props;
   if (!tasks.length) {
@@ -144,9 +158,61 @@ export function TaskTable(props: {
             {t.a2a_task_id ? ` · a2a:${t.a2a_task_id}` : ""}
           </div>
           {t.bucket === "delivered" || t.status === "delivered" ? (
-            <div className="text-xs">
-              <CheckCircle2 className="inline w-3 h-3 mr-1 text-emerald-500" />
-              交付（{t.delivered_by || "-"}）：{resultText(t.result)}
+            <div className="flex flex-col gap-1">
+              <div className="text-xs flex items-center gap-2 flex-wrap">
+                {t.verified ? (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-500">
+                    已验证 Test·verified
+                  </span>
+                ) : (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-500">
+                    已交付·未验证 Code·reported done
+                  </span>
+                )}
+                {t.verified ? (
+                  <span className="text-xs text-emerald-500">✓ {t.verified_by}</span>
+                ) : null}
+              </div>
+              <div className="text-xs">
+                <CheckCircle2 className={`inline w-3 h-3 mr-1 ${t.verified ? "text-emerald-500" : "text-amber-500"}`} />
+                交付（{t.delivered_by || "-"}）：{resultText(t.result)}
+                {t.verify_evidence ? ` · 验收证据：${t.verify_evidence}` : ""}
+              </div>
+              {!t.verified && (props.onVerify || props.setVerifyId) ? (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    className="text-xs px-2 py-1 rounded border border-border/60 hover:bg-muted"
+                    onClick={() => props.setVerifyId?.(t.task_id)}
+                    disabled={props.busyId === t.task_id}
+                  >
+                    <BadgeCheck className="inline w-3 h-3 mr-1" />
+                    验收
+                  </button>
+                  {props.verifyId === t.task_id ? (
+                    <div className="flex items-center gap-2 w-full">
+                      <textarea
+                        className="flex-1 text-xs rounded border border-border/60 bg-background p-2"
+                        rows={2}
+                        placeholder="内容级验收证据（跑了什么探针/查了什么内容，报成功没用）…"
+                        value={props.verifyDraft ?? ""}
+                        onChange={(e) => props.setVerifyDraft?.(e.target.value)}
+                      />
+                      <button
+                        className="text-xs px-2 py-1 rounded bg-emerald-600 text-white"
+                        onClick={() => props.onVerify?.(t, props.verifyDraft ?? "")}
+                      >
+                        记为已验证
+                      </button>
+                      <button
+                        className="text-xs px-2 py-1 rounded border border-border/60"
+                        onClick={() => props.setVerifyId?.("")}
+                      >
+                        <XCircle className="inline w-3 h-3" />
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           ) : (
             <div className="flex items-center gap-2 flex-wrap">
@@ -224,11 +290,14 @@ export function TaskTable(props: {
 export function TasksClient() {
   const [assignee, setAssignee] = useState("");
   const [bucket, setBucket] = useState("open");
+  const [unverifiedOnly, setUnverifiedOnly] = useState(false);
   const [tasks, setTasks] = useState<TaskView[]>([]);
   const [policies, setPolicies] = useState<BudgetPolicyView[]>([]);
   const [busyId, setBusyId] = useState("");
   const [deliverId, setDeliverId] = useState("");
   const [deliverDraft, setDeliverDraft] = useState("");
+  const [verifyId, setVerifyId] = useState("");
+  const [verifyDraft, setVerifyDraft] = useState("");
   const [error, setError] = useState("");
   const now = Date.now() / 1000;
 
@@ -237,6 +306,7 @@ export function TasksClient() {
     try {
       const params = new URLSearchParams({ bucket });
       if (assignee) params.set("assignee", assignee);
+      if (unverifiedOnly) params.set("verification", "unverified");
       const [list, stats] = await Promise.all([
         fetch(`${base}/collab/tasks?${params}`).then((r) => r.json()),
         fetch(`${base}/collab/stats`).then((r) => r.json()),
@@ -247,7 +317,7 @@ export function TasksClient() {
     } catch {
       setError("收发台不可达（acp-proxy /collab）");
     }
-  }, [assignee, bucket]);
+  }, [assignee, bucket, unverifiedOnly]);
 
   useEffect(() => {
     const saved = typeof window !== "undefined"
@@ -271,6 +341,8 @@ export function TasksClient() {
       });
       setDeliverId("");
       setDeliverDraft("");
+      setVerifyId("");
+      setVerifyDraft("");
       await reload();
     } finally {
       setBusyId("");
@@ -300,6 +372,14 @@ export function TasksClient() {
             </button>
           ))}
           <button
+            className={`text-xs px-2 py-1 rounded border ${unverifiedOnly ? "bg-amber-500/20 border-amber-500/50 text-amber-500" : "border-border/60 hover:bg-muted"}`}
+            onClick={() => setUnverifiedOnly((v) => !v)}
+            title="done·unverified 监督日清清单（已交付未验收=黄）"
+          >
+            <BadgeCheck className="inline w-3 h-3 mr-1" />
+            未验证
+          </button>
+          <button
             className="text-xs px-2 py-1 rounded border border-border/60 hover:bg-muted"
             onClick={reload}
           >
@@ -317,12 +397,23 @@ export function TasksClient() {
           deliverDraft={deliverDraft}
           setDeliverId={setDeliverId}
           setDeliverDraft={setDeliverDraft}
+          verifyId={verifyId}
+          verifyDraft={verifyDraft}
+          setVerifyId={setVerifyId}
+          setVerifyDraft={setVerifyDraft}
           onClaim={(t) => post(`${t.task_id}/claim`, { claimed_by: assignee || "我" })}
           onHeartbeat={(t) => post(`${t.task_id}/heartbeat`, { claim_token: "" })}
           onDeliver={(t, result) =>
             post(`${t.task_id}/deliver`, {
               result,
               delivered_by: assignee || "我",
+            })
+          }
+          onVerify={(t, evidence) =>
+            post(`${t.task_id}/verify`, {
+              verified_by: assignee || "我",
+              evidence,
+              ok: true,
             })
           }
           onRemind={(t) => post(`${t.task_id}/remind`, { note: "收发台催办" })}

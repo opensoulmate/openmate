@@ -43,6 +43,8 @@ Module._resolveFilename = function (request, ...args) {
 fs.mkdirSync(path.join(outDir, 'components'), { recursive: true });
 fs.writeFileSync(path.join(outDir, 'components/page-layout.js'),
   "const React=require('react');exports.PageLayout=(p)=>React.createElement('div',{'data-testid':'page-layout'},p.title,React.createElement('div',null,p.children));");
+fs.writeFileSync(path.join(outDir, 'components/task-triage-gate.js'),
+  "const React=require('react');exports.TaskTriagePanel=()=>React.createElement('div',{'data-testid':'triage-stub'});");
 fs.writeFileSync(path.join(outDir, 'lib-api-client-stub.js'),
   "exports.getApiBaseUrl=()=>'http://127.0.0.1:8092';");
 fs.mkdirSync(path.join(outDir, 'lib'), { recursive: true });
@@ -100,6 +102,8 @@ const tasks = [
 const tableHtml = renderToString(React.createElement(mod.TaskTable, {
   tasks, now,
   onClaim: () => {}, onHeartbeat: () => {}, onDeliver: () => {}, onRemind: () => {},
+  onVerify: () => {}, setVerifyId: () => {},
+  verifyId: 'TO-2-b', verifyDraft: '',   // 展开验收框：钉内容级证据入口
 }));
 // react-dom 相邻文本节点插 <!-- --> 分隔——断言前抹平
 const flat = tableHtml.replace(/<!-- -->/g, '');
@@ -110,6 +114,14 @@ check('table: 期限文本渲染', flat.includes('剩'), '期限');
 check('table: 持锁与 a2a 可见', flat.includes('soulmate:soulmate') && flat.includes('a2a:a2a-9'), '锁可见');
 check('table: 交付回流展示', flat.includes('验收通过') && flat.includes('交付（bob）'), '交付展示');
 check('table: 角色与归属', flat.includes('@engineer') && flat.includes('alice'), '角色归属');
+// ── 双轴（reported done ≠ verified）：黄=自报交付，绿=验收翻档 ──
+check('table: done·unverified 黄标（自报封顶）', flat.includes('已交付·未验证 Code·reported done'), '黄标');
+check('table: 未验证可验收入口', flat.includes('验收') && flat.includes('内容级验收证据'), '验收动作');
+const verifiedTasks = [{ ...tasks[1], verified: true, verified_by: 'qa', verify_evidence: '抽查通过' }];
+const verifiedHtml = renderToString(React.createElement(mod.TaskTable, {
+  tasks: verifiedTasks, now, onVerify: () => {}, setVerifyId: () => {},
+})).replace(/<!-- -->/g, '');
+check('table: verified 绿标 + 验收者可见', verifiedHtml.includes('已验证 Test·verified') && verifiedHtml.includes('qa'), '绿标');
 const emptyHtml = renderToString(React.createElement(mod.TaskTable, { tasks: [], now }));
 check('table: 空桶文案', emptyHtml.includes('本桶暂无工单'), '空桶');
 
