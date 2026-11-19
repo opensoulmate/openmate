@@ -82,21 +82,21 @@ export function BranchGraph({ defn }: { defn: FlowDef }) {
                 {t(NODE_TYPE_LABEL[node.type] || node.type, node.type)}
                 {node.type === "tool" && node.tool ? ` · ${node.tool}` : ""}
               </text>
-              {/* decision 分支弧线：右缘出发（上=then 下=else，双泳道），与画布端口语义一致 */}
+              {/* decision 分支：卡内右缘小号弱化字输出标签（上 then 下 else，对齐出点内侧），
+                  卡外零文字零徽章；弧线右缘出发（双泳道） */}
               {node.type === "decision" && (
                 <>
+                  <text x={centerX + 62} y={y - 5} fontSize={7} fontWeight={500} textAnchor="end"
+                    fill="var(--color-branch-then-weak)">then</text>
+                  <text x={centerX + 62} y={y + 11} fontSize={7} fontWeight={500} textAnchor="end"
+                    fill="var(--color-branch-else-weak)">else</text>
                   {node.then && (
                     <BranchEdge nodes={nodes} fromY={y - 8} targetId={node.then}
-                      laneX={320} color="var(--color-branch-then)" label={`then → ${node.then}`} />
+                      laneX={320} color="var(--color-branch-then)" />
                   )}
                   {nodeElse(node) && (
                     <BranchEdge nodes={nodes} fromY={y + 8} targetId={nodeElse(node)}
-                      laneX={288} color="var(--color-branch-else)" label={`else → ${nodeElse(node)}`} />
-                  )}
-                  {node.when && (
-                    <text x={centerX + 78} y={y + 3} fontSize={8} fill="currentColor" opacity={0.75}>
-                      {t("will.when", "条件")}: {node.when.length > 42 ? node.when.slice(0, 42) + "…" : node.when}
-                    </text>
+                      laneX={288} color="var(--color-branch-else)" />
                   )}
                 </>
               )}
@@ -108,9 +108,9 @@ export function BranchGraph({ defn }: { defn: FlowDef }) {
   );
 }
 
-function BranchEdge({ nodes, fromY, targetId, laneX, color, label }: {
+function BranchEdge({ nodes, fromY, targetId, laneX, color }: {
   nodes: FlowNode[]; fromY: number; targetId: string;
-  laneX: number; color: string; label: string;
+  laneX: number; color: string;
 }) {
   const rowH = 54;
   const centerX = 150;
@@ -125,10 +125,6 @@ function BranchEdge({ nodes, fromY, targetId, laneX, color, label }: {
         fill="none" stroke={color} strokeWidth={1.2} opacity={0.75} strokeDasharray="4 3"
         markerEnd="url(#will-arrow)"
       />
-      <text x={laneX} y={(fromY + toY) / 2 + 3} fontSize={7.5} fill={color}
-        textAnchor="end" fontWeight={600}>
-        {label}
-      </text>
     </g>
   );
 }

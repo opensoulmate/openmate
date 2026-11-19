@@ -126,7 +126,8 @@ export function nodeWidth(data: WorkflowNodeData, debugActive?: boolean): number
     String(data.description ?? "").trim() ||
     i18n.t(`nodeDesc.${data.type}`, nodeDescFallback[data.type] ?? "");
   const textW = Math.max(estimateTextWidth(label, 12), estimateTextWidth(desc, 10), 40);
-  const width = 12 + 17 + 10 + textW + (debugActive ? 48 : 0) + 12;
+  const labelZone = data.type === "condition" ? 42 : 12;
+  const width = 12 + 17 + 10 + textW + labelZone + (debugActive ? 48 : 0);
   return Math.round(Math.min(NODE_MAX_WIDTH, Math.max(NODE_MIN_WIDTH, width)));
 }
 
@@ -204,8 +205,8 @@ function BaseNodeInner({
       />
       {debug && <div className="wf-node-debug absolute inset-0 pointer-events-none" />}
 
-      {/* 内容层：纯色图标（与面板同款无框）+ 名称/说明双行 */}
-      <div className="relative flex h-full items-center gap-2.5 px-3">
+      {/* 内容层：纯色图标（与面板同款无框）+ 名称/说明双行；条件节点右侧让位输出标签 */}
+      <div className={cn("relative flex h-full items-center gap-2.5 px-3", sourceHandleCount > 1 && "pr-[42px]")}>
         <Icon size={17} style={{ color }} strokeWidth={2} className="shrink-0" />
         <div className="flex-1 min-w-0">
           <p className="truncate text-xs font-medium leading-4 text-foreground">{data.label}</p>
@@ -213,6 +214,13 @@ function BaseNodeInner({
             <p className="mt-px truncate text-[10px] leading-3 text-foreground/70">{subtitle}</p>
           )}
         </div>
+        {/* 分支输出标签：卡内右缘、一行一输出、小号弱化字色（对齐右缘出点内侧），卡外零文字零徽章 */}
+        {sourceHandleCount > 1 && (
+          <>
+            <span className="wf-branch-label" style={{ top: "30%", color: "var(--color-branch-then-weak)" }}>then</span>
+            <span className="wf-branch-label" style={{ top: "70%", color: "var(--color-branch-else-weak)" }}>else</span>
+          </>
+        )}
         {debug && (
           <span
             className="wf-chip flex shrink-0 items-center gap-1 px-1.5 py-0.5 text-[9px] font-medium text-foreground"
@@ -308,51 +316,13 @@ export const branchVar: Record<"then" | "else", string> = {
   else: "var(--color-branch-else)",
 };
 
-/** 分支标签（出点旁小徽章：实底 punch 线条 + 彩点 + 前景文字，双主题 WCAG 安全；wf-chip 普通圆角矩形） */
-export function BranchChip({ branch, className }: { branch: "then" | "else"; className?: string }) {
-  const color = branchVar[branch];
-  return (
-    <span
-      className={cn(
-        "wf-chip inline-flex items-center gap-1 px-1.5 py-[1px] text-[9px] font-medium text-foreground",
-        className,
-      )}
-      style={{
-        background: "var(--color-card)",
-        boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${color} 55%, transparent)`,
-      }}
-    >
-      <span
-        className="h-[6px] w-[6px] rounded-full"
-        style={{ background: color }}
-      />
-      {branch}
-    </span>
-  );
-}
-
 export const ConditionNode = memo(function ConditionNode({ data, selected }: NodeProps) {
   return (
-    <div className="relative">
-      <BaseNodeInner
-        data={data as unknown as WorkflowNodeData}
-        selected={selected}
-        sourceHandleCount={2}
-      />
-      {/* then/else 双分支标签：贴在右缘出点旁（上=then 下=else），实底 punch 骑线，不挂矩形下方 */}
-      <div
-        className="pointer-events-none absolute flex items-center"
-        style={{ left: "calc(100% + 14px)", top: "30%", transform: "translateY(-50%)" }}
-      >
-        <BranchChip branch="then" />
-      </div>
-      <div
-        className="pointer-events-none absolute flex items-center"
-        style={{ left: "calc(100% + 14px)", top: "70%", transform: "translateY(-50%)" }}
-      >
-        <BranchChip branch="else" />
-      </div>
-    </div>
+    <BaseNodeInner
+      data={data as unknown as WorkflowNodeData}
+      selected={selected}
+      sourceHandleCount={2}
+    />
   );
 });
 

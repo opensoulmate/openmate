@@ -90,6 +90,9 @@
   /* then=低饱和沉稳绿 / else=中性淡紫灰（暖灰-淡紫），与图标/节点色系统一闭环 */
   --color-branch-then: color-mix(in oklab, var(--color-success) 40%, var(--color-muted-foreground));
   --color-branch-else: color-mix(in oklab, var(--color-primary) 40%, var(--color-muted-foreground));
+  /* 分支输出标签弱化字色（卡内小字，语义色深度降饱和——n8n 式输出标注，仅端口圆点为纯语义色） */
+  --color-branch-then-weak: color-mix(in oklab, var(--color-branch-then) 38%, var(--color-muted-foreground));
+  --color-branch-else-weak: color-mix(in oklab, var(--color-branch-else) 38%, var(--color-muted-foreground));
   /* 端口中性填充（入点/执行出点同视觉重量，比 muted-foreground 更强的存在感） */
   --color-port-neutral: color-mix(in srgb, var(--color-foreground) 52%, var(--color-card));
 
@@ -1126,6 +1129,18 @@ html.tauri-shell.tauri-maximized body { border-radius: 0; }
 .wf-node-debug {
   border-radius: var(--radius-lg);
   border: 1.5px dashed var(--color-warning);
+}
+/* 分支输出标签：卡内右缘、一行一输出、小号弱化字色（对齐右缘出点内侧），卡外零文字 */
+.wf-branch-label {
+  position: absolute;
+  right: 12px;
+  transform: translateY(-50%);
+  font-size: 8px;
+  line-height: 1;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  opacity: 0.9;
+  pointer-events: none;
 }
 .wf-edge {
   transition: stroke-width var(--transition-fast);
