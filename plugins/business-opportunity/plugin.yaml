@@ -1,0 +1,139 @@
+id: business-opportunity
+name: 商机管理
+version: 0.1.0
+description: 销售商机管理——新增/编辑/删除/筛选/阶段统计（菜单+页面+工具，UI 与对话共用）
+author: soulmate
+entry: main.py
+permissions:
+  - ui.serve
+  - tool.register
+  - tool.call
+  - data.read
+  - data.write
+ui:
+  menu:
+    # 菜单贡献：商机发现=智能投标域二级（join）；目标域缺席回退独立一级位「商机管理」
+    label: 商机管理
+    label_i18n:
+      zh: 商机管理
+      en: Opportunities
+      ja: 商機管理
+    icon: Briefcase
+    join: bidding
+    entries:
+      - id: home
+        label: 商机发现
+        label_i18n: {zh: 商机发现, en: Opportunity Discovery, ja: 商機発見}
+        href: /plugins/business-opportunity/home
+        function: opportunity_list
+        position: start
+  pages:
+    - id: home
+      title: 商机管理
+      dsl: ui/home.json
+tools:
+  - name: opportunity_add
+    description: 新增商机（客户名称、商机名称、预计金额、销售阶段、预计成交日期、负责人、备注）
+    handler: handle_add
+    permissions: [tool.call, data.write]
+    approval: never
+    input_schema:
+      type: object
+      properties:
+        customer:
+          type: string
+          description: 客户名称
+        title:
+          type: string
+          description: 商机名称
+        amount:
+          type: number
+          description: 预计金额（元）
+        stage:
+          type: string
+          enum: [初步接触, 需求确认, 方案报价, 谈判, 赢单, 输单]
+          description: 销售阶段
+        expected_date:
+          type: string
+          description: 预计成交日期（YYYY-MM-DD，可选）
+        owner:
+          type: string
+          description: 负责人（可选）
+        note:
+          type: string
+          description: 备注（可选）
+      required: [customer, title, amount, stage]
+  - name: opportunity_list
+    description: 查询商机列表（可按阶段/负责人筛选，看板与列表面板数据源）
+    handler: handle_list
+    permissions: [tool.call, data.read]
+    approval: never
+    input_schema:
+      type: object
+      properties:
+        stage:
+          type: string
+          description: 按销售阶段过滤（可选）
+        owner:
+          type: string
+          description: 按负责人过滤（可选）
+        limit:
+          type: integer
+          description: 返回条数上限
+    output_schema:
+      type: object
+      properties:
+        entries:
+          type: array
+          description: 商机清单
+        total:
+          type: integer
+          description: 商机总数
+  - name: opportunity_update
+    description: 编辑商机（按 id 更新字段，含推进销售阶段）
+    handler: handle_update
+    permissions: [tool.call, data.write]
+    approval: never
+    input_schema:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: 商机 id
+        stage:
+          type: string
+          enum: [初步接触, 需求确认, 方案报价, 谈判, 赢单, 输单]
+          description: 销售阶段（可选）
+        amount:
+          type: number
+          description: 预计金额（可选）
+        expected_date:
+          type: string
+          description: 预计成交日期（可选）
+        owner:
+          type: string
+          description: 负责人（可选）
+        note:
+          type: string
+          description: 备注（可选）
+      required: [id]
+  - name: opportunity_delete
+    description: 删除商机（按 id）
+    handler: handle_delete
+    permissions: [tool.call, data.write]
+    approval: never
+    input_schema:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: 商机 id
+      required: [id]
+  - name: opportunity_stats
+    description: 商机统计（各阶段商机数与预计金额汇总）
+    handler: handle_stats
+    permissions: [tool.call, data.read]
+    approval: never
+    input_schema:
+      type: object
+      properties: {}

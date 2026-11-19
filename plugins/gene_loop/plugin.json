@@ -6,12 +6,35 @@
   "author": "soulmate+hermes",
   "entry": "__init__.py",
   "enabled": true,
-  "permissions": ["gene:read", "gene:write_dev_norm", "feedback:read", "feedback:append"],
+  "permissions": [
+    "gene:read",
+    "gene:write_dev_norm",
+    "feedback:read",
+    "feedback:append"
+  ],
   "frontend": {
-    "nav": {
+    "menu": {
       "label": "进化回流",
+      "label_i18n": {
+        "zh": "进化回流",
+        "en": "Gene Loop",
+        "ja": "進化ループ"
+      },
       "icon": "GitMerge",
-      "position": "after:bidding"
+      "join": "evolution",
+      "entries": [
+        {
+          "id": "root",
+          "label": "进化回流",
+          "label_i18n": {
+            "zh": "进化回流",
+            "en": "Gene Loop",
+            "ja": "進化ループ"
+          },
+          "href": "/plugins/gene-loop",
+          "position": "end"
+        }
+      ]
     }
   }
 }

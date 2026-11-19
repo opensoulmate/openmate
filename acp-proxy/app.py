@@ -46,6 +46,8 @@ def load_plugins(app: FastAPI) -> list[str]:
     plugins_str = str(PLUGINS_DIR)
     if plugins_str not in sys.path:
         sys.path.insert(0, plugins_str)
+    from plugin.install_state import is_installed, uninstalled_ids
+
     for plugin_dir in sorted(PLUGINS_DIR.iterdir()):
         if not plugin_dir.is_dir():
             continue
@@ -58,6 +60,10 @@ def load_plugins(app: FastAPI) -> list[str]:
             import json
             with open(plugin_json, "r", encoding="utf-8") as f:
                 manifest = json.load(f)
+            # 安装态门禁（"默认未安装，谁使用谁安装"）：可用未安装的包不装载
+            if not is_installed(PLUGINS_DIR, manifest.get("id", plugin_name)):
+                logger.info("⏭ 插件可用未安装（install-state），跳过装载: %s", plugin_name)
+                continue
             plugin_module = __import__(plugin_name)
             if hasattr(plugin_module, "register_routes"):
                 plugin_module.register_routes(app)
@@ -75,7 +81,8 @@ def load_plugins(app: FastAPI) -> list[str]:
         from plugin.dsl_api import scan_and_build
         from plugin.mcp_bridge import tool_registry
 
-        routers, index = scan_and_build(PLUGINS_DIR, tool_registry)
+        routers, index = scan_and_build(PLUGINS_DIR, tool_registry,
+                                        exclude_ids=uninstalled_ids(PLUGINS_DIR))
         for router in routers:
             app.include_router(router)
         _yaml_plugin_index = index
@@ -372,6 +379,37 @@ app.include_router(build_collab_router())   # 任务收发台（每人收件箱 
 app.include_router(build_governance_router())  # MCP 治理观察面（策略+审计）
 app.include_router(build_triage_router())   # 任务三级分流门（判级/三轨分流/统一回看板）
 app.include_router(build_forge_router(
+    PLUGINS_DIR,
+    include_router=app.include_router,
+    on_installed=_on_plugin_installed,
+))
+
+# ── 插件市场（docs/plugin-spec.md §生命周期）：默认未安装 / 一键装 / 一键卸 ──
+from plugin.market_api import bind_host as _bind_market_host, build_market_router  # noqa: E402
+
+
+def _register_legacy_routes(plugin_id: str) -> bool:
+    """legacy plugin.json 插件的热装载：entry 模块载入 + register_routes（安装时补挂）"""
+    import importlib
+
+    plugin_dir = PLUGINS_DIR / plugin_id
+    if not (plugin_dir / "plugin.json").is_file() or not (plugin_dir / "__init__.py").is_file():
+        return False
+    plugins_str = str(PLUGINS_DIR)
+    if plugins_str not in sys.path:
+        sys.path.insert(0, plugins_str)
+    module_name = plugin_dir.name
+    module = importlib.import_module(module_name) if module_name in sys.modules else __import__(module_name)
+    if hasattr(module, "register_routes"):
+        module.register_routes(app)
+        logger.info("✅ legacy 插件热装载: %s", plugin_id)
+        return True
+    return False
+
+
+_bind_market_host(register_legacy_routes=_register_legacy_routes,
+                  yaml_index=lambda: _yaml_plugin_index)
+app.include_router(build_market_router(
     PLUGINS_DIR,
     include_router=app.include_router,
     on_installed=_on_plugin_installed,
@@ -683,6 +721,8 @@ async def serve_file(path: str):
 @app.get("/plugins")
 async def list_plugins():
     plugins = []
+    from plugin.install_state import is_installed as _is_installed
+
     if PLUGINS_DIR.exists():
         for plugin_dir in sorted(PLUGINS_DIR.iterdir()):
             plugin_json = plugin_dir / "plugin.json"
@@ -690,6 +730,9 @@ async def list_plugins():
                 import json
                 with open(plugin_json, "r", encoding="utf-8") as f:
                     manifest = json.load(f)
+                # 安装态门禁：可用未安装的包不出现在清单（菜单不长出）
+                if not _is_installed(PLUGINS_DIR, manifest.get("id", plugin_dir.name)):
+                    continue
                 plugins.append({
                     "name": manifest.get("name", plugin_dir.name),
                     "version": manifest.get("version", "0.0.0"),
@@ -697,7 +740,7 @@ async def list_plugins():
                     "status": "loaded",
                     "manifest": manifest
                 })
-    # plugin.yaml 清单式插件并入（含 ui.nav → 前端菜单长出来）
+    # plugin.yaml 清单式插件并入（含 ui.nav/ui.menu → 前端菜单长出来）
     all_plugins = list(_yaml_plugin_index.get("plugins", [])) + plugins
     return {
         "plugins": all_plugins,

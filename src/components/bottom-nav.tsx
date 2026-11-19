@@ -4,19 +4,20 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
-import { useRef, useEffect, useCallback, useState } from "react";
+import { useRef, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { getUserName, getUserId, clearUser, getUserRole } from "@/lib/api-client";
+import { getUserName, getUserId, clearUser } from "@/lib/api-client";
 import {
-  MessageSquare, Users, BookOpen, Workflow, Settings, Brain, Activity,
-  LayoutDashboard, Bell, Server, GraduationCap, Network, Share2, Search,
-  FileText, Clock, GitBranch, Zap, Sparkles, Puzzle, Plug, FolderKanban,
-  Camera, Download, Tag, User, Bot, Droplets, Dna, Eye, Shield, Bone,
-  Volume2, Layers, Link2, Home, MousePointer, Mic, ImageIcon, Smile,
-  Stethoscope, Cpu, Bolt, Heart, Gauge, BarChart3, Package, ScrollText,
-  History, Store, Pill, LogOut, DollarSign, Terminal, Briefcase, GitMerge,
+  MessageSquare, Settings, User, LogOut, Terminal,
 } from "lucide-react";
-import { fetchPluginNavItems, getCachedPluginNavItems, mergePluginNavItems, PluginNavItem } from "@/lib/plugin-nav";
+import {
+  BOTTOM_DOMAINS, BUILTIN_DOMAINS, ICON_NAME_MAP, domainForPath, panelRoutes,
+  type DomainDef, type L2Item,
+} from "@/lib/menu-domains";
+import {
+  fetchPluginMenus, getCachedPluginMenus, resolvePluginMenus,
+  type PluginMenu,
+} from "@/lib/plugin-nav";
 import { BottomBar as OpenFaceBottomBar } from "@opensoulmate/openface";
 
 interface BottomNavItem {
@@ -27,79 +28,81 @@ interface BottomNavItem {
   icon: React.ElementType;
 }
 
-// 图标映射表 — 将字符串映射到lucide-react组件
-const ICON_MAP: Record<string, React.ElementType> = {
-  MessageSquare, Users, BookOpen, Workflow, Settings, Brain, Activity,
-  LayoutDashboard, Bell, Server, GraduationCap, Network, Share2, Search,
-  FileText, Clock, GitBranch, Zap, Sparkles, Puzzle, Plug, FolderKanban,
-  Camera, Download, Tag, User, Bot, Droplets, Dna, Eye, Shield, Bone,
-  Volume2, Layers, Link2, Home, MousePointer, Mic, ImageIcon, Smile,
-  Stethoscope, Cpu, Bolt, Heart, Gauge, BarChart3, Package, ScrollText,
-  History, Store, Pill, LogOut, DollarSign, Briefcase, GitMerge,
-};
+// 底栏一级位 = 功能域入口（docs/reports/menu-hierarchy-map.md 归属表）
+// 滑动面板顺序从这里派生（swipeable-panels：单源防漂移）——域首页 + 二级条目全量。
+export const baseNavItems: BottomNavItem[] = BOTTOM_DOMAINS.flatMap((domain) =>
+  [
+    { href: domain.home, label: domain.labelKey, icon: domain.icon },
+    ...domain.items.map((item: L2Item) => ({
+      href: item.href,
+      label: item.labelKey,
+      icon: item.icon,
+    })),
+  ].filter((entry, index, all) =>
+    all.findIndex((e) => e.href === entry.href) === index,
+  ),
+);
 
-const DEFAULT_ICON = FileText;
+/** 底栏一级位视图（内置核心域 + 插件贡献域，标签已解析） */
+interface L1View {
+  key: string;
+  label: string;
+  href: string;
+  icon: React.ElementType;
+  domainId: string;
+  isChat?: boolean;
+}
 
-// Settings is NOT in scrollable items — it's fixed on the right
-export const baseNavItems: BottomNavItem[] = [
-  { href: "/chat", label: "nav.chat", icon: MessageSquare },
-  { href: "/ai-groups", label: "nav.aiGroups", icon: Users },
-  { href: "/knowledge", label: "nav.knowledge", icon: BookOpen },
-  { href: "/learn", label: "nav.learn", icon: GraduationCap },
-  { href: "/graph", label: "nav.graph", icon: Network },
-  { href: "/knowledge-requests", label: "nav.kbSharing", icon: Share2 },
-  { href: "/cron", label: "nav.cron", icon: Clock },
-  { href: "/workflow", label: "nav.workflow", icon: Workflow },
-  // /pipeline 归位（2026-11-19）：流水线=后端工序，入口在知识库导入面，
-  // /pipeline 保留为加工详情视图（旧路由直达），不再占一级菜单
-  { href: "/skills", label: "nav.skills", icon: Puzzle },
-  { href: "/mcp", label: "nav.mcp", icon: Plug },
-  { href: "/workspace", label: "nav.workspace", icon: FolderKanban },
-  { href: "/capture", label: "nav.capture", icon: Camera },
-  { href: "/tags", label: "nav.tags", icon: Tag },
-  { href: "/body-map", label: "nav.bodyMap", icon: User },
-  { href: "/soma", label: "nav.soma", icon: Bot },
-  { href: "/discovery", label: "nav.discovery", icon: Search },
-  { href: "/cortex", label: "nav.cortex", icon: Cpu },
-  { href: "/vein", label: "nav.vein", icon: Droplets },
-  { href: "/gene", label: "nav.gene", icon: Dna },
-  { href: "/vital", label: "nav.vital", icon: Activity },
-  { href: "/gland", label: "nav.gland", icon: Zap },
-  { href: "/hippo", label: "nav.hippo", icon: Brain },
-  { href: "/reflex", label: "nav.reflex", icon: Bolt },
-  { href: "/heredity", label: "nav.heredity", icon: GitBranch },
-  { href: "/pulse", label: "nav.pulse", icon: Heart },
-  { href: "/nerve", label: "nav.nerve", icon: Zap },
-  { href: "/sense", label: "nav.sense", icon: Eye },
-  { href: "/immune", label: "nav.immune", icon: Shield },
-  { href: "/marrow", label: "nav.marrow", icon: Bone },
-  { href: "/echo", label: "nav.echo", icon: Volume2 },
-  { href: "/mirror", label: "nav.mirror", icon: Layers },
-  { href: "/link", label: "nav.link", icon: Link2 },
-  { href: "/nest", label: "nav.nest", icon: Home },
-  { href: "/limb", label: "nav.limb", icon: MousePointer },
-  { href: "/voice", label: "nav.voice", icon: Mic },
-  { href: "/vision", label: "nav.vision", icon: ImageIcon },
-  { href: "/mind", label: "nav.mind", icon: Smile },
-  { href: "/soul", label: "nav.soul", icon: Brain },
-  { href: "/soma-admin", adminOnly: true, label: "nav.somaAdmin", icon: Bot },
-  { href: "/admin", adminOnly: true, label: "nav.admin", icon: Shield },
-  { href: "/permission", adminOnly: true, label: "nav.permission", icon: Shield },
-  { href: "/enterprise", label: "nav.enterprise", icon: Shield },
-  { href: "/sessions", label: "nav.sessions", icon: History },
-  { href: "/spending", label: "nav.spending", icon: DollarSign },
-  { href: "/intelligence", label: "nav.intelligence", icon: Brain },
-  { href: "/ai-engine", label: "nav.aiEngine", icon: Cpu },
-  { href: "/healer", label: "nav.healer", icon: Pill },
-  { href: "/topology", label: "nav.topology", icon: Network },
-  { href: "/registry", label: "nav.registry", icon: Package },
-  { href: "/trajectory", label: "nav.trajectory", icon: Activity },
-  { href: "/timeline", label: "nav.timeline", icon: History },
-  { href: "/changelog", label: "nav.changelog", icon: ScrollText },
-  { href: "/docs", label: "文档中心", icon: FileText },
-  { href: "/devlog", label: "开发记录", icon: ScrollText },
-  { href: "/marketplace", label: "nav.marketplace", icon: Store },
-];
+function buildBottomL1(
+  t: ReturnType<typeof useTranslation>["t"],
+  pluginMenus: PluginMenu[],
+): L1View[] {
+  const { own } = resolvePluginMenus(pluginMenus);
+  const views: L1View[] = BOTTOM_DOMAINS.map((domain) => ({
+    key: domain.id,
+    label: t(domain.labelKey, domain.fallback),
+    href: domain.home,
+    icon: domain.icon,
+    domainId: domain.id,
+    isChat: domain.id === "chat",
+  }));
+  for (const menu of own) {
+    // 插件贡献域（安装长出/卸载收走）——仅落底栏一级位的插件域
+    const icon = ICON_NAME_MAP[menu.icon] || ICON_NAME_MAP.Puzzle;
+    const view: L1View = {
+      key: `plugin:${menu.pluginId}`,
+      label: menu.label,
+      href: menu.home,
+      icon,
+      domainId: `plugin:${menu.pluginId}`,
+    };
+    if (menu.position === "start") views.unshift(view);
+    else views.push(view);
+  }
+  return views;
+}
+
+/** 当前路径归属的一级域 id（内置 + 插件域） */
+export function activeDomainId(pathname: string, pluginMenus: PluginMenu[]): string | null {
+  const { own } = resolvePluginMenus(pluginMenus);
+  let best: { id: string; len: number } | null = null;
+  const match = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
+  for (const menu of own) {
+    for (const href of [menu.home, ...menu.entries.map((e) => e.href)]) {
+      if (match(href) && (!best || href.length > best.len)) {
+        best = { id: `plugin:${menu.pluginId}`, len: href.length };
+      }
+    }
+  }
+  for (const domain of BUILTIN_DOMAINS) {
+    for (const href of [domain.home, ...domain.items.map((i) => i.href)]) {
+      if (match(href) && (!best || href.length > best.len)) {
+        best = { id: domain.id, len: href.length };
+      }
+    }
+  }
+  return best?.id ?? null;
+}
 
 interface BottomNavProps {
   totalUnread?: number;
@@ -109,37 +112,33 @@ interface BottomNavProps {
 export function BottomNav({ totalUnread = 0, onOpenConversations }: BottomNavProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const activeRef = useRef<HTMLAnchorElement>(null);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
   const [menuPos, setMenuPos] = useState<{ bottom: number; left: number } | null>(null);
 
-  // 插件导航项状态
-  const [pluginNavItems, setPluginNavItems] = useState<PluginNavItem[]>([]);
+  // 插件贡献域（L1/L2 菜单动态生成：安装长出/卸载收走）
+  const [pluginMenus, setPluginMenus] = useState<PluginMenu[]>([]);
 
   const userId = getUserName() || getUserId() || "用户";
 
-  // 获取插件导航项
   useEffect(() => {
-    fetchPluginNavItems().then(items => {
-      setPluginNavItems(items);
-    }).catch(() => {
-      setPluginNavItems(getCachedPluginNavItems());
-    });
-  }, []);
+    const refetch = () => {
+      fetchPluginMenus(i18n.language).then(setPluginMenus).catch(() => {
+        setPluginMenus(getCachedPluginMenus());
+      });
+    };
+    refetch();
+    // 插件装/卸后菜单即刻长出/收走（docs/plugin-spec.md §生命周期）
+    window.addEventListener("openmate-plugins-changed", refetch);
+    return () => window.removeEventListener("openmate-plugins-changed", refetch);
+  }, [i18n.language]);
 
-  // 合并基础导航项和插件导航项
-  const role = getUserRole();
-  const navItems: BottomNavItem[] = [
-    ...baseNavItems.filter(item => !item.adminOnly || role === 'admin'),
-    ...pluginNavItems.map(item => ({
-      href: item.href,
-      label: item.label,
-      icon: ICON_MAP[item.icon] || DEFAULT_ICON,
-    })),
-  ];
+  // 底栏一级位：内置核心域 + 插件贡献域（功能域入口）
+  const l1Items: L1View[] = buildBottomL1(t, pluginMenus);
+  const currentDomainId = activeDomainId(pathname, pluginMenus);
 
   // Auto-scroll to active item
   useEffect(() => {
@@ -220,14 +219,14 @@ export function BottomNav({ totalUnread = 0, onOpenConversations }: BottomNavPro
       }
       middle={
         <>
-          {navItems.map((item) => {
-            const active = pathname.startsWith(item.href);
+          {l1Items.map((item) => {
+            // 一级位选中 = 当前路径归属该功能域（bg-primary/10 rounded，禁下划线）
+            const active = currentDomainId === item.domainId;
             const Icon = item.icon;
-            const isChat = item.href === '/chat';
-            const isChatActive = isChat && active;
+            const isChatActive = item.isChat && active;
             return isChatActive ? (
               <button
-                key={item.href}
+                key={item.key}
                 onClick={() => onOpenConversations?.()}
                 className={cn(
                   "relative flex shrink-0 flex-col items-center justify-center gap-0.5 rounded-lg px-2.5 py-1.5 text-[9px] font-medium transition-colors min-w-[48px]",
@@ -242,11 +241,11 @@ export function BottomNav({ totalUnread = 0, onOpenConversations }: BottomNavPro
                     </span>
                   )}
                 </div>
-                <span className="truncate max-w-[56px] leading-tight">{t(item.label)}</span>
+                <span className="truncate max-w-[56px] leading-tight">{item.label}</span>
               </button>
             ) : (
               <Link
-                key={item.href}
+                key={item.key}
                 href={item.href}
                 ref={active ? activeRef : undefined}
                 className={cn(
@@ -258,13 +257,13 @@ export function BottomNav({ totalUnread = 0, onOpenConversations }: BottomNavPro
               >
                 <div className="relative">
                   <Icon size={16} strokeWidth={active ? 2.2 : 1.5} />
-                  {isChat && totalUnread > 0 && (
+                  {item.isChat && totalUnread > 0 && (
                     <span className="absolute -top-1.5 -right-2 flex items-center justify-center min-w-[14px] h-3.5 px-0.5 rounded-full bg-red-500 text-white text-[7px] font-bold leading-none">
                       {totalUnread > 99 ? '99+' : totalUnread}
                     </span>
                   )}
                 </div>
-                <span className="truncate max-w-[56px] leading-tight">{t(item.label)}</span>
+                <span className="truncate max-w-[56px] leading-tight">{item.label}</span>
               </Link>
             );
           })}

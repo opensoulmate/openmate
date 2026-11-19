@@ -1,0 +1,37 @@
+[
+ {
+  "domain": "organs",
+  "rows": 9,
+  "leaks": []
+ },
+ {
+  "domain": "workbench",
+  "rows": 3,
+  "leaks": []
+ },
+ {
+  "domain": "market",
+  "rows": 9,
+  "leaks": []
+ },
+ {
+  "domain": "notify",
+  "rows": 2,
+  "leaks": []
+ },
+ {
+  "domain": "evolution",
+  "rows": 5,
+  "leaks": []
+ },
+ {
+  "domain": "system",
+  "rows": 9,
+  "leaks": []
+ },
+ {
+  "domain": "settings",
+  "rows": 1,
+  "leaks": []
+ }
+]

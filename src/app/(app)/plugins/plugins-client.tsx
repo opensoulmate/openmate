@@ -48,25 +48,35 @@ function apiHeaders(): HeadersInit {
   };
 }
 
-// :8092 /plugins 返回 { plugins: [{ name, version, description, status, manifest: {...} }] }
-// 映射到展示用 Plugin（id=manifest.id，enabled=status）。
+// 插件市场清单 :8092 /plugins/market（docs/plugin-spec.md §生命周期）：
+// 包清单 + 安装态（install-state 驱动）——已安装/可用未安装同列表，一键装/一键卸。
+// 映射到展示用 Plugin（enabled=installed）。
 async function fetchPlugins(): Promise<Plugin[]> {
-  const res = await fetch(`${pluginBase()}/plugins`);
+  const res = await fetch(`${pluginBase()}/plugins/market`);
   if (!res.ok) throw new Error(`Failed to fetch plugins: ${res.status}`);
   const data = await res.json();
-  const list: any[] = Array.isArray(data) ? data : data.plugins || [];
-  return list.map((p: any, idx: number) => {
-    const m = p.manifest || {};
-    return {
-      id: m.id || p.name || `plugin-${idx}`,
-      name: m.name || p.name || "Unknown",
-      version: m.version || p.version || "0.0.0",
-      type: m.tools?.length ? "tool" : m.frontend ? "ui" : "plugin",
-      enabled: p.status === "enabled" || p.status === "loaded",
-      description: m.description || p.description,
-      author: m.author || p.author,
-    } as Plugin;
+  const list: any[] = data.packages || [];
+  return list.map((p: any) => ({
+    id: p.id,
+    name: p.name || p.id,
+    version: p.version || "0.0.0",
+    type: p.tools ? "tool" : "ui",
+    enabled: !!p.installed,
+    description: p.description,
+    author: p.author,
+  })) as Plugin[];
+}
+
+/** 市场一键安装/卸载（生成≠安装：confirmed=true 才生效；菜单即刻长出/收走） */
+async function marketAction(id: string, action: "install" | "uninstall"): Promise<void> {
+  const res = await fetch(`${pluginBase()}/plugins/market/${id}/${action}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ confirmed: true, decided_by: "用户" }),
   });
+  if (!res.ok) throw new Error(`${action} failed: ${res.status}`);
+  // 通知导航面重拉插件菜单（L1/L2 动态生成：安装长出/卸载收走）
+  window.dispatchEvent(new CustomEvent("openmate-plugins-changed"));
 }
 
 async function installPlugin(manifest: Record<string, unknown>): Promise<Plugin> {
@@ -90,11 +100,11 @@ async function togglePlugin(id: string, enabled: boolean): Promise<Plugin> {
 }
 
 async function uninstallPlugin(id: string): Promise<void> {
-  const res = await fetch(`${apiBase()}/api/plugins/${id}`, {
-    method: "DELETE",
-    headers: apiHeaders(),
-  });
-  if (!res.ok) throw new Error(`Uninstall failed: ${res.status}`);
+  await marketAction(id, "uninstall");
+}
+
+async function installPluginFromMarket(id: string): Promise<void> {
+  await marketAction(id, "install");
 }
 
 // ─── Sub-components ─────────────────────────────────────────────────
@@ -135,10 +145,12 @@ function PluginCard({
   plugin,
   onToggle,
   onUninstall,
+  onInstall,
 }: {
   plugin: Plugin;
   onToggle: (id: string, enabled: boolean) => void;
   onUninstall: (id: string) => void;
+  onInstall: (id: string) => void;
 }) {
   const { t } = useTranslation();
   const [toggling, setToggling] = useState(false);
@@ -180,27 +192,36 @@ function PluginCard({
       </div>
 
       <div className="flex items-center gap-2 pt-3 border-t border-border">
+        {plugin.enabled ? (
         <button
           onClick={handleToggle}
           disabled={toggling}
           className={cn(
             "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
-            plugin.enabled
-              ? "bg-amber-500/10 text-amber-600 hover:bg-amber-500/20 dark:text-amber-400"
-              : "bg-green-500/10 text-green-600 hover:bg-green-500/20 dark:text-green-400"
+            "bg-amber-500/10 text-amber-600 hover:bg-amber-500/20 dark:text-amber-400"
           )}
         >
           {toggling ? (
             <Loader2 size={13} className="animate-spin" />
-          ) : plugin.enabled ? (
-            <PowerOff size={13} />
           ) : (
-            <Power size={13} />
+            <PowerOff size={13} />
           )}
-          {plugin.enabled ? (t("plugins.disable") || "Disable") : (t("plugins.enable") || "Enable")}
+          {t("plugins.disable") || "Disable"}
         </button>
+        ) : (
+        <button
+          onClick={() => onInstall(plugin.id)}
+          className={cn(
+            "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
+            "bg-green-500/10 text-green-600 hover:bg-green-500/20 dark:text-green-400"
+          )}
+        >
+          <Power size={13} />
+          {t("plugins.install") || "Install"}
+        </button>
+        )}
 
-        {showConfirm ? (
+        {plugin.enabled && (showConfirm ? (
           <div className="flex items-center gap-1.5 ml-auto">
             <span className="text-[11px] text-destructive">{t("plugins.confirmUninstall") || "Confirm uninstall?"}</span>
             <button
@@ -224,7 +245,7 @@ function PluginCard({
             <Trash2 size={13} />
             {t("plugins.uninstall") || "Uninstall"}
           </button>
-        )}
+        ))}
       </div>
     </div>
   );
@@ -347,8 +368,15 @@ export function PluginsClient() {
 
   const handleUninstall = async (id: string) => {
     await uninstallPlugin(id);
-    setPlugins((prev) => prev.filter((p) => p.id !== id));
-    if (selectedPlugin?.id === id) setSelectedPlugin(null);
+    // 卸载=菜单/工具/流程收走，插件包保留（能力零删除）→ 列表转"可用未安装"
+    setPlugins((prev) => prev.map((p) => (p.id === id ? { ...p, enabled: false } : p)));
+    setSelectedPlugin((prev) => (prev?.id === id ? { ...prev, enabled: false } : prev));
+  };
+
+  const handleInstall = async (id: string) => {
+    await installPluginFromMarket(id);
+    setPlugins((prev) => prev.map((p) => (p.id === id ? { ...p, enabled: true } : p)));
+    setSelectedPlugin((prev) => (prev?.id === id ? { ...prev, enabled: true } : prev));
   };
 
   const types = ["all", ...new Set(plugins.map((p) => p.type))];
@@ -623,6 +651,7 @@ export function PluginsClient() {
                   plugin={plugin}
                   onToggle={handleToggle}
                   onUninstall={handleUninstall}
+                  onInstall={handleInstall}
                 />
               ))}
             </div>

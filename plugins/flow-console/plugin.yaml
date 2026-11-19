@@ -11,10 +11,22 @@ permissions:
   - flow.register
   - data.read
 ui:
-  nav:
+  menu:
+    # 菜单贡献：流程运行台=自动化域二级（join 动态生成，卸载收走）
     label: 流程运行台
+    label_i18n:
+      zh: 流程运行台
+      en: Flow Console
+      ja: フロー実行台
     icon: Workflow
-    position: end
+    join: automation
+    entries:
+      - id: home
+        label: 流程运行台
+        label_i18n: {zh: 流程运行台, en: Flow Console, ja: フロー実行台}
+        href: /plugins/flow-console/home
+        function: flow_list
+        position: end
   pages:
     - id: home
       title: 流程运行台
@@ -28,6 +40,15 @@ tools:
     input_schema:
       type: object
       properties: {}
+    output_schema:
+      type: object
+      properties:
+        flows:
+          type: array
+          description: 流程定义清单（id/触发器/节点）
+        total:
+          type: integer
+          description: 流程总数
   - name: run_flow
     description: 手动触发一条流程（面板按钮/对话「跑一下」）
     handler: handle_run_flow

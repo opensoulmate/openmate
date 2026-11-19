@@ -1,0 +1,113 @@
+{
+  "version": 1,
+  "page": {
+    "title": "商机管理",
+    "description": "销售商机全生命周期管理：录入、跟进阶段推进、金额统计"
+  },
+  "panels": [
+    {
+      "type": "form",
+      "id": "opportunity-form",
+      "title": "新增商机",
+      "fields": [
+        {
+          "name": "customer",
+          "label": "客户名称",
+          "widget": "text",
+          "required": true,
+          "placeholder": "输入客户名称"
+        },
+        {
+          "name": "title",
+          "label": "商机名称",
+          "widget": "text",
+          "required": true,
+          "placeholder": "输入商机名称"
+        },
+        {
+          "name": "amount",
+          "label": "预计金额（元）",
+          "widget": "number",
+          "required": true,
+          "placeholder": "如 50000"
+        },
+        {
+          "name": "stage",
+          "label": "销售阶段",
+          "widget": "select",
+          "default": "初步接触",
+          "options": [
+            { "value": "初步接触", "label": "初步接触" },
+            { "value": "需求确认", "label": "需求确认" },
+            { "value": "方案报价", "label": "方案报价" },
+            { "value": "谈判", "label": "谈判" },
+            { "value": "赢单", "label": "赢单" },
+            { "value": "输单", "label": "输单" }
+          ]
+        },
+        {
+          "name": "expected_date",
+          "label": "预计成交日期",
+          "widget": "text",
+          "placeholder": "YYYY-MM-DD（可选）"
+        },
+        {
+          "name": "owner",
+          "label": "负责人",
+          "widget": "text",
+          "placeholder": "可选"
+        },
+        {
+          "name": "note",
+          "label": "备注",
+          "widget": "text",
+          "placeholder": "可选"
+        }
+      ],
+      "submit": {
+        "label": "保存商机",
+        "tool": "business-opportunity__opportunity_add",
+        "target_panel": "opportunity-result"
+      }
+    },
+    {
+      "type": "report",
+      "id": "opportunity-result",
+      "title": "最近操作结果",
+      "sections": [
+        { "kind": "kv", "title": "结果", "items": [{ "label": "状态", "value": "尚未录入" }] }
+      ]
+    },
+    {
+      "type": "list",
+      "id": "opportunity-list",
+      "title": "商机列表",
+      "columns": [
+        { "key": "id", "label": "ID" },
+        { "key": "customer", "label": "客户" },
+        { "key": "title", "label": "商机名称" },
+        { "key": "amount", "label": "预计金额" },
+        { "key": "stage", "label": "销售阶段" },
+        { "key": "expected_date", "label": "预计成交" },
+        { "key": "owner", "label": "负责人" },
+        { "key": "updated_at", "label": "更新时间" }
+      ],
+      "source": { "tool": "business-opportunity__opportunity_list", "args": { "limit": 50 } },
+      "empty_text": "暂无商机，先在上方录入一条"
+    },
+    {
+      "type": "report",
+      "id": "opportunity-stats",
+      "title": "商机统计",
+      "sections": [
+        {
+          "kind": "kv",
+          "title": "按销售阶段",
+          "items": [
+            { "label": "统计", "value": "点击刷新查看各阶段商机数与金额汇总" }
+          ]
+        }
+      ]
+    }
+  ]
+}

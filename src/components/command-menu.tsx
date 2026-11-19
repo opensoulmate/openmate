@@ -129,6 +129,9 @@ export function CommandMenu() {
     { id: "nav-settings", label: "设置", labelEn: "Settings", labelJa: "設定", icon: <Settings size={16} />, action: () => router.push("/settings"), keywords: ["settings", "设置", "config"], group: "系统", groupEn: "System", groupJa: "システム" },
     { id: "nav-activity", label: "活动", labelEn: "Activity", labelJa: "アクティビティ", icon: <Activity size={16} />, action: () => router.push("/activity"), keywords: ["activity", "活动", "event"], group: "系统", groupEn: "System", groupJa: "システム" },
     { id: "nav-body-map", label: "身体地图", labelEn: "Body Map", labelJa: "ボディマップ", icon: <Bot size={16} />, action: () => router.push("/body-map"), keywords: ["body", "map", "身体", "器官"], group: "系统", groupEn: "System", groupJa: "システム" },
+    // 对话域深层页（会话页专属侧栏不动=其二级菜单不可见，⌘K=全量入口面补位；零失联页）
+    { id: "nav-sessions", label: "会话管理", labelEn: "Sessions", labelJa: "セッション管理", icon: <History size={16} />, action: () => router.push("/sessions"), keywords: ["sessions", "会话", "session", "管理"], group: "系统", groupEn: "System", groupJa: "システム" },
+    { id: "nav-mate", label: "伙伴", labelEn: "Mate", labelJa: "パートナー", icon: <Users size={16} />, action: () => router.push("/mate"), keywords: ["mate", "伙伴", "本体", "client"], group: "系统", groupEn: "System", groupJa: "システム" },
 
     // Quick actions
     { id: "new-chat", label: "新建对话", labelEn: "New Chat", labelJa: "新しいチャット", icon: <Plus size={16} />, action: () => router.push("/chat"), keywords: ["new", "新建", "chat"], group: "快捷操作", groupEn: "Quick Actions", groupJa: "クイックアクション" },

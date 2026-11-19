@@ -1,0 +1,660 @@
+[
+ {
+  "label": "L1 Knowledge",
+  "expect": "/knowledge",
+  "path": "/knowledge",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 知识库",
+  "expect": "/knowledge",
+  "path": "/knowledge",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 知识图谱",
+  "expect": "/graph",
+  "path": "/graph",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 标签管理",
+  "expect": "/tags",
+  "path": "/tags",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 共享审批",
+  "expect": "/knowledge-requests",
+  "path": "/knowledge-requests",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 统一搜索",
+  "expect": "/search",
+  "path": "/search",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 文档中心",
+  "expect": "/docs",
+  "path": "/docs",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 开发记录",
+  "expect": "/devlog",
+  "path": "/devlog",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 规范",
+  "expect": "/dev-specs",
+  "path": "/dev-specs",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 海马体",
+  "expect": "/hippo",
+  "path": "/hippo",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L1 Learn",
+  "expect": "/learn",
+  "path": "/learn",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 课程",
+  "expect": "/learn",
+  "path": "/learn",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 创建课程",
+  "expect": "/learn/create",
+  "path": "/learn/create",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L1 Automation",
+  "expect": "/workflow",
+  "path": "/workflow",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 流程",
+  "expect": "/workflow",
+  "path": "/workflow",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 定时任务",
+  "expect": "/cron",
+  "path": "/cron",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 任务收发台",
+  "expect": "/tasks",
+  "path": "/tasks",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 流水线",
+  "expect": "/pipeline",
+  "path": "/pipeline",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 脉搏",
+  "expect": "/pulse",
+  "path": "/pulse",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 意志",
+  "expect": "/will",
+  "path": "/will",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 神经",
+  "expect": "/nerve",
+  "path": "/nerve",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L1 Organs",
+  "expect": "/body-map",
+  "path": "/body-map",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 躯体地图",
+  "expect": "/body-map",
+  "path": "/body-map",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 躯体",
+  "expect": "/soma",
+  "path": "/soma",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 发现引擎",
+  "expect": "/discovery",
+  "path": "/discovery",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 采集",
+  "expect": "/capture",
+  "path": "/capture",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 皮层",
+  "expect": "/cortex",
+  "path": "/cortex",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 感官",
+  "expect": "/sense",
+  "path": "/sense",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 镜像",
+  "expect": "/mirror",
+  "path": "/mirror",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 突触",
+  "expect": "/link",
+  "path": "/link",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 反射",
+  "expect": "/reflex",
+  "path": "/reflex",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 四肢",
+  "expect": "/limb",
+  "path": "/limb",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 声带",
+  "expect": "/voice",
+  "path": "/voice",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 视觉",
+  "expect": "/vision",
+  "path": "/vision",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 心智",
+  "expect": "/mind",
+  "path": "/mind",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L1 Workbench",
+  "expect": "/workspace",
+  "path": "/workspace",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 工作区",
+  "expect": "/workspace",
+  "path": "/workspace",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 下载管理",
+  "expect": "/download",
+  "path": "/download",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 血管",
+  "expect": "/vein",
+  "path": "/vein",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L1 Market",
+  "expect": "/marketplace",
+  "path": "/marketplace",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 插件市场",
+  "expect": "/marketplace",
+  "path": "/marketplace",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 技能市场",
+  "expect": "/skills",
+  "path": "/skills",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 插件管理",
+  "expect": "/plugins",
+  "path": "/plugins",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 MCP客户端",
+  "expect": "/mcp",
+  "path": "/mcp",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 基因",
+  "expect": "/gene",
+  "path": "/gene",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 书签",
+  "expect": "/plugins/bookmarks",
+  "path": "/plugins/bookmarks",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 每日摘要",
+  "expect": "/plugins/daily-digest",
+  "path": "/plugins/daily-digest",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 番茄钟",
+  "expect": "/plugins/pomodoro",
+  "path": "/plugins/pomodoro",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 便签",
+  "expect": "/plugins/quick-notes",
+  "path": "/plugins/quick-notes",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 计算器",
+  "expect": "/plugins/smart-calc",
+  "path": "/plugins/smart-calc",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 代码片段",
+  "expect": "/plugins/snippets",
+  "path": "/plugins/snippets",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 系统医生",
+  "expect": "/plugins/system-doctor",
+  "path": "/plugins/system-doctor",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L1top Notify",
+  "expect": "/notifications",
+  "path": "/notifications",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 消息推送",
+  "expect": "/echo",
+  "path": "/echo",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L1top Evolution",
+  "expect": "/evolution",
+  "path": "/evolution",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 遗传链",
+  "expect": "/heredity",
+  "path": "/heredity",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 版本日志",
+  "expect": "/changelog",
+  "path": "/changelog",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 轨迹",
+  "expect": "/trajectory",
+  "path": "/trajectory",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 时间线",
+  "expect": "/timeline",
+  "path": "/timeline",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L1top System",
+  "expect": "/system",
+  "path": "/system",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 系统总览",
+  "expect": "/system",
+  "path": "/system",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 仪表盘",
+  "expect": "/dashboard",
+  "path": "/dashboard",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 监控",
+  "expect": "/monitoring",
+  "path": "/monitoring",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 指标",
+  "expect": "/metrics",
+  "path": "/metrics",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 系统拓扑",
+  "expect": "/topology",
+  "path": "/topology",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 组件注册表",
+  "expect": "/registry",
+  "path": "/registry",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 体征",
+  "expect": "/vital",
+  "path": "/vital",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 智能分析",
+  "expect": "/intelligence",
+  "path": "/intelligence",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 AI 引擎",
+  "expect": "/ai-engine",
+  "path": "/ai-engine",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 腺体",
+  "expect": "/gland",
+  "path": "/gland",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 开销",
+  "expect": "/spending",
+  "path": "/spending",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 骨髓",
+  "expect": "/marrow",
+  "path": "/marrow",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 免疫",
+  "expect": "/immune",
+  "path": "/immune",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 自愈系统",
+  "expect": "/healer",
+  "path": "/healer",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 管理后台",
+  "expect": "/admin",
+  "path": "/admin",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 权限管理",
+  "expect": "/permission",
+  "path": "/permission",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 企业管理",
+  "expect": "/enterprise",
+  "path": "/enterprise",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 Soma管理",
+  "expect": "/soma-admin",
+  "path": "/soma-admin",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 Soul管理",
+  "expect": "/soul",
+  "path": "/soul",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 巢穴",
+  "expect": "/nest",
+  "path": "/nest",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L1top Settings",
+  "expect": "/settings",
+  "path": "/settings",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 新手引导",
+  "expect": "/onboarding",
+  "path": "/onboarding",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "⌘K→会话管理",
+  "expect": "/sessions",
+  "path": "/sessions",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 伙伴(301→/chat)",
+  "expect": "/chat",
+  "path": "/chat",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L1 商机管理(回退位)",
+  "expect": "/plugins/business-opportunity",
+  "path": "/plugins/business-opportunity",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L2 会话",
+  "expect": "/chat",
+  "path": "/chat",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "插件L2 /plugins/bidding/parse",
+  "expect": "/plugins/bidding/parse",
+  "path": "/plugins/bidding/parse",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "插件L2 /plugins/bidding/scoring",
+  "expect": "/plugins/bidding/scoring",
+  "path": "/plugins/bidding/scoring",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "插件L2 /plugins/bidding/generate",
+  "expect": "/plugins/bidding/generate",
+  "path": "/plugins/bidding/generate",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "插件L2 /plugins/bidding/review",
+  "expect": "/plugins/bidding/review",
+  "path": "/plugins/bidding/review",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "插件L2 /plugins/bidding/price",
+  "expect": "/plugins/bidding/price",
+  "path": "/plugins/bidding/price",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "插件L2 /plugins/bidding/knowledge",
+  "expect": "/plugins/bidding/knowledge",
+  "path": "/plugins/bidding/knowledge",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "插件joinL2 商机发现",
+  "expect": "/plugins/business-opportunity/home",
+  "path": "/plugins/business-opportunity/home",
+  "landed": true,
+  "content": true
+ },
+ {
+  "label": "L1 AI Groups",
+  "expect": "/ai-groups",
+  "path": "/ai-groups",
+  "landed": true,
+  "content": true
+ }
+]

@@ -1,0 +1,170 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://opensoulmate.dev/schemas/plugin-manifest-v1.json",
+  "title": "OpenMate Plugin Manifest (plugin.yaml) v1",
+  "description": "插件清单规范（docs/plugin-spec.md 的机器可读形态）。创建/安装双侧校验；SoulMate 自创建插件按本 schema 生成，字段无歧义、校验可自动执行。",
+  "type": "object",
+  "required": ["id", "name", "version", "entry"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,63}$",
+      "description": "插件 id（必须与目录名一致）"
+    },
+    "name": { "type": "string", "minLength": 1, "description": "显示名" },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "语义化版本 x.y.z"
+    },
+    "description": { "type": "string", "description": "功能描述（一句话）" },
+    "author": { "type": "string" },
+    "entry": {
+      "type": "string",
+      "description": "入口模块（插件目录内相对路径，须真实存在）"
+    },
+    "permissions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "ui.serve", "tool.register", "tool.call", "data.read", "data.write",
+          "knowledge.read", "knowledge.write", "export.write", "flow.register",
+          "network.http", "file.read", "file.write", "storage.read", "storage.write",
+          "log.write"
+        ]
+      },
+      "description": "权限白名单（未知权限=拒收）"
+    },
+    "ui": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "前端面：页面清单 + 菜单贡献",
+      "properties": {
+        "nav": {
+          "type": "object",
+          "description": "legacy 单项导航（兼容保留；新插件请用 ui.menu）",
+          "required": ["label"],
+          "properties": {
+            "label": { "type": "string" },
+            "icon": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9]*$" },
+            "position": { "type": "string" }
+          }
+        },
+        "pages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "title"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+              "title": { "type": "string" },
+              "label_i18n": { "$ref": "#/$defs/labelI18n" },
+              "dsl": { "type": "string", "description": "UI DSL JSON 相对路径（与 html 二选一）" },
+              "html": { "type": "string", "description": "自定义 HTML 面板相对路径（与 dsl 二选一）" }
+            }
+          }
+        },
+        "menu": {
+          "type": "object",
+          "required": ["label", "entries"],
+          "additionalProperties": false,
+          "description": "菜单贡献（一级功能域 + 二级清单）：安装生成 / 卸载收走，禁手写死",
+          "properties": {
+            "label": { "type": "string", "minLength": 1, "description": "一级菜单名（功能域名）" },
+            "label_i18n": { "$ref": "#/$defs/labelI18n" },
+            "icon": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9]*$" },
+            "position": {
+              "type": "string",
+              "description": "一级位插入位：start | end | after:<href>"
+            },
+            "join": {
+              "type": "string",
+              "description": "并入既有功能域（内置域 id 或插件 id）作二级条目；目标缺席回退独立一级位"
+            },
+            "entries": {
+              "type": "array",
+              "minItems": 1,
+              "description": "二级条目清单（按声明顺序渲染）",
+              "items": {
+                "type": "object",
+                "required": ["id", "label", "href"],
+                "additionalProperties": false,
+                "properties": {
+                  "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+                  "label": { "type": "string", "minLength": 1 },
+                  "label_i18n": { "$ref": "#/$defs/labelI18n" },
+                  "href": {
+                    "type": "string",
+                    "pattern": "^/[^\\s]*$",
+                    "description": "应用内绝对路由（本插件页或既有页面）"
+                  },
+                  "function": {
+                    "type": "string",
+                    "description": "工作流可调用单元：必须指向 tools[].name，且该工具须声明 input_schema + output_schema"
+                  },
+                  "position": {
+                    "type": "string",
+                    "enum": ["start", "end"],
+                    "description": "join 场景插入位（默认 end）"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "tools": {
+      "type": "array",
+      "description": "MCP 工具（二级功能的工作流可调用单元本体）",
+      "items": {
+        "type": "object",
+        "required": ["name", "description", "handler"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+            "description": "工具名（不含双下划线；全名 <plugin-id>__<name>）"
+          },
+          "description": { "type": "string" },
+          "handler": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+            "description": "entry 模块内函数名"
+          },
+          "input_schema": {
+            "type": "object",
+            "description": "JSON Schema（输入契约，必填）"
+          },
+          "output_schema": {
+            "type": "object",
+            "description": "JSON Schema（输出契约；被 ui.menu.entries[].function 引用时必填）"
+          },
+          "permissions": { "type": "array", "items": { "type": "string" } },
+          "approval": { "type": "string", "enum": ["never", "on-first-use", "always"] }
+        }
+      }
+    },
+    "flows": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "流程定义文件（插件目录内相对路径；安装后注册进流程引擎）"
+    }
+  },
+  "$defs": {
+    "labelI18n": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "多语言标签（全局强制 i18n 约束）",
+      "properties": {
+        "zh": { "type": "string" },
+        "en": { "type": "string" },
+        "ja": { "type": "string" }
+      }
+    }
+  }
+}

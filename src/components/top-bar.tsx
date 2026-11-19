@@ -3,13 +3,13 @@
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import {
-  Bell, Search, Download, Settings,
-  BarChart3, Gauge, Shield, Plug, Dna,
+  Bell, Search, Settings,
 } from "lucide-react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { HealthWidget } from "@/components/health-widget";
 import { SuperEllipse } from "@/components/ui/super-ellipse";
+import { TOP_DOMAINS, domainForPath, type DomainDef } from "@/lib/menu-domains";
 import { TopBar as OpenFaceTopBar } from "@opensoulmate/openface";
 
 interface TopBarProps {
@@ -20,24 +20,25 @@ export function TopBar({ eventCount = 0 }: TopBarProps) {
   const { t } = useTranslation();
   const pathname = usePathname();
 
-  const statusItems = [
-    { id: "metrics", icon: BarChart3, label: t("nav.metrics", "指标"), href: "/metrics" },
-  ];
+  // 顶栏一级位 = 功能域入口（通知/进化/系统管理；设置=右侧超椭圆钮）
+  // 原顶栏 指标/仪表盘/下载/插件 已按归属表归入对应域二级（docs/reports/menu-hierarchy-map.md）
+  const navItems: Array<{ id: string; icon: React.ElementType; label: string; href: string; badge?: number }> =
+    TOP_DOMAINS.filter((domain: DomainDef) => domain.id !== "settings").map((domain: DomainDef) => ({
+      id: domain.id,
+      icon: domain.icon,
+      label: t(domain.labelKey, domain.fallback),
+      href: domain.home,
+      ...(domain.id === "notify" && eventCount > 0 ? { badge: eventCount } : {}),
+    }));
 
-  const navItems = [
-    { id: "notifications", icon: Bell, label: t("nav.notifications", "通知"), href: "/notifications", ...(eventCount > 0 ? { badge: eventCount } : {}) },
-    { id: "dashboard", icon: Gauge, label: t("nav.dashboard", "仪表盘"), href: "/dashboard" },
-    { id: "download", icon: Download, label: t("nav.download", "下载"), href: "/download" },
-    { id: "evolution", icon: Dna, label: t("nav.evolution", "进化"), href: "/evolution" },
-    { id: "plugins", icon: Plug, label: t("nav.plugins", "插件"), href: "/plugins" },
-    { id: "system", icon: Shield, label: t("nav.system", "系统"), href: "/system" },
-  ];
+  const currentDomain = domainForPath(pathname);
 
   type NavItem = { id: string; icon: React.ElementType; label: string; href: string; badge?: number };
 
   const renderItem = (item: NavItem) => {
     const Icon = item.icon;
-    const active = item.href && pathname.startsWith(item.href);
+    // 一级位选中 = 当前路径归属该功能域（bg-primary/10 rounded，禁下划线）
+    const active = currentDomain?.id === item.id;
 
     return (
       <Link
@@ -75,7 +76,6 @@ export function TopBar({ eventCount = 0 }: TopBarProps) {
       middle={
         <>
           <HealthWidget />
-          {statusItems.map(renderItem)}
           <div className="w-px h-4 bg-border shrink-0 mx-1" />
           {navItems.map(renderItem)}
           <button
@@ -94,17 +94,17 @@ export function TopBar({ eventCount = 0 }: TopBarProps) {
           href="/settings"
           className={cn(
             "flex shrink-0 items-center justify-center h-full px-3 transition-colors",
-            pathname.startsWith("/settings")
+            currentDomain?.id === "settings"
               ? "text-primary"
               : "text-muted-foreground hover:text-foreground"
           )}
-          title={t("nav.settings", "设置")}
+          title={t("nav.dom.settings", "设置")}
         >
           <SuperEllipse
             size={36}
-            fill={pathname.startsWith("/settings") ? "var(--color-primary)" : "var(--color-muted)"}
+            fill={currentDomain?.id === "settings" ? "var(--color-primary)" : "var(--color-muted)"}
           >
-            <Settings size={18} className={pathname.startsWith("/settings") ? "text-primary-foreground" : "text-muted-foreground"} />
+            <Settings size={18} className={currentDomain?.id === "settings" ? "text-primary-foreground" : "text-muted-foreground"} />
           </SuperEllipse>
         </Link>
       }

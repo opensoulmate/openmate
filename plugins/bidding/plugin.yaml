@@ -13,10 +13,46 @@ permissions:
   - knowledge.read
   - export.write
 ui:
-  nav:
-    label: 招投标
+  # 菜单贡献（docs/plugin-spec.md §菜单契约）：一级「智能投标」+ 二级清单（安装生成/卸载收走）
+  menu:
+    label: 智能投标
+    label_i18n:
+      zh: 智能投标
+      en: Bidding
+      ja: 入札
     icon: FileText
     position: end
+    entries:
+      - id: parse
+        label: 招标文件解析
+        label_i18n: {zh: 招标文件解析, en: Tender Parsing, ja: 入札書解析}
+        href: /plugins/bidding/parse
+        function: bid_parse
+      - id: scoring
+        label: 评分办法配置
+        label_i18n: {zh: 评分办法配置, en: Scoring Setup, ja: 採点設定}
+        href: /plugins/bidding/scoring
+        function: bid_score_config
+      - id: generate
+        label: 标书生成工作台
+        label_i18n: {zh: 标书生成工作台, en: Bid Generation, ja: 提案書生成}
+        href: /plugins/bidding/generate
+        function: bid_generate
+      - id: review
+        label: 废标风险审查报告
+        label_i18n: {zh: 废标风险审查报告, en: Risk Review, ja: リスク審査}
+        href: /plugins/bidding/review
+        function: bid_review
+      - id: price
+        label: 报价策略
+        label_i18n: {zh: 报价策略, en: Pricing Strategy, ja: 価格戦略}
+        href: /plugins/bidding/price
+        function: price_calc
+      - id: knowledge
+        label: 知识库管理
+        label_i18n: {zh: 知识库管理, en: Knowledge, ja: 知識管理}
+        href: /plugins/bidding/knowledge
+        function: bid_knowledge_list
   pages:
     - id: parse
       title: 招标文件解析
@@ -53,6 +89,21 @@ tools:
           description: 是否同时登记进知识库
       required: [file_path]
 
+    output_schema:
+      type: object
+      properties:
+        project:
+          type: object
+          description: 项目关键信息（名称/编号/预算/工期）
+        scoring:
+          type: object
+          description: 评分办法结构（价格/技术/商务分值与公式）
+        reject_clauses:
+          type: array
+          description: 废标条款清单
+        qualifications:
+          type: array
+          description: 资格要求清单
   - name: bid_generate
     description: 编排→逐节生成标书 Word→一致性审计→断点续跑（python-docx）
     handler: handle_bid_generate
@@ -75,6 +126,21 @@ tools:
           description: 是否断点续跑（默认 true）
       required: [file_path]
 
+    output_schema:
+      type: object
+      properties:
+        project_id:
+          type: string
+          description: 标书项目 ID
+        outline:
+          type: array
+          description: 三级提纲节点
+        output_path:
+          type: string
+          description: 生成的标书 Word 路径
+        audit:
+          type: object
+          description: 一致性审计结果
   - name: bid_review
     description: 废标风险审查 🔴🟡🟢（报价/资格材料/★响应/评审因素合规/废标条款）
     handler: handle_bid_review
@@ -97,6 +163,18 @@ tools:
           description: 投标文件路径（可选，用于响应性核对）
       required: [file_path]
 
+    output_schema:
+      type: object
+      properties:
+        risks:
+          type: array
+          description: 风险清单（🔴🟡🟢 分级项）
+        score:
+          type: number
+          description: 合规得分
+        summary:
+          type: string
+          description: 审查摘要
   - name: price_calc
     description: 报价策略与价格得分预估（最低价法/平均价法/线性插值）
     handler: handle_price_calc
@@ -126,6 +204,18 @@ tools:
           description: 个别成本（用于低于成本风险）
       required: [bid_price]
 
+    output_schema:
+      type: object
+      properties:
+        strategy:
+          type: string
+          description: 报价策略名（最低价法/平均价法/线性插值）
+        suggested_price:
+          type: number
+          description: 建议报价
+        detail:
+          type: object
+          description: 测算明细
   - name: bid_score_config
     description: 评分办法配置——写入/读取评分权重（价格/技术/商务/服务）
     handler: handle_bid_score_config
@@ -154,6 +244,12 @@ tools:
           type: number
           description: 服务分权重
 
+    output_schema:
+      type: object
+      properties:
+        scoring:
+          type: object
+          description: 评分配置（分项/权重/公式）
   - name: bid_generate_status
     description: 标书生成状态——读取最近一次生成的章节树/断点（列表数据源）
     handler: handle_bid_generate_status
@@ -183,4 +279,13 @@ tools:
         limit:
           type: integer
           description: 返回条数上限
+    output_schema:
+      type: object
+      properties:
+        entries:
+          type: array
+          description: 知识条目清单
+        total:
+          type: integer
+          description: 条目总数
 flows: []

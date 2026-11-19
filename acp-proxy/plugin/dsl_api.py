@@ -179,9 +179,12 @@ def build_plugin_router(descriptor: PluginDescriptor, registry: PluginToolRegist
     plugin_id = descriptor.manifest.id
 
     def _installed_guard() -> None:
-        """卸载即收走：插件目录消失后本路由组整体 404（uninstall 热卸载后自惰，
-        无需从 app 摘除已注册路由）。"""
-        if not descriptor.dir_path.is_dir():
+        """卸载即收走：插件目录消失 **或安装态=false** 后本路由组整体 404
+        （uninstall 热卸载后自惰，无需从 app 摘除已注册路由）。
+        状态门禁见 plugin/install_state.py（"默认未安装，谁使用谁安装"）。"""
+        from plugin.install_state import is_installed
+
+        if not descriptor.dir_path.is_dir() or not is_installed(descriptor.dir_path.parent, plugin_id):
             raise HTTPException(status_code=404, detail=f"插件已卸载：{plugin_id}")
 
     router = APIRouter(prefix=f"/plugins/{plugin_id}", tags=[f"plugin:{plugin_id}"],
@@ -264,10 +267,16 @@ def build_plugins_index(
     return {"plugins": plugins, "count": len(plugins), "errors": errors or []}
 
 
-def scan_and_build(plugins_dir: Path | str, registry: PluginToolRegistry | None = None) -> tuple[list[APIRouter], dict[str, Any]]:
+def scan_and_build(
+    plugins_dir: Path | str,
+    registry: PluginToolRegistry | None = None,
+    exclude_ids: set[str] | None = None,
+) -> tuple[list[APIRouter], dict[str, Any]]:
     """一站式：扫描 + 工具绑定 + 路由生成 + /plugins 载荷
 
     返回 (routers, index_payload)。单插件工具绑定失败记入 errors，不影响其它插件。
+    exclude_ids：安装态门禁（plugin/install_state.py）——"可用未安装"插件不装载不入清单
+    （包目录不动，市场安装后 hot_load 即刻长出）。
     """
     from plugin.scanner import bind_tools, scan_plugins
 
@@ -277,6 +286,9 @@ def scan_and_build(plugins_dir: Path | str, registry: PluginToolRegistry | None 
     live: list[PluginDescriptor] = []
     errors = list(scan.errors)
     for descriptor in scan.descriptors:
+        if exclude_ids and descriptor.id in exclude_ids:
+            logger.info("插件 %s 可用未安装（install-state），跳过装载", descriptor.id)
+            continue
         try:
             bind_tools(descriptor, registry)
         except Exception as e:  # noqa: BLE001 — 装载边界：单插件失败不拖垮整体
