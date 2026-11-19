@@ -63,3 +63,36 @@ def _isolate_collab_side_effects(tmp_path, monkeypatch):
     yield
     reset_collab()
     reset_governance()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_skill_runtime_data(tmp_path, monkeypatch):
+    """P0 技能自动命中运行时数据统一进临时目录，禁写真实运行库。
+
+    既有测试跑真实注入路径（如 test_token_attribution_wiring）会触发命中记账/
+    装载收据/嵌入缓存落盘——不隔离会写进 acp-proxy/data/ 真实运行数据。
+    三路径按 env 解析（skill_feedback/skill_load_verify/skill_semantic），
+    单例重置防跨测试绑旧路径。测试自己再 setenv/构造隔离实例时以测试为准。
+    """
+    monkeypatch.setenv("SOULMATE_SKILL_LEDGER", str(tmp_path / "skill_hit_ledger.json"))
+    monkeypatch.setenv("SOULMATE_SKILL_LOAD_RECEIPTS", str(tmp_path / "skill_load_receipts.jsonl"))
+    monkeypatch.setenv("SOULMATE_SKILL_EMBED_CACHE", str(tmp_path / "skill_embed_cache.json"))
+    import agent.skill_feedback as sfb
+    import agent.skill_semantic as ss
+    monkeypatch.setattr(sfb, "_LEDGER", None)   # 单例重建绑定本测试临时路径
+    monkeypatch.setattr(ss, "_EMBEDDER", None)
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _isolate_long_task_autonomy_db(tmp_path, monkeypatch):
+    """P0 长任务自治检查点/轨迹库统一进临时目录，禁写真实运行库 data/long_task_autonomy.db。
+
+    既有测试跑 _prompt_inner 复杂任务路径会触发 _bind_long_task 检查点落盘——
+    不隔离会写进 acp-proxy/data/ 真实运行数据（repo 铁律：测试禁写真实运行库）。
+    DB_PATH 为模块级默认值，直接 monkeypatch 模块属性（CheckpointStore 调用时读）。
+    """
+    import agent.long_task_autonomy as lta
+    monkeypatch.setattr(lta, "DB_PATH", tmp_path / "long_task_autonomy.db")
+    monkeypatch.setenv("ACP_LONG_TASK_DB", str(tmp_path / "long_task_autonomy.db"))
+    yield

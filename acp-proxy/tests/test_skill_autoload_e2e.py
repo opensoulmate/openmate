@@ -81,7 +81,8 @@ def run1_learn_and_record(mgr, agent):
 
 class TestSecondRunAutoHit:
     def test_full_loop(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(slv, "RECEIPT_PATH", str(tmp_path / "receipts.jsonl"))
+        monkeypatch.setenv(
+            "SOULMATE_SKILL_LOAD_RECEIPTS", str(tmp_path / "receipts.jsonl"))
         mgr, ledger, loader = make_env(tmp_path)
         agent = bare_agent(mgr, ledger, loader)
 

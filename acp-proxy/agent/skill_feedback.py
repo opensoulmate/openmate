@@ -96,7 +96,8 @@ class SkillFeedbackLedger:
     """技能命中账本：三态记账 + 情况语句沉淀 + 打分增益。"""
 
     def __init__(self, path: str | None = None):
-        self.path = path or LEDGER_PATH
+        # 路径按构造时 env 解析（conftest 测试隔离以 setenv 为准；模块常量兜底）
+        self.path = path or os.environ.get("SOULMATE_SKILL_LEDGER") or LEDGER_PATH
         self._lock = threading.Lock()
         self._data: dict | None = None
 

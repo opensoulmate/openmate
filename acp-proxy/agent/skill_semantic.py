@@ -104,7 +104,11 @@ class SkillEmbedder:
         openai_model: str | None = None,
         timeout: float = EMBED_ATTEMPT_TIMEOUT,
     ):
-        self.cache_path = cache_path or EMBED_CACHE_PATH
+        self.cache_path = (
+            cache_path
+            or os.environ.get("SOULMATE_SKILL_EMBED_CACHE")
+            or EMBED_CACHE_PATH
+        )
         self.opensoul_url = opensoul_url or OPENSOUL_EMBED_URL
         self.ollama_url = ollama_url or OLLAMA_EMBED_URL
         self.ollama_model = ollama_model or OLLAMA_EMBED_MODEL

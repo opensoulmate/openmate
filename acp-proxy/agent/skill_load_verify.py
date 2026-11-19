@@ -114,7 +114,7 @@ def write_receipt(
     }
     if extra:
         receipt.update(extra)
-    target = path or RECEIPT_PATH
+    target = path or os.environ.get("SOULMATE_SKILL_LOAD_RECEIPTS") or RECEIPT_PATH
     try:
         os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
         with open(target, "a", encoding="utf-8") as fp:
@@ -126,7 +126,7 @@ def write_receipt(
 
 def read_receipts(limit: int = 50, path: str | None = None) -> list[dict]:
     """读最近收据（验收脚本断言用）。文件不存在=空列表。"""
-    target = path or RECEIPT_PATH
+    target = path or os.environ.get("SOULMATE_SKILL_LOAD_RECEIPTS") or RECEIPT_PATH
     try:
         with open(target, encoding="utf-8") as fp:
             lines = fp.readlines()
