@@ -38,6 +38,22 @@ from plugin.flow_def import (
     parse_flow,
     resolve_value,
 )
+from plugin.verify_axis import (
+    CLAIM_EVIDENCE,
+    CLAIM_SELF,
+    REJECT_ACCEPTANCE_MISSES,
+    REJECT_MISSING_DELIVERABLE,
+    REJECT_NO_EVIDENCE,
+    REJECT_SELF_VERIFY,
+    REJECT_UNKNOWN_VERIFIER,
+    SETTLE_MAX_FIXES,
+    can_verify,
+    node_axis,
+    node_confidence,
+    reject_fixable,
+    run_verdict,
+    settle_decision,
+)
 
 logger = logging.getLogger("plugin.flow_engine")
 
@@ -86,6 +102,25 @@ class NodeRun:
     output_summary: str | None = None
     loop_items: int | None = None
     over_budget: bool = False    # 软超时预算超出（只记录，不杀）
+    # ── 双轴完成状态（监督闭环：reported done ≠ verified）──
+    executed_by: str = ""        # 执行者身份（tool:<name> / 交付人 / SoulMate）
+    claim_source: str = CLAIM_SELF   # self-report（自报封顶黄）| evidence（验收翻绿）
+    verified: bool = False       # Test·verified 翻档标记（只由验收证据翻）
+    verified_by: str = ""        # 验收者（≠执行者才许翻档）
+    verified_at: float | None = None
+    verify_evidence: str = ""    # 内容级探针/验收证据摘要（报成功没用）
+    settle_rejects: int = 0      # settle 拒伪完成次数（留痕计数）
+    fix_rounds: int = 0          # 验证不过修复轮（≤2，超出→重规划）
+    owned_by: str = ""           # 归属节点（loop body / parallel 分支合成件：不独立判档）
+
+    # 只读派生（不改状态机，只加渲染——fail-closed：未知=未验证）
+    @property
+    def status_axis(self) -> str:
+        return node_axis(self.status, self.verified)
+
+    @property
+    def confidence(self) -> str:
+        return node_confidence(self.status, self.verified)
 
 
 @dataclass
@@ -131,6 +166,10 @@ class FlowRun:
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         return data
+
+    def verdict(self) -> dict[str, Any]:
+        """实例判档（双轴）：verified | done·unverified+理由码 | 进行态原词。"""
+        return run_verdict(self.status, self.nodes.values())
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "FlowRun":
@@ -355,6 +394,8 @@ class FlowExecutor:
         record = self._record(run, node)
         record.status = NODE_STATUS_RUNNING
         record.started_at = time.time()
+        if node.type == "tool" and not record.executed_by:
+            record.executed_by = f"tool:{node.tool}"   # 双轴：执行者身份（验收防自审用）
         self._log(run, node.id, "node-start", f"type={node.type}")
         self.engine.store.save(run)
 
@@ -369,6 +410,8 @@ class FlowExecutor:
                 output = await self._run_loop(run, defn, node, record)
             elif node.type == "parallel":
                 output = await self._run_parallel(run, defn, node, record)
+            elif node.type == "verify":
+                output = await self._run_verify_node(run, defn, node, record)
             elif node.type == "approval":
                 output = self._suspend_for_approval(run, node)
                 suspended = True
@@ -400,10 +443,14 @@ class FlowExecutor:
         return _NodeOutcome(next_id=next_id, suspended=suspended)
 
     def _next_for(self, run: FlowRun, defn: FlowDefinition, node: NodeSpec) -> str | None:
-        """节点后继：decision 按分支、approval 面向恢复、其余顺序推进"""
+        """节点后继：decision 按分支、verify 修复轮回跳目标、其余顺序推进"""
         if node.type == "decision":
             branch = (run.outputs.get(node.id) or {}).get("branch")
             return node.then if branch == "then" else node.else_
+        if node.type == "verify":
+            fix_goto = (run.outputs.get(node.id) or {}).get("fix_goto")
+            if fix_goto:
+                return str(fix_goto)   # 验证不过修复轮：回跳被验收节点重跑
         return defn.next_node_id(node.id)
 
     # ── tool 节点（重试 + 软超时预算）──
@@ -524,6 +571,7 @@ class FlowExecutor:
             self._log(run, node.id, "loop-item", f"第 {index + 1}/{len(items)} 项")
             for body_id in node.body:
                 body_node = defn.node_map[body_id]
+                self._record(run, body_node).owned_by = node.id   # body 归 loop 节点判档
                 item_ctx = EvalContext(outputs=run.outputs, item=item, run=_run_ctx(run))
                 item_outputs.append(
                     await self._run_body_item(run, defn, body_node, item_ctx, index)
@@ -759,13 +807,146 @@ class FlowExecutor:
                   f"（target_agent={node.target_agent}，role={role or '-'}）")
         try:
             task = await collab.dispatch(task)
-        except Exception as e:  # noqa: BLE001 — 派发失败按节点失败语义走 on_error
+        except Exception as e:  # noqa: BLE001 — 派发失败：on_error 显式处置 + 本地降级兜底
             record.error = f"agent 派发失败: {type(e).__name__}: {e}"
             self._log(run, node.id, "node-failed", record.error)
+            if node.on_error != "fail":
+                # 显式 skip | goto 处置（绝不静默）
+                return self._on_error(run, defn, node, record)
+            # 派发失败本地降级（agent_node 四补之一）：任务不丢——降级为本地人工单，
+            # 流程挂起等交付（比整条流程死掉强；本地单也开不出来才按 fail 收口）
+            try:
+                fallback = collab.create(
+                    kind="human", run_id=run.run_id, flow_id=run.flow_id,
+                    node_id=node.id, assignee=node.user or "用户", role=node.role,
+                    assignee_kind="human",
+                    title=f"本地降级：{run.flow_name}:{node.id}",
+                    instruction=f"{instruction}\n\n【本地降级】SoulMate 派发失败"
+                                f"（{record.error}），转本地人工完成。",
+                    form=node.form, timeout_hours=node.timeout_hours,
+                    on_timeout=node.on_timeout,
+                    payload={"fallback": "dispatch-failed", "error": record.error})
+            except Exception as e2:  # noqa: BLE001 — 本地降级开单也失败才按 on_error
+                self._log(run, node.id, "fallback-failed", f"本地降级开单失败: {e2}")
+                fallback = None
+            if fallback is not None:
+                self._log(run, node.id, "dispatch-fallback-local",
+                          f"A2A 派发失败 → 本地人工降级（工单 {fallback.task_id}）")
+                return self._suspend_for_approval(run, node, kind="human", task=fallback)
             return self._on_error(run, defn, node, record)
         self._log(run, node.id, "agent-dispatched",
                   f"a2a_task_id={task.a2a_task_id or '-'} status={task.status}")
+        if not task.is_open():
+            # 派发侧同步收口（INPUT_REQUIRED 转人工等）：改挂后续人工单，
+            # 闸面同步到新工单（此时 run.approval 尚未建立，由挂起面直接开单）
+            follow = collab.find_by_node(run.run_id, node.id)
+            if follow is not None and follow.task_id != task.task_id:
+                self._log(run, node.id, "dispatch-converted",
+                          f"派发侧收口（{task.status}）→ 改挂 {follow.kind} 工单 {follow.task_id}")
+                return self._suspend_for_approval(run, node, kind=follow.kind,
+                                                  task=follow)
         return self._suspend_for_approval(run, node, kind="agent", task=task)
+
+    # ── verify 验收节点（双轴翻档面：内容级探针 + 非执行者验收）──
+
+    async def _run_verify_node(self, run: FlowRun, defn: FlowDefinition,
+                               node: NodeSpec, record: NodeRun) -> Any:
+        """verify 节点：对 `for` 目标做验收——探针证据 + 验收条件 → 翻 verified。
+
+        铁律：报成功没用，要用内容级探针；执行者自报永远封顶 reported done。
+        - 翻档判定走 verify_axis.can_verify（证据非空 + 验收者≠执行者）；
+        - 验证不过：拒伪完成（目标不许标 completed）——先修复 ≤max_fixes 轮
+          （fix_goto 回跳目标重跑），超出→按本节点 on_error 重规划
+          （fail | skip | goto:<replan-node>）；
+        - 结构性拒绝（自审/验收者未知）修复内容无用，直接定夺。
+        """
+        target_id = node.for_
+        trecord = run.nodes.get(target_id)
+        target = defn.node_map.get(target_id)
+
+        def _refuse(code: str, detail: str) -> Any:
+            """拒翻档（留痕）→ 修复轮或重规划。"""
+            if trecord is not None:
+                trecord.settle_rejects += 1
+            self._log(run, node.id, "settle-refused",
+                      f"目标 {target_id} 拒翻档 [{code}]: {detail}")
+            if trecord is not None and reject_fixable(code) \
+                    and trecord.fix_rounds < max(0, node.max_fixes):
+                trecord.fix_rounds += 1
+                self._log(run, node.id, "verify-fix",
+                          f"修复轮 {trecord.fix_rounds}/{node.max_fixes}：重跑 {target_id}")
+                return {"verified": False, "fix_goto": target_id,
+                        "reason_code": code, "detail": detail}
+            record.error = f"验收不过（{code}）: {detail}"
+            self._log(run, node.id, "verify-exhausted",
+                      f"修复轮用尽/结构性拒绝，按 on_error={node.on_error} 重规划")
+            return self._on_error(run, defn, node, record)
+
+        if target is None or trecord is None:
+            return _refuse("target_not_done", f"验收目标不存在: {target_id!r}")
+        if trecord.status != NODE_STATUS_OK:
+            return _refuse("target_not_done",
+                           f"目标 {target_id} 还没干完（{trecord.status}），无从验收")
+
+        # 内容级探针（验收证据来源；探针失败=验收不过，可修复）
+        evidence = ""
+        probe_out: Any = None
+        if node.probe:
+            try:
+                probe_out = await self.engine.call_tool(
+                    node.probe,
+                    {"run_id": run.run_id, "flow_id": run.flow_id,
+                     "target": target_id, "output": run.outputs.get(target_id)},
+                    approved=_run_approved(run),
+                    ctx={"run_id": run.run_id, "flow_id": run.flow_id,
+                         "node_id": node.id, "role": "verify"})
+                evidence = f"probe={node.probe} {_summarize(probe_out)}"
+            except Exception as e:  # noqa: BLE001 — 探针失败=验收不过（可修复轮）
+                evidence = ""
+                probe_error = f"探针 {node.probe} 失败: {type(e).__name__}: {e}"
+                self._log(run, node.id, "probe-failed", probe_error)
+                record.error = probe_error
+
+        # 验收条件（when）：目标输出 + 探针输出可寻址（$.<verify-id>.*）
+        acceptance_ok: bool | None = None
+        if node.when:
+            ctx = EvalContext(
+                outputs={**run.outputs, node.id: probe_out},
+                run=_run_ctx(run))
+            try:
+                acceptance_ok = bool(eval_expr(node.when, ctx))
+            except ExprError as e:
+                acceptance_ok = False
+                evidence = (evidence + f" when-error: {e}").strip()
+            if acceptance_ok:
+                evidence = (evidence + f" when={node.when} → true").strip()
+            else:
+                evidence = (evidence + f" when={node.when} → false").strip()
+        if not evidence:
+            return _refuse("no_evidence", "探针/验收条件都没有产出证据（报成功没用）")
+        if acceptance_ok is False:
+            return _refuse("acceptance_misses", f"验收条件未满足: {evidence[:200]}")
+
+        # 翻档判定（防自审：验收者=执行者拒收留痕）
+        verifier = (node.verifier or (f"probe:{node.probe}" if node.probe
+                                      else f"verify-node:{node.id}"))
+        allowed, code, detail = can_verify(
+            verifier=verifier, executor=trecord.executed_by, evidence=evidence)
+        if not allowed:
+            return _refuse(code, detail)
+        trecord.verified = True
+        trecord.verified_by = verifier
+        trecord.verified_at = time.time()
+        trecord.verify_evidence = evidence[:500]
+        trecord.claim_source = CLAIM_EVIDENCE
+        record.executed_by = verifier
+        record.claim_source = CLAIM_EVIDENCE
+        record.verify_evidence = evidence[:500]
+        self._log(run, node.id, "verified",
+                  f"目标 {target_id} 翻档 Test·verified（by={verifier} "
+                  f"evidence={evidence[:120]}）")
+        return {"verified": True, "target": target_id, "by": verifier,
+                "evidence": evidence[:500]}
 
     # ── action 节点（notify | emit-event | update-panel | compress-handoff）──
 
@@ -839,6 +1020,7 @@ class FlowExecutor:
             brecord = self._record(run, synth)
             brecord.status = NODE_STATUS_RUNNING
             brecord.started_at = time.time()
+            brecord.owned_by = node.id   # 分支合成件：判档归 parallel 节点
             try:
                 async def _exec():
                     return await self._run_tool_node(run, defn, synth, brecord)
@@ -1080,10 +1262,12 @@ class FlowEngine:
             data.setdefault("observability", {})
             data["observability"]["retain_runs"] = patch["retain_runs"]
         data["id"] = flow_id
-        # 节点兼容两种拼写：GET /flows/{id} 序列化是 else_，YAML/校验口径是 else
+        # 节点兼容两种拼写：GET /flows/{id} 序列化是 else_/for_，YAML/校验口径是 else/for
         for node in data.get("nodes") or []:
             if isinstance(node, dict) and "else_" in node and "else" not in node:
                 node["else"] = node.pop("else_")
+            if isinstance(node, dict) and "for_" in node and "for" not in node:
+                node["for"] = node.pop("for_")
         try:
             updated = parse_flow(data, source=f"edit:{flow_id}")
         except FlowDefError as e:
@@ -1343,10 +1527,22 @@ class FlowEngine:
         defn = self.get_flow(run.flow_id)
         approval_node = defn.node_map.get(run.approval.node_id)
         record = run.nodes.get(run.approval.node_id)
+        # ── settle 拒伪完成闸（agent/human 交付回流）：缺交付物/验收标准未满足 → 拒 ok，
+        #    先修复 ≤2 轮再重规划；执行者自报 verified 一律封顶 reported done（不翻档）──
+        if decision == "approve" and run.approval.kind in ("agent", "human") \
+                and approval_node is not None:
+            settled = await self._settle_delivery(
+                run, approval_node, record, result, decided_by)
+            if settled is not None:
+                return settled
         if record is not None:
             record.status = NODE_STATUS_OK if decision == "approve" else NODE_STATUS_FAILED
             record.finished_at = time.time()
             record.output_summary = f"审批 {run.approval.status}（{decided_by or '用户'}）"
+            if decision == "approve" and run.approval.kind in ("agent", "human"):
+                # 双轴：交付=执行者自报（封顶 Code·reported done，黄）
+                record.executed_by = decided_by or record.executed_by
+                record.claim_source = CLAIM_SELF
         self._sync_gate_task(run.approval, approved=(decision == "approve"),
                              result=result, decided_by=decided_by)
         if decision == "approve" and run.approval.kind == "budget-gate":
@@ -1385,6 +1581,24 @@ class FlowEngine:
                 return run
             self._log(run, approval_node.id, "review-accepted",
                       f"by={decided_by or '用户'}")
+            # review 节点自身=验收动作：其产出即验收证据（claim_source=evidence）
+            if record is not None:
+                record.verified = True
+                record.verified_by = decided_by or "用户"
+                record.verified_at = time.time()
+                record.verify_evidence = f"review-accept: {str(result)[:200]}"
+                record.claim_source = CLAIM_EVIDENCE
+            # review 验收门带 for 目标：验收结论=独立验收证据 → 目标翻 verified
+            # （验收者=执行者 → 拒翻档留痕，节点保持 done·unverified）
+            if approval_node.for_:
+                try:
+                    self.mark_verified(
+                        run, approval_node.for_,
+                        verified_by=decided_by or "用户",
+                        evidence=f"review-accept: {str(result)[:200]}")
+                except FlowRunError as e:
+                    self._log(run, approval_node.id, "verify-refused",
+                              f"review 验收未能翻档 {approval_node.for_}: {e}")
         if decision == "reject":
             run.status = RUN_STATUS_FAILED
             run.finished_at = time.time()
@@ -1423,6 +1637,332 @@ class FlowEngine:
         """human/agent 工单交付回流：与 approval 同一恢复面（approve + 交付物）。"""
         return await self.resolve_approval(
             run_id, "approve", decided_by=decided_by, note=note, result=result)
+
+    # ── settle 拒伪完成闸 + 双轴翻档（监督闭环）──
+
+    async def _settle_delivery(self, run: FlowRun, node: NodeSpec,
+                               record: NodeRun | None, result: Any,
+                               decided_by: str) -> FlowRun | None:
+        """settle 拒伪完成（agent/human 交付回流入账处）：
+
+        - 缺交付物 → 拒 ok；声明 acceptance 验收标准未满足 → 拒 ok；
+        - 执行者自报 verified 一律不采信（claim 封顶 Code·reported done）；
+        - 拒绝留痕（settle_rejects + 日志），先修复 ≤SETTLE_MAX_FIXES 轮
+          （原节点重跑重派），超出→重规划（on_error：fail | skip | goto:<replan>）。
+        返回 None = settle 过（继续正常收口，节点只到 reported done，等验收翻档）。
+        """
+        strict = node.type == "agent" or bool(node.form) or bool(node.acceptance)
+        acceptance_ok: bool | None = None
+        if node.acceptance:
+            try:
+                ctx = EvalContext(
+                    outputs={**run.outputs, node.id: {"result": result}},
+                    run=_run_ctx(run))
+                acceptance_ok = bool(eval_expr(node.acceptance, ctx))
+            except ExprError as e:
+                acceptance_ok = False
+                self._log(run, node.id, "acceptance-error", f"验收标准求值失败: {e}")
+        claim_verified = bool(re.search(
+            r"\bverified\b|已验证|验证通过|测试通过",
+            str(result or ""), re.IGNORECASE))
+        decision = settle_decision(result=result, acceptance_ok=acceptance_ok,
+                                   claim_verified=claim_verified)
+        if decision["accept"]:
+            if decision["capped"]:
+                self._log(run, node.id, "claim-capped",
+                          "执行者自报 verified 不采信，封顶 Code·reported done（黄）")
+            return None
+        if not strict:
+            return None    # 非严格面（没声明交付物/验收标准）：保持旧收口语义
+        if record is not None:
+            record.settle_rejects += 1
+        self._log(run, node.id, "settle-refused",
+                  f"[{decision['reason_code']}] {decision['detail']}")
+        if reject_fixable(decision["reason_code"]) and record is not None \
+                and record.fix_rounds < SETTLE_MAX_FIXES:
+            # 修复轮：原节点重跑重派（agent 重新开单），流程不丢
+            record.fix_rounds += 1
+            record.status = NODE_STATUS_PENDING
+            record.error = None
+            record.attempts = 0
+            record.retries = 0
+            record.started_at = None
+            record.finished_at = None
+            run.status = RUN_STATUS_RUNNING
+            run.cursor = node.id
+            self._log(run, node.id, "settle-fix",
+                      f"修复轮 {record.fix_rounds}/{SETTLE_MAX_FIXES}：重跑 {node.id}")
+            self.store.save(run)
+            return await self.execute(run.run_id, start_at=node.id)
+        # 修复轮用尽/结构性拒绝 → 重规划（on_error 语义）
+        refuse_out = {"settle_refused": True,
+                      "reason_code": decision["reason_code"],
+                      "detail": decision["detail"]}
+        if node.on_error.startswith("goto:"):
+            replan = node.on_error.split(":", 1)[1]
+            if record is not None:
+                record.status = NODE_STATUS_FAILED
+                record.error = f"settle 拒伪完成: {decision['reason_code']}"
+                record.finished_at = time.time()
+            run.status = RUN_STATUS_RUNNING
+            run.outputs[node.id] = refuse_out
+            run.cursor = replan
+            self._log(run, node.id, "settle-replan", f"重规划 → {replan}")
+            self.store.save(run)
+            return await self.execute(run.run_id, start_at=replan)
+        if node.on_error == "skip":
+            if record is not None:
+                record.status = NODE_STATUS_SKIPPED
+                record.error = f"settle 拒伪完成: {decision['reason_code']}"
+                record.finished_at = time.time()
+            run.status = RUN_STATUS_RUNNING
+            run.outputs[node.id] = refuse_out
+            self.store.save(run)
+            nxt = self.get_flow(run.flow_id).next_node_id(node.id)
+            if nxt:
+                return await self.execute(run.run_id, start_at=nxt)
+            run.status = RUN_STATUS_COMPLETED
+            run.finished_at = time.time()
+            self.store.save(run)
+            return run
+        run.status = RUN_STATUS_FAILED
+        run.finished_at = time.time()
+        run.error = (f"settle 拒伪完成（{decision['reason_code']}）: "
+                     f"{decision['detail']}，修复 {SETTLE_MAX_FIXES} 轮后转重规划")
+        if record is not None:
+            record.status = NODE_STATUS_FAILED
+            record.error = run.error
+            record.finished_at = time.time()
+        self._log(run, node.id, "settle-exhausted",
+                  f"修复轮用尽，按 on_error=fail 收口: {decision['detail']}")
+        self.store.save(run)
+        self.notify_run(run, "failed", node=node.id,
+                        dedupe_key=str(run.finished_at))
+        return run
+
+    def mark_verified(self, run: FlowRun, node_id: str, *, verified_by: str,
+                      evidence: str, ok: bool = True) -> dict[str, Any]:
+        """验收证据翻档（唯一翻绿通道）：证据非空 + 验收者≠执行者。
+
+        伪完成被拒并留痕：自审（self_referential_evidence）/证据为空（no_evidence）
+        → 拒翻档（FlowRunError）+ settle_refused 日志，节点保持 done·unverified。
+        ok=False：验收不过——不许标 completed（拒伪完成），留痕计数。
+        """
+        record = run.nodes.get(node_id)
+        if record is None:
+            raise FlowRunError(f"节点不存在: {node_id}")
+        if not ok:
+            record.settle_rejects += 1
+            self._log(run, node_id, "verify-failed",
+                      f"验收不过（by={verified_by or '-'}）: {str(evidence)[:200]}")
+            self.store.save(run)
+            return {"verified": False, "node": node_id,
+                    "reason_code": "verification_failed",
+                    "detail": "验收不过，不许标 completed（拒伪完成）"}
+        allowed, code, detail = can_verify(
+            verifier=verified_by, executor=record.executed_by, evidence=evidence)
+        if not allowed:
+            record.settle_rejects += 1
+            self._log(run, node_id, "verify-refused",
+                      f"拒翻档 [{code}] {detail}（by={verified_by or '-'}，"
+                      f"executor={record.executed_by or '-'}）")
+            self.store.save(run)
+            raise FlowRunError(f"验收翻档被拒（{code}）: {detail}")
+        record.verified = True
+        record.verified_by = verified_by
+        record.verified_at = time.time()
+        record.verify_evidence = str(evidence)[:500]
+        record.claim_source = CLAIM_EVIDENCE
+        self._log(run, node_id, "verified",
+                  f"翻档 Test·verified（by={verified_by} evidence={str(evidence)[:120]}）")
+        self.store.save(run)
+        return {"verified": True, "node": node_id, "by": verified_by,
+                "evidence": str(evidence)[:500]}
+
+    async def verify_node(self, run_id: str, node_id: str, *, verified_by: str,
+                          evidence: str, ok: bool = True) -> dict[str, Any]:
+        """人工/探针验收入口（看板·API）：内容级验收证据 → 翻 verified / 拒收留痕。"""
+        run = self.store.find_run(run_id)
+        if run is None:
+            raise FlowRunError(f"流程实例不存在: {run_id}")
+        result = self.mark_verified(run, node_id, verified_by=verified_by,
+                                    evidence=evidence, ok=ok)
+        return result
+
+    async def reassign_node(self, run_id: str, node_id: str, *,
+                            to_assignee: str = "", target_agent: str = "",
+                            by: str = "", note: str = "",
+                            expect_version: int | None = None) -> dict[str, Any]:
+        """换人重派（agent_node 四补之一）：工单交办新归属（D5 handoff 版本校验）+
+        可换 target_agent 重新派发；失败实例原地续跑（同 retry 语义）。
+        """
+        run = self.store.find_run(run_id)
+        if run is None:
+            raise FlowRunError(f"流程实例不存在: {run_id}")
+        defn = self.get_flow(run.flow_id)
+        node = defn.node_map.get(node_id)
+        if node is None:
+            raise FlowRunError(f"节点不存在: {node_id}")
+        if node.type not in ("agent", "human"):
+            raise FlowRunError(f"只有 agent/human 协作节点可换人重派（当前 {node.type}）")
+        collab = self.collab()
+        task = collab.find_by_node(run_id, node_id)
+        created_new = False
+        if task is None:
+            assignee = to_assignee or node.user or "用户"
+            task = collab.create(
+                kind="agent" if node.type == "agent" else "human",
+                run_id=run_id, flow_id=run.flow_id, node_id=node_id,
+                assignee=assignee, role=node.role,
+                assignee_kind="agent" if node.type == "agent" else "human",
+                target_agent=target_agent or node.target_agent,
+                title=f"{run.flow_name}:{node_id}",
+                instruction=str(node.task), form=node.form,
+                timeout_hours=node.timeout_hours, on_timeout=node.on_timeout,
+                budget=node.budget, payload={"reassign": {"by": by, "note": note}})
+            created_new = True
+        else:
+            collab.store.handoff(
+                task.task_id, to_assignee=to_assignee or task.assignee,
+                by=by, note=note or "换人重派", expect_version=expect_version)
+            task = collab.store.load(task.task_id)
+        if target_agent and target_agent != task.target_agent:
+            task.target_agent = target_agent
+            task.note("reassign", f"换目标 SoulMate: {target_agent} by={by or '-'}")
+            collab.store.save(task)
+        if getattr(task, "a2a_task_id", ""):
+            # 交接清场：作废在途 a2a 通道（旧 SoulMate 回流按 superseded 规则拒收），
+            # 重派才不被唤醒合并挡住（防双发双扣靠 claim 清场 + 通道作废）
+            task.a2a_task_id = ""
+            task.handed_off_at = 0.0
+            task.note("reassign", "作废在途 a2a 通道（旧回流拒收）")
+            collab.store.save(task)
+        self._log(run, node_id, "reassigned",
+                  f"工单 {task.task_id} → {task.assignee}"
+                  f"（target_agent={task.target_agent or '-'} by={by or '-'}"
+                  f"{' 新开单' if created_new else ''}）")
+        self.store.save(run)
+        dispatched = False
+        if node.type == "agent" and run.status == RUN_STATUS_WAITING:
+            try:
+                task = await collab.dispatch(task)   # 重派出网（唤醒合并防双发）
+                dispatched = True
+            except Exception as e:  # noqa: BLE001 — 重派失败留痕，工单保持可重试
+                task.note("redispatch-failed", f"{type(e).__name__}: {e}")
+                collab.store.save(task)
+                self._log(run, node_id, "redispatch-failed", f"{type(e).__name__}: {e}")
+        resumed = False
+        if run.status == RUN_STATUS_FAILED:
+            record = run.nodes.get(node_id)
+            if record is not None:
+                record.status = NODE_STATUS_PENDING
+                record.error = None
+                record.attempts = 0
+                record.retries = 0
+            run.status = RUN_STATUS_RUNNING
+            run.error = None
+            run.finished_at = None
+            run.cursor = node_id
+            self._log(run, node_id, "reassign-resume", "换人重派后原地续跑")
+            self.store.save(run)
+            await self.execute(run_id, start_at=node_id)
+            resumed = True
+        return {"run_id": run_id, "node": node_id, "task_id": task.task_id,
+                "assignee": task.assignee, "target_agent": task.target_agent,
+                "created_new": created_new, "dispatched": dispatched,
+                "resumed": resumed}
+
+    def reattach_gate_task(self, run_id: str, node_id: str, task: Any) -> bool:
+        """INPUT_REQUIRED 转人工（agent_node 四补之一）：挂起闸的工单账重挂到
+        人工补输入单（同一恢复面：人交付答案 = 该节点交付回流，流程续跑）。"""
+        run = self.store.find_run(run_id)
+        if run is None or run.approval is None or run.approval.status != "pending" \
+                or run.approval.node_id != node_id:
+            return False
+        run.approval.kind = "human"
+        run.approval.task_id = getattr(task, "task_id", "")
+        run.approval.assignee = getattr(task, "assignee", "")
+        run.approval.role = getattr(task, "role", "")
+        self._log(run, node_id, "input-required-converted",
+                  f"SoulMate 要补输入 → 人工工单 {run.approval.task_id}")
+        self.store.save(run)
+        return True
+
+    async def recover_deliveries(self) -> int:
+        """任务级断点恢复（agent_node 四补之一）：WAITING 实例的工单已交付/终态但
+        流程没恢复（崩在交付与恢复之间）→ 补恢复续跑/收口。"""
+        handled = 0
+        for run in self.store.list_runs(status=RUN_STATUS_WAITING, limit=1000):
+            approval = run.approval
+            if approval is None or approval.status != "pending" or not approval.task_id:
+                continue
+            try:
+                from plugin.flow_collab import get_collab
+                task = get_collab().store.find(approval.task_id)
+            except Exception:  # noqa: BLE001 — 工单账不可达：下拍再试
+                continue
+            if task is None:
+                continue
+            if task.status == "delivered":
+                self._log(run, approval.node_id, "recover-delivery",
+                          f"工单 {task.task_id} 已交付，断点补恢复续跑")
+                self.store.save(run)
+                await self.resolve_delivery(
+                    run.run_id, task.result,
+                    decided_by=task.delivered_by, note="断点补恢复")
+                handled += 1
+            elif task.status in ("failed", "cancelled"):
+                run.status = RUN_STATUS_FAILED
+                run.finished_at = time.time()
+                run.error = f"工单 {task.task_id} {task.status}，断点恢复收口"
+                record = run.nodes.get(approval.node_id)
+                if record is not None:
+                    record.status = NODE_STATUS_FAILED
+                    record.error = run.error
+                self._log(run, approval.node_id, "recover-closed", run.error)
+                self.store.save(run)
+                handled += 1
+        return handled
+
+    def unverified_done(self, limit: int = 500) -> dict[str, Any]:
+        """done·unverified 清单（监督日清一条）：产活节点 ok 未 verified +
+        工单 delivered 未 verified + 完成但未 verified 的实例。"""
+        nodes: list[dict[str, Any]] = []
+        runs: list[dict[str, Any]] = []
+        for run in self.store.list_runs(limit=limit):
+            verdict = run.verdict()
+            if run.status == RUN_STATUS_COMPLETED and verdict["verdict"] != "verified":
+                runs.append({"run_id": run.run_id, "flow_id": run.flow_id,
+                             "flow_name": run.flow_name, "verdict": verdict["verdict"],
+                             "reasons": verdict["reasons"]})
+            for node_id, record in run.nodes.items():
+                if record.status == NODE_STATUS_OK and not record.verified \
+                        and not record.owned_by \
+                        and record.type in ("tool", "agent", "human", "loop", "parallel"):
+                    nodes.append({
+                        "run_id": run.run_id, "flow_id": run.flow_id,
+                        "node": node_id, "type": record.type,
+                        "status_axis": record.status_axis,
+                        "confidence": record.confidence,
+                        "executed_by": record.executed_by,
+                        "claim_source": record.claim_source,
+                        "settle_rejects": record.settle_rejects,
+                        "fix_rounds": record.fix_rounds,
+                    })
+        tasks: list[dict[str, Any]] = []
+        try:
+            from plugin.flow_collab import STATUS_DELIVERED, get_collab
+            for task in get_collab().store.list(limit=limit):
+                if task.status == STATUS_DELIVERED and not getattr(task, "verified", False):
+                    tasks.append({"task_id": task.task_id, "kind": task.kind,
+                                  "run_id": task.run_id, "node_id": task.node_id,
+                                  "assignee": task.assignee,
+                                  "delivered_by": task.delivered_by,
+                                  "confidence": task.confidence})
+        except Exception:  # noqa: BLE001 — 工单账不可达不阻断流程侧清单
+            pass
+        return {"nodes": nodes, "tasks": tasks, "runs": runs,
+                "count": len(nodes) + len(tasks) + len(runs)}
 
     def _sync_gate_task(self, approval: ApprovalRecord, *, approved: bool,
                         result: Any, decided_by: str) -> None:
@@ -1633,13 +2173,26 @@ class FlowEngine:
                 "error_norm": normalize_error(record.error, where=node_id)
                 if record.error else None,
                 "output": record.output_summary or "",
+                # ── 双轴（reported done ≠ verified）──
+                "status_axis": record.status_axis,
+                "confidence": record.confidence,
+                "claim_source": record.claim_source,
+                "executed_by": record.executed_by,
+                "verified": record.verified,
+                "verified_by": record.verified_by,
+                "verify_evidence": record.verify_evidence,
+                "settle_rejects": record.settle_rejects,
+                "fix_rounds": record.fix_rounds,
             })
+        verdict = run.verdict()
         return {
             "run_id": run.run_id,
             "flow_id": run.flow_id,
             "flow_name": run.flow_name,
             "plugin_id": run.plugin_id,
             "status": run.status,
+            "verdict": verdict["verdict"],
+            "verdict_reasons": verdict["reasons"],
             "trigger": run.trigger.get("type", ""),
             "idempotency_key": run.idempotency_key,
             "replay_of": run.replay_of,
@@ -1660,6 +2213,7 @@ class FlowEngine:
             "实例": run.run_id,
             "流程": f"{run.flow_name}（{run.flow_id}）",
             "状态": run.status,
+            "判档": run.verdict()["verdict"],   # 双轴：verified 绿 | done·unverified 黄
             "触发": run.trigger.get("type", ""),
             "创建": _fmt_ts(run.created_at),
             "结束": _fmt_ts(run.finished_at) if run.finished_at else "—",
@@ -1670,9 +2224,12 @@ class FlowEngine:
         for node_id, record in run.nodes.items():
             budget = " ⏱超预算" if record.over_budget else ""
             err = f" · {record.error}" if record.error else ""
+            verify = (f" · 验收[{record.verified_by}]"
+                      if record.verified else
+                      f" · 未验证（自报 {record.claim_source}）" if record.status == "ok" else "")
             flat[f"节点 {node_id}"] = (
-                f"{record.status} · 尝试{record.attempts}次 · 重试{record.retries}次 · "
-                f"{record.duration_ms or 0:.0f}ms{budget}{err} · {record.output_summary or ''}"
+                f"{record.status_axis} · 尝试{record.attempts}次 · 重试{record.retries}次 · "
+                f"{record.duration_ms or 0:.0f}ms{budget}{err}{verify} · {record.output_summary or ''}"
             )
         log_lines = [
             f"{_fmt_ts(entry['ts'])} [{entry['node']}] {entry['event']}: {entry['detail']}"
@@ -1713,6 +2270,10 @@ class FlowScheduler:
 
     async def start(self) -> None:
         self.engine.resume_incomplete()
+        try:
+            await self.engine.recover_deliveries()   # 任务级断点恢复（交付在途补收口）
+        except Exception as e:  # noqa: BLE001 — 断点补恢复失败不阻断调度启动
+            logger.warning("任务级断点恢复失败: %s", e)
         self._task = asyncio.get_event_loop().create_task(self._loop())
         logger.info("流程调度器已启动（间隔 %.0fs）", self.interval_seconds)
 

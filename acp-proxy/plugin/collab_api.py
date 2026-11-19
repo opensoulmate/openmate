@@ -78,6 +78,12 @@ class CancelRequest(PydanticBaseModel):
     reason: str = ""
 
 
+class VerifyTaskRequest(PydanticBaseModel):
+    verified_by: str                 # 验收者（≠交付者；自审拒收留痕）
+    evidence: str = ""               # 内容级探针/验收证据（空=拒翻档 fail-closed）
+    ok: bool = True                  # False=验收不过（拒伪完成，不许标完成）
+
+
 def _task_view(runtime, task: WorkOrder, now: float) -> dict[str, Any]:
     return {
         "task_id": task.task_id,
@@ -112,6 +118,16 @@ def _task_view(runtime, task: WorkOrder, now: float) -> dict[str, Any]:
         "budget": task.budget,
         "usage": task.usage,
         "on_timeout": task.on_timeout,
+        # ── 双轴（reported done ≠ verified）：黄=自报交付，绿=验收翻档 ──
+        "verified": getattr(task, "verified", False),
+        "verified_by": getattr(task, "verified_by", ""),
+        "verified_at": getattr(task, "verified_at", None),
+        "verify_evidence": getattr(task, "verify_evidence", ""),
+        "claim_source": getattr(task, "claim_source", "self-report"),
+        "confidence": task.confidence,
+        "status_axis": task.status_axis,
+        "settle_rejects": getattr(task, "settle_rejects", 0),
+        "fix_rounds": getattr(task, "fix_rounds", 0),
     }
 
 
@@ -127,17 +143,26 @@ def build_collab_router(runtime=None) -> APIRouter:
 
     @router.get("/tasks")
     async def list_tasks(assignee: str = "", role: str = "", kind: str = "",
-                         bucket: str = "", limit: int = 50) -> dict[str, Any]:
-        """收件箱清单（在办/交付/超时三桶为收发台主视图）。"""
+                         bucket: str = "", verification: str = "",
+                         limit: int = 50) -> dict[str, Any]:
+        """收件箱清单（在办/交付/超时三桶为收发台主视图）。
+
+        verification=unverified：只看「done·unverified」（已交付未验收，黄）——
+        监督日清一条的数据源。
+        """
         now = runtime._clock()
         tasks = runtime.store.list(assignee=assignee, role=role, kind=kind,
                                    bucket=bucket, limit=max(1, min(limit, 200)),
                                    now=now)
+        if verification == "unverified":
+            tasks = [t for t in tasks
+                     if t.status == "delivered" and not getattr(t, "verified", False)]
         return {
             "tasks": [_task_view(runtime, t, now) for t in tasks],
             "count": len(tasks),
             "assignee": assignee,
             "bucket": bucket,
+            "verification": verification,
         }
 
     @router.get("/tasks/{task_id}")
@@ -251,6 +276,19 @@ def build_collab_router(runtime=None) -> APIRouter:
         task = runtime.store.close(task_id, STATUS_CANCELLED, note=req.reason or "人工取消")
         return {"task": _task_view(runtime, task, runtime._clock())}
 
+    @router.post("/tasks/{task_id}/verify")
+    async def verify_task(task_id: str, req: VerifyTaskRequest) -> dict[str, Any]:
+        """验收证据翻档（工单面唯一翻绿通道）：证据非空+验收者≠交付者，否则拒收留痕。"""
+        _load(task_id)
+        try:
+            task = runtime.store.verify(
+                task_id, verified_by=req.verified_by, evidence=req.evidence,
+                ok=req.ok)
+        except CollabError as e:
+            raise HTTPException(status_code=409, detail=str(e))
+        return {"task": _task_view(runtime, task, runtime._clock()),
+                "verified": task.verified}
+
     @router.get("/stats")
     async def collab_stats() -> dict[str, Any]:
         """收发台看板：三桶计数 + 预算策略状态（ok/warning/hard_stop 直出）。"""
@@ -258,10 +296,13 @@ def build_collab_router(runtime=None) -> APIRouter:
         all_tasks = runtime.store.list(limit=10_000, now=now)
         buckets = {"open": 0, "delivered": 0, "overdue": 0, "closed": 0}
         by_assignee: dict[str, int] = {}
+        done_unverified = 0
         for task in all_tasks:
             buckets[task.bucket(now)] = buckets.get(task.bucket(now), 0) + 1
             if task.is_open():
                 by_assignee[task.assignee] = by_assignee.get(task.assignee, 0) + 1
+            if task.status == "delivered" and not getattr(task, "verified", False):
+                done_unverified += 1   # 黄：done·unverified（监督日清清单）
         policies = [
             {"id": p.id, "scope": p.scope, "key": p.key, "window": p.window,
              "max_cost_usd": p.max_cost_usd, "max_tokens": p.max_tokens,
@@ -272,6 +313,7 @@ def build_collab_router(runtime=None) -> APIRouter:
         return {
             "buckets": buckets,
             "total": len(all_tasks),
+            "done_unverified": done_unverified,
             "open_by_assignee": by_assignee,
             "budget_policies": policies,
         }

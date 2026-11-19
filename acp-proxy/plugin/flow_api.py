@@ -54,6 +54,20 @@ class RetryRequest(PydanticBaseModel):
     from_node: str = ""              # 缺省=失败节点；可指定续跑起点
 
 
+class VerifyRequest(PydanticBaseModel):
+    verified_by: str                 # 验收者（≠执行者；自审拒收留痕）
+    evidence: str = ""               # 内容级探针/验收证据（空=拒翻档 fail-closed）
+    ok: bool = True                  # False=验收不过（拒伪完成，不许标 completed）
+
+
+class ReassignRequest(PydanticBaseModel):
+    to_assignee: str = ""            # 新归属（人/员工）
+    target_agent: str = ""           # 可换 A2A 目标 SoulMate
+    by: str = ""                     # 发起人（留痕）
+    note: str = ""
+    expect_version: int | None = None   # D5 交办版本校验（缺省不校验）
+
+
 class CloneRequest(PydanticBaseModel):
     new_id: str = ""                 # 缺省 <id>-copy（冲突自动加号）
     new_name: str = ""
@@ -243,6 +257,36 @@ def build_flow_router(engine: FlowEngine | None = None) -> APIRouter:
         except FlowRunError as e:
             raise HTTPException(status_code=409, detail=str(e))
         return engine.run_summary(run)
+
+    @router.post("/runs/{run_id}/nodes/{node_id}/verify")
+    async def verify_run_node(run_id: str, node_id: str,
+                              req: VerifyRequest) -> dict[str, Any]:
+        """验收证据翻档（唯一翻绿通道）：证据非空+验收者≠执行者，否则拒收留痕"""
+        try:
+            return await engine.verify_node(
+                run_id, node_id, verified_by=req.verified_by,
+                evidence=req.evidence, ok=req.ok)
+        except FlowRunError as e:
+            status = 404 if "不存在" in str(e) else 409
+            raise HTTPException(status_code=status, detail=str(e))
+
+    @router.post("/runs/{run_id}/nodes/{node_id}/reassign")
+    async def reassign_run_node(run_id: str, node_id: str,
+                                req: ReassignRequest) -> dict[str, Any]:
+        """换人重派：工单交办新归属（可换 target_agent 重派），失败实例原地续跑"""
+        try:
+            return await engine.reassign_node(
+                run_id, node_id, to_assignee=req.to_assignee,
+                target_agent=req.target_agent, by=req.by, note=req.note,
+                expect_version=req.expect_version)
+        except FlowRunError as e:
+            status = 404 if "不存在" in str(e) else 409
+            raise HTTPException(status_code=status, detail=str(e))
+
+    @router.get("/unverified")
+    async def unverified_done(limit: int = 200) -> dict[str, Any]:
+        """done·unverified 清单（监督日清一条）：节点/工单/实例三个层面可查"""
+        return engine.unverified_done(limit=max(1, min(limit, 1000)))
 
     @router.post("/events")
     async def emit_event(req: EventRequest) -> dict[str, Any]:

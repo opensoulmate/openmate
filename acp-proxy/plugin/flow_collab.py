@@ -43,6 +43,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from plugin.flow_def import BudgetSpec
+from plugin.verify_axis import can_verify, is_input_required, node_confidence, task_axis
 
 logger = logging.getLogger("plugin.flow_collab")
 
@@ -323,6 +324,14 @@ class WorkOrder:
     history: list[dict[str, Any]] = field(default_factory=list)
     history_trimmed: int = 0      # E5 有界裁剪计数（上下文卫生）
     archived: bool = False        # E5 任务包上下文已归档释放
+    # ── 双轴完成状态（监督闭环：reported done ≠ verified）──
+    verified: bool = False        # Test·verified（绿）：只由验收证据翻档
+    verified_by: str = ""         # 验收者（≠交付者才许翻档，防自审）
+    verified_at: float | None = None
+    verify_evidence: str = ""     # 内容级探针/验收证据摘要（报成功没用）
+    claim_source: str = "self-report"   # self-report（自报封顶黄）| evidence（翻绿）
+    settle_rejects: int = 0       # settle 拒伪完成次数（留痕计数）
+    fix_rounds: int = 0           # 修复轮（≤2，超出→重规划）
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -349,6 +358,17 @@ class WorkOrder:
         if self.status in (STATUS_FAILED, STATUS_CANCELLED):
             return "closed"
         return "overdue" if self.is_overdue(now) else "open"
+
+    # ── 双轴（只读派生，fail-closed：交付未验收=黄 reported done）──
+
+    @property
+    def confidence(self) -> str:
+        status = "ok" if self.status == STATUS_DELIVERED else self.status
+        return node_confidence(status, self.verified)
+
+    @property
+    def status_axis(self) -> str:
+        return task_axis(self.status, self.verified)
 
     def note(self, event: str, detail: str = "") -> None:
         # E5 上下文卫生：history 有界（防逐任务累积），溢出计数留痕
@@ -564,6 +584,52 @@ class WorkOrderStore:
 
         task, dup = self._mutate(task_id, _do)
         return task, dup
+
+    def verify(self, task_id: str, *, verified_by: str, evidence: str,
+               ok: bool = True, now: float | None = None) -> WorkOrder:
+        """验收证据翻档（工单面，唯一翻绿通道）：证据非空 + 验收者≠交付者。
+
+        伪完成被拒并留痕（对位 completion_integrity 自审拒收规则）：
+        自审（self_referential_evidence）/证据为空（no_evidence）→
+        note(verify-refused) 留痕后 CollabError 原样上抛，工单保持 reported done（黄）。
+        ok=False：验收不过——不许标完成（拒伪完成），留痕计数。
+        """
+        now = time.time() if now is None else now
+
+        def _do(task: WorkOrder) -> None:
+            if task.status != STATUS_DELIVERED:
+                raise CollabError(
+                    f"只有已交付工单可验收（当前 {task.status}）: {task_id}")
+            if not ok:
+                task.settle_rejects += 1
+                task.note("verify-failed",
+                          f"验收不过 by={verified_by or '-'}: {str(evidence)[:200]}")
+                return
+            allowed, code, detail = can_verify(
+                verifier=verified_by, executor=task.delivered_by,
+                evidence=evidence)
+            if not allowed:
+                raise CollabError(f"verify_refused:{code}: {detail}")
+            task.verified = True
+            task.verified_by = verified_by
+            task.verified_at = now
+            task.verify_evidence = str(evidence)[:500]
+            task.claim_source = "evidence"
+            task.note("verified",
+                      f"by={verified_by} evidence={str(evidence)[:200]}")
+
+        try:
+            task, _ = self._mutate(task_id, _do)
+        except CollabError as e:
+            if str(e).startswith("verify_refused:"):
+                # 拒收留痕（落 history 后原样抛出）
+                task = self.find(task_id)
+                if task is not None:
+                    task.settle_rejects += 1
+                    task.note("verify-refused", str(e)[len("verify_refused:"):][:300])
+                    self.save(task)
+            raise
+        return task
 
     def close(self, task_id: str, status: str, note: str = "") -> WorkOrder:
         """终态收口（failed/cancelled）：终态幂等不覆盖。"""
@@ -1356,6 +1422,10 @@ class CollabRuntime:
         task.note("dispatched", f"a2a_task_id={task.a2a_task_id} status={out.get('status')}")
         self.store.save(task)
         self._emit("task-dispatched", task)
+        if is_input_required(str(out.get("state") or ""), out.get("result")):
+            # INPUT_REQUIRED 转人工（agent_node 四补之一）：缺输入≠失败，开人工补输入单
+            await self._convert_to_human_input(task, out)
+            return self.store.load(task.task_id)
         if out.get("result"):
             # 确定性处理端同步回结果：直接交付回流（带领取令牌=CAS 回执）
             await self.deliver_and_resume(task.task_id, out["result"],
@@ -1405,6 +1475,39 @@ class CollabRuntime:
 
     # -- agent 结果轮询 / 超时账 --
 
+    async def _convert_to_human_input(self, task: WorkOrder,
+                                      out: dict[str, Any]) -> None:
+        """INPUT_REQUIRED → 转人工（agent_node 四补之一）：SoulMate 卡在缺输入——
+        开人工补输入单（同一 run/node 恢复面：人交付答案=该节点交付回流），
+        agent 单收口取消（留痕，绝不当失败静默吞）。"""
+        question = str(out.get("result") or out.get("message") or "").strip() \
+            or "SoulMate 需要补充输入才能继续"
+        task.note("input-required", f"转人工补输入: {question[:200]}")
+        self.store.save(task)
+        hours_left = 72.0
+        if task.due_at:
+            hours_left = max(1.0, (task.due_at - time.time()) / 3600)
+        human_task = self.create(
+            kind=KIND_HUMAN, run_id=task.run_id, flow_id=task.flow_id,
+            node_id=task.node_id, assignee=task.assignee or "用户",
+            role=task.role, assignee_kind="human",
+            title=f"补输入：{task.title or task.node_id}",
+            instruction=f"SoulMate（{task.target_agent or task.assignee}）"
+                        f"需要补充输入才能继续：\n{question}",
+            form="补充输入/确认（交付=回答）",
+            timeout_hours=hours_left, on_timeout=task.on_timeout,
+            payload={"converted_from": task.task_id, "kind": "input-required"})
+        self.store.close(task.task_id, STATUS_CANCELLED,
+                         note="input-required 转人工")
+        engine = self._get_engine()
+        if engine is not None and task.run_id:
+            try:
+                engine.reattach_gate_task(task.run_id, task.node_id, human_task)
+            except Exception as e:  # noqa: BLE001 — 重挂闸失败留痕不吞
+                logger.warning("input-required 重挂闸失败 %s: %s", task.task_id, e)
+        self._emit("task-input-required", human_task)
+        logger.info("INPUT_REQUIRED 转人工: %s → %s", task.task_id, human_task.task_id)
+
     async def poll_agent_tasks(self) -> int:
         """agent 工单回流轮询：completed → 交付恢复；failed → 单据 failed 显式报因。
 
@@ -1452,6 +1555,10 @@ class CollabRuntime:
                                  note=f"a2a task {state}: {(out.get('result') or '')[:200]}")
                 self._emit("task-failed", self.store.load(task.task_id))
                 delivered += 1  # 让引擎侧超时账同步收口
+            elif is_input_required(state, out.get("result")):
+                # INPUT_REQUIRED 转人工（agent_node 四补之一）：缺输入≠失败
+                await self._convert_to_human_input(task, out)
+                delivered += 1
         return delivered
 
     def check_timeouts(self, now: float | None = None) -> dict[str, int]:
