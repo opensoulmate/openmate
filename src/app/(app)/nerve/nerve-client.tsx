@@ -235,20 +235,23 @@ export function NerveClient() {
   return (
       <PageLayout title="神经">
         
-    <div className="p-4 sm:p-3 lg:p-6 max-w-6xl mx-auto space-y-3 lg:space-y-6">
+    <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex items-center gap-2 lg:gap-3">
-        <div className="p-2 rounded-lg bg-gradient-to-br from-blue-500/20 to-purple-500/20">
-          <Zap className="w-6 h-6 text-blue-400" />
-        </div>
-        <div>
-          <h1 className="text-xl lg:text-2xl font-bold">⚡ Nerve — {t('nerve.title')}</h1>
-          <p className="text-xs lg:text-sm text-muted-foreground">{t('nerve.message')}</p>
+      <div className="flex items-center justify-between border-b border-border px-3 lg:px-6 py-4">
+        <div className="flex items-center gap-2 lg:gap-3 min-w-0 flex-1">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500/20 to-purple-500/20">
+            <Zap className="w-6 h-6 text-blue-400" />
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-lg lg:text-xl font-semibold truncate">⚡ Nerve — {t('nerve.title')}</h1>
+            <p className="text-xs lg:text-sm text-muted-foreground truncate">{t('organTag.nerve')}</p>
+          </div>
         </div>
       </div>
+      <div className="flex-1 overflow-y-auto px-3 lg:px-6 py-4 lg:py-6 space-y-3 lg:space-y-6">
 
       {/* Stats Bar */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 lg:gap-3 sm:gap-2 lg:gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 lg:gap-4">
         {[
           { label: t('nerve.t93835'), value: bus?.total_events ?? 0, icon: MessageSquare, color: "blue" },
           { label: t('nerve.t23323'), value: bus?.total_nodes ?? 0, icon: Server, color: "purple" },
@@ -294,7 +297,7 @@ export function NerveClient() {
         <div className="space-y-3 lg:space-y-6">
           {/* Topics */}
           {bus?.topics && bus.topics.length > 0 && (
-            <div className="bg-card border border-border rounded-xl p-5">
+            <div className="bg-card border border-border rounded-xl p-3 lg:p-4">
               <h3 className="font-semibold mb-3 flex items-center gap-2">
                 <Globe className="w-4 h-4" /> {t('nerve.activeTopics')}
               </h3>
@@ -316,7 +319,7 @@ export function NerveClient() {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-2 lg:gap-4">
             <button
               onClick={() => setActiveTab("publish")}
-              className="bg-card border border-border rounded-xl p-5 text-left hover:border-blue-500/30 hover:bg-blue-500/5 transition-all group"
+              className="bg-card border border-border rounded-xl p-3 lg:p-4 text-left hover:border-blue-500/30 hover:bg-blue-500/5 transition-all group"
             >
               <Send className="w-6 h-6 text-blue-400 mb-2 group-hover:scale-110 transition-transform" />
               <h4 className="font-semibold text-xs lg:text-sm">{t('nerve.text5')}</h4>
@@ -324,7 +327,7 @@ export function NerveClient() {
             </button>
             <button
               onClick={() => setActiveTab("subscriptions")}
-              className="bg-card border border-border rounded-xl p-5 text-left hover:border-purple-500/30 hover:bg-purple-500/5 transition-all group"
+              className="bg-card border border-border rounded-xl p-3 lg:p-4 text-left hover:border-purple-500/30 hover:bg-purple-500/5 transition-all group"
             >
               <Radio className="w-6 h-6 text-purple-400 mb-2 group-hover:scale-110 transition-transform" />
               <h4 className="font-semibold text-xs lg:text-sm">{t('nerve.text11')}</h4>
@@ -332,7 +335,7 @@ export function NerveClient() {
             </button>
             <button
               onClick={() => setActiveTab("nodes")}
-              className="bg-card border border-border rounded-xl p-5 text-left hover:border-green-500/30 hover:bg-green-500/5 transition-all group"
+              className="bg-card border border-border rounded-xl p-3 lg:p-4 text-left hover:border-green-500/30 hover:bg-green-500/5 transition-all group"
             >
               <Server className="w-6 h-6 text-green-400 mb-2 group-hover:scale-110 transition-transform" />
               <h4 className="font-semibold text-xs lg:text-sm">{t('nerve.text4')}</h4>
@@ -341,7 +344,7 @@ export function NerveClient() {
           </div>
 
           {/* Recent Events Preview */}
-          <div className="bg-card border border-border rounded-xl p-5">
+          <div className="bg-card border border-border rounded-xl p-3 lg:p-4">
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-semibold flex items-center gap-2">
                 <Clock className="w-4 h-4" /> {t('nerve.recentEvents')}
@@ -461,7 +464,7 @@ export function NerveClient() {
       {activeTab === "subscriptions" && (
         <div className="space-y-3 lg:space-y-6">
           {/* Add Subscription */}
-          <div className="bg-card border border-border rounded-xl p-5">
+          <div className="bg-card border border-border rounded-xl p-3 lg:p-4">
             <h3 className="font-semibold mb-4 flex items-center gap-2">
               <Plus className="w-4 h-4" /> {t('nerve.addSubscription')}
             </h3>
@@ -498,7 +501,7 @@ export function NerveClient() {
           </div>
 
           {/* Subscription List */}
-          <div className="bg-card border border-border rounded-xl p-5">
+          <div className="bg-card border border-border rounded-xl p-3 lg:p-4">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-semibold">{t('nerve.activeSubscriptions')} ({subscriptions.length})</h3>
               <button onClick={fetchSubscriptions} className="text-xs text-muted-foreground hover:text-foreground">
@@ -543,7 +546,7 @@ export function NerveClient() {
       {activeTab === "nodes" && (
         <div className="space-y-3 lg:space-y-6">
           {/* Register Node */}
-          <div className="bg-card border border-border rounded-xl p-5">
+          <div className="bg-card border border-border rounded-xl p-3 lg:p-4">
             <h3 className="font-semibold mb-4 flex items-center gap-2">
               <Plus className="w-4 h-4" /> {t('nerve.registerNode')}
             </h3>
@@ -577,7 +580,7 @@ export function NerveClient() {
           </div>
 
           {/* Node List */}
-          <div className="bg-card border border-border rounded-xl p-5">
+          <div className="bg-card border border-border rounded-xl p-3 lg:p-4">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-semibold">{t('nerve.nodeList')} ({nodes.length})</h3>
               <button onClick={fetchNodes} className="text-xs text-muted-foreground hover:text-foreground">
@@ -671,7 +674,7 @@ export function NerveClient() {
 
           <div className="space-y-4">
             <h3 className="font-semibold">{t('nerve.text36')}</h3>
-            <div className="min-h-[300px] bg-card border border-border rounded-xl p-3 lg:p-4">
+            <div className="min-h-[300px] bg-card border border-border rounded-xl p-3 lg:p-4 lg:p-4">
               {pubResult ? (
                 <div className="space-y-3">
                   <div className="flex items-center gap-2 text-green-400">
@@ -708,6 +711,7 @@ export function NerveClient() {
       )}
     </div>
   
-      </PageLayout>
+            </div>
+</PageLayout>
     )
 }

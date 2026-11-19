@@ -191,13 +191,15 @@ export function HeredityClient() {
       <PageLayout title="遗传链">
         
     <div className="flex h-full flex-col overflow-hidden">
-      <div className="flex items-center justify-between border-b border-border px-3 lg:px-6 py-3 lg:py-4 gap-2">
+      <div className="flex items-center justify-between border-b border-border px-3 lg:px-6 py-4">
         <div className="flex items-center gap-2 lg:gap-3 min-w-0 flex-1">
-          <GitBranch size={18} className="text-teal-500 shrink-0" />
-          <h1 className="text-sm lg:text-lg font-semibold truncate">{t('heredity.title') || t('heredity.text4')}</h1>
-          <span className="rounded-full bg-teal-500/10 px-1.5 lg:px-2 py-0.5 text-[10px] lg:text-xs font-medium text-teal-500 shrink-0 hidden sm:inline">
-            {t('heredity.subtitle') || t('heredity.text5')}
-          </span>
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-teal-500/10">
+            <GitBranch size={18} className="text-teal-500 shrink-0" />
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-lg lg:text-xl font-semibold truncate">{t('heredity.title') || t('heredity.text4')}</h1>
+            <p className="text-xs lg:text-sm text-muted-foreground truncate">{t('organTag.heredity')}</p>
+          </div>
           {platform && (
             <span className="rounded-full bg-muted px-1.5 lg:px-2 py-0.5 text-[10px] lg:text-xs text-muted-foreground shrink-0">
               v{platform.platform_version}
@@ -210,7 +212,7 @@ export function HeredityClient() {
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3 lg:p-6 space-y-3 lg:space-y-6">
+      <div className="flex-1 overflow-y-auto px-3 lg:px-6 py-4 lg:py-6 space-y-3 lg:space-y-6">
         {/* Stats */}
         {platform && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 lg:gap-4">
@@ -280,7 +282,7 @@ export function HeredityClient() {
 
               {/* Component Detail */}
               {componentDetail && (
-                <div className="rounded-xl border border-border bg-card p-5 space-y-4">
+                <div className="rounded-xl border border-border bg-card p-3 lg:p-4 space-y-4">
                   <div className="flex items-center justify-between">
                     <h3 className="text-xs lg:text-sm font-semibold">{componentDetail.component_name}</h3>
                     <span className="text-lg font-bold text-teal-500">v{componentDetail.current.version}</span>
@@ -380,7 +382,7 @@ export function HeredityClient() {
             ) : (
               <div className="space-y-2">
                 {migrations.map((m) => (
-                  <div key={m.migration_id} className="rounded-xl border border-border bg-card p-3 lg:p-4">
+                  <div key={m.migration_id} className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2 lg:gap-3">
                         <span className={cn("rounded-full px-2 py-0.5 text-[10px]", STATUS_COLORS[m.status] || "bg-muted")}>
@@ -459,7 +461,7 @@ export function HeredityClient() {
         {/* Platform Tab */}
         {tab === "platform" && platform && (
           <div className="space-y-4">
-            <div className="rounded-xl border border-border bg-card p-3 lg:p-6 space-y-4">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4 space-y-4">
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-lg font-semibold">{t('heredity.platformVersion') || t('heredity.platformVersion')}</h3>
@@ -497,7 +499,7 @@ export function HeredityClient() {
             </div>
 
             {/* Dependency Graph */}
-            <div className="rounded-xl border border-border bg-card p-5 space-y-3">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 space-y-3">
               <h3 className="text-xs lg:text-sm font-semibold">{t('heredity.dependencyGraph') || t('heredity.t75585')}</h3>
               <div className="space-y-2">
                 {components.map((c) => (
@@ -532,7 +534,7 @@ function StatCard({ icon: Icon, label, value, sub, color, bg }: {
   icon: React.ElementType; label: string; value: string; sub: string; color: string; bg: string;
 }) {
   return (
-    <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
+    <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-medium text-muted-foreground">{label}</span>
         <div className={cn("rounded-lg p-1.5", bg)}><Icon size={14} className={color} /></div>

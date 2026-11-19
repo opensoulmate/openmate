@@ -144,7 +144,7 @@ function StatCard({ icon: Icon, label, value, sub, color, bg }: {
   icon: React.ElementType; label: string; value: string | number; sub: string; color: string; bg: string;
 }) {
   return (
-    <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
+    <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-medium text-muted-foreground">{label}</span>
         <div className={cn("rounded-lg p-1.5", bg)}><Icon size={14} className={color} /></div>
@@ -669,12 +669,14 @@ export function VeinClient() {
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-3 lg:px-6 py-4">
-        <div className="flex items-center gap-2 lg:gap-3">
-          <Folder size={20} className="text-red-500" />
-          <h1 className="text-lg font-semibold">{t("vein.title") || "Vein · File Management"}</h1>
-          <span className="rounded-full bg-red-500/10 px-2 py-0.5 text-xs font-medium text-red-500">
-            Vein
-          </span>
+        <div className="flex items-center gap-2 lg:gap-3 min-w-0 flex-1">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-500/10">
+            <Folder size={20} className="text-red-500" />
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-lg lg:text-xl font-semibold truncate">{t("vein.title") || "Vein · File Management"}</h1>
+            <p className="text-xs lg:text-sm text-muted-foreground truncate">{t('organTag.vein')}</p>
+          </div>
         </div>
         <div className="flex gap-2">
           {tab === "files" && (
@@ -718,7 +720,7 @@ export function VeinClient() {
         ))}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3 lg:p-6 space-y-3 lg:space-y-6">
+      <div className="flex-1 overflow-y-auto px-3 lg:px-6 py-4 lg:py-6 space-y-3 lg:space-y-6">
         {/* Upload progress */}
         {uploadProgress && (
           <div className={cn(
@@ -809,7 +811,7 @@ export function VeinClient() {
 
             {/* Chunked Upload Sessions */}
             {chunkedUploads.length > 0 && (
-              <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
+              <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
                 <h3 className="text-xs lg:text-sm font-medium mb-3 flex items-center gap-2">
                   <Layers size={14} className="text-blue-500" />
                   {t("vein.activeChunkedUploads", { count: chunkedUploads.length })}
@@ -1366,7 +1368,7 @@ export function VeinClient() {
             </div>
 
             {/* Cache Usage Bar */}
-            <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-xs lg:text-sm font-medium">{t("vein.cacheSpaceUsage")}</h3>
                 <span className="text-xs text-muted-foreground">
@@ -1392,7 +1394,7 @@ export function VeinClient() {
             </div>
 
             {/* Cache Actions */}
-            <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
               <h3 className="text-xs lg:text-sm font-medium mb-3">{t("vein.cacheOperationsTitle")}</h3>
               <div className="flex flex-col sm:flex-row gap-2 lg:gap-3">
                 <button
@@ -1416,7 +1418,7 @@ export function VeinClient() {
             </div>
 
             {/* Dedup Info */}
-            <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
               <h3 className="text-xs lg:text-sm font-medium mb-3 flex items-center gap-2">
                 <Database size={14} className="text-amber-500" />
                 {t("vein.dedupStatsTitle")}

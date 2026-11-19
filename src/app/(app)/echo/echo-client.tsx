@@ -231,12 +231,14 @@ export function EchoClient() {
         
     <div className="flex h-full flex-col overflow-hidden">
       <div className="flex items-center justify-between border-b border-border px-3 lg:px-6 py-4">
-        <div className="flex items-center gap-2 lg:gap-3">
-          <Volume2 size={20} className="text-pink-500" />
-          <h1 className="text-lg font-semibold">{t("echo.title") || "Echo · Message Push"}</h1>
-          <span className="rounded-full bg-pink-500/10 px-2 py-0.5 text-xs font-medium text-pink-500">
-            {t("echo.t83763") || "Message Push"}
-          </span>
+        <div className="flex items-center gap-2 lg:gap-3 min-w-0 flex-1">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-pink-500/10">
+            <Volume2 size={20} className="text-pink-500" />
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-lg lg:text-xl font-semibold truncate">{t("echo.title") || "Echo · Message Push"}</h1>
+            <p className="text-xs lg:text-sm text-muted-foreground truncate">{t('organTag.echo')}</p>
+          </div>
         </div>
         <button onClick={() => { fetchHealth(); tab === "channels" && fetchChannels(); tab === "history" && fetchHistory(); tab === "templates" && fetchTemplates(); }}
           className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs lg:text-sm hover:bg-muted">
@@ -244,27 +246,27 @@ export function EchoClient() {
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3 lg:p-6 space-y-3 lg:space-y-6">
+      <div className="flex-1 overflow-y-auto px-3 lg:px-6 py-4 lg:py-6 space-y-3 lg:space-y-6">
         {/* Stats */}
         {health && (
           <div className="grid grid-cols-2 md:grid-cols-5 gap-2 lg:gap-4">
-            <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
               <span className="text-xs text-muted-foreground">{t("echo.t38907") || "Total Messages"}</span>
               <p className="text-xl lg:text-2xl font-bold">{health.total_messages || 0}</p>
             </div>
-            <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
               <span className="text-xs text-muted-foreground">{t("echo.success") || "Success"}</span>
               <p className="text-xl lg:text-2xl font-bold text-emerald-500">{health.sent || 0}</p>
             </div>
-            <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
               <span className="text-xs text-muted-foreground">{t("echo.fail") || "Failed"}</span>
               <p className="text-xl lg:text-2xl font-bold text-red-500">{health.failed || 0}</p>
             </div>
-            <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
               <span className="text-xs text-muted-foreground">{t("echo.channel") || "Channel"}</span>
               <p className="text-xl lg:text-2xl font-bold">{health.channels_enabled || 0}/{health.channels_configured || 0}</p>
             </div>
-            <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
               <span className="text-xs text-muted-foreground">{t("echo.templates") || "Templates"}</span>
               <p className="text-xl lg:text-2xl font-bold">{health.templates?.total_templates || 0}</p>
               <p className="text-xs text-muted-foreground mt-0.5">{(t("echo.usageTimes") || "Used {{count}} times").replace("{count}", String(health.templates?.total_usage || 0))}</p>
@@ -591,7 +593,7 @@ export function EchoClient() {
             {/* Create Template Modal */}
             {showCreateTemplate && (
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-                <div className="w-full max-w-lg rounded-xl border border-border bg-card p-3 lg:p-6 space-y-4">
+                <div className="w-full max-w-lg rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4 space-y-4">
                   <h3 className="font-semibold">{t("echo.createNewTemplate") || "New Message Template"}</h3>
                   <div className="grid grid-cols-2 gap-2 lg:gap-3">
                     <input value={newTplName} onChange={(e) => setNewTplName(e.target.value)}
@@ -671,7 +673,7 @@ export function EchoClient() {
               {channels.map((ch) => {
                 const healthInfo = channelHealth?.channels?.find((h: any) => h.channel === ch.channel);
                 return (
-                <div key={ch.channel} className="rounded-xl border border-border bg-card p-3 lg:p-4">
+                <div key={ch.channel} className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
                       <Radio size={16} className={ch.enabled ? "text-emerald-500" : "text-muted-foreground"} />

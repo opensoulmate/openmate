@@ -227,13 +227,15 @@ export function VoiceClient() {
         
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-border px-3 lg:px-6 py-3 lg:py-4 gap-2">
+      <div className="flex items-center justify-between border-b border-border px-3 lg:px-6 py-4">
         <div className="flex items-center gap-2 lg:gap-3 min-w-0 flex-1">
-          <Volume2 size={18} className="text-rose-500 shrink-0" />
-          <h1 className="text-sm lg:text-lg font-semibold truncate">{t("voice.title") || "Voice Engine"}</h1>
-          <span className="rounded-full bg-rose-500/10 px-1.5 lg:px-2 py-0.5 text-[10px] lg:text-xs font-medium text-rose-500 shrink-0">
-            {t("voice.badge") || "TTS"}
-          </span>
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-rose-500/10">
+            <Volume2 size={18} className="text-rose-500 shrink-0" />
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-lg lg:text-xl font-semibold truncate">{t("voice.title") || "Voice Engine"}</h1>
+            <p className="text-xs lg:text-sm text-muted-foreground truncate">{t('organTag.voice')}</p>
+          </div>
           {stats && <StatusBadge online={stats.status === "ok"} />}
         </div>
         <button
@@ -246,7 +248,7 @@ export function VoiceClient() {
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3 lg:p-6 space-y-3 lg:space-y-6">
+      <div className="flex-1 overflow-y-auto px-3 lg:px-6 py-4 lg:py-6 space-y-3 lg:space-y-6">
         {error && (
           <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 lg:p-4 text-xs lg:text-sm text-red-500">
             {error}
@@ -254,7 +256,7 @@ export function VoiceClient() {
         )}
 
         {/* TTS 合成 */}
-        <div className="rounded-xl border border-border bg-card p-5 space-y-3">
+        <div className="rounded-xl border border-border bg-card p-3 lg:p-4 space-y-3">
           <h3 className="text-xs lg:text-sm font-semibold flex items-center gap-2">
             <Mic size={14} className="text-rose-500" />
             {t("voice.synth.title", "语音合成")}
@@ -434,7 +436,7 @@ export function VoiceClient() {
         {stats && (
           <>
             {/* Backend Status */}
-            <div className="rounded-xl border border-border bg-card p-5">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
               <h3 className="text-xs lg:text-sm font-semibold flex items-center gap-2 mb-4">
                 <Settings size={14} className="text-rose-500" />
                 {t("voice.backendStatus") || "Backend Status"}
@@ -472,21 +474,21 @@ export function VoiceClient() {
 
             {/* Synthesis Stats */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2 lg:gap-4">
-              <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
+              <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-medium text-muted-foreground">{t("voice.totalSynthesized") || "Synthesized"}</span>
                   <div className="rounded-lg p-1.5 bg-rose-500/10"><Mic size={14} className="text-rose-500" /></div>
                 </div>
                 <p className="text-xl lg:text-2xl font-bold">{stats.engine.total_synthesized}</p>
               </div>
-              <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
+              <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-medium text-muted-foreground">{t("voice.totalCharacters") || "Characters"}</span>
                   <div className="rounded-lg p-1.5 bg-blue-500/10"><Hash size={14} className="text-blue-500" /></div>
                 </div>
                 <p className="text-xl lg:text-2xl font-bold">{stats.engine.total_characters.toLocaleString()}</p>
               </div>
-              <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
+              <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-medium text-muted-foreground">{t("voice.cacheHits") || "Cache Hits"}</span>
                   <div className="rounded-lg p-1.5 bg-emerald-500/10"><Database size={14} className="text-emerald-500" /></div>
@@ -496,7 +498,7 @@ export function VoiceClient() {
                   {stats.engine.cache.entries} entries · {formatBytes(stats.engine.cache.size_bytes)}
                 </p>
               </div>
-              <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
+              <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-medium text-muted-foreground">{t("voice.errors") || "Errors"}</span>
                   <div className="rounded-lg p-1.5 bg-red-500/10"><XCircle size={14} className="text-red-500" /></div>
@@ -507,7 +509,7 @@ export function VoiceClient() {
 
             {/* Profile Stats */}
             <div className="grid grid-cols-2 md:grid-cols-3 gap-2 lg:gap-4">
-              <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
+              <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-medium text-muted-foreground">{t("voice.totalProfiles") || "Total Profiles"}</span>
                   <div className="rounded-lg p-1.5 bg-violet-500/10"><Settings size={14} className="text-violet-500" /></div>
@@ -517,7 +519,7 @@ export function VoiceClient() {
                   {stats.profiles.builtin_count} {t("voice.builtin") || "builtin"} · {stats.profiles.user_count} {t("voice.user") || "user"}
                 </p>
               </div>
-              <div className="rounded-xl border border-border bg-card p-3 lg:p-4 col-span-2">
+              <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4 col-span-2">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-medium text-muted-foreground">{t("voice.languageBreakdown") || "Language Breakdown"}</span>
                   <div className="rounded-lg p-1.5 bg-amber-500/10"><Globe size={14} className="text-amber-500" /></div>

@@ -231,12 +231,14 @@ export function HippoClient() {
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-3 lg:px-6 py-4">
-        <div className="flex items-center gap-2 lg:gap-3">
-          <Brain size={20} className="text-indigo-500" />
-          <h1 className="text-lg font-semibold">{t("hippo.title") || "Hippocampus · Memory Lifecycle"}</h1>
-          <span className="rounded-full bg-indigo-500/10 px-2 py-0.5 text-xs font-medium text-indigo-500">
-            {t("hippo.subtitle") || "Short-term memory management, auto-archiving, forgetting decay, session lifecycle"}
-          </span>
+        <div className="flex items-center gap-2 lg:gap-3 min-w-0 flex-1">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-500/10">
+            <Brain size={20} className="text-indigo-500" />
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-lg lg:text-xl font-semibold truncate">{t("hippo.title") || "Hippocampus · Memory Lifecycle"}</h1>
+            <p className="text-xs lg:text-sm text-muted-foreground truncate">{t('organTag.hippo')}</p>
+          </div>
         </div>
         <button onClick={() => { fetchStats(); tab === "memories" && fetchMemories(); tab === "sessions" && fetchSessions(); }}
           className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs lg:text-sm hover:bg-muted transition-colors">
@@ -244,7 +246,7 @@ export function HippoClient() {
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3 lg:p-6 space-y-3 lg:space-y-6">
+      <div className="flex-1 overflow-y-auto px-3 lg:px-6 py-4 lg:py-6 space-y-3 lg:space-y-6">
         {/* Stats */}
         {stats && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 lg:gap-4">
@@ -434,7 +436,7 @@ export function HippoClient() {
             </div>
 
             {decayConfig && (
-              <div className="rounded-xl border border-border bg-card p-5 space-y-4">
+              <div className="rounded-xl border border-border bg-card p-3 lg:p-4 space-y-4">
                 <h3 className="text-xs lg:text-sm font-semibold">{t("hippo.decayConfig") || "Decay Configuration"}</h3>
                 <div className="grid grid-cols-2 gap-2 lg:gap-4">
                   <div>
@@ -480,7 +482,7 @@ export function HippoClient() {
         {/* Simulate Tab */}
         {tab === "simulate" && (
           <div className="space-y-4">
-            <div className="rounded-xl border border-border bg-card p-5 space-y-4">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 space-y-4">
               <h3 className="text-xs lg:text-sm font-semibold">{t("hippo.simulateDecay") || "Simulate Decay"}</h3>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 lg:gap-4">
                 <div>
@@ -544,7 +546,7 @@ function StatCard({ icon: Icon, label, value, sub, color, bg }: {
   icon: React.ElementType; label: string; value: string; sub: string; color: string; bg: string;
 }) {
   return (
-    <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
+    <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-medium text-muted-foreground">{label}</span>
         <div className={cn("rounded-lg p-1.5", bg)}><Icon size={14} className={color} /></div>

@@ -66,13 +66,15 @@ export function VisionClient() {
         
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-border px-3 lg:px-6 py-3 lg:py-4 gap-2">
+      <div className="flex items-center justify-between border-b border-border px-3 lg:px-6 py-4">
         <div className="flex items-center gap-2 lg:gap-3 min-w-0 flex-1">
-          <ImageIcon size={18} className="text-indigo-500 shrink-0" />
-          <h1 className="text-sm lg:text-lg font-semibold truncate">{t("vision.title") || "Vision Engine"}</h1>
-          <span className="rounded-full bg-indigo-500/10 px-1.5 lg:px-2 py-0.5 text-[10px] lg:text-xs font-medium text-indigo-500 shrink-0">
-            {t("vision.badge") || "Charts"}
-          </span>
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-500/10">
+            <ImageIcon size={18} className="text-indigo-500 shrink-0" />
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-lg lg:text-xl font-semibold truncate">{t("vision.title") || "Vision Engine"}</h1>
+            <p className="text-xs lg:text-sm text-muted-foreground truncate">{t('organTag.vision')}</p>
+          </div>
           {stats && <StatusBadge online={stats.status === "ok"} />}
         </div>
         <button
@@ -85,7 +87,7 @@ export function VisionClient() {
         </button>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto p-3 lg:p-6">
+      <div className="flex-1 min-h-0 overflow-y-auto px-3 lg:px-6 py-4 lg:py-6">
         {error && (
           <div className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 p-3 lg:p-4 text-xs lg:text-sm text-red-500">
             {error}

@@ -236,13 +236,15 @@ export function MirrorClient() {
       <PageLayout title="镜像">
         
     <div className="flex h-full flex-col overflow-hidden">
-      <div className="flex items-center justify-between border-b border-border px-3 lg:px-6 py-3 lg:py-4 gap-2">
+      <div className="flex items-center justify-between border-b border-border px-3 lg:px-6 py-4">
         <div className="flex items-center gap-2 lg:gap-3 min-w-0 flex-1">
-          <Layers size={18} className="text-indigo-500 shrink-0" />
-          <h1 className="text-sm lg:text-lg font-semibold truncate">{t("mirror.title") || "Mirror · Sandbox Testing"}</h1>
-          <span className="rounded-full bg-indigo-500/10 px-1.5 lg:px-2 py-0.5 text-[10px] lg:text-xs font-medium text-indigo-500 shrink-0 hidden sm:inline">
-            {t("mirror.t13347") || "Isolated environment"}
-          </span>
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-500/10">
+            <Layers size={18} className="text-indigo-500 shrink-0" />
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-lg lg:text-xl font-semibold truncate">{t("mirror.title") || "Mirror · Sandbox Testing"}</h1>
+            <p className="text-xs lg:text-sm text-muted-foreground truncate">{t('organTag.mirror')}</p>
+          </div>
         </div>
         <div className="flex items-center gap-1.5 lg:gap-2 shrink-0">
           {tab === "sandboxes" && (
@@ -265,27 +267,27 @@ export function MirrorClient() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3 lg:p-6 space-y-3 lg:space-y-6">
+      <div className="flex-1 overflow-y-auto px-3 lg:px-6 py-4 lg:py-6 space-y-3 lg:space-y-6">
         {/* Stats */}
         {health && (
           <div className="grid grid-cols-2 md:grid-cols-5 gap-2 lg:gap-4">
-            <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
               <span className="text-xs text-muted-foreground">{t("mirror.t22079") || "Sandboxes"}</span>
               <p className="text-xl lg:text-2xl font-bold">{health.total_sandboxes || 0}</p>
             </div>
-            <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
               <span className="text-xs text-muted-foreground">{t("mirror.active") || "Active"}</span>
               <p className="text-xl lg:text-2xl font-bold text-emerald-500">{health.active || 0}</p>
             </div>
-            <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
               <span className="text-xs text-muted-foreground">{t("mirror.paused") || "Paused"}</span>
               <p className="text-xl lg:text-2xl font-bold text-amber-500">{health.paused || 0}</p>
             </div>
-            <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
               <span className="text-xs text-muted-foreground">{t("mirror.ttl") || "Storage"}</span>
               <p className="text-xs font-mono truncate mt-1">{health.sandbox_dir}</p>
             </div>
-            <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
               <span className="text-xs text-muted-foreground">{t("mirror.totalTemplates") || "Templates"}</span>
               <p className="text-xl lg:text-2xl font-bold">{health.templates?.total_templates || 0}</p>
             </div>
@@ -618,7 +620,7 @@ export function MirrorClient() {
         {/* Create Modal */}
         {showCreate && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-            <div className="w-full max-w-md rounded-xl border border-border bg-card p-3 lg:p-6 space-y-4">
+            <div className="w-full max-w-md rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4 space-y-4">
               <h3 className="font-semibold">{t("mirror.t40266") || "Create Sandbox"}</h3>
               <input value={newName} onChange={(e) => setNewName(e.target.value)}
                 placeholder={t("mirror.sandboxName") || "Sandbox Name"} className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs lg:text-sm" />

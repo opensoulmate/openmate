@@ -392,27 +392,30 @@ export function GeneClient() {
   return (
       <PageLayout title="基因">
         
-    <div className="p-3 lg:p-6 max-w-6xl mx-auto space-y-3 lg:space-y-6 h-full overflow-y-auto">
+    <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex items-center gap-3">
-        <div className="p-2 rounded-lg bg-gradient-to-br from-emerald-500/20 to-teal-500/20">
-          <Dna className="w-6 h-6 text-emerald-400" />
-        </div>
-        <div>
-          <h1 className="text-xl lg:text-2xl font-bold">🧬 Gene — {t("gene.text7")}</h1>
-          <p className="text-xs lg:text-sm text-muted-foreground">{t("gene.text8")}</p>
+      <div className="flex items-center justify-between border-b border-border px-3 lg:px-6 py-4">
+        <div className="flex items-center gap-2 lg:gap-3 min-w-0 flex-1">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500/20 to-teal-500/20">
+            <Dna className="w-6 h-6 text-emerald-400" />
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-lg lg:text-xl font-semibold truncate">🧬 Gene — {t("gene.text7")}</h1>
+            <p className="text-xs lg:text-sm text-muted-foreground truncate">{t('organTag.gene')}</p>
+          </div>
         </div>
       </div>
+      <div className="flex-1 overflow-y-auto px-3 lg:px-6 py-4 lg:py-6 space-y-3 lg:space-y-6">
 
       {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-2 lg:gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 lg:gap-4">
         {[
           { label: t("gene.text9"), value: health?.total_templates ?? 0 },
           { label: t("gene.text10"), value: health?.builtin_count ?? 0 },
           { label: t("gene.user"), value: health?.user_count ?? 0 },
           { label: t("gene.text11"), value: categories.length },
         ].map(s => (
-          <div key={s.label} className="bg-card border border-border rounded-xl p-3 lg:p-4">
+          <div key={s.label} className="bg-card border border-border rounded-xl p-3 lg:p-4 lg:p-4">
             <div className="text-xl lg:text-2xl font-bold">{s.value}</div>
             <div className="text-xs text-muted-foreground">{s.label}</div>
           </div>
@@ -506,7 +509,7 @@ export function GeneClient() {
 
           {/* 回滚预览：先看逐字段diff再动手（Agent Zero _time_travel preview语义） */}
           {revertPreview && (
-            <div className="bg-card border border-amber-500/40 rounded-xl p-3 lg:p-4 space-y-2">
+            <div className="bg-card border border-amber-500/40 rounded-xl p-3 lg:p-4 lg:p-4 space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <h4 className="text-sm font-semibold flex items-center gap-2 min-w-0">
                   <RotateCcw className="w-4 h-4 text-amber-400 shrink-0" />
@@ -551,7 +554,7 @@ export function GeneClient() {
               <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
             </div>
           ) : skills.length === 0 ? (
-            <div className="bg-card border border-border rounded-xl p-6 text-center text-sm text-muted-foreground">
+            <div className="bg-card border border-border rounded-xl p-3 lg:p-4 text-center text-sm text-muted-foreground">
               {t("gene.noSkills")}
             </div>
           ) : (
@@ -889,7 +892,7 @@ export function GeneClient() {
 
           <div className="space-y-4">
             <h3 className="font-semibold">{t("gene.text26")}</h3>
-            <div className="min-h-[300px] bg-card border border-border rounded-xl p-3 lg:p-4">
+            <div className="min-h-[300px] bg-card border border-border rounded-xl p-3 lg:p-4 lg:p-4">
               {createResult ? (
                 <div className="space-y-3">
                   <div className="flex items-center gap-2 text-green-400">
@@ -978,7 +981,7 @@ export function GeneClient() {
 
           <div className="space-y-4">
             <h3 className="font-semibold">{t("gene.text34")}</h3>
-            <div className="min-h-[300px] bg-card border border-border rounded-xl p-3 lg:p-4">
+            <div className="min-h-[300px] bg-card border border-border rounded-xl p-3 lg:p-4 lg:p-4">
               {instResult ? (
                 <div className="space-y-3">
                   <div className="flex items-center gap-2 text-green-400">
@@ -1070,7 +1073,7 @@ export function GeneClient() {
             <p className="text-xs text-muted-foreground">
               {t("gene.t21fff")}
             </p>
-            <div className="bg-card border border-border rounded-xl p-3 lg:p-6 space-y-4">
+            <div className="bg-card border border-border rounded-xl p-3 lg:p-4 lg:p-4 space-y-4">
               <div className="grid grid-cols-2 gap-2 lg:gap-4">
                 <div className="bg-muted/20 rounded-lg p-3 lg:p-4 text-center">
                   <div className="text-xl lg:text-2xl font-bold">{health?.total_templates ?? 0}</div>
@@ -1096,6 +1099,7 @@ export function GeneClient() {
       )}
     </div>
   
-      </PageLayout>
+            </div>
+</PageLayout>
     )
 }

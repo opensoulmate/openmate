@@ -5,6 +5,7 @@ import {
   Zap, RefreshCw, Activity, ShieldAlert, Timer, BarChart3, Radio,
 } from "lucide-react";
 import { PageLayout } from '@/components/page-layout';
+import { useTranslation } from 'react-i18next';
 
 /* ⚡Reflex 反射层观察面板 — 对接 acp-proxy /api/reflex/*（只读观察面）
  * 数据源：agent.reflex.ReflexHub.stats()/recent()（/ws_acp 双向事件源桥同源）
@@ -84,6 +85,7 @@ const CIRCUIT_COLORS: Record<string, string> = {
 };
 
 export function ReflexClient() {
+  const { t } = useTranslation();
   const [stats, setStats] = useState<ReflexStats | null>(null);
   const [events, setEvents] = useState<ReflexEventRow[]>([]);
   const [eventTotal, setEventTotal] = useState(0);
@@ -116,12 +118,14 @@ export function ReflexClient() {
     <PageLayout title="反射">
       <div className="flex h-full flex-col overflow-hidden">
         <div className="flex items-center justify-between border-b border-border px-3 lg:px-6 py-4">
-          <div className="flex items-center gap-2 lg:gap-3">
-            <Zap size={20} className="text-yellow-500" />
-            <h1 className="text-lg font-semibold">Reflex · 反射层观察面</h1>
-            <span className="rounded-full bg-yellow-500/10 px-2 py-0.5 text-xs font-medium text-yellow-500">
-              事件捕获 → 轻量规则 → 回调/路由/拦截 · 零 LLM
-            </span>
+          <div className="flex items-center gap-2 lg:gap-3 min-w-0 flex-1">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-yellow-500/10">
+              <Zap size={20} className="text-yellow-500" />
+            </div>
+            <div className="min-w-0">
+              <h1 className="text-lg lg:text-xl font-semibold truncate">Reflex · 反射层观察面</h1>
+              <p className="text-xs lg:text-sm text-muted-foreground truncate">{t('organTag.reflex')}</p>
+            </div>
           </div>
           <button onClick={fetchAll}
             className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs lg:text-sm hover:bg-muted transition-colors">
@@ -129,7 +133,7 @@ export function ReflexClient() {
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-3 lg:p-6 space-y-3 lg:space-y-6">
+        <div className="flex-1 overflow-y-auto px-3 lg:px-6 py-4 lg:py-6 space-y-3 lg:space-y-6">
           {/* Stats */}
           {stats && (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2 lg:gap-4">
@@ -151,7 +155,7 @@ export function ReflexClient() {
 
           {/* 熔断状态 · 规则表 */}
           {stats && stats.rules.length > 0 && (
-            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 space-y-3">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4 space-y-3">
               <h3 className="text-xs lg:text-sm font-medium flex items-center gap-2">
                 <ShieldAlert size={14} className="text-yellow-500" /> 熔断状态 · 规则
               </h3>
@@ -194,7 +198,7 @@ export function ReflexClient() {
           )}
 
           {/* 事件流 */}
-          <div className="rounded-xl border border-border bg-card p-3 lg:p-4 space-y-3">
+          <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4 space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="text-xs lg:text-sm font-medium flex items-center gap-2">
                 <Radio size={14} className="text-yellow-500" /> 事件流（实时）
@@ -252,7 +256,7 @@ export function ReflexClient() {
 
           {/* 事件分类计数 */}
           {stats && Object.keys(stats.by_kind).length > 0 && (
-            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 space-y-3">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4 space-y-3">
               <h3 className="text-xs lg:text-sm font-medium flex items-center gap-2">
                 <BarChart3 size={14} className="text-yellow-500" /> 按事件类目
               </h3>
@@ -275,7 +279,7 @@ function StatCard({ icon: Icon, label, value, sub, color, bg }: {
   icon: React.ElementType; label: string; value: string; sub: string; color: string; bg: string;
 }) {
   return (
-    <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
+    <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-medium text-muted-foreground">{label}</span>
         <div className={cn("rounded-lg p-1.5", bg)}><Icon size={14} className={color} /></div>

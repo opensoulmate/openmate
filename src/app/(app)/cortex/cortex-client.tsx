@@ -411,13 +411,15 @@ export function CortexClient() {
         
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex items-center gap-2 lg:gap-3 border-b border-border px-3 lg:px-6 py-4">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
-          <Brain size={18} className="text-primary" />
-        </div>
-        <div>
-          <h1 className="text-lg font-semibold">OpenCortex</h1>
-          <p className="text-xs text-muted-foreground">{t('cortex.advanced')}</p>
+      <div className="flex items-center justify-between border-b border-border px-3 lg:px-6 py-4">
+        <div className="flex items-center gap-2 lg:gap-3 min-w-0 flex-1">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+            <Brain size={18} className="text-primary" />
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-lg lg:text-xl font-semibold truncate">OpenCortex</h1>
+            <p className="text-xs lg:text-sm text-muted-foreground truncate">{t('organTag.cortex')}</p>
+          </div>
         </div>
       </div>
 
@@ -442,7 +444,7 @@ export function CortexClient() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-3 lg:p-6">
+      <div className="flex-1 overflow-y-auto px-3 lg:px-6 py-4 lg:py-6">
         {error && (
           <div className="mb-4 flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-2 lg:px-4 py-2 lg:py-3 text-xs lg:text-sm text-red-500">
             <AlertCircle size={16} />
@@ -453,7 +455,7 @@ export function CortexClient() {
         {/* ── Plan Tab ───────────────────────────────── */}
         {tab === "plan" && (
           <div className="space-y-3 lg:space-y-6">
-            <div className="rounded-xl border border-border bg-card p-5">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
               <h3 className="mb-3 flex items-center gap-2 text-xs lg:text-sm font-medium">
                 <Target size={15} className="text-primary" />
                 {t('cortex.plan.inputGoal')}
@@ -487,7 +489,7 @@ export function CortexClient() {
             </div>
 
             {planResult && (
-              <div className="rounded-xl border border-border bg-card p-5">
+              <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
                 <h3 className="mb-4 flex items-center gap-2 text-xs lg:text-sm font-medium">
                   <GitBranch size={15} className="text-primary" />
                   {t('cortex.plan.taskBreakdown')} · {planResult.tasks.length} {t('cortex.plan.tasks')}
@@ -496,7 +498,7 @@ export function CortexClient() {
                   {planResult.tasks.map((task, i) => (
                     <div
                       key={i}
-                      className="flex items-start gap-2 lg:gap-3 rounded-lg border border-border bg-background p-3 lg:p-4"
+                      className="flex items-start gap-2 lg:gap-3 rounded-xl border border-border bg-background p-3 lg:p-4 lg:p-4"
                     >
                       <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
                         {task.index + 1}
@@ -525,7 +527,7 @@ export function CortexClient() {
         {/* ── Agent Tab ──────────────────────────────── */}
         {tab === "agent" && (
           <div className="space-y-3 lg:space-y-6">
-            <div className="rounded-xl border border-border bg-card p-5">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
               <h3 className="mb-3 flex items-center gap-2 text-xs lg:text-sm font-medium">
                 <Users size={15} className="text-primary" />
                 {t('cortex.agent.inputTopic')}
@@ -602,7 +604,7 @@ export function CortexClient() {
         {/* ── Think Tab ──────────────────────────────── */}
         {tab === "think" && (
           <div className="space-y-3 lg:space-y-6">
-            <div className="rounded-xl border border-border bg-card p-5">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
               <h3 className="mb-3 flex items-center gap-2 text-xs lg:text-sm font-medium">
                 <Lightbulb size={15} className="text-primary" />
                 {t('cortex.think.inputQuestion')}
@@ -644,7 +646,7 @@ export function CortexClient() {
 
             {thinkResult && (
               <div className="space-y-4">
-                <div className="rounded-xl border border-border bg-card p-5">
+                <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
                   <h3 className="mb-4 flex items-center gap-2 text-xs lg:text-sm font-medium">
                     <Lightbulb size={15} className="text-primary" />
                     {t('cortex.think.reasoningChain')} · {thinkResult.reasoning_steps?.length || 0} {t('cortex.think.steps')}
@@ -696,7 +698,7 @@ export function CortexClient() {
         {tab === "graphrag" && (
           <div className="space-y-3 lg:space-y-6">
             {/* Build Graph */}
-            <div className="rounded-xl border border-border bg-card p-5">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
               <h3 className="mb-3 flex items-center gap-2 text-xs lg:text-sm font-medium">
                 <Network size={15} className="text-primary" />
                 {t('cortex.graphrag.buildTitle')}
@@ -724,7 +726,7 @@ export function CortexClient() {
                 )}
               </div>
               {graphragBuildResult && (
-                <div className="mt-4 rounded-lg border border-border bg-background p-3 lg:p-4">
+                <div className="mt-4 rounded-xl border border-border bg-background p-3 lg:p-4 lg:p-4">
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2 lg:gap-3">
                     <div className="text-center">
                       <p className="text-xl lg:text-2xl font-bold text-primary">{graphragBuildResult.entities_new || 0}</p>
@@ -753,7 +755,7 @@ export function CortexClient() {
             </div>
 
             {/* Query Graph */}
-            <div className="rounded-xl border border-border bg-card p-5">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
               <h3 className="mb-3 flex items-center gap-2 text-xs lg:text-sm font-medium">
                 <Search size={15} className="text-primary" />
                 {t('cortex.graphrag.queryTitle')}
@@ -826,7 +828,7 @@ export function CortexClient() {
             </div>
 
             {/* Extract from Text */}
-            <div className="rounded-xl border border-border bg-card p-5">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
               <h3 className="mb-3 flex items-center gap-2 text-xs lg:text-sm font-medium">
                 <BookOpen size={15} className="text-primary" />
                 {t('cortex.graphrag.extractTitle')}
@@ -917,7 +919,7 @@ export function CortexClient() {
 
             {/* Trending / Recent */}
             {(recommendTab === "trending" || recommendTab === "recent") && (
-              <div className="rounded-xl border border-border bg-card p-5">
+              <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-xs lg:text-sm font-medium">
                     {recommendTab === "trending" ? t('cortex.text53') : t('cortex.text54')}
@@ -938,7 +940,7 @@ export function CortexClient() {
                 )}
                 <div className="space-y-2">
                   {recommendEntries.map((entry, i) => (
-                    <div key={entry.id || i} className="flex items-start gap-2 lg:gap-3 rounded-lg border border-border bg-background p-3 hover:border-primary/30 transition-colors">
+                    <div key={entry.id || i} className="flex items-start gap-2 lg:gap-3 rounded-xl border border-border bg-background p-3 lg:p-4 hover:border-primary/30 transition-colors">
                       <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
                         {i + 1}
                       </div>
@@ -964,7 +966,7 @@ export function CortexClient() {
 
             {/* Related */}
             {recommendTab === "related" && (
-              <div className="rounded-xl border border-border bg-card p-5">
+              <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
                 <h3 className="mb-3 flex items-center gap-2 text-xs lg:text-sm font-medium">
                   <Star size={15} className="text-primary" />
                   {t('cortex.recommend.relatedTitle')}
@@ -988,7 +990,7 @@ export function CortexClient() {
                 {relatedResults.length > 0 && (
                   <div className="space-y-2">
                     {relatedResults.map((entry, i) => (
-                      <div key={entry.id || i} className="flex items-start gap-2 lg:gap-3 rounded-lg border border-border bg-background p-3 hover:border-primary/30 transition-colors">
+                      <div key={entry.id || i} className="flex items-start gap-2 lg:gap-3 rounded-xl border border-border bg-background p-3 lg:p-4 hover:border-primary/30 transition-colors">
                         <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
                           {i + 1}
                         </div>
@@ -1037,7 +1039,7 @@ export function CortexClient() {
             </div>
 
             {/* Single Score */}
-            <div className="rounded-xl border border-border bg-card p-5">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
               <h3 className="mb-3 flex items-center gap-2 text-xs lg:text-sm font-medium">
                 <Search size={15} className="text-primary" />
                 {t('cortex.quality.singleScore')}
@@ -1094,7 +1096,7 @@ export function CortexClient() {
 
             {/* Quality Report */}
             {qualityReport && (
-              <div className="rounded-xl border border-border bg-card p-5">
+              <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
                 <h3 className="mb-4 flex items-center gap-2 text-xs lg:text-sm font-medium">
                   <BarChart3 size={15} className="text-primary" />
                   {t('cortex.quality.report')}
@@ -1181,14 +1183,14 @@ export function CortexClient() {
 
             {/* Batch Scores */}
             {qualityScores.length > 0 && (
-              <div className="rounded-xl border border-border bg-card p-5">
+              <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
                 <h3 className="mb-4 flex items-center gap-2 text-xs lg:text-sm font-medium">
                   <Award size={15} className="text-primary" />
                   {t('cortex.quality.batchResult')} · {qualityScores.length} {t('cortex.quality.entries')}
                 </h3>
                 <div className="space-y-2">
                   {qualityScores.map((item, i) => (
-                    <div key={i} className="flex items-center gap-2 lg:gap-3 rounded-lg border border-border bg-background p-3">
+                    <div key={i} className="flex items-center gap-2 lg:gap-3 rounded-xl border border-border bg-background p-3 lg:p-4">
                       <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
                         {i + 1}
                       </div>

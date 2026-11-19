@@ -160,13 +160,15 @@ export function LinkClient() {
       <PageLayout title="突触">
         
     <div className="flex h-full flex-col overflow-hidden">
-      <div className="flex items-center justify-between border-b border-border px-4 md:px-3 lg:px-6 py-3 md:py-4">
-        <div className="flex items-center gap-2 md:gap-3">
-          <Link2 size={18} className="text-teal-500" />
-          <h1 className="text-base md:text-lg font-semibold">{t("link.title") || "Link · Integration Gateway"}</h1>
-          <span className="rounded-full bg-teal-500/10 px-2 py-0.5 text-[10px] md:text-xs font-medium text-teal-500">
-            {t("link.t69735")}
-          </span>
+      <div className="flex items-center justify-between border-b border-border px-3 lg:px-6 py-4">
+        <div className="flex items-center gap-2 lg:gap-3 min-w-0 flex-1">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-teal-500/10">
+            <Link2 size={18} className="text-teal-500" />
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-lg lg:text-xl font-semibold truncate">{t("link.title") || "Link · Integration Gateway"}</h1>
+            <p className="text-xs lg:text-sm text-muted-foreground truncate">{t('organTag.link')}</p>
+          </div>
         </div>
         <div className="flex items-center gap-1.5 md:gap-2">
           <button onClick={() => setShowEvents(!showEvents)}
@@ -187,23 +189,23 @@ export function LinkClient() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3 lg:p-4 md:p-3 lg:p-6 space-y-4 md:space-y-3 lg:space-y-6">
+      <div className="flex-1 overflow-y-auto px-3 lg:px-6 py-4 lg:py-6 space-y-3 lg:space-y-6">
         {/* Stats */}
         {health && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 lg:gap-4">
-            <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
               <span className="text-xs text-muted-foreground">{t("link.t81176")}</span>
               <p className="text-xl lg:text-2xl font-bold">{health.total_connectors || 0}</p>
             </div>
-            <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
               <span className="text-xs text-muted-foreground">{t("link.active")}</span>
               <p className="text-xl lg:text-2xl font-bold text-emerald-500">{health.active || 0}</p>
             </div>
-            <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
               <span className="text-xs text-muted-foreground">{t("link.t93835")}</span>
               <p className="text-xl lg:text-2xl font-bold">{health.total_events || 0}</p>
             </div>
-            <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
               <span className="text-xs text-muted-foreground">{t("link.type")}</span>
               <p className="text-xs font-mono mt-1">{Object.entries(health.by_type || {}).map(([k, v]) => `${k}:${v}`).join(" · ")}</p>
             </div>
@@ -212,7 +214,7 @@ export function LinkClient() {
 
         {/* Event Log Panel */}
         {showEvents && (
-          <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
+          <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-xs lg:text-sm font-medium flex items-center gap-2">
                 <Activity size={14} className="text-teal-500" />
@@ -404,7 +406,7 @@ export function LinkClient() {
         {/* Create Modal */}
         {showCreate && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-            <div className="w-full max-w-md rounded-xl border border-border bg-card p-3 lg:p-6 space-y-4">
+            <div className="w-full max-w-md rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4 space-y-4">
               <h3 className="font-semibold">{t("link.t30523")}</h3>
               <input value={newName} onChange={(e) => setNewName(e.target.value)}
                 placeholder={t("link.connectorName")} className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs lg:text-sm" />

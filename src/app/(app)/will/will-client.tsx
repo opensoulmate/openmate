@@ -433,14 +433,16 @@ export function WillClient() {
 
   return (
     <PageLayout title={t("will.title", "意志 · 工作流引擎")}>
-      <div className="h-full overflow-y-auto px-3 lg:px-6 py-4 lg:py-6 space-y-4">
+      <div className="flex h-full flex-col overflow-hidden">
         {/* 头部 */}
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-3">
-            <Sparkles size={20} className="text-primary" />
-            <div>
-              <h1 className="text-base lg:text-lg font-semibold">{t("will.title", "意志 · 工作流引擎")}</h1>
-              <p className="text-xs text-muted-foreground">{t("will.subtitle", "复杂工作流编排、条件触发、多分支定时业务流程")}</p>
+        <div className="flex items-center justify-between border-b border-border px-3 lg:px-6 py-4">
+          <div className="flex items-center gap-2 lg:gap-3 min-w-0 flex-1">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+              <Sparkles size={20} className="text-primary" />
+            </div>
+            <div className="min-w-0">
+              <h1 className="text-lg lg:text-xl font-semibold truncate">{t("will.title", "意志 · 工作流引擎")}</h1>
+              <p className="text-xs lg:text-sm text-muted-foreground truncate">{t('organTag.will')}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -458,6 +460,7 @@ export function WillClient() {
             </button>
           </div>
         </div>
+        <div className="flex-1 overflow-y-auto px-3 lg:px-6 py-4 lg:py-6 space-y-3 lg:space-y-6">
 
         {/* 统计条 */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 lg:gap-3">
@@ -467,7 +470,7 @@ export function WillClient() {
             { label: t("will.running", "运行中"), value: runningRuns, icon: Zap },
             { label: t("will.waiting", "待审批"), value: waitingRuns, icon: Clock },
           ].map((s) => (
-            <div key={s.label} className="rounded-xl border border-border bg-card p-3 lg:p-4">
+            <div key={s.label} className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <s.icon size={12} /> {s.label}
               </div>
@@ -538,7 +541,7 @@ export function WillClient() {
               </div>
             )}
             {flows.length === 0 && (
-              <div className="rounded-xl border border-border bg-card p-8 text-center text-sm text-muted-foreground">
+              <div className="rounded-xl border border-border bg-card p-3 lg:p-4 text-center text-sm text-muted-foreground">
                 {t("will.emptyFlows", "暂无流程定义——带 flows: 的插件装载后自动注册")}
               </div>
             )}
@@ -645,7 +648,7 @@ export function WillClient() {
           /* ── 运行历史（按流程/时间筛选 + 成败统计） ── */
           <div className="space-y-3">
             {/* 筛选条 */}
-            <div className="rounded-xl border border-border bg-card p-3 flex items-center gap-2 flex-wrap">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 flex items-center gap-2 flex-wrap">
               <Filter size={13} className="text-muted-foreground" />
               <select
                 value={filterFlow}
@@ -691,14 +694,14 @@ export function WillClient() {
                     icon: SquareCheck,
                   },
                 ].map((s) => (
-                  <div key={s.label} className="rounded-xl border border-border bg-card p-3">
+                  <div key={s.label} className="rounded-xl border border-border bg-card p-3 lg:p-4">
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                       <s.icon size={12} /> {s.label}
                     </div>
                     <div className="mt-1 text-lg font-semibold tabular-nums">{s.value}</div>
                   </div>
                 ))}
-                <div className="rounded-xl border border-border bg-card p-3 col-span-2 lg:col-span-4 flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
+                <div className="rounded-xl border border-border bg-card p-3 lg:p-4 col-span-2 lg:col-span-4 flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
                   <Clock size={12} />
                   <span>
                     {t("will.avgDuration", "平均耗时")}：
@@ -720,7 +723,7 @@ export function WillClient() {
             )}
 
             {runs.length === 0 && (
-              <div className="rounded-xl border border-border bg-card p-8 text-center text-sm text-muted-foreground">
+              <div className="rounded-xl border border-border bg-card p-3 lg:p-4 text-center text-sm text-muted-foreground">
                 {t("will.emptyRuns", "暂无运行实例——在流程定义里「立即触发」跑一条")}
               </div>
             )}
@@ -822,7 +825,8 @@ export function WillClient() {
           />
         )}
       </div>
-    </PageLayout>
+          </div>
+</PageLayout>
   );
 }
 
@@ -849,7 +853,7 @@ function RunParamsDialog({ flow, busy, onCancel, onRun }: {
   };
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-      <div className="rounded-xl border border-border bg-card w-full max-w-md p-4 space-y-3">
+      <div className="rounded-xl border border-border bg-card w-full max-w-md p-3 lg:p-4 space-y-3">
         <div className="text-sm font-semibold">
           {t("will.runWithParams", "带参触发")} · {flow.name}
         </div>

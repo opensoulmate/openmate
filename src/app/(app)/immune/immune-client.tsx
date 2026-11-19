@@ -259,17 +259,20 @@ export function ImmuneClient() {
   return (
       <PageLayout title="免疫">
         
-    <div className="p-4 sm:p-3 lg:p-6 max-w-6xl mx-auto space-y-3 lg:space-y-6">
+    <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex items-center gap-3">
-        <div className="p-2 rounded-lg bg-gradient-to-br from-red-500/20 to-pink-500/20">
-          <Shield className="w-6 h-6 text-red-400" />
-        </div>
-        <div>
-          <h1 className="text-xl lg:text-2xl font-bold">{t('immune.t05460')}</h1>
-          <p className="text-xs lg:text-sm text-muted-foreground">{t('immune.contentrateLimit')}</p>
+      <div className="flex items-center justify-between border-b border-border px-3 lg:px-6 py-4">
+        <div className="flex items-center gap-2 lg:gap-3 min-w-0 flex-1">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-red-500/20 to-pink-500/20">
+            <Shield className="w-6 h-6 text-red-400" />
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-lg lg:text-xl font-semibold truncate">{t('immune.t05460')}</h1>
+            <p className="text-xs lg:text-sm text-muted-foreground truncate">{t('organTag.immune')}</p>
+          </div>
         </div>
       </div>
+      <div className="flex-1 overflow-y-auto px-3 lg:px-6 py-4 lg:py-6 space-y-3 lg:space-y-6">
 
       {/* Tab Navigation */}
       <div className="flex gap-1 sm:gap-2 border-b border-border pb-2 overflow-x-auto scrollbar-none">
@@ -304,7 +307,7 @@ export function ImmuneClient() {
             ].map(item => {
               const Icon = item.icon
               return (
-                <div key={item.label} className="bg-card border border-border rounded-xl p-3 lg:p-4">
+                <div key={item.label} className="bg-card border border-border rounded-xl p-3 lg:p-4 lg:p-4">
                   <div className="flex items-center gap-2 mb-2">
                     <Icon className="w-4 h-4 text-muted-foreground" />
                     <span className="text-xs text-muted-foreground">{item.label}</span>
@@ -317,7 +320,7 @@ export function ImmuneClient() {
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 lg:gap-6">
             {/* Rate Limiter Config */}
-            <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+            <div className="bg-card border border-border rounded-xl p-3 lg:p-4 space-y-4">
               <h3 className="font-semibold flex items-center gap-2">
                 <Clock className="w-4 h-4" /> {t('immune.rateLimitConfig')}
               </h3>
@@ -359,7 +362,7 @@ export function ImmuneClient() {
             </div>
 
             {/* Quick Stats */}
-            <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+            <div className="bg-card border border-border rounded-xl p-3 lg:p-4 space-y-4">
               <h3 className="font-semibold flex items-center gap-2">
                 <Activity className="w-4 h-4" /> {t('immune.rateLimitStats')}
               </h3>
@@ -396,7 +399,7 @@ export function ImmuneClient() {
                 onChange={(e) => setModerateText(e.target.value)}
                 placeholder={t('immune.contentinput')}
                 rows={8}
-                className="w-full bg-card border border-border rounded-xl p-3 lg:p-4 text-xs lg:text-sm resize-none focus:outline-none focus:ring-2 focus:ring-red-500/30"
+                className="w-full bg-card border border-border rounded-xl p-3 lg:p-4 lg:p-4 text-xs lg:text-sm resize-none focus:outline-none focus:ring-2 focus:ring-red-500/30"
               />
               <button
                 onClick={handleModerate}
@@ -410,7 +413,7 @@ export function ImmuneClient() {
 
             <div className="space-y-4">
               <h3 className="font-semibold">{t('immune.result4')}</h3>
-              <div className="min-h-[300px] bg-card border border-border rounded-xl p-3 lg:p-4">
+              <div className="min-h-[300px] bg-card border border-border rounded-xl p-3 lg:p-4 lg:p-4">
                 {moderateResult ? (
                   <div className="space-y-4">
                     <div className={`flex items-center gap-2 p-3 rounded-lg border ${
@@ -467,7 +470,7 @@ export function ImmuneClient() {
       {activeTab === "ratelimit" && (
         <div className="space-y-3 lg:space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 lg:gap-6">
-            <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+            <div className="bg-card border border-border rounded-xl p-3 lg:p-4 space-y-4">
               <h3 className="font-semibold">{t('immune.rateLimitConfig1')}</h3>
               <div className="space-y-3">
                 <div>
@@ -517,7 +520,7 @@ export function ImmuneClient() {
               </div>
             </div>
 
-            <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+            <div className="bg-card border border-border rounded-xl p-3 lg:p-4 space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="font-semibold">{t('immune.t87501')}</h3>
                 <button onClick={fetchRateLimitStats} className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
@@ -560,7 +563,7 @@ export function ImmuneClient() {
       {activeTab === "ip" && (
         <div className="space-y-3 lg:space-y-6">
           {/* Add IP */}
-          <div className="bg-card border border-border rounded-xl p-5">
+          <div className="bg-card border border-border rounded-xl p-3 lg:p-4">
             <h3 className="font-semibold mb-4">{t('immune.t80747')}</h3>
             <div className="flex flex-col sm:flex-row gap-3">
               <input
@@ -594,7 +597,7 @@ export function ImmuneClient() {
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 lg:gap-6">
             {/* Blacklist */}
-            <div className="bg-card border border-border rounded-xl p-5">
+            <div className="bg-card border border-border rounded-xl p-3 lg:p-4">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-semibold flex items-center gap-2">
                   <Ban className="w-4 h-4 text-red-400" /> {t('immune.t66502')}
@@ -624,7 +627,7 @@ export function ImmuneClient() {
             </div>
 
             {/* Whitelist */}
-            <div className="bg-card border border-border rounded-xl p-5">
+            <div className="bg-card border border-border rounded-xl p-3 lg:p-4">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-semibold flex items-center gap-2">
                   <Unlock className="w-4 h-4 text-green-400" /> {t('immune.t04967')}
@@ -667,7 +670,7 @@ export function ImmuneClient() {
             ].map(item => {
               const Icon = item.icon
               return (
-                <div key={item.label} className="bg-card border border-border rounded-xl p-3 lg:p-4">
+                <div key={item.label} className="bg-card border border-border rounded-xl p-3 lg:p-4 lg:p-4">
                   <div className="flex items-center gap-2 mb-2">
                     <Icon className="w-4 h-4 text-muted-foreground" />
                     <span className="text-xs text-muted-foreground">{item.label}</span>
@@ -680,7 +683,7 @@ export function ImmuneClient() {
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 lg:gap-6">
             {/* Request Inspector */}
-            <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+            <div className="bg-card border border-border rounded-xl p-3 lg:p-4 space-y-4">
               <h3 className="font-semibold flex items-center gap-2">
                 <Crosshair className="w-4 h-4" /> Request Inspector
               </h3>
@@ -752,7 +755,7 @@ export function ImmuneClient() {
             </div>
 
             {/* Auto-Blocked IPs */}
-            <div className="bg-card border border-border rounded-xl p-5">
+            <div className="bg-card border border-border rounded-xl p-3 lg:p-4">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-semibold flex items-center gap-2">
                   <Ban className="w-4 h-4 text-red-400" /> {t('immune.blockedIps')}
@@ -908,6 +911,7 @@ export function ImmuneClient() {
       )}
     </div>
   
-      </PageLayout>
+            </div>
+</PageLayout>
     )
 }

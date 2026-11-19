@@ -188,12 +188,14 @@ export function LimbClient() {
         
     <div className="flex h-full flex-col overflow-hidden">
       <div className="flex items-center justify-between border-b border-border px-3 lg:px-6 py-4">
-        <div className="flex items-center gap-3">
-          <MousePointer size={20} className="text-orange-500" />
-          <h1 className="text-lg font-semibold">{t("limb.title") || "Limb · RPA Executor"}</h1>
-          <span className="rounded-full bg-orange-500/10 px-2 py-0.5 text-xs font-medium text-orange-500">
-            {t("limb.t87353") || "Automation"}
-          </span>
+        <div className="flex items-center gap-2 lg:gap-3 min-w-0 flex-1">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-orange-500/10">
+            <MousePointer size={20} className="text-orange-500" />
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-lg lg:text-xl font-semibold truncate">{t("limb.title") || "Limb · RPA Executor"}</h1>
+            <p className="text-xs lg:text-sm text-muted-foreground truncate">{t('organTag.limb')}</p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => { fetchStats(); fetchTasks(); }}
@@ -203,27 +205,27 @@ export function LimbClient() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3 lg:p-6 space-y-3 lg:space-y-6">
+      <div className="flex-1 overflow-y-auto px-3 lg:px-6 py-4 lg:py-6 space-y-3 lg:space-y-6">
         {/* Stats */}
         {stats && (
           <div className="grid grid-cols-2 md:grid-cols-5 gap-2 lg:gap-4">
-            <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
               <span className="text-xs text-muted-foreground">{t("limb.t26095") || "TotalTask"}</span>
               <p className="text-xl lg:text-2xl font-bold">{stats.total_tasks}</p>
             </div>
-            <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
               <span className="text-xs text-muted-foreground">{t("limb.running") || "Running"}</span>
               <p className="text-xl lg:text-2xl font-bold text-blue-500">{stats.running}</p>
             </div>
-            <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
               <span className="text-xs text-muted-foreground">{t("limb.t54694") || "Queue"}</span>
               <p className="text-xl lg:text-2xl font-bold text-amber-500">{stats.queue_length}</p>
             </div>
-            <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
               <span className="text-xs text-muted-foreground">{t("limb.successRate") || "Success Rate"}</span>
               <p className="text-xl lg:text-2xl font-bold text-emerald-500">{stats.success_rate}%</p>
             </div>
-            <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
               <span className="text-xs text-muted-foreground">{t("limb.templates") || "Templates"}</span>
               <p className="text-xl lg:text-2xl font-bold text-indigo-500">{stats.templates}</p>
             </div>
@@ -307,7 +309,7 @@ export function LimbClient() {
                 style={{ right: 0 }}
               >
                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                  <div className="rounded-xl border border-border bg-card p-3 lg:p-4 space-y-3">
+                  <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4 space-y-3">
                     <div className="flex items-center justify-between">
                       <h3 className="font-semibold text-xs lg:text-sm">{selected.name}</h3>
                       <button onClick={() => handleDelete(selected.task_id)}
@@ -337,7 +339,7 @@ export function LimbClient() {
                   </div>
 
                   {selected.results && selected.results.length > 0 && (
-                    <div className="rounded-xl border border-border bg-card p-3 lg:p-4 space-y-2">
+                    <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4 space-y-2">
                       <h4 className="text-xs lg:text-sm font-medium">{t("limb.t62005") || "Execution steps"}</h4>
                       {selected.results.map((r, i) => (
                         <div key={i} className="flex items-start gap-2 text-xs">
@@ -357,7 +359,7 @@ export function LimbClient() {
                   )}
 
                   {selected.actions && selected.actions.length > 0 && (
-                    <div className="rounded-xl border border-border bg-card p-3 lg:p-4 space-y-2">
+                    <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4 space-y-2">
                       <h4 className="text-xs lg:text-sm font-medium">{t("limb.t47867") || "Action List"}</h4>
                       {selected.actions.map((a, i) => (
                         <div key={i} className="flex items-center gap-2 text-xs">
@@ -373,7 +375,7 @@ export function LimbClient() {
               </div>
             ) : selected ? (
               <div className="w-96 space-y-4">
-                <div className="rounded-xl border border-border bg-card p-3 lg:p-4 space-y-3">
+                <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <h3 className="font-semibold text-xs lg:text-sm">{selected.name}</h3>
                     <button onClick={() => handleDelete(selected.task_id)}
@@ -404,7 +406,7 @@ export function LimbClient() {
 
                 {/* Step Results */}
                 {selected.results && selected.results.length > 0 && (
-                  <div className="rounded-xl border border-border bg-card p-3 lg:p-4 space-y-2">
+                  <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4 space-y-2">
                     <h4 className="text-xs lg:text-sm font-medium">{t("limb.t62005") || "Execution steps"}</h4>
                     {selected.results.map((r, i) => (
                       <div key={i} className="flex items-start gap-2 text-xs">
@@ -425,7 +427,7 @@ export function LimbClient() {
 
                 {/* Actions list */}
                 {selected.actions && selected.actions.length > 0 && (
-                  <div className="rounded-xl border border-border bg-card p-3 lg:p-4 space-y-2">
+                  <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4 space-y-2">
                     <h4 className="text-xs lg:text-sm font-medium">{t("limb.t47867") || "Action List"}</h4>
                     {selected.actions.map((a, i) => (
                       <div key={i} className="flex items-center gap-2 text-xs">
@@ -447,7 +449,7 @@ export function LimbClient() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2 lg:gap-4">
             {templates.map((tpl) => (
               <div key={tpl.template_id}
-                className="rounded-xl border border-border bg-card p-5 space-y-3 hover:shadow-md transition-all">
+                className="rounded-xl border border-border bg-card p-3 lg:p-4 space-y-3 hover:shadow-md transition-all">
                 <div className="flex items-center justify-between">
                   <div>
                     <h3 className="font-semibold text-xs lg:text-sm">{tpl.name}</h3>
@@ -517,7 +519,7 @@ export function LimbClient() {
         {/* Template Instantiate Modal */}
         {showTemplate && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-            <div className="w-full max-w-md rounded-xl border border-border bg-card p-3 lg:p-6 space-y-4">
+            <div className="w-full max-w-md rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4 space-y-4">
               <h3 className="font-semibold">{t("limb.t26840") || "Use Template"}: {showTemplate.name}</h3>
               <p className="text-xs lg:text-sm text-muted-foreground">{showTemplate.description}</p>
               {showTemplate.variables.map((v: any) => (

@@ -5,6 +5,7 @@ import {
   Heart, RefreshCw, Activity, Clock, Timer, ListChecks, Trash2, AlertTriangle,
 } from "lucide-react";
 import { PageLayout } from '@/components/page-layout';
+import { useTranslation } from 'react-i18next';
 
 /* ❤️Pulse 心跳层观察面板 — 对接 acp-proxy /api/pulse/*（只读观察面）
  * 数据源：agent.pulse.PulseLoop.status()/recent_beats()（进程级心跳宿主）
@@ -95,6 +96,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 export function PulseClient() {
+  const { t } = useTranslation();
   const [status, setStatus] = useState<PulseStatus | null>(null);
   const [checks, setChecks] = useState<PulseCheckItem[]>([]);
   const [beats, setBeats] = useState<BeatReport[]>([]);
@@ -128,12 +130,14 @@ export function PulseClient() {
     <PageLayout title="脉搏">
       <div className="flex h-full flex-col overflow-hidden">
         <div className="flex items-center justify-between border-b border-border px-3 lg:px-6 py-4">
-          <div className="flex items-center gap-3">
-            <Heart size={20} className="text-red-500 animate-pulse" />
-            <h1 className="text-lg font-semibold">Pulse · 心跳层观察面</h1>
-            <span className="rounded-full bg-red-500/10 px-2 py-0.5 text-xs font-medium text-red-500">
-              定时心跳 · 周期自检 · 僵尸回收 · 软预算禁硬杀
-            </span>
+          <div className="flex items-center gap-2 lg:gap-3 min-w-0 flex-1">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-500/10">
+              <Heart size={20} className="text-red-500 animate-pulse" />
+            </div>
+            <div className="min-w-0">
+              <h1 className="text-lg lg:text-xl font-semibold truncate">Pulse · 心跳层观察面</h1>
+              <p className="text-xs lg:text-sm text-muted-foreground truncate">{t('organTag.pulse')}</p>
+            </div>
             {status && (
               <span className={cn("rounded-full px-2 py-0.5 text-[10px]",
                 status.running ? "text-emerald-500 bg-emerald-500/10" : "text-muted-foreground bg-muted")}>
@@ -147,7 +151,7 @@ export function PulseClient() {
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-3 lg:p-6 space-y-3 lg:space-y-6">
+        <div className="flex-1 overflow-y-auto px-3 lg:px-6 py-4 lg:py-6 space-y-3 lg:space-y-6">
           {/* Stats */}
           {status && (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2 lg:gap-4">
@@ -168,7 +172,7 @@ export function PulseClient() {
           )}
 
           {/* 自检清单（五类目） */}
-          <div className="rounded-xl border border-border bg-card p-3 lg:p-4 space-y-3">
+          <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4 space-y-3">
             <h3 className="text-xs lg:text-sm font-medium flex items-center gap-2">
               <ListChecks size={14} className="text-red-500" /> 周期自检 · 五类目
             </h3>
@@ -218,7 +222,7 @@ export function PulseClient() {
           </div>
 
           {/* 心跳流 */}
-          <div className="rounded-xl border border-border bg-card p-3 lg:p-4 space-y-3">
+          <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4 space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="text-xs lg:text-sm font-medium flex items-center gap-2">
                 <Timer size={14} className="text-red-500" /> 心跳流（每拍六段）
@@ -286,7 +290,7 @@ export function PulseClient() {
 
           {/* 长任务工单账 */}
           {status && status.tasks.total > 0 && (
-            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 space-y-3">
+            <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4 space-y-3">
               <h3 className="text-xs lg:text-sm font-medium flex items-center gap-2">
                 <Clock size={14} className="text-red-500" /> 长任务工单（软预算禁硬杀）
               </h3>
@@ -329,7 +333,7 @@ function StatCard({ icon: Icon, label, value, sub, color, bg }: {
   icon: React.ElementType; label: string; value: string; sub: string; color: string; bg: string;
 }) {
   return (
-    <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
+    <div className="rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4">
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-medium text-muted-foreground">{label}</span>
         <div className={cn("rounded-lg p-1.5", bg)}><Icon size={14} className={color} /></div>

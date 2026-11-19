@@ -243,20 +243,23 @@ export function SenseClient() {
   return (
       <PageLayout title="感官">
         
-    <div className="p-4 sm:p-3 lg:p-6 max-w-6xl mx-auto space-y-3 lg:space-y-6">
+    <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex items-center gap-2 lg:gap-3">
-        <div className="p-2 rounded-lg bg-gradient-to-br from-amber-500/20 to-orange-500/20">
-          <Eye className="w-6 h-6 text-amber-500" />
-        </div>
-        <div>
-          <h1 className="text-xl lg:text-2xl font-bold">👁️ Sense — {t("sense.text6")}</h1>
-          <p className="text-xs lg:text-sm text-muted-foreground">{t("sense.t22285")}</p>
+      <div className="flex items-center justify-between border-b border-border px-3 lg:px-6 py-4">
+        <div className="flex items-center gap-2 lg:gap-3 min-w-0 flex-1">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-amber-500/20 to-orange-500/20">
+            <Eye className="w-6 h-6 text-amber-500" />
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-lg lg:text-xl font-semibold truncate">👁️ Sense — {t("sense.text6")}</h1>
+            <p className="text-xs lg:text-sm text-muted-foreground truncate">{t('organTag.sense')}</p>
+          </div>
         </div>
       </div>
+      <div className="flex-1 overflow-y-auto px-3 lg:px-6 py-4 lg:py-6 space-y-3 lg:space-y-6">
 
       {/* Engine Status */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 lg:gap-3 sm:gap-2 lg:gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 lg:gap-4">
         {Object.entries(health?.engines || {}).map(([name, eng]) => (
           <div
             key={name}
@@ -403,7 +406,7 @@ export function SenseClient() {
                   </button>
                 )}
               </div>
-              <div className="min-h-[300px] max-h-[500px] overflow-y-auto bg-card border border-border rounded-xl p-3 lg:p-4">
+              <div className="min-h-[300px] max-h-[500px] overflow-y-auto bg-card border border-border rounded-xl p-3 lg:p-4 lg:p-4">
                 {ocrResult ? (
                   <div className="space-y-4">
                     <div className="flex gap-2 lg:gap-4 text-xs text-muted-foreground">
@@ -516,7 +519,7 @@ export function SenseClient() {
                   </button>
                 )}
               </div>
-              <div className="min-h-[300px] max-h-[500px] overflow-y-auto bg-card border border-border rounded-xl p-3 lg:p-4">
+              <div className="min-h-[300px] max-h-[500px] overflow-y-auto bg-card border border-border rounded-xl p-3 lg:p-4 lg:p-4">
                 {asrResult ? (
                   <div className="space-y-4">
                     <div className="flex gap-2 lg:gap-4 text-xs text-muted-foreground">
@@ -609,7 +612,7 @@ export function SenseClient() {
             {/* Result Area */}
             <div className="space-y-4">
               <h3 className="font-semibold">{t("sense.text41")}</h3>
-              <div className="min-h-[300px] bg-card border border-border rounded-xl p-3 lg:p-4">
+              <div className="min-h-[300px] bg-card border border-border rounded-xl p-3 lg:p-4 lg:p-4">
                 {analyzeResult ? (
                   <div className="space-y-4">
                     <div className="grid grid-cols-2 gap-2 lg:gap-3">
@@ -771,7 +774,7 @@ export function SenseClient() {
             {/* Result Area */}
             <div className="space-y-4">
               <h3 className="font-semibold">{t("sense.text41")}</h3>
-              <div className="min-h-[300px] bg-card border border-border rounded-xl p-3 lg:p-4">
+              <div className="min-h-[300px] bg-card border border-border rounded-xl p-3 lg:p-4 lg:p-4">
                 {videoResult ? (
                   <div className="space-y-4">
                     <div className="grid grid-cols-2 gap-2 lg:gap-3">
@@ -825,6 +828,7 @@ export function SenseClient() {
       )}
     </div>
   
-      </PageLayout>
+            </div>
+</PageLayout>
     )
 }

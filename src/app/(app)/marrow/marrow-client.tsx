@@ -307,19 +307,21 @@ export function MarrowClient() {
         
     <div className="flex flex-col h-full overflow-hidden">
       {/* Header */}
-      <div className="shrink-0 px-3 lg:px-6 pt-6 pb-4">
-        <div className="flex items-center gap-2 lg:gap-3 mb-1">
-          <div className="p-2 rounded-lg bg-gradient-to-br from-amber-500/20 to-orange-500/20">
+      <div className="flex items-center justify-between border-b border-border px-3 lg:px-6 py-4">
+        <div className="flex items-center gap-2 lg:gap-3 min-w-0 flex-1">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-amber-500/20 to-orange-500/20">
             <Bone className="w-5 h-5 text-amber-400" />
           </div>
-          <div>
-            <h1 className="text-lg font-semibold text-foreground">{t("marrow.title") || "Marrow — Backup System"}</h1>
-            <p className="text-xs lg:text-sm text-muted-foreground">{t("marrow.subtitle") || "Backup & restore, scheduled backups, data migration, disaster recovery"}</p>
+          <div className="min-w-0">
+            <h1 className="text-lg lg:text-xl font-semibold truncate">{t("marrow.title") || "Marrow — Backup System"}</h1>
+            <p className="text-xs lg:text-sm text-muted-foreground truncate">{t('organTag.marrow')}</p>
           </div>
         </div>
+      </div>
+      <div className="shrink-0">
 
         {/* Tab Navigation */}
-        <div className="flex gap-1 sm:gap-2 border-b border-border pb-2 mt-4 overflow-x-auto scrollbar-none">
+        <div className="flex gap-1 sm:gap-2 border-b border-border px-3 lg:px-6 py-2 overflow-x-auto scrollbar-none">
           {tabs.map(tab => {
             const Icon = tab.icon
             return (
@@ -355,7 +357,7 @@ export function MarrowClient() {
       )}
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto px-3 lg:px-6 pb-6">
+      <div className="flex-1 overflow-y-auto px-3 lg:px-6 py-4 lg:py-6">
 
         {/* ── Overview Tab ── */}
         {activeTab === "overview" && (
@@ -376,7 +378,7 @@ export function MarrowClient() {
             </div>
 
             {/* Paths */}
-            <div className="p-4 rounded-xl border border-border bg-card space-y-2">
+            <div className="p-3 lg:p-4 rounded-xl border border-border bg-card space-y-2">
               <h3 className="text-xs lg:text-sm font-semibold text-foreground mb-2">{t("marrow.storagePaths") || "Storage Paths"}</h3>
               <div className="flex items-center gap-2 text-xs lg:text-sm">
                 <span className="text-muted-foreground">{t("marrow.backupDir") || "Backup Directory"}:</span>
@@ -398,7 +400,7 @@ export function MarrowClient() {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 lg:gap-4">
               <button
                 onClick={() => { setActiveTab("backups"); setShowCreateBackup(true) }}
-                className="p-4 rounded-xl border border-border bg-card hover:border-primary/40 transition-all text-left"
+                className="p-3 lg:p-4 rounded-xl border border-border bg-card hover:border-primary/40 transition-all text-left"
               >
                 <Plus className="w-5 h-5 text-primary mb-2" />
                 <div className="text-xs lg:text-sm font-semibold text-foreground">{t("marrow.createBackup") || "Create Backup"}</div>
@@ -406,7 +408,7 @@ export function MarrowClient() {
               </button>
               <button
                 onClick={() => { setActiveTab("schedules"); setShowCreateSchedule(true) }}
-                className="p-4 rounded-xl border border-border bg-card hover:border-primary/40 transition-all text-left"
+                className="p-3 lg:p-4 rounded-xl border border-border bg-card hover:border-primary/40 transition-all text-left"
               >
                 <CalendarClock className="w-5 h-5 text-cyan-400 mb-2" />
                 <div className="text-xs lg:text-sm font-semibold text-foreground">{t("marrow.scheduledBackup") || "Scheduled Backups"}</div>
@@ -414,7 +416,7 @@ export function MarrowClient() {
               </button>
               <button
                 onClick={() => setActiveTab("migration")}
-                className="p-4 rounded-xl border border-border bg-card hover:border-primary/40 transition-all text-left"
+                className="p-3 lg:p-4 rounded-xl border border-border bg-card hover:border-primary/40 transition-all text-left"
               >
                 <ArrowUpDown className="w-5 h-5 text-purple-400 mb-2" />
                 <div className="text-xs lg:text-sm font-semibold text-foreground">{t("marrow.dataMigration") || "Data Migration"}</div>
@@ -444,7 +446,7 @@ export function MarrowClient() {
 
             {/* Create Backup Form */}
             {showCreateBackup && (
-              <div className="p-4 rounded-xl border border-border bg-card space-y-3">
+              <div className="p-3 lg:p-4 rounded-xl border border-border bg-card space-y-3">
                 <div className="grid grid-cols-2 gap-2 lg:gap-3">
                   <div>
                     <label className="text-xs text-muted-foreground mb-1 block">{t("marrow.backupName") || "Backup Name"}</label>
@@ -484,7 +486,7 @@ export function MarrowClient() {
                 <div className="text-center py-8 text-muted-foreground text-xs lg:text-sm">{t("marrow.noBackups") || "No backups yet"}</div>
               )}
               {backups.map(b => (
-                <div key={b.backup_id} className="p-4 rounded-xl border border-border bg-card">
+                <div key={b.backup_id} className="p-3 lg:p-4 rounded-xl border border-border bg-card">
                   <div className="flex items-start justify-between">
                     <div className="flex items-center gap-2 lg:gap-3">
                       <Archive className="w-5 h-5 text-amber-400" />
@@ -545,7 +547,7 @@ export function MarrowClient() {
 
             {/* Create Schedule Form */}
             {showCreateSchedule && (
-              <div className="p-4 rounded-xl border border-border bg-card space-y-3">
+              <div className="p-3 lg:p-4 rounded-xl border border-border bg-card space-y-3">
                 <div className="grid grid-cols-2 gap-2 lg:gap-3">
                   <div>
                     <label className="text-xs text-muted-foreground mb-1 block">{t("marrow.scheduleName") || "Task Name"}</label>
@@ -625,7 +627,7 @@ export function MarrowClient() {
         {activeTab === "migration" && (
           <div className="space-y-3 lg:space-y-6">
             {/* Export */}
-            <div className="p-4 rounded-xl border border-border bg-card">
+            <div className="p-3 lg:p-4 rounded-xl border border-border bg-card">
               <h3 className="text-xs lg:text-sm font-semibold text-foreground mb-3">{t("marrow.exportData") || "Export Data"}</h3>
               <p className="text-xs text-muted-foreground mb-3">{t("marrow.exportDesc") || "Export knowledge base data in standard format"}</p>
               <button
@@ -650,7 +652,7 @@ export function MarrowClient() {
             </div>
 
             {/* Import */}
-            <div className="p-4 rounded-xl border border-border bg-card">
+            <div className="p-3 lg:p-4 rounded-xl border border-border bg-card">
               <h3 className="text-xs lg:text-sm font-semibold text-foreground mb-3">{t("marrow.importData") || "Import Data"}</h3>
               <p className="text-xs text-muted-foreground mb-3">{t("marrow.importDesc") || "Import data from backup files or standard formats"}</p>
               <div className="flex items-center gap-2 lg:gap-3">
@@ -676,7 +678,7 @@ export function MarrowClient() {
               ) : (
                 <div className="space-y-2">
                   {exports.map(exp => (
-                    <div key={exp.job_id} className="p-3 rounded-lg border border-border bg-card flex items-center justify-between">
+                    <div key={exp.job_id} className="p-3 lg:p-4 rounded-xl border border-border bg-card flex items-center justify-between">
                       <div className="flex items-center gap-2 lg:gap-3">
                         <FileText className="w-4 h-4 text-purple-400" />
                         <div>

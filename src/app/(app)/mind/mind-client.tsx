@@ -140,12 +140,14 @@ export function MindClient() {
         
     <div className="flex h-full flex-col overflow-hidden">
       <div className="flex items-center justify-between border-b border-border px-3 lg:px-6 py-4">
-        <div className="flex items-center gap-3">
-          <Brain size={20} className="text-violet-500" />
-          <h1 className="text-lg font-semibold">{t("mind.title")}</h1>
-          <span className="rounded-full bg-violet-500/10 px-2 py-0.5 text-xs font-medium text-violet-500">
-            {t("mind.badge")}
-          </span>
+        <div className="flex items-center gap-2 lg:gap-3 min-w-0 flex-1">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-500/10">
+            <Brain size={20} className="text-violet-500" />
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-lg lg:text-xl font-semibold truncate">{t("mind.title")}</h1>
+            <p className="text-xs lg:text-sm text-muted-foreground truncate">{t('organTag.mind')}</p>
+          </div>
         </div>
         <button onClick={() => { fetchPersonalities(); }}
           className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs lg:text-sm hover:bg-muted transition-colors">
@@ -153,7 +155,7 @@ export function MindClient() {
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3 lg:p-6 space-y-3 lg:space-y-6">
+      <div className="flex-1 overflow-y-auto px-3 lg:px-6 py-4 lg:py-6 space-y-3 lg:space-y-6">
         <div className="flex gap-2">
           {[
             { id: "emotion" as const, label: t("mind.emotionTab"), icon: Smile },
@@ -171,7 +173,7 @@ export function MindClient() {
         {tab === "emotion" && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 lg:gap-6">
             <div className="space-y-4">
-              <div className="rounded-xl border border-border bg-card p-5 space-y-3">
+              <div className="rounded-xl border border-border bg-card p-3 lg:p-4 space-y-3">
                 <h3 className="font-semibold text-xs lg:text-sm">{t("mind.inputText")}</h3>
                 <textarea value={emotionText} onChange={(e) => setEmotionText(e.target.value)}
                   placeholder={t("mind.textPlaceholder")}
@@ -187,7 +189,7 @@ export function MindClient() {
               </div>
 
               {/* Quick samples */}
-              <div className="rounded-xl border border-border bg-card p-5 space-y-2">
+              <div className="rounded-xl border border-border bg-card p-3 lg:p-4 space-y-2">
                 <h3 className="font-semibold text-xs lg:text-sm">{t("mind.quickTest")}</h3>
                 {[
                   t("mind.sample1") || "This feature is finally done, I am so happy!",
@@ -208,7 +210,7 @@ export function MindClient() {
             <div className="space-y-4">
               {emotionResult ? (
                 <>
-                  <div className="rounded-xl border border-border bg-card p-5 space-y-4">
+                  <div className="rounded-xl border border-border bg-card p-3 lg:p-4 space-y-4">
                     <div className="flex items-center justify-between">
                       <h3 className="font-semibold text-xs lg:text-sm">{t("mind.primaryEmotion")}</h3>
                       <div className="flex items-center gap-2">
@@ -275,7 +277,7 @@ export function MindClient() {
                   </div>
                 </>
               ) : (
-                <div className="rounded-xl border border-border bg-card p-5">
+                <div className="rounded-xl border border-border bg-card p-3 lg:p-4">
                   <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
                     <Smile size={40} className="mb-3 opacity-30" />
                     <p className="text-xs lg:text-sm">{t("mind.inputHint")}</p>
@@ -349,7 +351,7 @@ export function MindClient() {
       {/* Create Personality Modal */}
       {showCreate && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-full max-w-md rounded-xl border border-border bg-card p-3 lg:p-6 space-y-4">
+          <div className="w-full max-w-md rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4 space-y-4">
             <h3 className="font-semibold">{t("mind.createPersonality")}</h3>
             <div className="space-y-3">
               <div>

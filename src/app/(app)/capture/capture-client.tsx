@@ -125,13 +125,13 @@ export function CaptureClient() {
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-3 lg:px-6 py-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-orange-500/10">
+        <div className="flex items-center gap-2 lg:gap-3 min-w-0 flex-1">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-orange-500/10">
             <Camera size={18} className="text-orange-500" />
           </div>
-          <div>
-            <h1 className="text-lg font-semibold">{t("capture.title")}</h1>
-            <p className="text-xs text-muted-foreground">{t("capture.subtitle")}</p>
+          <div className="min-w-0">
+            <h1 className="text-lg lg:text-xl font-semibold truncate">{t("capture.title")}</h1>
+            <p className="text-xs lg:text-sm text-muted-foreground truncate">{t('organTag.capture')}</p>
           </div>
         </div>
         <button onClick={fetchData} className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-accent">
@@ -175,7 +175,7 @@ export function CaptureClient() {
       </div>
 
       {/* List */}
-      <div className="flex-1 overflow-y-auto px-3 lg:px-6 py-3">
+      <div className="flex-1 overflow-y-auto px-3 lg:px-6 py-4 lg:py-6">
         {loading && captures.length === 0 ? (
           <div className="flex items-center justify-center py-12 text-muted-foreground">
             <Loader2 size={16} className="animate-spin mr-2" /> {t("capture.loading")}
@@ -189,7 +189,7 @@ export function CaptureClient() {
         ) : (
           <div className="space-y-2">
             {filteredCaptures.map(capture => (
-              <div key={capture.id} className="group rounded-xl border border-border bg-card p-3 lg:p-4 transition-colors hover:border-orange-500/30">
+              <div key={capture.id} className="group rounded-xl border border-border bg-card p-3 lg:p-4 lg:p-4 transition-colors hover:border-orange-500/30">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 mb-1">
