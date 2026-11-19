@@ -23,6 +23,7 @@ interface NavEntry {
   key: string;
   labelKey: string;
   fallback: string;
+  tag?: string; // 4 字功能说明（与躯体地图同文案；名字后弱化小字）
   href: string;
   icon: LucideIcon;
 }
@@ -42,14 +43,14 @@ const SECTIONS: NavSection[] = [
     titleFallback: "核心",
     hasHealth: true,
     items: [
-      { key: "soul", labelKey: "nav.soul", fallback: "Soul", href: "/soul", icon: Brain },
-      { key: "cortex", labelKey: "nav.cortex", fallback: "皮层", href: "/cortex", icon: Cpu },
-      { key: "nerve", labelKey: "nav.nerve", fallback: "神经", href: "/nerve", icon: Zap },
-      { key: "vein", labelKey: "nav.vein", fallback: "血管", href: "/vein", icon: Droplets },
-      { key: "soma", labelKey: "nav.soma", fallback: "躯体", href: "/soma", icon: Bot },
-      { key: "sense", labelKey: "nav.sense", fallback: "感官", href: "/sense", icon: Eye },
-      { key: "will", labelKey: "nav.will", fallback: "意志", href: "/will", icon: Sparkles },
-      { key: "mate", labelKey: "nav.mate", fallback: "伙伴", href: "/mate", icon: Users },
+      { key: "soul", labelKey: "nav.soul", fallback: "Soul", tag: "记忆中枢", href: "/soul", icon: Brain },
+      { key: "cortex", labelKey: "nav.cortex", fallback: "皮层", tag: "认知规划", href: "/cortex", icon: Cpu },
+      { key: "nerve", labelKey: "nav.nerve", fallback: "神经", tag: "事件总线", href: "/nerve", icon: Zap },
+      { key: "vein", labelKey: "nav.vein", fallback: "血管", tag: "文件管理", href: "/vein", icon: Droplets },
+      { key: "soma", labelKey: "nav.soma", fallback: "躯体", tag: "外部连接", href: "/soma", icon: Bot },
+      { key: "sense", labelKey: "nav.sense", fallback: "感官", tag: "感知解析", href: "/sense", icon: Eye },
+      { key: "will", labelKey: "nav.will", fallback: "意志", tag: "流程编排", href: "/will", icon: Sparkles },
+      { key: "mate", labelKey: "nav.mate", fallback: "伙伴", tag: "客户端本体", href: "/mate", icon: Users },
     ],
   },
   {
@@ -57,14 +58,14 @@ const SECTIONS: NavSection[] = [
     titleFallback: "底座",
     hasHealth: true,
     items: [
-      { key: "immune", labelKey: "nav.immune", fallback: "免疫", href: "/immune", icon: Shield },
-      { key: "vital", labelKey: "nav.vital", fallback: "体征", href: "/vital", icon: Activity },
-      { key: "marrow", labelKey: "nav.marrow", fallback: "骨髓", href: "/marrow", icon: Bone },
-      { key: "gland", labelKey: "nav.gland", fallback: "腺体", href: "/gland", icon: Stethoscope },
-      { key: "gene", labelKey: "nav.gene", fallback: "基因", href: "/gene", icon: Dna },
-      { key: "echo", labelKey: "nav.echo", fallback: "回声", href: "/echo", icon: Volume2 },
-      { key: "mirror", labelKey: "nav.mirror", fallback: "镜像", href: "/mirror", icon: Layers },
-      { key: "link", labelKey: "nav.link", fallback: "突触", href: "/link", icon: Link2 },
+      { key: "immune", labelKey: "nav.immune", fallback: "免疫", tag: "安全防护", href: "/immune", icon: Shield },
+      { key: "vital", labelKey: "nav.vital", fallback: "体征", tag: "系统监控", href: "/vital", icon: Activity },
+      { key: "marrow", labelKey: "nav.marrow", fallback: "骨髓", tag: "备份恢复", href: "/marrow", icon: Bone },
+      { key: "gland", labelKey: "nav.gland", fallback: "腺体", tag: "模型网关", href: "/gland", icon: Stethoscope },
+      { key: "gene", labelKey: "nav.gene", fallback: "基因", tag: "预制模板", href: "/gene", icon: Dna },
+      { key: "echo", labelKey: "nav.echo", fallback: "回声", tag: "消息推送", href: "/echo", icon: Volume2 },
+      { key: "mirror", labelKey: "nav.mirror", fallback: "镜像", tag: "沙箱测试", href: "/mirror", icon: Layers },
+      { key: "link", labelKey: "nav.link", fallback: "突触", tag: "双向集成", href: "/link", icon: Link2 },
     ],
   },
   {
@@ -72,15 +73,15 @@ const SECTIONS: NavSection[] = [
     titleFallback: "高级",
     hasHealth: true,
     items: [
-      { key: "hippo", labelKey: "nav.hippo", fallback: "海马体", href: "/hippo", icon: Brain },
-      { key: "reflex", labelKey: "nav.reflex", fallback: "反射", href: "/reflex", icon: Bolt },
-      { key: "heredity", labelKey: "nav.heredity", fallback: "遗传链", href: "/heredity", icon: GitBranch },
-      { key: "nest", labelKey: "nav.nest", fallback: "巢穴", href: "/nest", icon: Home },
-      { key: "pulse", labelKey: "nav.pulse", fallback: "脉搏", href: "/pulse", icon: Heart },
-      { key: "limb", labelKey: "nav.limb", fallback: "四肢", href: "/limb", icon: MousePointer },
-      { key: "voice", labelKey: "nav.voice", fallback: "声带", href: "/voice", icon: Mic },
-      { key: "vision", labelKey: "nav.vision", fallback: "视觉", href: "/vision", icon: ImageIcon },
-      { key: "mind", labelKey: "nav.mind", fallback: "心智", href: "/mind", icon: Smile },
+      { key: "hippo", labelKey: "nav.hippo", fallback: "海马体", tag: "记忆管理", href: "/hippo", icon: Brain },
+      { key: "reflex", labelKey: "nav.reflex", fallback: "反射", tag: "高速应答", href: "/reflex", icon: Bolt },
+      { key: "heredity", labelKey: "nav.heredity", fallback: "遗传链", tag: "版本演化", href: "/heredity", icon: GitBranch },
+      { key: "nest", labelKey: "nav.nest", fallback: "巢穴", tag: "租户隔离", href: "/nest", icon: Home },
+      { key: "pulse", labelKey: "nav.pulse", fallback: "脉搏", tag: "时序节拍", href: "/pulse", icon: Heart },
+      { key: "limb", labelKey: "nav.limb", fallback: "四肢", tag: "RPA执行", href: "/limb", icon: MousePointer },
+      { key: "voice", labelKey: "nav.voice", fallback: "声带", tag: "语音合成", href: "/voice", icon: Mic },
+      { key: "vision", labelKey: "nav.vision", fallback: "视觉", tag: "图表绘制", href: "/vision", icon: ImageIcon },
+      { key: "mind", labelKey: "nav.mind", fallback: "心智", tag: "人格调节", href: "/mind", icon: Smile },
     ],
   },
   {
@@ -184,6 +185,9 @@ export function OrganNavSidebar() {
                       >
                         <Icon className="h-3.5 w-3.5 shrink-0" />
                         <span className="truncate">{t(it.labelKey, it.fallback)}</span>
+                        {it.tag && (
+                          <span className="shrink-0 text-[10px] text-muted-foreground/60">{it.tag}</span>
+                        )}
                         {section.hasHealth && (
                           <span
                             className={cn(

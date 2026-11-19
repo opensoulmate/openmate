@@ -28,6 +28,7 @@ interface OrganStatus {
 const ORGAN_LAYOUT: Array<{
   key: string;
   label: string;
+  tag: string; // 4 字功能说明（名字下方弱化小字；文案定稿，禁改写）
   emoji: string;
   category: string;
   x: number;
@@ -38,60 +39,60 @@ const ORGAN_LAYOUT: Array<{
   self?: boolean;
 }> = [
   // Brain area (head)
-  { key: "soul", label: "灵魂", emoji: "🧠", category: "core", x: 88, y: 5, href: "/dashboard", system: "brain" },
-  { key: "cortex", label: "皮层", emoji: "🧩", category: "core", x: 49, y: 5, href: "/cortex", system: "brain" },
-  { key: "hippo", label: "海马体", emoji: "🧠", category: "organ", x: 127, y: 5, href: "/hippo", system: "brain" },
-  { key: "mind", label: "心智", emoji: "💭", category: "organ", x: 88, y: 19, href: "/mind", system: "brain" },
-  { key: "reflex", label: "反射", emoji: "⚡", category: "organ", x: 12, y: 5, href: "/reflex", system: "brain" },
+  { key: "soul", label: "灵魂", tag: "记忆中枢", emoji: "🧠", category: "core", x: 88, y: 5, href: "/dashboard", system: "brain" },
+  { key: "cortex", label: "皮层", tag: "认知规划", emoji: "🧩", category: "core", x: 49, y: 5, href: "/cortex", system: "brain" },
+  { key: "hippo", label: "海马体", tag: "记忆管理", emoji: "🧠", category: "organ", x: 127, y: 5, href: "/hippo", system: "brain" },
+  { key: "mind", label: "心智", tag: "人格调节", emoji: "💭", category: "organ", x: 88, y: 19, href: "/mind", system: "brain" },
+  { key: "reflex", label: "反射", tag: "高速应答", emoji: "⚡", category: "organ", x: 12, y: 5, href: "/reflex", system: "brain" },
 
   // Eyes/Sense (face)
-  { key: "sense", label: "感官", emoji: "👁", category: "service", x: 12, y: 19, href: "/sense", system: "sensory" },
-  { key: "vision", label: "视觉", emoji: "🎨", category: "organ", x: 49, y: 19, href: "/vision", system: "sensory" },
-  { key: "capture", label: "捕获", emoji: "📸", category: "service", x: 127, y: 19, href: "/capture", system: "sensory" },
+  { key: "sense", label: "感官", tag: "感知解析", emoji: "👁", category: "service", x: 12, y: 19, href: "/sense", system: "sensory" },
+  { key: "vision", label: "视觉", tag: "图表绘制", emoji: "🎨", category: "organ", x: 49, y: 19, href: "/vision", system: "sensory" },
+  { key: "capture", label: "捕获", tag: "采集入库", emoji: "📸", category: "service", x: 127, y: 19, href: "/capture", system: "sensory" },
 
   // Voice (throat)
-  { key: "voice", label: "声带", emoji: "🎤", category: "organ", x: 67, y: 33, href: "/voice", system: "sensory" },
-  { key: "echo", label: "回声", emoji: "🔊", category: "service", x: 164, y: 19, href: "/echo", system: "sensory" },
+  { key: "voice", label: "声带", tag: "语音合成", emoji: "🎤", category: "organ", x: 67, y: 33, href: "/voice", system: "sensory" },
+  { key: "echo", label: "回声", tag: "消息推送", emoji: "🔊", category: "service", x: 164, y: 19, href: "/echo", system: "sensory" },
 
   // Chest area
-  { key: "vital", label: "体征", emoji: "📊", category: "service", x: 49, y: 47, href: "/vital", system: "circulatory" },
-  { key: "pulse", label: "脉搏", emoji: "💓", category: "organ", x: 109, y: 33, href: "/pulse", system: "circulatory" },
-  { key: "immune", label: "免疫", emoji: "🛡", category: "service", x: 12, y: 47, href: "/immune", system: "immune" },
+  { key: "vital", label: "体征", tag: "系统监控", emoji: "📊", category: "service", x: 49, y: 47, href: "/vital", system: "circulatory" },
+  { key: "pulse", label: "脉搏", tag: "时序节拍", emoji: "💓", category: "organ", x: 109, y: 33, href: "/pulse", system: "circulatory" },
+  { key: "immune", label: "免疫", tag: "安全防护", emoji: "🛡", category: "service", x: 12, y: 47, href: "/immune", system: "immune" },
 
   // Arms (Nerve/Will)
-  { key: "nerve", label: "神经", emoji: "⚡", category: "service", x: 21, y: 33, href: "/nerve", system: "nervous" },
-  { key: "will", label: "意志", emoji: "✨", category: "core", x: 155, y: 33, href: "/will", system: "nervous" },
+  { key: "nerve", label: "神经", tag: "事件总线", emoji: "⚡", category: "service", x: 21, y: 33, href: "/nerve", system: "nervous" },
+  { key: "will", label: "意志", tag: "流程编排", emoji: "✨", category: "core", x: 155, y: 33, href: "/will", system: "nervous" },
 
   // Core (torso center)
-  { key: "gland", label: "腺体", emoji: "🧪", category: "service", x: 88, y: 47, href: "/gland", system: "endocrine" },
-  { key: "heredity", label: "遗传链", emoji: "🔗", category: "organ", x: 127, y: 47, href: "/heredity", system: "endocrine" },
+  { key: "gland", label: "腺体", tag: "模型网关", emoji: "🧪", category: "service", x: 88, y: 47, href: "/gland", system: "endocrine" },
+  { key: "heredity", label: "遗传链", tag: "版本演化", emoji: "🔗", category: "organ", x: 127, y: 47, href: "/heredity", system: "endocrine" },
 
   // Vein (vascular system - spread across body)
-  { key: "vein", label: "血管", emoji: "🩸", category: "core", x: 164, y: 47, href: "/vein", system: "circulatory" },
+  { key: "vein", label: "血管", tag: "文件管理", emoji: "🩸", category: "core", x: 164, y: 47, href: "/vein", system: "circulatory" },
 
   // Soma/Mate（核心 8 补齐：躯体采集层 + 共生伙伴本体）
-  { key: "soma", label: "躯体", emoji: "🤖", category: "core", x: 67, y: 61, href: "/soma", system: "motor", healthKey: "soma-connector" },
-  { key: "mate", label: "伙伴", emoji: "🤝", category: "core", x: 164, y: 5, href: "", system: "brain", self: true },
+  { key: "soma", label: "躯体", tag: "外部连接", emoji: "🤖", category: "core", x: 67, y: 61, href: "/soma", system: "motor", healthKey: "soma-connector" },
+  { key: "mate", label: "伙伴", tag: "客户端本体", emoji: "🤝", category: "core", x: 164, y: 5, href: "", system: "brain", self: true },
 
   // Hands (Limb/Link)
-  { key: "limb", label: "四肢", emoji: "💪", category: "organ", x: 21, y: 61, href: "/limb", system: "motor" },
-  { key: "link", label: "突触", emoji: "🔗", category: "service", x: 155, y: 61, href: "/link", system: "motor" },
+  { key: "limb", label: "四肢", tag: "RPA执行", emoji: "💪", category: "organ", x: 21, y: 61, href: "/limb", system: "motor" },
+  { key: "link", label: "突触", tag: "双向集成", emoji: "🔗", category: "service", x: 155, y: 61, href: "/link", system: "motor" },
 
   // Abdomen
-  { key: "marrow", label: "骨髓", emoji: "🦴", category: "service", x: 109, y: 61, href: "/marrow", system: "immune" },
-  { key: "gene", label: "基因", emoji: "🧬", category: "service", x: 109, y: 75, href: "/gene", system: "endocrine" },
+  { key: "marrow", label: "骨髓", tag: "备份恢复", emoji: "🦴", category: "service", x: 109, y: 61, href: "/marrow", system: "immune" },
+  { key: "gene", label: "基因", tag: "预制模板", emoji: "🧬", category: "service", x: 109, y: 75, href: "/gene", system: "endocrine" },
 
   // Lower torso
-  { key: "nest", label: "巢穴", emoji: "🏠", category: "organ", x: 67, y: 75, href: "/nest", system: "isolation" },
-  { key: "mirror", label: "镜像", emoji: "🪞", category: "service", x: 21, y: 75, href: "/mirror", system: "isolation" },
+  { key: "nest", label: "巢穴", tag: "租户隔离", emoji: "🏠", category: "organ", x: 67, y: 75, href: "/nest", system: "isolation" },
+  { key: "mirror", label: "镜像", tag: "沙箱测试", emoji: "🪞", category: "service", x: 21, y: 75, href: "/mirror", system: "isolation" },
 
   // Legs (Foundation)
-  { key: "trajectory", label: "轨迹", emoji: "📊", category: "system", x: 88, y: 89, href: "/trajectory", system: "foundation" },
-  { key: "mcp", label: "MCP", emoji: "🔌", category: "system", x: 155, y: 75, href: "/mcp", system: "foundation" },
+  { key: "trajectory", label: "轨迹", tag: "轨迹追踪", emoji: "📊", category: "system", x: 88, y: 89, href: "/trajectory", system: "foundation" },
+  { key: "mcp", label: "MCP", tag: "工具接入", emoji: "🔌", category: "system", x: 155, y: 75, href: "/mcp", system: "foundation" },
 
   // Feet (Infrastructure)
-  { key: "learn", label: "Learn", emoji: "📚", category: "system", x: 44, y: 89, href: "/learn", system: "foundation" },
-  { key: "diagnostics", label: "Diagnostics", emoji: "🩺", category: "system", x: 132, y: 89, href: "/monitoring", system: "foundation" },
+  { key: "learn", label: "Learn", tag: "课程学习", emoji: "📚", category: "system", x: 44, y: 89, href: "/learn", system: "foundation" },
+  { key: "diagnostics", label: "Diagnostics", tag: "系统诊断", emoji: "🩺", category: "system", x: 132, y: 89, href: "/monitoring", system: "foundation" },
 ];
 
 const SYSTEM_COLORS: Record<string, { fill: string; stroke: string; glow: string }> = {
@@ -292,6 +293,8 @@ function OrganNode({
         touchAction: "none",
       }}
     >
+      {/* 悬停原生提示：名字 + 4 字功能说明 */}
+      <title>{organ.tag ? `${label} · ${organ.tag}` : label}</title>
       {/* Pulse ring for ok status */}
       {isOk && !active && (
         <circle
@@ -343,17 +346,21 @@ function OrganNode({
         {organ.emoji}
       </text>
 
-      {/* Label */}
+      {/* Label（名字 + 名字后 4 字功能说明：弱化小字、与名字垂直居中对齐、整体居中于图标） */}
       <text
         x={pos.x}
-        y={pos.y + 6.8}
+        y={pos.y + 7.15}
         textAnchor="middle"
-        fontSize="2.8"
         fill="currentColor"
         fontWeight="500"
         className="select-none pointer-events-none"
       >
-        {label}
+        <tspan fontSize="2.4">{label}</tspan>
+        {organ.tag && (
+          <tspan fontSize="2" dx="0.7" dy="-0.15" fontWeight="400" opacity={0.55}>
+            {organ.tag}
+          </tspan>
+        )}
       </text>
     </g>
   );
@@ -789,7 +796,12 @@ function OrganDetailsBlock({
           <div className="flex items-center gap-2">
             <span className="text-2xl">{selectedOrganData.emoji}</span>
             <div>
-              <h3 className="font-semibold text-sm">{organLabel(selectedOrganData.key)}</h3>
+              <h3 className="font-semibold text-sm">
+                {organLabel(selectedOrganData.key)}
+                {selectedOrganData.tag && (
+                  <span className="ml-1.5 text-xs font-normal text-muted-foreground/70">{selectedOrganData.tag}</span>
+                )}
+              </h3>
               <p className="text-xs text-muted-foreground capitalize">{selectedOrganData.system} system</p>
             </div>
           </div>
@@ -820,10 +832,12 @@ function OrganDetailsBlock({
                 {organRelations(selectedOrganData.key).map((rel) => {
                   const other = rel.from === selectedOrganData.key ? rel.to : rel.from;
                   const outgoing = rel.from === selectedOrganData.key;
+                  const otherTag = ORGAN_LAYOUT.find((x) => x.key === other)?.tag;
                   return (
                     <div key={rel.id} className="rounded-lg bg-muted/50 px-2.5 py-1.5 text-[11px] leading-relaxed">
                       <span className="font-medium">
                         {rel.dir === "twoway" ? "↔" : outgoing ? "→" : "←"} {organLabel(other)}
+                        {otherTag && <span className="ml-1.5 text-[9px] font-normal text-muted-foreground/60">{otherTag}</span>}
                       </span>
                       <p className="text-muted-foreground">{t(`bodyMap.rel.${rel.id}.note`, rel.note)}</p>
                       <p className="mt-0.5 font-mono text-[9px] leading-relaxed text-muted-foreground/70 break-all">{t("bodyMap.evidence", "证据")}: {rel.evidence}</p>
@@ -891,7 +905,10 @@ function OrganListBlock({
               onMouseLeave={() => onHover(null)}
             >
               <span>{organ.emoji}</span>
-              <span className="flex-1 truncate">{organLabel(organ.key)}</span>
+              <span className="flex-1 truncate">
+                {organLabel(organ.key)}
+                {organ.tag && <span className="ml-1.5 text-[10px] text-muted-foreground/60">{organ.tag}</span>}
+              </span>
               {status?.status === "ok" && <CheckCircle size={12} className="text-emerald-500" />}
               {status?.status === "error" && <XCircle size={12} className="text-red-500" />}
               {status?.status === "loading" && <Loader2 size={12} className="animate-spin text-muted-foreground" />}
