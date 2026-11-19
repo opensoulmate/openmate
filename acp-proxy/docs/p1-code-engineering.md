@@ -124,6 +124,33 @@ for h in ri.find_callers('_file_recall_dispatch'): print(h.brief())"
 |---|---|
 | `agent/repo_index.py` | 新增：AST 语义索引（符号/作用域/绑定/使用点），SQLite 增量落盘 |
 | `agent/fix_loop.py` | 新增：测试驱动修复循环（四闸门 + RepairLoop 策略升级 + 状态持久化） |
-| `agent/soulmate_agent.py` | 接线 ×5：import、code-mode 路由、dispatch 方法、主循环路由、工具面 schema、系统提示 |
+| `agent/soulmate_agent.py` | 接线 ×5：code-mode 路由、dispatch 方法、系统提示、工具面 schema、主循环路由 |
 | `tests/test_repo_index.py` | 14 用例：语义保证（别名/同名/属性/self.X）+ 增量 + 接线护栏 |
 | `tests/test_fix_loop.py` | 9 用例：四闸门 + 自主驱动 + 持久化 + 真 pytest 端到端 + 工具面端到端 |
+
+提交：`1c6fe2b6`（openmate，显式路径提交——同文件在途的兄弟路 hunks 未混入）；
+验收仓库：`~/fixloop-lab` 两提交（初始版本含预存红测试 + fix 提交）。
+
+## 5. 测试基线说明（如实报告）
+
+本机环境装好 pytest/python-docx 后全量跑基线（214 个测试文件，约 3500+ 用例），
+以下问题**与本路变更无关**（A/B 实证：失败集在本路提交前 0c9481e7 与本路提交
+1c6fe2b6 上逐条 identical，零新增失败）：
+
+1. **预存挂死 ×2**（同根因：`_SilentServer` 真 TCP 静默服务端上读超时不触发，
+   `asyncio.run` 永不返回；文件在本路提交中零改动，机械上不可能由本路引入）：
+   `tests/test_trajectory_recorder.py::test_read_timeout_visible_drop_and_no_retry`
+   与 `::test_stats_reconcile_sent_ok_dropped`。跑全量时需 `--deselect` 这两个。
+2. **预存失败**（环境相关/陈旧断言，19 条 failure/error 在 A/B 两侧完全一致）：
+   `test_browser_tools.py` 全文件 8 条（浏览器 worker 环境）、
+   `test_docgen_tools.py` xlsx 3 条、`test_deps_lock.py` 1 条、
+   `test_output_guard.py` 2 条（`[:200]` 陈旧接线断言 vs 已演进的
+   `EVIDENCE_PREVIEW_CHARS`，属其它在途路的演进，不在本路范围）、
+   `test_flow_collab_e2e.py` 2 条 ERROR（real pulse 计时）等。
+
+验证方法（可复跑）：对 `0c9481e7` 与 `1c6fe2b6` 各开干净 worktree 跑同一批测试，
+`diff` 两侧 FAILED/ERROR 清单须为空。本路 23 个新增用例全绿，且在仅含本提交的
+干净 worktree 复跑通过——提交自洽，不依赖任何兄弟路在途代码。
+
+尾段 20 个测试文件（trajectory_rounds → ws_session_recovery）补跑：354 passed，
+0 failed（仅 deselect 上述 2 个挂死项）。全量口径：3500+ 用例，除预存问题外全绿。

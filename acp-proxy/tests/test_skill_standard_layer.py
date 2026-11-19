@@ -197,6 +197,27 @@ class TestListMerge:
         names = [s["name"] for s in skills]
         assert names.index("hot-skill") < names.index("std-skill")  # use_count降序
 
+    def test_local_same_name_different_task_both_visible(self, mgr):
+        """P0 二次命中缺口回归：auto-learned 同名（工具链）不同任务技能不可再被吞。
+
+        按 name 吞掉 → 第二个任务学到的技能永远检索不到；按 (name, description)
+        折叠：同名不同任务=两个都可见，同名同描述=重复学习复本折叠。
+        """
+        m, _, _ = mgr
+        m.create_skill(name="terminal→read_file", description="从交互中自动学习: 报销发票",
+                       triggers=["发票"], content="c1")
+        m.create_skill(name="terminal→read_file", description="从交互中自动学习: 备份数据库",
+                       triggers=["备份"], content="c2")
+        names = [s["name"] for s in m.list_skills() if s["name"] == "terminal→read_file"]
+        assert len(names) == 2
+
+    def test_local_same_name_same_description_collapsed(self, mgr):
+        """同名同描述=重复学习的复本，折叠只留一份。"""
+        m, _, _ = mgr
+        m.create_skill(name="n", description="d", triggers=["t"], content="c")
+        m.create_skill(name="n", description="d", triggers=["t"], content="c")
+        assert len([s for s in m.list_skills() if s["name"] == "n"]) == 1
+
 
 # ── search_skills 标准层检索 ─────────────────────────────────
 

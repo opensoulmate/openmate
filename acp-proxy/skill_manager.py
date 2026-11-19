@@ -328,22 +328,28 @@ class SkillManager:
     def list_skills(self) -> list[dict]:
         """列出所有技能：.agents/skills标准层+shared层（只读）+本地JSON技能，按 use_count 降序
 
-        标准层与本地JSON层、以及标准层跨label（agents-global vs shared同名）全部去重：
-        先出现者胜出（STANDARD_SKILL_DIRS顺序：agents-global优先于shared）。
+        去重语义（两层不同真源）：
+        - 跨层同名：标准层优先（test_standard_wins_name_collision 锁定），
+          std 跨 label 同名先出现者胜出（STANDARD_SKILL_DIRS 顺序）；
+        - 本地JSON层自身：按 (name, description) 去重——同名不同任务是不同技能
+          （auto-learned 技能名=工具链，"terminal→read_file→write_file" 型同名
+          极常见；按 name 吞掉后第二次同类任务永远检索不到，P0 二次命中缺口），
+          同名同描述=重复学习的复本才折叠。
         """
         skills: list[dict] = []
-        seen: set = set()
+        layer_seen: set = set()  # std+saved 层同名去重（跨层标准优先）
         for s in self.scan_standard_skills():
-            if s["name"] in seen:
+            if s["name"] in layer_seen:
                 continue
-            seen.add(s["name"])
+            layer_seen.add(s["name"])
             skills.append(s)
         # saved: 可写库（skill_saver 保存的SKILL.md）进运行时技能面——保存即被检索命中
         for s in self.scan_saved_skills():
-            if s["name"] in seen:
+            if s["name"] in layer_seen:
                 continue
-            seen.add(s["name"])
+            layer_seen.add(s["name"])
             skills.append(s)
+        local_seen: set = set()
         for f in os.listdir(self.skills_dir):
             if f.endswith(".json"):
                 try:
@@ -352,9 +358,12 @@ class SkillManager:
                 except Exception as e:
                     logger.warning("Failed to load skill %s: %s", f, e)
                     continue
-                if s.get("name") in seen:
+                if s.get("name") in layer_seen:
+                    continue  # 跨层同名：标准层优先（锁定语义）
+                key = (s.get("name"), s.get("description", ""))
+                if key in local_seen:
                     continue
-                seen.add(s.get("name"))
+                local_seen.add(key)
                 skills.append(s)
         skills.sort(key=lambda s: s.get("use_count", 0), reverse=True)
         return skills

@@ -1,15 +1,21 @@
 """agent/skill_loader.py — 技能检索与加载（路线图 6.2：按任务自动匹配并注入）
 
 补齐 6.1 诚实边界里"按任务自动匹配注入"的真实缺口（本轮勘察实证三处）：
-1. gene /skill/recommend 推荐结果只注入"可用技能: 名字"——描述/模板/成败率全部
+1. gene /skill/recommend 推荐结果只注入"可用技能: 名字"——描述/模板/成功率全部
    丢弃，LLM 看到名字不知道怎么做（"检索到了但没加载"）；
 2. 任务管线只按用户原话匹配一次技能，步骤文本（如"解析PDF"）命中不到的技能
    永远注入不进来（步骤级重新匹配缺位）；
 3. 注入面无预算——技能正文多长都全量塞系统提示（超出即膨胀上下文）。
 
+P0 技能自动命中（对标 OMH 路由器，卷一§4）：检索升级为 skill_matcher 混合打分
+（触发打分 + BM25 短名单 + 语义向量 + 反馈增益），放行走"Ranking is not
+admission"证据门（触发命中/情况语句语义/锚词混合佐证三路，pitfall 30 语义
+逐条保留：纯描述匹配绝不放行）；命中记账（skill_feedback 三态）与装载验证
+（skill_load_verify 四态收据）在 soulmate_agent 回合收尾接线。
+
 职责（确定性，不走 LLM）：
 - match_for_task：回合级检索，集中既有 gate 语义（短消息不匹配 / 文件发送请求
-  跳过 / 只认触发词命中忽略纯描述匹配——pitfall 30 防误触发语义逐条保留）；
+  跳过）+ 混合放行（skill_matcher.admit 单一真源）；
 - match_for_step：步骤级重新检索 + 与回合级结果合并去重（步骤命中在前——当前
   步骤相关性优先）；
 - render_local_section：本地 SkillManager 技能注入段（字节契约与历史内联实现
@@ -17,9 +23,9 @@
 - render_recommended：gene 推荐载荷 → 技能内容加载注入段（描述/模板/成功率/
   相关性），格式对齐 opensoul skill_learner.get_context_prompt；
 - 预算：SOULMATE_SKILL_BUDGET_TOKENS（默认 1500）内截断自报（"指标不许说谎"，
-  小技能文本绝不改动）。
+  小技能文本绝不改动）；预算挤掉的技能 over_budget 留痕（卷二 #17，last_render_report）。
 
-可观测：stats 计数（匹配/注入/截断/推荐加载）。
+可观测：stats 计数（匹配/注入/截断/推荐加载/over_budget）。
 """
 
 from __future__ import annotations
@@ -54,8 +60,12 @@ class SkillLoader:
         skill_manager: Any = None,
         max_skills: int = DEFAULT_MAX_SKILLS,
         budget_tokens: int | None = None,
+        feedback: Any = None,
+        matcher: Any = None,
     ):
         self._skill_manager = skill_manager  # None → 延迟构造生产 SkillManager
+        self._feedback = feedback  # None → 延迟构造生产 SkillFeedbackLedger
+        self._matcher_inst = matcher  # None → 延迟构造 SkillMatcher
         self.max_skills = max(1, int(max_skills))
         self.budget_tokens = (
             int(budget_tokens)
@@ -68,7 +78,11 @@ class SkillLoader:
             "injections": 0,
             "recommended_loaded": 0,
             "truncations": 0,
+            "over_budget": 0,
+            "hybrid_admits": 0,
         }
+        # 卷二 #17 over_budget 留痕：最近一次注入段渲染的完整清单
+        self.last_render_report: dict = {}
 
     # ── 检索 ─────────────────────────────────────────────
 
@@ -78,44 +92,43 @@ class SkillLoader:
             self._skill_manager = SkillManager()
         return self._skill_manager
 
+    def feedback_ledger(self) -> Any:
+        if self._feedback is None:
+            from agent.skill_feedback import get_ledger  # 延迟导入防环
+            self._feedback = get_ledger()
+        return self._feedback
+
+    def matcher(self) -> Any:
+        """混合匹配器 lazy-init（skill_matcher：触发+BM25+语义+反馈，证据放行）。"""
+        if self._matcher_inst is None:
+            from agent.skill_matcher import SkillMatcher  # 延迟导入防环
+            self._matcher_inst = SkillMatcher(
+                skill_manager=self._manager(),
+                ledger=self.feedback_ledger(),
+                top_k=self.max_skills,
+            )
+        return self._matcher_inst
+
     @staticmethod
     def _is_file_request(text: str) -> bool:
         return bool(_FILE_NAME_RE.search(text) and _SEND_VERB_RE.search(text))
 
-    @staticmethod
-    def _trigger_gate(text: str, skills: list[dict]) -> list[dict]:
-        """只保留触发词命中（is_injectable_trigger 单一真源），忽略纯描述匹配。
-
-        命中条目带 match_reason（可观测：为什么注入这个技能）。
-        """
-        from skill_manager import is_injectable_trigger
-        t_lower = text.lower()
-        out: list[dict] = []
-        for s in skills or []:
-            reasons = [
-                t for t in s.get("triggers", [])
-                if t and t.lower() in t_lower and is_injectable_trigger(t)
-            ]
-            if reasons:
-                item = dict(s)
-                item["match_reason"] = f"trigger:{reasons[0]}"
-                out.append(item)
-        return out
-
     def match_for_task(self, task_text: str) -> list[dict]:
-        """回合级技能检索（gate 语义与历史内联实现逐条一致）。
+        """回合级技能检索（gate 语义 + 混合放行，skill_matcher.admit 单一真源）。
 
         1. 短消息（≤10 字）不匹配（pitfall 30 技能误触发）；
         2. 文件发送请求跳过（MEDIA 标签范式）；
-        3. 只认触发词命中，忽略纯描述匹配。
+        3. 放行走证据门（Ranking is not admission）：触发词命中 / 情况语句语义
+           相似 / 锚词共享+语义佐证；纯描述匹配绝不放行（pitfall 30 保留）。
         """
         text = task_text or ""
         if len(text) <= 10:
             return []
         if self._is_file_request(text):
             return []
-        hits = self._trigger_gate(text, self._manager().search_skills(text, limit=self.max_skills))
+        hits = self.matcher().admit(text)
         self.stats["task_matches"] += 1
+        self.stats["hybrid_admits"] += len(hits)
         return hits
 
     def match_for_step(self, step_text: str, base_matches: list[dict] | None = None) -> list[dict]:
@@ -127,10 +140,9 @@ class SkillLoader:
         text = step_text or ""
         step_hits: list[dict] = []
         if text and not self._is_file_request(text):
-            step_hits = self._trigger_gate(
-                text, self._manager().search_skills(text, limit=self.max_skills)
-            )
+            step_hits = self.matcher().admit(text)
         self.stats["step_matches"] += 1
+        self.stats["hybrid_admits"] += len(step_hits)
         return self.merge_matches(step_hits, base_matches or [])
 
     def merge_matches(self, first: list[dict], second: list[dict]) -> list[dict]:
@@ -168,12 +180,15 @@ class SkillLoader:
         预算内截断自报；小技能文本绝不改动。
         """
         if not skills:
+            self.last_render_report = {"rendered": [], "over_budget": [], "truncated": []}
             return "", []
         header = "\n\n## 相关技能（参考以下经验执行任务）\n"
         section = header
         bodies: list[tuple[str, str]] = []
         used = estimate_tokens(header)
         budget = max(200, self.budget_tokens)
+        rendered_names: list[str] = []
+        truncated_names: list[str] = []
         for skill in list(skills)[: self.max_skills]:
             name = str(skill.get("name", "unnamed_skill"))
             content = str(skill.get("content") or "")
@@ -190,11 +205,25 @@ class SkillLoader:
                 body = f"{head}{keep}{_TRUNCATED_MARK}\n"
                 tail = ""
                 self.stats["truncations"] += 1
+                truncated_names.append(name)
             full = body + tail
             section += full
             bodies.append((name, full))
+            rendered_names.append(name)
             used += estimate_tokens(full)
         self.stats["injections"] += 1
+        # 卷二 #17 over_budget 留痕：被 max_skills/budget 挤掉的技能列名+理由，
+        # 不静默丢（截断的已在正文自报，此处归因到清单）
+        over_budget = [
+            {"name": str(s.get("name", "unnamed_skill")), "reason": "over_budget"}
+            for s in list(skills)[self.max_skills:]
+        ]
+        self.stats["over_budget"] += len(over_budget)
+        self.last_render_report = {
+            "rendered": rendered_names,
+            "truncated": truncated_names,
+            "over_budget": over_budget,
+        }
         return section, bodies
 
     def render_recommended(self, skills: list[dict]) -> str:

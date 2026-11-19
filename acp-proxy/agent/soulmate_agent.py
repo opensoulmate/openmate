@@ -3183,6 +3183,90 @@ class SoulMateAgent:
             self._skill_loader_inst = loader
         return loader
 
+    # ── P0 技能自动命中：命中记账 + 装载验证（OMH 路由器对标件）──
+    def _skill_feedback_ledger(self):
+        """命中账本 lazy-init（三态记账+情况语句，提升二次命中率）。"""
+        ledger = getattr(self, "_skill_feedback_inst", None)
+        if ledger is None:
+            from agent.skill_feedback import get_ledger
+            ledger = get_ledger()
+            self._skill_feedback_inst = ledger
+        return ledger
+
+    def _record_skill_hits(
+        self, skills: list | None, task_text: str, full_response: str
+    ) -> int:
+        """技能命中记账（命中/有用/没用三态，P0 反馈闭环③）。
+
+        三态口径对齐 _report_skill_usage"诚实优先于记账"：
+        - 基础设施失败（llm_outcome_status=error）→ unknown（计命中不稀释成败）；
+        - 成败=turn_outcome_success 单一真源（只认结构化失败标记）；
+        - 任务原话沉淀为该技能情况语句（run2 同类任务的命中锚）。
+        旁路纪律：任何异常只记 debug 日志，绝不阻塞回合收尾主链路。
+        返回记账条数（可观测）。
+        """
+        if not skills:
+            return 0
+        try:
+            from agent.trajectory_recorder import llm_outcome_status, turn_outcome_success
+
+            if llm_outcome_status(full_response) == "error":
+                outcome = "unknown"
+            elif turn_outcome_success(full_response):
+                outcome = "useful"
+            else:
+                outcome = "not_useful"
+            ledger = self._skill_feedback_ledger()
+            ok = 0
+            for skill in skills[:3]:
+                sid = str(skill.get("id", ""))
+                if not sid:
+                    continue
+                ledger.record_hit(
+                    sid, task_text, outcome=outcome,
+                    skill_name=str(skill.get("name", "")),
+                )
+                ok += 1
+            if ok:
+                logger.info(
+                    f"[skill-feedback] recorded {ok} hit(s), outcome={outcome}")
+            return ok
+        except Exception as e:
+            logger.debug(f"Skill hit ledger skipped: {e}")
+            return 0
+
+    def _verify_skill_loads(
+        self, skills: list, section: str, bodies: list, session_id: str = ""
+    ) -> str:
+        """技能装载验证（OMH skill_load_protocol 同名四态，"写了≠接线了"钩子④）。
+
+        "匹配到了"≠"装进上下文了"：逐技能核验注入段里真有其体，四态收据落
+        data/skill_load_receipts.jsonl（none_loaded/partially_loaded 直接暴露
+        接线断/预算挤）。旁路纪律：失败只记 debug 日志。返回 overall 态。
+        """
+        try:
+            from agent.skill_load_verify import overall_state, verify_loaded, write_receipt
+
+            states = verify_loaded(skills or [], section or "", bodies or [])
+            overall = overall_state(states)
+            if states and overall != "all_loaded":
+                logger.warning(
+                    f"[skill-load-verify] {overall}: "
+                    f"{[(s['name'], s['state']) for s in states]}")
+            report = getattr(self._skill_loader(), "last_render_report", {}) or {}
+            write_receipt(
+                session_id=session_id,
+                states=states,
+                extra={
+                    "over_budget": report.get("over_budget", []),
+                    "truncated": report.get("truncated", []),
+                },
+            )
+            return overall
+        except Exception as e:
+            logger.debug(f"Skill load verify skipped: {e}")
+            return ""
+
     def _schedule_prefetch(self, session_id: str, cwd: str | None = None) -> None:
         """new_session 即调度预热（fire-and-forget 旁路，失败只记日志绝不阻塞）。"""
         try:
@@ -3440,6 +3524,9 @@ You can send files to the user natively: to deliver a file, write a brief confir
         if matched_skills:
             _skill_section, _skill_bodies = self._skill_loader().render_local_section(matched_skills)
             system_prompt += _skill_section
+            # P0装载验证（OMH skill_load_protocol 同名四态）："匹配到了"≠"装进
+            # 上下文了"——逐技能核验注入段真有其体+收据落盘（"写了≠接线了"钩子④）
+            self._verify_skill_loads(matched_skills, _skill_section, _skill_bodies, session_id)
             # P1归因：skill逐项（SDKContextUsage skills[]，名称+正文+模板）
             for _s_name, _s_body in _skill_bodies:
                 attr_items.append(ContextItem(
@@ -8337,6 +8424,8 @@ You can send files to the user natively: to deliver a file, write a brief confir
         # ── 记录技能使用 ──────────────────────────────────
         for skill in matched_skills:
             self._skill_manager.record_usage(skill["id"])
+        # ── P0 命中记账（命中/有用/没用三态+情况语句沉淀）：反馈闭环提升二次命中率──
+        self._record_skill_hits(matched_skills, user_text, full_response)
 
         # ── 路线图 6.3 技能进化：执行结果反哺技能内容（确定性坑沉淀）──
         # 只对命中过的 saved 可写技能做失败→坑沉淀（单写入者纪律不动标准层）；
@@ -8392,11 +8481,15 @@ You can send files to the user natively: to deliver a file, write a brief confir
 
         # ── 自动学习 ──────────────────────────────────────
         try:
-            await self._skill_manager.try_learn_skill(
+            _learned_skill = await self._skill_manager.try_learn_skill(
                 user_text=user_text,
                 assistant_response=full_response,
                 tool_calls=tool_calls_log,
             )
+            # P0 闭环 run1 记账点：学到的技能立刻与本任务挂钩（任务原话沉淀为
+            # 情况语句）——第二次同类任务经锚词/语义自动命中（近零摸索）
+            if _learned_skill:
+                self._record_skill_hits([_learned_skill], user_text, full_response)
         except Exception as e:
             logger.debug(f"Auto-learn skipped: {e}")
 
