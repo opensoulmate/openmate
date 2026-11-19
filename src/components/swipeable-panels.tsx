@@ -5,75 +5,15 @@ import { useRouter, usePathname } from "next/navigation";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 
-// ── Panel route order — matches bottom nav order exactly ──────────
+// ── Panel route order — derived from the bottom-nav menu (single source of truth) ──
+// 对齐映射+去重（2026-11-19）：旧手抄清单与底栏菜单两处维护，4e9f70f2 合并
+// workflow-builder 时把 "/workflow-builder" 直接改成 "/workflow"（上一行已有
+// "/workflow"）造成数组重复，其后顺序与菜单漂移——滑动面板按错位顺序串页
+// （工作流位死页/相邻项串位）。现直接从 baseNavItems 派生，结构上不可能重复或漂移。
 
-const PANEL_ROUTES = [
-  "/chat",
-  "/dashboard",
-  "/notifications",
-  "/ai-groups",
-  "/knowledge",
-  "/learn",
-  "/graph",
-  "/graph-builder",
-  "/search",
-  "/knowledge-requests",
+import { baseNavItems } from "@/components/bottom-nav";
 
-  "/cron",
-  "/workflow",
-  "/workflow",
-  "/will",
-  "/skills",
-  "/mcp",
-  "/workspace",
-  "/capture",
-  "/download",
-  "/tags",
-  "/body-map",
-  "/soma",
-  "/discovery",
-  "/cortex",
-  "/vein",
-  "/gene",
-  "/vital",
-  "/gland",
-  "/hippo",
-  "/reflex",
-  "/heredity",
-  "/pulse",
-  "/nerve",
-  "/sense",
-  "/immune",
-  "/marrow",
-  "/echo",
-  "/mirror",
-  "/link",
-  "/nest",
-  "/limb",
-  "/voice",
-  "/vision",
-  "/mind",
-  "/system",
-  "/soul",
-  "/soma-admin",
-  "/admin",
-  "/permission",
-  "/enterprise",
-  "/sessions",
-  "/diagnostics",
-  "/metrics",
-  "/benchmark",
-  "/intelligence",
-  "/ai-engine",
-  "/healer",
-  "/topology",
-  "/registry",
-  "/trajectory",
-  "/timeline",
-  "/changelog",
-  "/plugins",
-  "/marketplace",
-];
+const PANEL_ROUTES: string[] = baseNavItems.map((item) => item.href);
 
 const SWIPE_THRESHOLD = 50;
 
@@ -93,8 +33,9 @@ export function SwipeablePanels({ children, isHomePage }: SwipeablePanelsProps) 
   const lockedAxisRef = useRef<"horizontal" | "vertical" | null>(null);
   const [swipeDir, setSwipeDir] = useState<"left" | "right" | null>(null);
 
-  // Get current panel index
-  const currentIndex = PANEL_ROUTES.findIndex((r) => pathname.startsWith(r));
+  // Get current panel index (exact route first, then longest prefix match —
+  // 短前缀抢位是旧串位源之一：/knowledge-requests 曾被 "/knowledge" 抢走索引)
+  const currentIndex = getPanelIndex(pathname);
 
   const handleSwipe = useCallback(
     (direction: "left" | "right") => {
@@ -205,5 +146,18 @@ export function SwipeablePanels({ children, isHomePage }: SwipeablePanelsProps) 
 // ── Exports ───────────────────────────────────────────────────────
 
 export function getPanelIndex(pathname: string): number {
-  return PANEL_ROUTES.findIndex((r) => pathname.startsWith(r));
+  // 精确路由优先，其次最长前缀（如 /graph-builder → /graph）；
+  // 旧 findIndex(startsWith) 会被短前缀抢位（/knowledge-requests 曾命中 /knowledge）
+  const exact = PANEL_ROUTES.indexOf(pathname);
+  if (exact >= 0) return exact;
+  let best = -1;
+  let bestLen = -1;
+  for (let i = 0; i < PANEL_ROUTES.length; i++) {
+    const r = PANEL_ROUTES[i];
+    if (pathname.startsWith(r) && r.length > bestLen) {
+      best = i;
+      bestLen = r.length;
+    }
+  }
+  return best;
 }

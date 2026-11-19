@@ -41,7 +41,7 @@ const ICON_MAP: Record<string, React.ElementType> = {
 const DEFAULT_ICON = FileText;
 
 // Settings is NOT in scrollable items — it's fixed on the right
-const baseNavItems: BottomNavItem[] = [
+export const baseNavItems: BottomNavItem[] = [
   { href: "/chat", label: "nav.chat", icon: MessageSquare },
   { href: "/ai-groups", label: "nav.aiGroups", icon: Users },
   { href: "/knowledge", label: "nav.knowledge", icon: BookOpen },
