@@ -63,3 +63,17 @@ def _isolate_collab_side_effects(tmp_path, monkeypatch):
     yield
     reset_collab()
     reset_governance()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_long_task_autonomy_db(tmp_path, monkeypatch):
+    """P0 长任务自治检查点/轨迹库统一进临时目录，禁写真实运行库 data/long_task_autonomy.db。
+
+    既有测试跑 _prompt_inner 复杂任务路径会触发 _bind_long_task 检查点落盘——
+    不隔离会写进 acp-proxy/data/ 真实运行数据（repo 铁律：测试禁写真实运行库）。
+    DB_PATH 为模块级默认值，直接 monkeypatch 模块属性（CheckpointStore 调用时读）。
+    """
+    import agent.long_task_autonomy as lta
+    monkeypatch.setattr(lta, "DB_PATH", tmp_path / "long_task_autonomy.db")
+    monkeypatch.setenv("ACP_LONG_TASK_DB", str(tmp_path / "long_task_autonomy.db"))
+    yield
