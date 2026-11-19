@@ -1680,6 +1680,12 @@ class SoulMateAgent:
             # 会话文件索引召回（路线图 20.1）：只读检索，批内同样可用
             if func_name == "file_recall":
                 return self._file_recall_dispatch(func_args)
+            # P1 代码工程能力：大仓库理解（AST 语义索引），批内同样可用（只读索引查询）
+            if func_name == "repo_index":
+                return self._repo_index_dispatch(func_args)
+            # P1 代码工程能力：测试驱动自主修复循环（验证闸门），批内同样可用
+            if func_name == "fix_loop":
+                return self._fix_loop_dispatch(func_args, session_id)
             # 定时任务调度（路线图 3.1 cron引擎）：批内同样可用
             if func_name in ("schedule_task", "schedule_list", "schedule_cancel"):
                 return self._cron_dispatch(func_name, func_args, session_id)
@@ -1958,6 +1964,127 @@ class SoulMateAgent:
             snippet = r.content.replace("\n", " ")[:200]
             lines.append(f"- {r.file_path}（chunk#{r.chunk_index}）: {snippet}")
         return f"文件索引命中 {len(results)} 段：\n" + "\n".join(lines)
+
+    # ── P1 代码工程能力：大仓库理解（AST 语义索引）+ 测试驱动自主修复循环 ──
+
+    def _repo_index(self, repo_path: str):
+        """RepoIndex lazy 构造（与 _file_recall_dispatch 同款 lazy-init）。"""
+        from agent.repo_index import RepoIndex
+        root = os.path.expanduser(str(repo_path or "")) or self._project_root
+        cache = getattr(self, "_repo_index_cache", None)
+        if cache is None:
+            cache = {}
+            self._repo_index_cache = cache
+        key = os.path.abspath(root)
+        idx = cache.get(key)
+        if idx is None:
+            idx = RepoIndex(key)
+            cache[key] = idx
+        return idx
+
+    def _repo_index_dispatch(self, func_args: dict) -> str:
+        """repo_index 工具分发（P1 大仓库理解：符号/文件地图，AST 语义级）。
+
+        回答"X 在哪实现 / 谁调 Y"靠索引（def/refs/callers 按 AST 归属，别名/同名
+        不误伤），不把全仓塞进上下文。主循环与 code-mode 内层共用此入口。
+        全部只读（build 写的是 data/repo-index/ 索引库，不动目标仓库）。
+        """
+        action = str(func_args.get("action", "") or "build").strip().lower()
+        repo_path = str(func_args.get("repo_path", "") or "")
+        try:
+            idx = self._repo_index(repo_path)
+            if action == "build":
+                res = idx.build(force=bool(func_args.get("force", False)))
+                return (
+                    f"✅ 仓库索引已建: {res['total_files']} 文件"
+                    f"（新建/更新 {res['indexed']}，跳过未变 {res['skipped']}）\n"
+                    f"索引库: {idx.db_path}\n"
+                    + (f"解析失败 {len(res['failed'])} 个: {res['failed'][:5]}"
+                       if res["failed"] else "")
+                    + "\n下一步: repo_index(action='def', name=符号) 找定义，"
+                      "action='refs'/'callers' 找引用/调用方，action='file_map' 看文件地图"
+                )
+            if action == "def":
+                name = str(func_args.get("name", "") or "").strip()
+                if not name:
+                    return "错误: action=def 需要 name 参数"
+                hits = idx.find_def(name, limit=int(func_args.get("limit", 20) or 20))
+                if not hits:
+                    return f"索引中无「{name}」的定义（先 repo_index(action='build') 建索引？）"
+                return f"「{name}」定义 {len(hits)} 处：\n" + "\n".join(
+                    f"- {h.brief()}" for h in hits)
+            if action in ("refs", "callers"):
+                name = str(func_args.get("name", "") or "").strip()
+                if not name:
+                    return f"错误: action={action} 需要 name 参数"
+                target_file = str(func_args.get("target_file", "") or "")
+                limit = int(func_args.get("limit", 50) or 50)
+                if action == "callers":
+                    hits = idx.find_callers(name, target_file=target_file, limit=limit)
+                    label = f"「{name}」调用点"
+                else:
+                    hits = idx.find_refs(name, target_file=target_file, limit=limit)
+                    label = f"「{name}」引用"
+                if not hits:
+                    return (
+                        f"{label} 0 处（AST 语义归属下无引用——注意：动态派发/"
+                        f"星号导入不解析，宁缺勿错）"
+                    )
+                return f"{label} {len(hits)} 处：\n" + "\n".join(
+                    f"- {h.brief()}" for h in hits)
+            if action == "file_map":
+                fm = idx.file_map(subtree=str(func_args.get("subtree", "") or ""),
+                                  limit=int(func_args.get("limit", 200) or 200))
+                lines = [f"📁 {fm['root']} 文件地图（{len(fm['files'])} 文件）："]
+                for f in fm["files"]:
+                    syms = (" | " + ", ".join(f["top_symbols"][:8])) if f["top_symbols"] else ""
+                    lines.append(f"- {f['path']} [{f['language']}, {f['loc']}行]{syms}")
+                return "\n".join(lines)
+            if action == "stats":
+                return json.dumps(idx.stats(), ensure_ascii=False, indent=2)
+            return f"错误: 未知 action={action!r}（支持 build/def/refs/callers/file_map/stats）"
+        except Exception as e:
+            return f"repo_index 执行失败: {e}"
+
+    def _fix_loop_dispatch(self, func_args: dict, session_id: str = "") -> str:
+        """fix_loop 工具分发（P1 测试驱动自主修复循环，四道验证闸门）。
+
+        流程: start（复现闸，必须红）→ 改代码 → check（定向绿闸+回归闸，自动
+        推进/打回/策略升级）→ report（报告闸，测试红绝不写 fixed）。
+        状态落 data/fix-loops/<id>.json 可中断续跑。主循环与 code-mode 共用。
+        """
+        action = str(func_args.get("action", "") or "status").strip().lower()
+        try:
+            from agent.fix_loop import TestDrivenFixLoop
+            loop_id = str(func_args.get("loop_id", "") or "")
+            if action == "start":
+                loop = TestDrivenFixLoop(
+                    repo=str(func_args.get("repo_path", "") or self._project_root),
+                    test_cmd=str(func_args.get("test_cmd", "") or ""),
+                    repro_test=str(func_args.get("repro_test", "") or ""),
+                    bug=str(func_args.get("bug", "") or ""),
+                    regress_cmd=str(func_args.get("regress_cmd", "") or ""),
+                    max_rounds=int(func_args.get("max_rounds", 8) or 8),
+                )
+                result = loop.start()
+                result["loop_id"] = loop.state.loop_id
+                return json.dumps(result, ensure_ascii=False, indent=2)
+            if not loop_id:
+                return f"错误: action={action} 需要 loop_id（action='start' 返回的那个）"
+            loop = TestDrivenFixLoop.load(loop_id)
+            if action == "check":
+                return json.dumps(loop.check(), ensure_ascii=False, indent=2)
+            if action == "status":
+                return json.dumps(loop.status(), ensure_ascii=False, indent=2)
+            if action == "report":
+                return json.dumps(loop.report(), ensure_ascii=False, indent=2)
+            return f"错误: 未知 action={action!r}（支持 start/check/status/report）"
+        except FileNotFoundError:
+            return f"错误: 未找到修复循环 {loop_id!r}（data/fix-loops/ 下无此 id）"
+        except ValueError as e:
+            return f"错误: {e}"
+        except Exception as e:
+            return f"fix_loop 执行失败: {e}"
 
     def _cron_dispatch(self, func_name: str, func_args: dict, session_id: str = "") -> str:
         """schedule_task/schedule_list/schedule_cancel 分发（路线图 3.1 cron引擎）。
@@ -3094,6 +3221,8 @@ ACP代理目录: {cwd}/acp-proxy（后端 Python 代码在此）
 - system_checkup: 系统状态一键体检（只读，不改系统）。服务运行状态/端口监听/磁盘占用/内存/负载/进程（内存TopN+僵尸）六项一次查全；用户问系统/服务/磁盘/负载现状或需要运维判断时使用。sections 参数可只查部分分区
 - evo_communicate: 与进化协调者 evo 对话（Agent↔Agent A2A 转达，回执是 evo 原话）。用户说「告诉evo：…」或下达进化目标→set_goal（content=目标原话）；问 evo 在干嘛/进展→query_status；问为什么这么改/依据→explain（content=主题词）
 - file_recall: 会话文件索引召回（只读）。按内容关键词检索会话中提到并索引过的文件片段（文件路径+内容片段）；用户问『之前那个文件里写了什么』『哪个文件提到过 X』或凭内容回忆文件时使用。⚠️ 只覆盖索引时快照，文件已改动请 read_file 读最新
+- repo_index: 大仓库代码索引（AST 语义级）。action=build 先建索引（增量），action=def 找定义『X 在哪实现』、refs/callers 找引用/调用方『谁调 Y』、file_map 看文件地图。定义/引用按 AST 归属解析（import 别名归属原符号，局部同名/别的文件同名不误伤）；理解大仓库/定位代码优先用它，不要全仓 grep 塞上下文
+- fix_loop: 测试驱动自主修复循环（修 bug/改代码的闭环工具）。action=start（bug+复现测试+测试命令，复现测试必须红）→ 修复 → action=check 验收（定向绿闸+回归闸，红=打回并自动换策略 normal→change_strategy→minimum，测试红不交付）→ action=report 交付（全闸通过才 fixed，否则诚实 failed）。修 bug 任务必须走这个闭环自校验
 - schedule_task / schedule_list / schedule_cancel: 定时任务调度（SoulMate自己的cron：到点自动执行+执行日志+自动排下一次，区别于一次性唤醒）。用户要求"定时/每天/每小时/每周做某事"→ schedule_task（schedule=interval:5m 或 cron:0 9 * * *）；查看任务与执行日志→ schedule_list；停用/删除→ schedule_cancel
 - monitor_add / monitor_list / monitor_check / monitor_remove: 监控告警（对指定服务/网站做周期健康检查：异常告警+恢复通知，目标持久化）。用户要求"监控某网站/服务是否存活、挂了提醒我"→ monitor_add（kind=website/service/port）；查看监控项与最近检查→ monitor_list；立即检查→ monitor_check；停用/删除→ monitor_remove。⚠️ 监控检查只读，不改目标系统
 - wechat_route_list / wechat_route_bind / wechat_route_unbind: 微信会话级路由（peer↔OpenMate会话映射管理，持久化）。查看映射（可按peer/session_id过滤反查）→ wechat_route_list；用户要求"把某微信用户的对话换到某会话/重新绑定/纠正绑错"→ wechat_route_bind；"解绑/断开某微信用户"→ wechat_route_unbind（下次来消息自动新建会话，历史保留）。⚠️ 只改映射，不删消息、不碰消息收发与hermes侧
@@ -3891,6 +4020,81 @@ You can send files to the user natively: to deliver a file, write a brief confir
             },
         }
         builtin_tools.append(file_recall_tool)
+
+        # ── P1 代码工程能力：大仓库理解（AST 语义索引）────────────────
+        # 回答"X 在哪实现/谁调 Y"靠索引而非全仓塞上下文；定义/引用按 AST 语义
+        # 归属（别名/同名不误伤，对齐 OMH LSP 环路的语义定位标准）。
+        repo_index_tool = {
+            "type": "function",
+            "function": {
+                "name": "repo_index",
+                "description": (
+                    "大仓库代码索引（AST 语义级，只读目标仓库）：action=build 建/增量"
+                    "更新索引（先跑这个）；action=def 找定义『X 在哪实现』；action=refs "
+                    "找引用；action=callers 找调用方『谁调 Y』；action=file_map 看文件地图；"
+                    "action=stats 查索引规模。定义/引用按 AST 归属解析——import 别名"
+                    "（as）归属原符号，局部同名变量/参数/别的文件的同名函数不会误伤"
+                    "（区别于 grep 字符串匹配）。用户问『X 在哪实现/谁调用了 Y/这个函数"
+                    "被谁用』或需要理解大仓库结构时优先用它，不要全仓 grep 塞上下文。"
+                    "⚠️ 动态派发（getattr/星号导入）不解析（宁缺勿错）；文件改动后需重新 "
+                    "build。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["build", "def", "refs", "callers", "file_map", "stats"],
+                            "description": "build=建索引（先跑）；def=找定义；refs=找引用；callers=找调用方；file_map=文件地图；stats=索引规模",
+                        },
+                        "name": {"type": "string", "description": "符号名（def/refs/callers 必填，可 'Cls.method' 限定）"},
+                        "repo_path": {"type": "string", "description": "目标仓库路径（缺省=当前项目根）"},
+                        "target_file": {"type": "string", "description": "限定符号的定义文件（同名多义时消歧，如 'agent/repo_index.py'）"},
+                        "subtree": {"type": "string", "description": "file_map 只看某子目录前缀（可选）"},
+                        "force": {"type": "boolean", "description": "build 强制全量重建（缺省增量）"},
+                        "limit": {"type": "integer", "description": "结果条数上限（缺省 def=20 / refs=50）"},
+                    },
+                    "required": ["action"],
+                },
+            },
+        }
+        builtin_tools.append(repo_index_tool)
+
+        # ── P1 代码工程能力：测试驱动自主修复循环（验证闸门）──────────
+        # 复现（红）→修→定向绿→回归全量→报告；测试红不交付；修复失败自动换
+        # 策略（normal→change_strategy→minimum）而非死循环。
+        fix_loop_tool = {
+            "type": "function",
+            "function": {
+                "name": "fix_loop",
+                "description": (
+                    "测试驱动自主修复循环（四道验证闸门，测试红不交付）：action=start "
+                    "启动（指定 bug/复现测试/测试命令——复现测试必须先红，基线就绿会被"
+                    "拒伪修复）；action=check 每轮修复后验收（定向绿闸+回归闸：复现测试"
+                    "红=打回并自动换修复策略 normal→change_strategy→minimum；定向绿但"
+                    "回归新增红=修复破坏别处照样打回；双绿才进 done）；action=status 查"
+                    "进度；action=report 出报告（只有全闸通过才写 fixed，否则诚实 failed，"
+                    "含基线预存红对照）。修 bug/改代码任务用它闭环：先 start 拿红复现，"
+                    "修完 check 验收，最后 report 交付。循环状态持久化可中断续跑"
+                    "（data/fix-loops/）。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": {"type": "string", "enum": ["start", "check", "status", "report"]},
+                        "loop_id": {"type": "string", "description": "修复循环 id（start 返回；check/status/report 必填）"},
+                        "repo_path": {"type": "string", "description": "目标仓库路径（start 用）"},
+                        "bug": {"type": "string", "description": "bug 描述（start 用）"},
+                        "test_cmd": {"type": "string", "description": "测试命令，如 'pytest tests/ -q'（start 必填）"},
+                        "repro_test": {"type": "string", "description": "复现测试选择器，如 'tests/test_x.py::test_bug'（start 建议填）"},
+                        "regress_cmd": {"type": "string", "description": "回归全量命令（缺省=test_cmd）"},
+                        "max_rounds": {"type": "integer", "description": "修复轮次上限（缺省8，防死循环）"},
+                    },
+                    "required": ["action"],
+                },
+            },
+        }
+        builtin_tools.append(fix_loop_tool)
 
         # ── 录制流程智能执行工具（录制→沉淀→SoulMate 按名调用）────────
         # browser_flow_list=浏览流程配方库；browser_flow_execute=按名调出流程的
@@ -5903,6 +6107,22 @@ You can send files to the user natively: to deliver a file, write a brief confir
                             # ── 会话文件索引召回（路线图 20.1，只读）──────
                             try:
                                 result = self._file_recall_dispatch(func_args)
+                            except Exception as e:
+                                te = self._tool_error_handler.handle_error(
+                                    session_id, func_name, e, func_args)
+                                result = te.to_model_message()
+                        elif func_name == "repo_index":
+                            # ── P1 大仓库理解（AST 语义索引，只读）────────
+                            try:
+                                result = self._repo_index_dispatch(func_args)
+                            except Exception as e:
+                                te = self._tool_error_handler.handle_error(
+                                    session_id, func_name, e, func_args)
+                                result = te.to_model_message()
+                        elif func_name == "fix_loop":
+                            # ── P1 测试驱动自主修复循环（验证闸门）────────
+                            try:
+                                result = self._fix_loop_dispatch(func_args, session_id)
                             except Exception as e:
                                 te = self._tool_error_handler.handle_error(
                                     session_id, func_name, e, func_args)
