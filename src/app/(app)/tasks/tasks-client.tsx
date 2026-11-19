@@ -4,6 +4,7 @@ import {
   Inbox, RefreshCw, Hand, HeartPulse, Send, BellRing, XCircle, CheckCircle2,
 } from "lucide-react";
 import { PageLayout } from "@/components/page-layout";
+import { TaskTriagePanel } from "@/components/task-triage-gate";
 
 /* 任务收发台 — 对接 acp-proxy /collab/*（每人任务收件箱）
  * 数据源：plugin.collab_api（工单账=flow_collab.WorkOrderStore）
@@ -279,6 +280,8 @@ export function TasksClient() {
   return (
     <PageLayout title="任务收发台">
       <div className="p-4 flex flex-col gap-4 h-full overflow-auto">
+        {/* 统一下达入口：任务三级分流门（小→会话 / 中→群组 / 大→流程化） */}
+        <TaskTriagePanel />
         <div className="flex items-center gap-2 flex-wrap">
           <Inbox className="w-4 h-4" />
           <input

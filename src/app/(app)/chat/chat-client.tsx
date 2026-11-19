@@ -1220,6 +1220,8 @@ export function ChatClient() {
   // URL ?session= 直载（会话不在 /api/sessions 列表时按 id 直载，禁静默空历史/静默改道）
   const [urlSessionError, setUrlSessionError] = useState<string | null>(null);
   const urlSessionDirectRef = useRef<string | null>(null);
+  // 分流门 ?auto_send=1：待自动送达的文本（会话 WS 就绪后发出一次）
+  const autoSendPendingRef = useRef<string>('');
   // per-session loading: derived from sessionDataMap for current session
   const effectiveSessionIdForLoading = useAppStore((s) => s.activeSessionId) || pendingSessionIdRef.current;
   const loading = effectiveSessionIdForLoading ? (sessionDataMap.get(effectiveSessionIdForLoading)?.loading || false) : false;
@@ -1667,16 +1669,44 @@ export function ChatClient() {
   }, [sendAcpPrompt]);
 
   // 转发直达：?forward=TEXT → 预填输入框（回车即发）
+  // 分流门一键直达：?auto_send=1（小任务轨）→ 会话连上后自动发出，直接办
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const fwd = params.get('forward');
-    if (fwd) {
+    const autoSend = params.get('auto_send');
+    if (fwd && autoSend) {
+      autoSendPendingRef.current = fwd;
+    } else if (fwd) {
       setSmartPromptTask(fwd);
+    }
+    if (fwd || autoSend) {
       params.delete('forward');
+      params.delete('auto_send');
       const q = params.toString();
       window.history.replaceState({}, '', window.location.pathname + (q ? `?${q}` : ''));
     }
   }, []);
+
+  // 分流门 ?auto_send=1：等目标会话 WS 真正 OPEN（握手层由 sendAcpPrompt 续等）后发一次
+  useEffect(() => {
+    if (!autoSendPendingRef.current) return;
+    const sid = activeSessionIdFromStore;
+    if (!sid) return;
+    const text = autoSendPendingRef.current;
+    let tries = 0;
+    const timer = setInterval(() => {
+      tries += 1;
+      const ws = wsMapRef.current.get(sid);
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        clearInterval(timer);
+        autoSendPendingRef.current = '';
+        sendAcpPrompt(sid, text);
+      } else if (tries > 120) {
+        clearInterval(timer); // 连不上不无限等——输入框仍在，用户可手动发
+      }
+    }, 500);
+    return () => clearInterval(timer);
+  }, [activeSessionIdFromStore, sendAcpPrompt]);
 
   useEffect(() => {
     const sid = new URLSearchParams(window.location.search).get('session');

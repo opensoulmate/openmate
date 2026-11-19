@@ -20,6 +20,7 @@ import { BranchGraph, type FlowDef, type FlowNode } from "./flow-graph";
 import {
   flowApi, type FlowDefData, type FlowNodeSpec, type TemplateMeta, type TemplateParam,
 } from "./flow-api";
+import { ModeBadge, triageApi } from "@/components/task-triage-gate";
 
 type StudioMode = "nl" | "templates" | "editor";
 
@@ -387,7 +388,7 @@ function NlPane({ onSaved }: { onSaved: () => void }) {
 function TemplatesPane({ onSaved }: { onSaved: () => void }) {
   const { t, i18n } = useTranslation();
   const lang = lang3(i18n.language);
-  const [templates, setTemplates] = useState<TemplateMeta[]>([]);
+  const [templates, setTemplates] = useState<Array<TemplateMeta & { preferred?: boolean }>>([]);
   const [loading, setLoading] = useState(true);
   const [picked, setPicked] = useState<TemplateMeta | null>(null);
   const [params, setParams] = useState<Record<string, string>>({});
@@ -396,8 +397,11 @@ function TemplatesPane({ onSaved }: { onSaved: () => void }) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    flowApi.templates()
+    // 双语义模板偏好：/triage/templates 按租户模式（一人公司/内部流程）排推荐序
+    triageApi.triageFetch("/triage/templates")
       .then((res) => setTemplates(res.templates || []))
+      .catch(() => flowApi.templates())
+      .then((res) => { if (res?.templates) setTemplates(res.templates || []); })
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
   }, []);
@@ -454,6 +458,11 @@ function TemplatesPane({ onSaved }: { onSaved: () => void }) {
                   <span className="rounded bg-primary/10 text-primary px-1.5 py-0.5 text-[10px]">
                     {tpl.scene[lang]}
                   </span>
+                  {tpl.preferred ? (
+                    <span className="rounded bg-emerald-500/15 text-emerald-500 px-1.5 py-0.5 text-[10px]">
+                      {t("triage.preferred", "推荐")}
+                    </span>
+                  ) : null}
                   <span className="text-xs font-medium">{tpl.name[lang]}</span>
                   <code className="text-[10px] text-muted-foreground bg-muted rounded px-1.5 py-0.5">{tpl.id}</code>
                 </div>
@@ -1064,6 +1073,22 @@ export function FlowStudio({ flows, onSaved }: {
 }) {
   const { t } = useTranslation();
   const [mode, setMode] = useState<StudioMode>("nl");
+  // 个人/企业双语义：流程化视图 = 一人公司 / 内部流程（模式随设置切换）
+  const [tenantMode, setTenantMode] = useState("personal");
+
+  useEffect(() => {
+    triageApi.triageFetch("/triage/mode")
+      .then((d) => setTenantMode(d.mode || "personal"))
+      .catch(() => {});
+  }, []);
+
+  const toggleTenantMode = async () => {
+    const next = tenantMode === "personal" ? "enterprise" : "personal";
+    try {
+      await triageApi.triageFetch("/triage/mode", { method: "PUT", body: JSON.stringify({ mode: next }) });
+      setTenantMode(next);
+    } catch { /* 保持现值 */ }
+  };
 
   const modes: Array<{ id: StudioMode; label: string; icon: typeof Sparkles }> = [
     { id: "nl", label: t("will.studioNlTab", "一句话建流"), icon: Sparkles },
@@ -1073,23 +1098,26 @@ export function FlowStudio({ flows, onSaved }: {
 
   return (
     <div className="space-y-3">
-      {/* 分段选择（选中态圆角高亮，禁下划线） */}
-      <div className="flex items-center gap-1 rounded-lg bg-muted p-1 w-fit">
-        {modes.map((item) => (
-          <button
-            key={item.id}
-            onClick={() => setMode(item.id)}
-            className={cn(
-              "flex items-center gap-1.5 rounded-md px-4 py-1.5 text-xs font-medium transition-colors",
-              mode === item.id
-                ? "bg-primary/10 text-primary"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            <item.icon size={12} />
-            {item.label}
-          </button>
-        ))}
+      {/* 分段选择（选中态圆角高亮，禁下划线）+ 流程化双语义标注 */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-1 rounded-lg bg-muted p-1 w-fit">
+          {modes.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => setMode(item.id)}
+              className={cn(
+                "flex items-center gap-1.5 rounded-md px-4 py-1.5 text-xs font-medium transition-colors",
+                mode === item.id
+                  ? "bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <item.icon size={12} />
+              {item.label}
+            </button>
+          ))}
+        </div>
+        <ModeBadge mode={tenantMode} onToggle={toggleTenantMode} />
       </div>
 
       {mode === "nl" && <NlPane onSaved={onSaved} />}

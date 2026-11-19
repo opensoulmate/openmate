@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import '@/styles/sidebar.css';
 import { AppShell } from '@/components/app-shell';
 import { CommandMenu } from '@/components/command-menu';
+import { TaskTriageLauncher } from '@/components/task-triage-gate';
 import { GlobalShortcuts } from '@/components/global-shortcuts';
 import { AuthExpiryGuard } from '@/components/auth-expiry-guard';
 import { LoginPage } from '@/components/login-page';
@@ -32,6 +33,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <AppShell>
         <main className="flex-1 flex flex-col overflow-hidden">{children}</main>
         <CommandMenu />
+        <TaskTriageLauncher />
         <GlobalShortcuts />
       </AppShell>
     </ToastProvider>
