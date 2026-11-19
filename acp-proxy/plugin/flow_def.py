@@ -11,14 +11,16 @@
 
 from __future__ import annotations
 
+import fnmatch
+import posixpath
 import re
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass, field, replace as _dc_replace
+from typing import Any, Iterable, Mapping, Sequence
 
 # ---- 常量 ----
 
 NODE_TYPES = {"tool", "decision", "loop", "approval", "action", "parallel",
-              "agent", "human"}
+              "agent", "human", "verify"}
 TRIGGER_TYPES = {"cron", "event", "manual"}
 ON_ERROR_PATTERN = re.compile(r"^(fail|skip|goto:[a-z][a-z0-9-]{0,63})$")
 NODE_ID_PATTERN = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
@@ -69,6 +71,7 @@ class ParallelBranchSpec:
     id: str
     tool: str = ""
     args: dict[str, Any] = field(default_factory=dict)
+    write_scope: tuple[str, ...] = ()   # 写域声明（并行分支互踩静态拒载）
 
 
 @dataclass(frozen=True)
@@ -113,6 +116,15 @@ class NodeSpec:
     budget: BudgetSpec = field(default_factory=BudgetSpec)  # 预算隔离（软预算禁硬杀）
     package: str = "full"          # 任务包档位（E1：full | compact 防上下文爆）
     review: bool = False           # 人 工节点=验收门（E4：驳回→不算节点完成）
+    # 写域声明（shared_scope_pairs 静态拒载：并行节点写域重叠即拒绝装载）
+    write_scope: tuple[str, ...] = ()
+    # settle 验收标准（agent/human：交付回流时求值，未满足→拒 ok 修复轮）
+    acceptance: str = ""
+    # verify 验收节点（Test·verified 翻档面：内容级探针 + 非执行者验收）
+    for_: str = ""                 # 被验收节点 id（YAML 键 `for`；缺省=顺序前驱）
+    probe: str = ""                # 内容级探针工具（<plugin>__<tool>，验收证据来源）
+    verifier: str = ""             # 验收者身份（缺省 probe:<tool>；≠执行者才许翻档）
+    max_fixes: int = 2             # 验证不过修复轮上限（超出→重规划 on_error）
 
 
 @dataclass(frozen=True)
@@ -152,6 +164,78 @@ class FlowDefinition:
             if node.id not in self.body_node_ids:
                 return node.id
         raise FlowDefError(f"流程 {self.id} 没有可执行的入口节点")
+
+
+# ---- 并行写域隔离（shared_scope_pairs 移植自 dag_core.py:145-209，纯 stdlib）----
+
+def _scope_path(entry: str) -> tuple[tuple[str, ...], str, str]:
+    """写域条目 → (它写在哪些目录段下, 它的 glob, 它的具体文件)。
+
+    ``\\\\`` 按 ``/`` 读、大小写折叠、其余过 posixpath.normpath（``./``、重复/结尾
+    ``/``、``x/..`` 都不改变语义；开头 ``/`` 保留为首个 ``/`` 段）。含 ``*``/``?``
+    的段：写域落在 glob 段之前的目录下，整串保留为 pattern（fnmatch 的 ``*`` 本就
+    跨 ``/``，``src/**/*.py`` 必须命中 ``src/x.py``），``[`` 转义（``app/[slug]/x.tsx``
+    更常是文件名而非字符类）。条目既非 glob 也不是目录写法（结尾 ``/``）且末段带
+    后缀时，它就是那个具体文件。
+    """
+    text = entry.replace("\\", "/").casefold()
+    absolute = text.startswith("/")
+    normal = posixpath.normpath(text.lstrip("/") or ".")
+    segments = [] if normal == "." else normal.split("/")
+    globbed = [i for i, s in enumerate(segments) if "*" in s or "?" in s]
+    under = (( "/",) if absolute else ()) + tuple(
+        segments[:globbed[0]] if globbed else segments)
+    whole = ("/" if absolute else "") + "/".join(segments)
+    pattern = whole.replace("**/", "*").replace("[", "[[]") if globbed else ""
+    concrete = (not globbed and not text.endswith("/")
+                and bool(segments) and posixpath.splitext(segments[-1])[1])
+    return under, pattern, whole if concrete else ""
+
+
+def _meets(first: tuple[tuple[str, ...], str, str],
+           second: tuple[tuple[str, ...], str, str]) -> bool:
+    """两条写域是否可能写同一路径：一目录包含另一；glob 与具体文件按 fnmatch。
+
+    glob 对 glob、目录对目录只要目录相交就算 meet（并发互踩无法静态排除）。
+    """
+    (f_under, f_glob, f_file), (s_under, s_glob, s_file) = first, second
+    if f_under != s_under[:len(f_under)] and s_under != f_under[:len(s_under)]:
+        return False
+    if f_glob and s_file:
+        return fnmatch.fnmatchcase(s_file, f_glob)
+    if s_glob and f_file:
+        return fnmatch.fnmatchcase(f_file, s_glob)
+    return True
+
+
+def shared_scope_pairs(
+    scopes: Sequence[tuple[str, Iterable[str]]],
+    parents: Mapping[str, Iterable[str]], *, as_paths: bool = False,
+) -> list[tuple[str, str, list[str], bool]]:
+    """枚举写域相交的节点对：(甲, 乙, 共享条目, 是否已有直接边)。
+
+    条目默认按书写原样比较；as_paths=True 走 _meets 路径语义
+    （``src`` 命中 ``src/x.py``、``src/a`` 不命中 ``src/ab``、
+    ``*.md`` 命中 ``docs/a.md`` 不命中 ``src/x.py``）。
+    有直接边（一者直接依赖另一者）= 顺序执行不并发，可共享写域；无边即冲突。
+    """
+    edges = {(node, parent) for node, listed in parents.items()
+             for parent in listed}
+    indexed = [(node, {entry: _scope_path(entry) if as_paths else ((entry,), "", "")
+                       for entry in scope})
+               for node, scope in scopes]
+    pairs: list[tuple[str, str, list[str], bool]] = []
+    for position, (first, first_scope) in enumerate(indexed):
+        for second, second_scope in indexed[position + 1:]:
+            shared: set[str] = set()
+            for f_entry, f_path in first_scope.items():
+                for s_entry, s_path in second_scope.items():
+                    if _meets(f_path, s_path):
+                        shared.update((f_entry, s_entry))
+            if shared:
+                pairs.append((first, second, sorted(shared),
+                              (first, second) in edges or (second, first) in edges))
+    return pairs
 
 
 # ---- 解析与校验 ----
@@ -225,6 +309,15 @@ def _parse_budget(data: Any, where: str) -> BudgetSpec:
     return budget
 
 
+def _parse_write_scope(data: Any, where: str) -> tuple[str, ...]:
+    """写域声明：非空字符串列表（路径/目录/glob 三态，见 _scope_path）"""
+    if data is None:
+        return ()
+    if not isinstance(data, list) or not all(isinstance(s, str) and s.strip() for s in data):
+        raise FlowDefError(f"{where} 应为非空字符串列表（路径/目录/glob 写域声明）")
+    return tuple(s.strip() for s in data)
+
+
 def _parse_node(data: Any, index: int) -> NodeSpec:
     where = f"nodes[{index}]"
     if not isinstance(data, dict):
@@ -250,6 +343,7 @@ def _parse_node(data: Any, index: int) -> NodeSpec:
         "retry": _parse_retry(data.get("retry"), f"{where}.retry"),
         "timeout_seconds": float(timeout_seconds),
         "on_error": on_error,
+        "write_scope": _parse_write_scope(data.get("write_scope"), f"{where}.write_scope"),
     }
     if typ == "tool":
         tool = _require(data, "tool", str, where)
@@ -286,7 +380,9 @@ def _parse_node(data: Any, index: int) -> NodeSpec:
             args = item.get("args", {})
             if not isinstance(args, dict):
                 raise FlowDefError(f"{bw}.args 应为映射")
-            branches.append(ParallelBranchSpec(id=bid, tool=tool, args=args))
+            branches.append(ParallelBranchSpec(
+                id=bid, tool=tool, args=args,
+                write_scope=_parse_write_scope(item.get("write_scope"), f"{bw}.write_scope")))
         max_concurrency = data.get("max_concurrency", 0)
         if not isinstance(max_concurrency, int) or max_concurrency < 0:
             raise FlowDefError(f"{where}.max_concurrency 应为非负整数")
@@ -340,6 +436,34 @@ def _parse_node(data: Any, index: int) -> NodeSpec:
         kwargs["budget"] = _parse_budget(data.get("budget"), f"{where}.budget")
         kwargs["package"] = package
         kwargs["review"] = bool(data.get("review", False))
+        acceptance = str(data.get("acceptance", "") or "")
+        if acceptance and not acceptance.strip():
+            raise FlowDefError(f"{where}.acceptance 不可为空白")
+        kwargs["acceptance"] = acceptance
+        for_target = str(data.get("for", "") or "")
+        if for_target and not NODE_ID_PATTERN.match(for_target):
+            raise FlowDefError(f"{where}.for 非法: {for_target!r}")
+        kwargs["for_"] = for_target   # review 验收门的验收目标（E4→双轴翻档）
+    elif typ == "verify":
+        # 验收节点：内容级探针（probe）/ 验收条件（when）至少声明一个
+        probe = str(data.get("probe", "") or "")
+        if probe and not TOOL_FULL_PATTERN.match(probe):
+            raise FlowDefError(f"{where}.probe 非法: {probe!r}（应为 <plugin-id>__<tool-name>）")
+        when = str(data.get("when", "") or "")
+        if not probe and not when:
+            raise FlowDefError(
+                f"{where} 验收节点须声明内容级探针 probe 或验收条件 when（报成功没用）")
+        for_target = str(data.get("for", "") or "")
+        if for_target and not NODE_ID_PATTERN.match(for_target):
+            raise FlowDefError(f"{where}.for 非法: {for_target!r}")
+        max_fixes = data.get("max_fixes", 2)
+        if not isinstance(max_fixes, int) or not 0 <= max_fixes <= 10:
+            raise FlowDefError(f"{where}.max_fixes 应为 0-10 整数")
+        kwargs["probe"] = probe
+        kwargs["when"] = when
+        kwargs["for_"] = for_target
+        kwargs["verifier"] = str(data.get("verifier", "") or "")
+        kwargs["max_fixes"] = max_fixes
     elif typ == "action":
         kwargs["actions"] = _parse_actions(data.get("actions"), f"{where}.actions")
     return NodeSpec(**kwargs)
@@ -390,6 +514,39 @@ def parse_flow(data: Any, *, source: str = "<flow>") -> FlowDefinition:
         if node.id in seen:
             raise FlowDefError(f"节点 id 重复: {node.id!r}")
         seen.add(node.id)
+
+    # verify 节点缺省验收目标 = 顺序前驱（非 loop body 节点）
+    body_ids: set[str] = set()
+    for node in nodes:
+        if node.type == "loop":
+            body_ids.update(node.body)
+    resolved_nodes: list[NodeSpec] = []
+    prev_id = ""
+    for node in nodes:
+        if node.type == "verify" and not node.for_:
+            if not prev_id:
+                raise FlowDefError(
+                    f"verify 节点 {node.id!r} 无验收目标（须声明 for 或置于产活节点之后）")
+            node = _dc_replace(node, for_=prev_id)
+        if node.id not in body_ids:
+            prev_id = node.id
+        resolved_nodes.append(node)
+    nodes = resolved_nodes
+
+    # 并行写域隔离（shared_scope_pairs 静态拒载）：parallel 分支同时跑（彼此无边），
+    # 写域重叠即拒绝装载——"加顺序依赖或拆开 scope"
+    for node in nodes:
+        if node.type != "parallel":
+            continue
+        scopes = [(b.id, b.write_scope) for b in node.branches if b.write_scope]
+        conflicts = [p for p in shared_scope_pairs(scopes, {}, as_paths=True)
+                     if not p[3]]
+        if conflicts:
+            detail = "; ".join(
+                f"{a}↔{b} 共享写域 {shared}" for a, b, shared, _ in conflicts)
+            raise FlowDefError(
+                f"{source} parallel 节点 {node.id!r} 并行分支写域重叠: {detail}"
+                f"（并发互踩静态拒载：加顺序依赖或拆开 scope）")
 
     defn = FlowDefinition(
         id=flow_id,
@@ -447,6 +604,8 @@ def _dump_node(node: NodeSpec) -> dict[str, Any]:
         data["timeout_seconds"] = node.timeout_seconds
     if node.on_error != "fail":
         data["on_error"] = node.on_error
+    if node.write_scope:
+        data["write_scope"] = list(node.write_scope)
     if node.type == "tool":
         data["tool"] = node.tool
         if node.args:
@@ -458,7 +617,8 @@ def _dump_node(node: NodeSpec) -> dict[str, Any]:
     elif node.type == "parallel":
         data["branches"] = [
             {k: v for k, v in
-             {"id": b.id, "tool": b.tool, **({"args": dict(b.args)} if b.args else {})}.items()}
+             {"id": b.id, "tool": b.tool, **({"args": dict(b.args)} if b.args else {}),
+              **({"write_scope": list(b.write_scope)} if b.write_scope else {})}.items()}
             for b in node.branches
         ]
         if node.max_concurrency:
@@ -494,6 +654,20 @@ def _dump_node(node: NodeSpec) -> dict[str, Any]:
             data["package"] = node.package
         if node.review:
             data["review"] = True
+        if node.acceptance:
+            data["acceptance"] = node.acceptance
+        if node.for_:
+            data["for"] = node.for_
+    elif node.type == "verify":
+        data["for"] = node.for_
+        if node.probe:
+            data["probe"] = node.probe
+        if node.when:
+            data["when"] = node.when
+        if node.verifier:
+            data["verifier"] = node.verifier
+        if node.max_fixes != 2:
+            data["max_fixes"] = node.max_fixes
     elif node.type == "action":
         data["actions"] = [
             {k: v for k, v in
@@ -545,6 +719,10 @@ def _node_refs(node: NodeSpec) -> list[tuple[str, str]]:
             refs.append((body_id, "body"))
     if node.on_error.startswith("goto:"):
         refs.append((node.on_error.split(":", 1)[1], "on_error"))
+    if node.type == "verify" and node.for_:
+        refs.append((node.for_, "for"))
+    if node.type in ("agent", "human") and node.for_:
+        refs.append((node.for_, "for"))   # review 验收门目标
     return refs
 
 
