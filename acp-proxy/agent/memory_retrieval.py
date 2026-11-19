@@ -24,6 +24,14 @@ from typing import Optional
 from datetime import datetime
 from enum import Enum
 
+from agent.memory_admission import (
+    DECISION_APPROVED,
+    DECISION_DEFERRED,
+    DECISION_REJECTED,
+    evaluate_admission,
+)
+from agent.memory_vector_index import MemoryVectorIndex, cosine
+
 logger = logging.getLogger("acp-proxy.memory-retrieval")
 
 
@@ -119,15 +127,30 @@ def three_factor_score(entry: MemoryEntry, query: str, *, now: Optional[float] =
     return (recency + importance + relevance) / 3.0
 
 
+def _semantic_boost(sims: dict[str, float], memory_id: str, weight: float = 1.0 / 3.0) -> float:
+    """语义因子（三因子公式的第4因子等权形态）：w·cos_sim，cos 钳 [0,1]。
+
+    无向量/通道缺席=0.0——排序退化纯三因子（旧行为字节级保持）。
+    """
+    sim = sims.get(memory_id)
+    if sim is None:
+        return 0.0
+    return weight * min(1.0, max(0.0, sim))
+
+
 class MemoryRetrievalEngine:
     """记忆检索引擎"""
 
-    def __init__(self, db_path: str = ""):
+    def __init__(self, db_path: str = "", embed_fn=None):
         if not db_path:
             base = Path.home() / ".hermes" / "soulmate" / "memory"
             base.mkdir(parents=True, exist_ok=True)
             db_path = str(base / "memory.db")
         self.db_path = db_path
+        # MEM-Semantic：向量索引 + embedding 注入口（缺省=agent.memory_embedding
+        # 既有配置口径；测试注入假向量=零网络；未配置=语义通道如实缺席）
+        self._vector_index = MemoryVectorIndex(db_path)
+        self._embed_fn = embed_fn
         self._init_db()
 
     def _init_db(self):
@@ -161,6 +184,23 @@ class MemoryRetrievalEngine:
                 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
                 USING fts5(memory_id, content, embedding_text, tokenize='unicode61')
             """)
+            # MEM-Semantic 加码①：写入决策留痕（OMH memory_admission 可抄件——
+            # 保留/拒绝/延后三岔全带书面理由，审计可查可统计）
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS memory_write_audit (
+                    audit_id TEXT PRIMARY KEY,
+                    memory_id TEXT NOT NULL,
+                    decision TEXT NOT NULL,
+                    rule TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    content_preview TEXT DEFAULT '',
+                    created_at REAL NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_mw_audit_decision
+                ON memory_write_audit(decision, created_at)
+            """)
             conn.commit()
 
     def store(
@@ -171,9 +211,41 @@ class MemoryRetrievalEngine:
         session_id: str = "",
         tags: Optional[list[str]] = None,
         metadata: Optional[dict] = None,
-    ) -> MemoryEntry:
-        """存储记忆"""
+    ) -> Optional[MemoryEntry]:
+        """存储记忆（MEM-Semantic：写入决策留痕 + 写入时自动向量化）。
+
+        准入三岔（OMH memory_admission 可抄件，三岔全带书面理由落
+        memory_write_audit）：auto_approved 入库照常召回；rejected 不入库
+        （空内容/类凭据——记忆库不是密钥库）；deferred_review 入库但**不进
+        召回**，待 review_memory 复核（指令形内容禁变成注入指令）。返回
+        None=拒绝入库。近重复候选照常入库（去重交 consolidate）但审计盖
+        duplicate_of 章。
+        """
+        dup_of = ""
+        if (content or "").strip():
+            with sqlite3.connect(self.db_path) as conn:
+                row = conn.execute(
+                    "SELECT memory_id FROM memories WHERE content = ? LIMIT 1",
+                    (content,),
+                ).fetchone()
+                dup_of = row[0] if row else ""
+        admission = evaluate_admission(content, duplicate_of=dup_of)
+        self._write_admission_audit(
+            memory_id=f"gate_{hashlib.sha256(f'{content}:{time.time()}'.encode()).hexdigest()[:12]}",
+            decision=admission.decision,
+            rule=admission.rule,
+            reason=admission.reason,
+            content=content,
+        )
+        if admission.decision == DECISION_REJECTED:
+            logger.info(f"[memory-admission] rejected ({admission.rule}): {admission.reason}")
+            return None
+
         memory_id = f"mem_{hashlib.sha256(f'{content}:{time.time()}'.encode()).hexdigest()[:12]}"
+
+        entry_meta = dict(metadata or {})
+        entry_meta["admission"] = admission.decision
+        entry_meta["admission_reason"] = admission.reason
 
         entry = MemoryEntry(
             memory_id=memory_id,
@@ -183,7 +255,7 @@ class MemoryRetrievalEngine:
             session_id=session_id,
             tags=tags or [],
             embedding_text=self._extract_keywords(content),
-            metadata=metadata or {},
+            metadata=entry_meta,
         )
 
         with sqlite3.connect(self.db_path) as conn:
@@ -207,8 +279,122 @@ class MemoryRetrievalEngine:
             )
             conn.commit()
 
+        # MEM-Semantic ②：写入时自动向量化（失败不打断写入，检索期自愈回填）
+        self._auto_vectorize(entry.memory_id, content)
+
         logger.debug(f"Stored memory: {memory_id} ({memory_type.value}, importance={importance.value})")
         return entry
+
+    # ── MEM-Semantic：写入审计 + 自动向量化 ──────────────────────────
+    def _write_admission_audit(
+        self, memory_id: str, decision: str, rule: str, reason: str, content: str
+    ) -> None:
+        """写入决策留痕（三岔全带书面理由——OMH「处置动词全带 reason」逐字纪律）。"""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """INSERT INTO memory_write_audit
+                   (audit_id, memory_id, decision, rule, reason, content_preview, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    f"mwa_{hashlib.sha256(f'{memory_id}:{time.time()}'.encode()).hexdigest()[:12]}",
+                    memory_id,
+                    decision,
+                    rule,
+                    reason,
+                    (content or "")[:120],
+                    time.time(),
+                ),
+            )
+            conn.commit()
+
+    def _resolve_embed_fn(self):
+        """embedding 注入口：测试注入优先；缺省=agent.memory_embedding（EMBEDDING_*
+        同 opensoul 配置口径）。未配置=embed_texts 恒空向量（语义通道如实缺席）。"""
+        if self._embed_fn is not None:
+            return self._embed_fn
+        try:
+            from agent import memory_embedding
+
+            return memory_embedding.embed_texts
+        except Exception as exc:
+            logger.warning("memory embedding infra unavailable: %s", exc)
+            return None
+
+    def _auto_vectorize(self, memory_id: str, content: str) -> bool:
+        """写入时自动向量化（失败不打断写入主流程；空向量=不落索引禁假缓存；
+        漏算由 retrieve 期 is_fresh 自愈回填兜底）。"""
+        fn = self._resolve_embed_fn()
+        if fn is None:
+            return False
+        try:
+            vecs = fn([content])
+            vec = vecs[0] if vecs else []
+            if vec and self._vector_index.upsert(memory_id, content, vec):
+                return True
+            logger.debug(f"write-time vectorization degraded (empty vector): {memory_id}")
+        except Exception as exc:
+            logger.warning(f"write-time vectorization failed, self-heals at recall: {exc}")
+        return False
+
+    def _semantic_sims(
+        self,
+        query: str,
+        memory_type: Optional[MemoryType],
+        session_id: str,
+        min_importance: MemoryImportance,
+    ) -> dict[str, float]:
+        """语义通道：候选=过滤后全部活跃行（非字面查询全靠这一步进候选），向量
+        缺失自愈回填。返回 {memory_id: cosine}；失败/未配置=空 dict（调用方
+        按通道缺席降级，禁静默冒充）。"""
+        fn = self._resolve_embed_fn()
+        if fn is None or not (query or "").strip():
+            return {}
+        sql = "SELECT memory_id, content, metadata FROM memories WHERE 1=1"
+        params: list = []
+        if memory_type:
+            sql += " AND memory_type = ?"
+            params.append(memory_type.value)
+        if session_id:
+            sql += " AND session_id = ?"
+            params.append(session_id)
+        sql += " AND importance >= ?"
+        params.append(min_importance.value)
+        sql += " ORDER BY created_at DESC LIMIT 500"
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
+        rows = [
+            r for r in rows
+            if json.loads(r.get("metadata") or "{}").get("admission", "auto_approved")
+            != "deferred_review"
+        ]
+        if not rows:
+            return {}
+        contents = {r["memory_id"]: r["content"] for r in rows}
+        vectors = self._vector_index.load(contents=contents)  # 陈旧向量不进排名
+        missing = [(mid, c) for mid, c in contents.items() if mid not in vectors]
+        if missing:
+            try:
+                stats = self._vector_index.backfill(missing, fn)
+                if stats["embedded"]:
+                    vectors = self._vector_index.load(contents=contents)
+            except Exception as exc:
+                logger.warning(f"recall-time vector backfill failed: {exc}")
+        try:
+            q_vecs = fn([query])
+            q_vec = q_vecs[0] if q_vecs else []
+        except Exception as exc:
+            logger.warning(f"query embedding failed, semantic channel off: {exc}")
+            return {}
+        if not q_vec:
+            return {}
+        sims: dict[str, float] = {}
+        for mid, vec in vectors.items():
+            try:
+                sims[mid] = cosine(q_vec, vec)
+            except ValueError:
+                continue  # 维度不齐=该行如实不参与语义排名
+        return sims
 
     def retrieve(
         self,
@@ -253,23 +439,23 @@ class MemoryRetrievalEngine:
                 ).fetchall()
 
         # 转换为MemoryEntry并排序
-        entries = []
-        for row in rows:
-            entry = MemoryEntry(
-                memory_id=row["memory_id"],
-                memory_type=MemoryType(row["memory_type"]),
-                content=row["content"],
-                importance=MemoryImportance(row["importance"]),
-                session_id=row["session_id"],
-                tags=json.loads(row["tags"]),
-                embedding_text=row["embedding_text"],
-                created_at=row["created_at"],
-                last_accessed=row["last_accessed"],
-                access_count=row["access_count"],
-                decay_rate=row["decay_rate"],
-                metadata=json.loads(row["metadata"]),
-            )
-            entries.append(entry)
+        entries = [self._row_to_entry(row) for row in rows]
+
+        # ── MEM-Semantic ③：语义通道候选并入（「上周聊的X」类非字面查询的
+        # 召回来源——全文匹配盲区由语义通道补齐）────────────────────────
+        sims = self._semantic_sims(query, memory_type, session_id, min_importance)
+        if sims:
+            known = {e.memory_id for e in entries}
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                for mid in sims:
+                    if mid in known:
+                        continue
+                    row = conn.execute(
+                        "SELECT * FROM memories WHERE memory_id = ?", (mid,)
+                    ).fetchone()
+                    if row is not None:
+                        entries.append(self._row_to_entry(row))
 
         # fallback（LIKE）路径SQL侧不带type/importance/session过滤——在此统一
         # 补过滤（FTS路径已过滤，重施无害），fail-closed：过滤条件不满足不许混入
@@ -278,13 +464,15 @@ class MemoryRetrievalEngine:
             if (memory_type is None or e.memory_type == memory_type)
             and (not session_id or e.session_id == session_id)
             and e.importance.value >= min_importance.value
+            and e.metadata.get("admission", "auto_approved") != "deferred_review"
         ]
 
         # 三因子排序（generative-agents：recency+importance+relevance等权归一，
-        # relevance=query相关度——修复旧排序与query无关的缺陷）；query为空时
-        # 退化为旧启发式relevance_score；memory_id做确定性tie-break
+        # relevance=query相关度——修复旧排序与query无关的缺陷）；语义通道在场
+        # 时以第4因子等权并入（_semantic_boost；无向量=0.0 退化纯三因子）；
+        # query为空时退化为旧启发式relevance_score；memory_id做确定性tie-break
         if query and query.strip():
-            entries.sort(key=lambda e: (-three_factor_score(e, query), e.memory_id))
+            entries.sort(key=lambda e: (-(three_factor_score(e, query) + _semantic_boost(sims, e.memory_id)), e.memory_id))
         else:
             entries.sort(key=lambda e: (-e.relevance_score, e.memory_id))
 
@@ -293,6 +481,139 @@ class MemoryRetrievalEngine:
             self._update_access(entry.memory_id)
 
         return entries[:limit]
+
+    @staticmethod
+    def _row_to_entry(row) -> MemoryEntry:
+        return MemoryEntry(
+            memory_id=row["memory_id"],
+            memory_type=MemoryType(row["memory_type"]),
+            content=row["content"],
+            importance=MemoryImportance(row["importance"]),
+            session_id=row["session_id"],
+            tags=json.loads(row["tags"]),
+            embedding_text=row["embedding_text"],
+            created_at=row["created_at"],
+            last_accessed=row["last_accessed"],
+            access_count=row["access_count"],
+            decay_rate=row["decay_rate"],
+            metadata=json.loads(row["metadata"]),
+        )
+
+    def retrieve_pack(
+        self,
+        query: str,
+        memory_type: Optional[MemoryType] = None,
+        session_id: str = "",
+        limit: int = 6,
+        max_chars: int = 1200,
+        min_importance: MemoryImportance = MemoryImportance.TRIVIAL,
+    ) -> dict:
+        """混合检索召回包（MEM-Semantic 加码①：OMH 可抄件形）——语义 top-k +
+        关键词兜底；included/excluded 每条带 reason；超预算记录 reason=
+        over_budget 留痕不静默丢；truncated 标志 + 双预算如实。"""
+        from agent.memory_hybrid import hybrid_retrieve
+
+        sql = "SELECT * FROM memories WHERE 1=1"
+        params: list = []
+        if memory_type:
+            sql += " AND memory_type = ?"
+            params.append(memory_type.value)
+        if session_id:
+            sql += " AND session_id = ?"
+            params.append(session_id)
+        sql += " AND importance >= ?"
+        params.append(min_importance.value)
+        sql += " ORDER BY created_at DESC LIMIT 500"
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
+        rows = [
+            r for r in rows
+            if json.loads(r.get("metadata") or "{}").get("admission", "auto_approved")
+            != "deferred_review"
+        ]
+        contents = {r["memory_id"]: r["content"] for r in rows}
+        vectors = self._vector_index.load(contents=contents)
+        fn = self._resolve_embed_fn()
+        missing = [(mid, c) for mid, c in contents.items() if mid not in vectors]
+        if missing and fn is not None:
+            try:
+                stats = self._vector_index.backfill(missing, fn)
+                if stats["embedded"]:
+                    vectors = self._vector_index.load(contents=contents)
+            except Exception as exc:
+                logger.warning(f"retrieve_pack vector backfill failed: {exc}")
+
+        def embed_batch(texts):
+            return fn(texts) if fn is not None else [[] for _ in texts]
+
+        def embed_query(texts):
+            if fn is None:
+                return [[] for _ in texts]
+            return fn(texts)
+
+        pack = hybrid_retrieve(
+            query,
+            rows,
+            vectors=vectors,
+            embed_query_fn=embed_query if fn is not None else None,
+            embed_batch_fn=embed_batch if fn is not None else None,
+            limit=limit,
+            max_chars=max_chars,
+        )
+        return pack.to_dict()
+
+    def review_memory(self, memory_id: str, verdict: str, reason: str = "") -> tuple[bool, str]:
+        """延后记忆复核（OMH 三岔动词全带 reason）：verdict=approve 放行进召回 /
+        reject 落审计后遗忘 / defer 维持延后。每次复核落 memory_write_audit。"""
+        if verdict not in ("approve", "reject", "defer"):
+            return False, f"invalid verdict: {verdict!r} (approve|reject|defer)"
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT * FROM memories WHERE memory_id = ?", (memory_id,)
+            ).fetchone()
+        if row is None:
+            return False, f"memory not found: {memory_id}"
+        entry = self._row_to_entry(row)
+        if verdict == "reject":
+            self.forget(memory_id)
+            self._write_admission_audit(
+                memory_id, "review_rejected", "review", reason or "rejected at review", entry.content
+            )
+            return True, "rejected and removed"
+        meta = dict(entry.metadata)
+        meta["admission"] = (
+            DECISION_APPROVED if verdict == "approve" else DECISION_DEFERRED
+        )
+        meta["admission_reason"] = reason or f"{verdict} at review"
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "UPDATE memories SET metadata = ? WHERE memory_id = ?",
+                (json.dumps(meta), memory_id),
+            )
+            conn.commit()
+        self._write_admission_audit(
+            memory_id,
+            f"review_{verdict}",
+            "review",
+            reason or f"{verdict} at review",
+            entry.content,
+        )
+        return True, f"{meta['admission']}: {meta['admission_reason']}"
+
+    def get_audit(self, memory_id: str = "", limit: int = 50) -> list[dict]:
+        """写入决策审计查询（保留/拒绝/延后全带书面理由，可按记忆过滤）。"""
+        sql = "SELECT * FROM memory_write_audit"
+        params: list = []
+        if memory_id:
+            sql += " WHERE memory_id = ?"
+            params.append(memory_id)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            return [dict(r) for r in conn.execute(sql, params).fetchall()]
 
     def get_context_memories(
         self,

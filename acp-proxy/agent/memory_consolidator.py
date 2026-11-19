@@ -12,6 +12,9 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional
 
+from agent.memory_hybrid import keyword_relevance
+from agent.memory_vector_index import MemoryVectorIndex, cosine
+
 logger = logging.getLogger("acp-proxy.memory-consolidator")
 
 
@@ -32,12 +35,16 @@ class MemoryFragment:
 class MemoryConsolidator:
     """记忆整合器"""
 
-    def __init__(self, db_path: str = ""):
+    def __init__(self, db_path: str = "", embed_fn=None):
         if not db_path:
             base = Path.home() / ".hermes" / "soulmate" / "memory-consolidator"
             base.mkdir(parents=True, exist_ok=True)
             db_path = str(base / "fragments.db")
         self.db_path = db_path
+        # MEM-Semantic：片段向量索引 + embedding 注入口（与 MemoryRetrievalEngine
+        # 同纪律：未配置=语义通道如实缺席，keyword 通道兜底）
+        self._vector_index = MemoryVectorIndex(db_path)
+        self._embed_fn = embed_fn
         self._init_db()
 
     def _init_db(self):
@@ -81,6 +88,23 @@ class MemoryConsolidator:
                  json.dumps(tags or [])),
             )
             conn.commit()
+
+        # MEM-Semantic ②：片段写入时自动向量化（失败不打断，recall 期自愈）
+        fn = self._embed_fn
+        if fn is None:
+            try:
+                from agent import memory_embedding
+
+                fn = memory_embedding.embed_texts
+            except Exception:
+                fn = None
+        if fn is not None:
+            try:
+                vecs = fn([content])
+                if vecs and vecs[0]:
+                    self._vector_index.upsert(fragment_id, content, vecs[0])
+            except Exception as exc:
+                logger.debug(f"fragment vectorization failed (self-heals at recall): {exc}")
 
         return fragment_id
 
@@ -176,19 +200,48 @@ class MemoryConsolidator:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(sql, params).fetchall()
 
-        # 关键词匹配
-        query_lower = query.lower()
+        # MEM-Semantic ③：混合打分——keyword=token 覆盖度（CJK bigram；旧实现
+        # 空格切词对中文整句零命中）+ semantic=向量余弦（通道缺席=0 如实），
+        # 取两通道较强者为 relevance；至少一通道命中才进召回。
+        fn = self._embed_fn
+        if fn is None:
+            try:
+                from agent import memory_embedding
+
+                fn = memory_embedding.embed_texts
+            except Exception:
+                fn = None
+        dicts = [dict(row) for row in rows]
+        sims: dict[str, float] = {}
+        if fn is not None and (query or "").strip():
+            try:
+                contents = {d["fragment_id"]: d["content"] for d in dicts}
+                vectors = self._vector_index.load(contents=contents)
+                missing = [(fid, c) for fid, c in contents.items() if fid not in vectors]
+                if missing:
+                    stats = self._vector_index.backfill(missing, fn)
+                    if stats["embedded"]:
+                        vectors = self._vector_index.load(contents=contents)
+                q_vecs = fn([query])
+                q_vec = q_vecs[0] if q_vecs else []
+                if q_vec:
+                    for fid, vec in vectors.items():
+                        try:
+                            sims[fid] = cosine(q_vec, vec)
+                        except ValueError:
+                            continue
+            except Exception as exc:
+                logger.debug(f"recall semantic channel degraded: {exc}")
+
         scored = []
-        for row in rows:
-            d = dict(row)
-            content_lower = d["content"].lower()
-            # 简单关键词匹配
-            match_score = sum(
-                1 for word in query_lower.split()
-                if word in content_lower
-            )
-            if match_score > 0:
-                d["relevance"] = match_score / len(query_lower.split())
+        for d in dicts:
+            kw = keyword_relevance(query, d["content"])
+            sem = max(0.0, min(1.0, sims.get(d["fragment_id"], 0.0)))
+            relevance = max(kw, sem)
+            if relevance > 0:
+                d["relevance"] = relevance
+                d["keyword"] = kw
+                d["semantic"] = round(sem, 4) if d["fragment_id"] in sims else None
                 scored.append(d)
 
         scored.sort(key=lambda x: (x["relevance"], x["importance"]), reverse=True)
