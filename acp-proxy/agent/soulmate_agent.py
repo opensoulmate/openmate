@@ -466,6 +466,8 @@ class SoulMateAgent:
         self._skill_injected: dict[str, list[str]] = {}
         # ── kilocode #4 readTurn：工具动作轮廓(toolSummary)+文件快照diff进记忆──
         self._turn_read_view = TurnReadView()
+        # ── P0 长任务自治：session_id -> LongTaskController（防空转/断点续跑/回放）──
+        self._lta_controllers: dict = {}
         
         # ── Writer Fence：per-session写入锁（替代全局_processing标志）──
         self._writer_fence = SessionWriterFence(action=WriteAction.REJECT, timeout=30)
@@ -545,6 +547,53 @@ class SoulMateAgent:
             if getattr(s, "result", None):
                 parts.append(f"## 步骤{i + 1}：{getattr(s, 'description', '')}\n\n{s.result}")
         return "\n\n".join(parts)
+
+    # ── P0 长任务自治接线（防空转 · 断点续跑 · 过程可回放）──────────────
+    # 对标 Manus（断点续跑/过程回放）+ OMH（自报≠完成）+ Paperclip（防饿死）。
+    # 铁律：全部 try/except 包裹 = 非致命，绝不打断真实任务循环（写了≠接线了，故接线但零风险）。
+    def _bind_long_task(self, session_id: str, goal: str, plan):
+        """绑定长任务自治控制器：检查点落盘 data/ + 回放轨迹 + 防空转心跳。
+        进程重启/失败后 bind 自动 find_resumable 续跑，不从头来。失败返回 None。"""
+        try:
+            from agent.long_task_autonomy import LongTaskController
+            steps = [{"id": getattr(s, "id", f"step_{i}"), "description": getattr(s, "description", "")}
+                     for i, s in enumerate(getattr(plan, "subtasks", []) or [])]
+            ctl = LongTaskController.bind(session_id, goal or "", steps)
+            self._lta_controllers[session_id] = ctl
+            return ctl
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[lta] bind non-fatal: {e}")
+            return None
+
+    def _lta_step_end(self, ctl, idx: int, step, passed: bool, reflection) -> None:
+        """步骤收口：检查点落盘 + 轨迹记录(input/output/decision) + 完成状态裁决。
+        诚实语义：Agent 自省=自报（reported_done），不谎报 verified（OMH 自报≠完成）。"""
+        if ctl is None:
+            return
+        try:
+            summary = reflection.get("summary", "") if isinstance(reflection, dict) else str(reflection or "")
+            ctl.on_step_end(
+                idx,
+                success=bool(passed),
+                output={"result": (getattr(step, "result", "") or "")[:500]},
+                decision=summary[:300],
+                evidence=[f"self-reflection: {summary[:200]}"],
+                verifier="executor",  # 自省=执行者自报 → evaluate_completion 封顶 reported_done
+                step_id=getattr(step, "id", f"step_{idx}"),
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[lta] step_end non-fatal: {e}")
+
+    def _lta_finalize(self, ctl) -> None:
+        """终局：多档完成状态 + 完整性审计（供 UI/API 查完整轨迹）。"""
+        if ctl is None:
+            return
+        try:
+            report = ctl.finalize()
+            logger.info(f"[lta] finalize: run_confidence={report.get('run_confidence')} "
+                        f"verified={report.get('verified_count')}/{report.get('total_steps', '?')}")
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[lta] finalize non-fatal: {e}")
 
     def _save_progress(self, session_id: str, text: str, turn_key: str = "") -> None:
         """增量落库：生成中的回复按当前内容存一条 assistant 行（首次插入复用 _save_message，
@@ -7685,6 +7734,8 @@ You can send files to the user natively: to deliver a file, write a brief confir
         if plan.subtasks and plan.status == "active":
             # 复杂任务：逐步执行子任务 + 自省
             logger.info(f"[task] Complex task detected, {len(plan.subtasks)} subtasks")
+            # ── P0 长任务自治接线：检查点(data/)+回放轨迹+防空转（非致命）──
+            _lta = self._bind_long_task(session_id, user_text, plan)
             if self._client is not None:
                 step_list = "\n".join([f"  {i+1}. {s.description}" for i, s in enumerate(plan.subtasks)])
                 await self._client.session_update(
@@ -7706,6 +7757,13 @@ You can send files to the user natively: to deliver a file, write a brief confir
 
                 plan.current_step_idx = idx
                 self._task_planner.store.save_plan(plan)
+                # P0 长任务自治：轨迹 step_start + 检查点（观测性，不改控制流——
+                # 断点续跑由既有 plan store 驱动，本钩子只落 data/ 检查点+回放轨迹）
+                if _lta is not None:
+                    try:
+                        _lta.on_step_start(idx, step.description, {"step_id": step.id}, step_id=step.id)
+                    except Exception as _e:  # noqa: BLE001
+                        logger.debug(f"[lta] step_start non-fatal: {_e}")
 
                 # 推送当前步骤
                 if self._client is not None:
@@ -7812,6 +7870,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
                     await self._commit_step_changes(step, idx, session_id)
                     all_results.append(f"✅ 步骤{idx+1}: {step.description}\n   结果: {step.result[:200]}")
                     logger.info(f"[task] Step {idx+1} passed: {reflection.get('summary', '')}")
+                    self._lta_step_end(_lta, idx, step, True, reflection)  # P0 轨迹+检查点落盘
                     self._task_planner.store.save_plan(plan)
                     idx += 1
                     continue
@@ -7880,6 +7939,7 @@ You can send files to the user natively: to deliver a file, write a brief confir
                     else:
                         step.status = StepStatus.FAILED
                         logger.warning(f"[task] Step {idx+1} 重试仍失败: {retry_reflection.get('summary', '')}")
+                    self._lta_step_end(_lta, idx, step, retry_reflection.get("passed", False), retry_reflection)  # P0
                     self._task_planner.store.save_plan(plan)
                     idx += 1
                     continue
@@ -7908,6 +7968,8 @@ You can send files to the user natively: to deliver a file, write a brief confir
                     plan.status = "completed"
                 plan.completed_at = time.time()
                 self._task_planner.store.save_plan(plan)
+            # P0 长任务自治终局：多档完成状态（自报≠verified）落盘，可回放审计
+            self._lta_finalize(_lta)
 
             report = f"## 任务执行报告\n\n**目标**: {plan.goal}\n\n"
             for i, step in enumerate(plan.subtasks):
