@@ -18,6 +18,7 @@ import "@xyflow/react/dist/style.css";
 
 import { useWorkflowStore, type WorkflowNodeData } from "@/stores/workflow-store";
 import { useAppStore } from "@/stores/app-store";
+import { isLightTheme } from "@/lib/theme";
 import { getApiBaseUrl, getToken } from "@/lib/api-client";
 import { friendlyAuthMessage } from "@/lib/auth-errors";
 import { PageLayout } from "@/components/page-layout";
@@ -144,6 +145,9 @@ export function WorkflowClient() {
   // ── App layout ──
   const setPageSidebar = useAppStore((s) => s.setPageSidebar);
   const setPageWorkspace = useAppStore((s) => s.setPageWorkspace);
+  // 主题联动：React Flow colorMode 跟随系统主题（其默认 light 会给容器注入
+  // light 类、把 .light 令牌块带进画布——画布必须显式跟随应用主题）
+  const theme = useAppStore((s) => s.theme);
 
   // ── Toast helper ──
   const showToast = useCallback((message: string, type: "success" | "error") => {
@@ -687,19 +691,17 @@ export function WorkflowClient() {
               snapGrid={[16, 16]}
               defaultEdgeOptions={{ type: "flowEdge" }}
               proOptions={{ hideAttribution: true }}
-              className="bg-background"
+              colorMode={isLightTheme(theme) ? "light" : "dark"}
+              className="wf-flow bg-background"
             >
               <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="var(--color-border)" />
-              <Controls
-                position="bottom-left"
-                className="!rounded-[10px] !border-0 !bg-card/85 !shadow-[0_4px_16px_rgba(0,0,0,0.18)] backdrop-blur-sm"
-              />
+              <Controls position="bottom-left" className="wf-controls" />
               <WorkflowMiniMap />
               <WorkflowFlowHealer />
             </ReactFlow>
 
-            {/* Empty state */}
-            {!activeWorkflowId && (
+            {/* Empty state（画布无节点时才提示，避免文字压住节点） */}
+            {!activeWorkflowId && nodes.length === 0 && (
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                 <div className="text-center">
                   <div className="mb-3 text-4xl opacity-20">⚡</div>

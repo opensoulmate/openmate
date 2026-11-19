@@ -82,13 +82,13 @@ export function WorkflowToolbar({ onCreateNew }: WorkflowToolbarProps) {
   const execStatus = currentExecution?.status;
   const execStatusColor =
     execStatus === "completed"
-      ? "text-emerald-500"
+      ? "text-success"
       : execStatus === "failed"
-        ? "text-red-500"
+        ? "text-destructive"
         : execStatus === "running"
-          ? "text-blue-500"
+          ? "text-info"
           : execStatus === "cancelled"
-            ? "text-amber-500"
+            ? "text-warning"
             : "text-muted-foreground";
 
   return (
@@ -110,8 +110,8 @@ export function WorkflowToolbar({ onCreateNew }: WorkflowToolbarProps) {
         className={cn(
           toolbarBtnCls,
           isExecuting
-            ? "text-red-600 hover:bg-red-500/10"
-            : "text-emerald-600 hover:bg-emerald-500/10",
+            ? "text-destructive hover:bg-destructive/10"
+            : "text-success hover:bg-success/10",
         )}
         title={isExecuting ? t("workflowBuilder.cancelExecution") : t("workflowBuilder.runWorkflow")}
       >
@@ -134,8 +134,8 @@ export function WorkflowToolbar({ onCreateNew }: WorkflowToolbarProps) {
         className={cn(
           toolbarBtnCls,
           debugMode
-            ? "bg-amber-500/15 text-amber-600"
-            : "text-amber-600 hover:bg-amber-500/10",
+            ? "bg-warning/15 text-warning"
+            : "text-warning hover:bg-warning/10",
         )}
         title={t("workflowBuilder.debugMode")}
       >
@@ -193,11 +193,11 @@ export function WorkflowToolbar({ onCreateNew }: WorkflowToolbarProps) {
           {isExecuting ? (
             <Loader2 size={12} className="animate-spin" />
           ) : execStatus === "completed" ? (
-            <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
+            <span className="inline-block h-2 w-2 rounded-full bg-success" />
           ) : execStatus === "failed" ? (
-            <span className="inline-block h-2 w-2 rounded-full bg-red-500" />
+            <span className="inline-block h-2 w-2 rounded-full bg-destructive" />
           ) : (
-            <span className="inline-block h-2 w-2 rounded-full bg-amber-500" />
+            <span className="inline-block h-2 w-2 rounded-full bg-warning" />
           )}
           <span>{currentExecution.status}</span>
         </button>

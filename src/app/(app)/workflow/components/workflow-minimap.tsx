@@ -127,7 +127,7 @@ export function WorkflowMiniMap() {
         .wf-minimap.react-flow__minimap {
           border: 0;
           overflow: hidden;
-          border-radius: 10px;
+          border-radius: var(--radius-md);
           box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18), 0 0 0 1px color-mix(in srgb, var(--color-border) 55%, transparent);
           backdrop-filter: blur(6px);
         }

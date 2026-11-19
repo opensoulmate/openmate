@@ -52,8 +52,9 @@ export function BranchGraph({ defn }: { defn: FlowDef }) {
   const height = Math.max(nodes.length * rowH + 20, 120);
   const centerX = 150;
   const typeColor: Record<string, string> = {
-    tool: "#3b82f6", decision: "#f59e0b", loop: "#8b5cf6", approval: "#a855f7",
-    action: "#10b981", agent: "#06b6d4", human: "#ec4899", parallel: "#6366f1",
+    tool: "var(--color-info)", decision: "var(--color-warning)", loop: "var(--color-warning)",
+    approval: "var(--color-success)", action: "var(--color-info)", agent: "var(--color-primary)",
+    human: "var(--color-success)", parallel: "var(--color-info)",
   };
 
   return (
@@ -66,7 +67,7 @@ export function BranchGraph({ defn }: { defn: FlowDef }) {
         </defs>
         {nodes.map((node, i) => {
           const y = 14 + i * rowH;
-          const color = typeColor[node.type] || "#64748b";
+          const color = typeColor[node.type] || "var(--color-muted-foreground)";
           return (
             <g key={node.id}>
               {/* 顺序连接线（非分支后继） */}
@@ -86,11 +87,11 @@ export function BranchGraph({ defn }: { defn: FlowDef }) {
                 <>
                   {node.then && (
                     <BranchEdge nodes={nodes} fromY={y} targetId={node.then}
-                      side="right" color="#10b981" label={`then → ${node.then}`} />
+                      side="right" color="var(--color-branch-then)" label={`then → ${node.then}`} />
                   )}
                   {nodeElse(node) && (
                     <BranchEdge nodes={nodes} fromY={y} targetId={nodeElse(node)}
-                      side="left" color="#ef4444" label={`else → ${nodeElse(node)}`} />
+                      side="left" color="var(--color-branch-else)" label={`else → ${nodeElse(node)}`} />
                   )}
                   {node.when && (
                     <text x={centerX + 78} y={y + 3} fontSize={8} fill="currentColor" opacity={0.75}>

@@ -21,13 +21,13 @@ import { useState } from "react";
 function statusIcon(status: string) {
   switch (status) {
     case "completed":
-      return <CheckCircle size={14} className="text-emerald-500" />;
+      return <CheckCircle size={14} className="text-success" />;
     case "running":
-      return <Loader2 size={14} className="text-blue-500 animate-spin" />;
+      return <Loader2 size={14} className="text-info animate-spin" />;
     case "failed":
-      return <XCircle size={14} className="text-red-500" />;
+      return <XCircle size={14} className="text-destructive" />;
     case "cancelled":
-      return <StopCircle size={14} className="text-amber-500" />;
+      return <StopCircle size={14} className="text-warning" />;
     case "pending":
       return <Clock size={14} className="text-muted-foreground" />;
     case "skipped":
@@ -40,13 +40,13 @@ function statusIcon(status: string) {
 function statusColor(status: string) {
   switch (status) {
     case "completed":
-      return "text-emerald-500";
+      return "text-success";
     case "running":
-      return "text-blue-500";
+      return "text-info";
     case "failed":
-      return "text-red-500";
+      return "text-destructive";
     case "cancelled":
-      return "text-amber-500";
+      return "text-warning";
     default:
       return "text-muted-foreground";
   }
@@ -55,13 +55,13 @@ function statusColor(status: string) {
 function statusBg(status: string) {
   switch (status) {
     case "completed":
-      return "bg-emerald-500/10 border-emerald-500/30";
+      return "bg-success/10 border-success/30";
     case "running":
-      return "bg-blue-500/10 border-blue-500/30";
+      return "bg-info/10 border-info/30";
     case "failed":
-      return "bg-red-500/10 border-red-500/30";
+      return "bg-destructive/10 border-destructive/30";
     case "cancelled":
-      return "bg-amber-500/10 border-amber-500/30";
+      return "bg-warning/10 border-warning/30";
     default:
       return "bg-muted/50 border-border";
   }
@@ -124,7 +124,7 @@ function StepCard({
             </div>
           )}
           {step.error && (
-            <div className="rounded-md bg-red-500/5 p-2 text-xs font-mono text-red-500 max-h-32 overflow-y-auto whitespace-pre-wrap break-all">
+            <div className="rounded-md bg-destructive/5 p-2 text-xs font-mono text-destructive max-h-32 overflow-y-auto whitespace-pre-wrap break-all">
               {step.error}
             </div>
           )}
@@ -189,7 +189,7 @@ export function WorkflowExecutionPanel() {
           {isExecuting && (
             <button
               onClick={cancelExecution}
-              className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-red-500 hover:bg-red-500/10 transition-colors"
+              className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-destructive hover:bg-destructive/10 transition-colors"
             >
               <StopCircle size={12} />
               {t("workflowBuilder.cancel")}
@@ -263,7 +263,7 @@ export function WorkflowExecutionPanel() {
 
                 {/* Error message */}
                 {currentExecution.error && (
-                  <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-3 text-xs text-red-500">
+                  <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
                     <div className="flex items-center gap-1.5 font-medium mb-1">
                       <XCircle size={12} />
                       {t("workflowBuilder.errorInfo")}

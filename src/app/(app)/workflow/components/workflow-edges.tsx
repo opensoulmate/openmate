@@ -4,7 +4,7 @@
 // 三类语义连线，与节点语义色体系同源（主强调 1 + 语义 4，全站 token 对齐）：
 //   exec  执行流   —— 主强调紫，实线
 //   data  数据流   —— info 青，虚线（数据口菱形 → 节点）
-//   branch 判断分支 —— then=success / else=warning，实线 + then/else 骑线徽章
+//   branch 判断分支 —— then=branch-then 沉稳绿 / else=branch-else 中性淡紫灰，实线 + then/else 骑线徽章
 // 动效克制：仅调试/执行途经的连线做虚线流动，其余静态。
 
 import {

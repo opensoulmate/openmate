@@ -6359,6 +6359,20 @@
     "workingDir": "Working Directory",
     "workingDirPlaceholder": "/home/user (optional)"
   },
+  "nodeDesc": {
+    "start": "Manual/timer trigger entry",
+    "condition": "Conditional branch",
+    "loop": "Loop iteration",
+    "end": "Flow end",
+    "llm": "LLM inference call",
+    "http": "HTTP API request",
+    "notify": "Notification push",
+    "organ": "Organ capability call",
+    "knowledge": "Knowledge search",
+    "script": "Script execution",
+    "tool": "Tool invocation",
+    "code": "Custom code block"
+  },
   "nodePalette": {
     "title": "Nodes",
     "flowControl": "Flow Control",

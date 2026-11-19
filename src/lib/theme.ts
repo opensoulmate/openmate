@@ -26,6 +26,11 @@ export type ThemeId =
 /** localStorage 存储键名 */
 const STORAGE_KEY = "openmate-theme";
 
+/** 当前主题是否为亮色（light / *-light）——供画布 colorMode 等第三方库跟随 */
+export function isLightTheme(theme: ThemeId): boolean {
+  return theme === "light" || theme.endsWith("-light");
+}
+
 /** 所有可用主题列表 —— labelKey 对应 i18n 翻译键，color 为预览色 */
 export const themes: { id: ThemeId; labelKey: string; color: string }[] = [
   { id: "dark", labelKey: "theme.dark", color: "#6366f1" },

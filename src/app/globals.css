@@ -86,6 +86,13 @@
   --color-error: var(--color-destructive);
   --color-info: #8be9fd;
 
+  /* ─── 画布分支/端口语义（派生色：随各主题语义色自动联动） ─── */
+  /* then=低饱和沉稳绿 / else=中性淡紫灰（暖灰-淡紫），与图标/节点色系统一闭环 */
+  --color-branch-then: color-mix(in oklab, var(--color-success) 40%, var(--color-muted-foreground));
+  --color-branch-else: color-mix(in oklab, var(--color-primary) 40%, var(--color-muted-foreground));
+  /* 端口中性填充（入点/执行出点同视觉重量，比 muted-foreground 更强的存在感） */
+  --color-port-neutral: color-mix(in srgb, var(--color-foreground) 52%, var(--color-card));
+
   /* ─── VS Code 风格块（ThinkingBlock / ToolCallBlock） ─── */
   --color-thinking-bg: #282a36;
   --color-thinking-border: #ff79c6;
@@ -246,7 +253,9 @@ html.om-glass .om-chrome {
 }
 
 /* ─── Light Theme ─────────────────────────────────────────────────────── */
-.light {
+/* 令牌覆盖只挂 html（applyTheme 只作用于 documentElement）：任何第三方库在
+   子树里注入 light 类（React Flow colorMode 默认 light 即会）都不得翻转主题令牌 */
+html.light {
   --color-background: #ffffff;
   --color-foreground: #18181b;
   --color-card: #fafafa;
@@ -291,19 +300,19 @@ html.om-glass .om-chrome {
   --color-code-bg: #f4f4f5;
 }
 
-.light * {
+html.light * {
   scrollbar-color: transparent transparent;
 }
 
-.light *:hover {
+html.light *:hover {
   scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
 }
 
-.light *:hover::-webkit-scrollbar-thumb {
+html.light *:hover::-webkit-scrollbar-thumb {
   background: rgba(0, 0, 0, 0.15);
 }
 
-.light ::-webkit-scrollbar-thumb:hover {
+html.light ::-webkit-scrollbar-thumb:hover {
   background: rgba(0, 0, 0, 0.3);
 }
 
@@ -1110,5 +1119,82 @@ html.tauri-shell.tauri-maximized body { border-radius: 0; }
 }
 @keyframes wf-edge-flow {
   to { stroke-dashoffset: -10; }
+}
+
+/* ── 画布控件（React Flow Controls/连接线/选区）：设计令牌 + 超椭圆语言 ── */
+.wf-flow.react-flow {
+  --xy-connectionline-stroke-default: color-mix(in srgb, var(--color-primary) 65%, var(--color-border));
+  --xy-connectionline-stroke-width-default: 1.6;
+  --xy-selection-background-color-default: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  --xy-selection-border-default: 1px dotted color-mix(in srgb, var(--color-primary) 55%, transparent);
+}
+
+/* 控件组：毛玻璃超椭圆壳（与鹰眼图同语言：圆角+柔影），按钮=超椭圆 chip */
+.wf-controls.react-flow__controls {
+  --xy-controls-button-background-color-default: transparent;
+  --xy-controls-button-background-color-hover-default: color-mix(in srgb, var(--color-primary) 14%, transparent);
+  --xy-controls-button-color-default: var(--color-muted-foreground);
+  --xy-controls-button-color-hover-default: var(--color-primary);
+  --xy-controls-button-border-color-default: transparent;
+  gap: 2px;
+  padding: 2px;
+  border: 0;
+  background: color-mix(in srgb, var(--color-card) 88%, transparent);
+  backdrop-filter: blur(8px);
+  border-radius: var(--radius-md);
+  corner-shape: squircle;
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.18),
+    0 0 0 1px color-mix(in srgb, var(--color-border) 45%, transparent);
+}
+.wf-controls .react-flow__controls-button {
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-bottom: none;
+  border-radius: var(--radius-sm);
+  corner-shape: squircle;
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast),
+    scale var(--transition-fast);
+}
+.wf-controls .react-flow__controls-button:hover {
+  scale: 1.06;
+}
+.wf-controls .react-flow__controls-button:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: -2px;
+}
+.wf-controls .react-flow__controls-button.active {
+  --xy-controls-button-background-color-default: color-mix(in srgb, var(--color-primary) 22%, transparent);
+  --xy-controls-button-color-default: var(--color-primary);
+}
+
+/* ── 端口统一语言：入点/出点同尺寸同描边同视觉重量；填充色 --wf-port-fill 分语义 ── */
+.wf-port.react-flow__handle {
+  width: 10px;
+  height: 10px;
+  min-width: 10px;
+  min-height: 10px;
+  border: 2px solid var(--color-card);
+  border-radius: 100%;
+  background-color: var(--wf-port-fill, var(--color-port-neutral));
+  transition: scale var(--transition-fast), box-shadow var(--transition-fast);
+}
+.wf-port.react-flow__handle:hover {
+  scale: 1.35;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--wf-port-fill, var(--color-port-neutral)) 35%, transparent);
+}
+/* 数据出点：同语言菱形（旋转方块），描边/视觉重量与执行端口一致 */
+.wf-port-data.react-flow__handle {
+  border-radius: 3px;
+  rotate: 45deg;
+}
+
+/* ── 小徽章/标签：超椭圆统一语言（设计令牌定档 radius-sm，与节点壳/图标框同曲率分级） ── */
+.wf-chip {
+  border-radius: var(--radius-sm);
+  corner-shape: squircle;
 }
 

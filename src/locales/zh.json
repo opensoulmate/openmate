@@ -6368,6 +6368,20 @@
     "workingDir": "工作目录",
     "workingDirPlaceholder": "/home/user (可选)"
   },
+  "nodeDesc": {
+    "start": "手动/定时触发入口",
+    "condition": "条件分支判断",
+    "loop": "循环迭代控制",
+    "end": "流程结束出口",
+    "llm": "大模型推理调用",
+    "http": "外部接口请求",
+    "notify": "消息通知推送",
+    "organ": "器官能力调用",
+    "knowledge": "知识库检索",
+    "script": "脚本执行动作",
+    "tool": "工具能力调用",
+    "code": "自定义代码块"
+  },
   "nodePalette": {
     "title": "节点",
     "flowControl": "流程控制",

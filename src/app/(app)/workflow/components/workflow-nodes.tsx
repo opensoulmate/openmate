@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect } from "react";
+import { memo, useEffect, type CSSProperties } from "react";
 import {
   Handle,
   Position,
@@ -10,6 +10,7 @@ import {
   type NodeProps,
 } from "@xyflow/react";
 import { useTranslation } from "react-i18next";
+import i18n from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { genPath, genRectPath } from "@/components/ui/super-ellipse";
 import type { WorkflowNodeData, WorkflowNodeType } from "@/stores/workflow-store";
@@ -87,17 +88,68 @@ const nodeIcons: Record<WorkflowNodeData["type"], React.ElementType> = {
   end: Square,
 };
 
-// ── 节点固定几何（宽高显式声明：免测量、鹰眼图/连线初始化确定性）────────
-export const NODE_WIDTH = 200;
+// ── 节点几何（高固定、宽随内容收紧凑：显式声明免测量，鹰眼图/连线初始化确定性）──
 export const NODE_HEIGHT = 53;
+const NODE_MIN_WIDTH = 140;
+const NODE_MAX_WIDTH = 228;
+
+/** 副标题兜底描述（无自述时的描述性文案，禁止复读类型名） */
+export const nodeDescFallback: Record<WorkflowNodeType, string> = {
+  start: "手动/定时触发入口",
+  condition: "条件分支判断",
+  loop: "循环迭代控制",
+  end: "流程结束出口",
+  llm: "大模型推理调用",
+  http: "外部接口请求",
+  notify: "消息通知推送",
+  organ: "器官能力调用",
+  knowledge: "知识库检索",
+  script: "脚本执行动作",
+  tool: "工具能力调用",
+  code: "自定义代码块",
+};
+
+/** 文本宽估算（确定性、免 DOM 测量）：CJK/全角≈字号，拉丁≈0.56 字号 */
+function estimateTextWidth(text: string, fontSize: number): number {
+  let w = 0;
+  for (const ch of text) {
+    const code = ch.codePointAt(0) ?? 0;
+    w += code > 0x2e7f ? fontSize : fontSize * 0.56;
+  }
+  return w;
+}
+
+/** 节点宽度随内容收紧凑（左内距 + 图标 + 间距 + 文本 + 调试徽章 + 右内距），区间夹紧。
+ *  副标题文案取 i18n 实际渲染串（与显示一致，防止宽估不足截断） */
+export function nodeWidth(data: WorkflowNodeData, debugActive?: boolean): number {
+  const label = String(data.label ?? "");
+  const desc =
+    String(data.description ?? "").trim() ||
+    i18n.t(`nodeDesc.${data.type}`, nodeDescFallback[data.type] ?? "");
+  const textW = Math.max(estimateTextWidth(label, 12), estimateTextWidth(desc, 10), 40);
+  const width = 16 + 30 + 10 + textW + (debugActive ? 48 : 0) + 12;
+  return Math.round(Math.min(NODE_MAX_WIDTH, Math.max(NODE_MIN_WIDTH, width)));
+}
 
 /** 节点归一化：显式 width/height（React Flow v12 需要节点尺寸才能初始化鹰眼图/连线） */
 export function prepareNodes(nodes: Node<WorkflowNodeData>[]): Node<WorkflowNodeData>[] {
-  return nodes.map((n) => ({ ...n, width: NODE_WIDTH, height: NODE_HEIGHT }));
+  return nodes.map((n) => ({
+    ...n,
+    width: nodeWidth(n.data, Boolean((n.data as { debugActive?: boolean }).debugActive)),
+    height: NODE_HEIGHT,
+  }));
 }
 
-/** 超椭圆壳 path（固定几何，模块级算一次） */
-const SHELL_PATH = genRectPath(NODE_WIDTH, NODE_HEIGHT);
+/** 超椭圆壳 path（按宽度分档缓存，同档只算一次） */
+const shellPathCache = new Map<number, string>();
+function shellPath(width: number): string {
+  let d = shellPathCache.get(width);
+  if (!d) {
+    d = genRectPath(width, NODE_HEIGHT);
+    shellPathCache.set(width, d);
+  }
+  return d;
+}
 
 // ── 测量尺寸（超椭圆 path 需要真实宽高）────────────────────────────────
 /**
@@ -139,8 +191,13 @@ function BaseNodeInner({
   const debug = debugActive ?? Boolean((data as { debugActive?: boolean }).debugActive);
   const color = nodeTypeColor(data.type);
   const Icon = nodeIcons[data.type];
-  const d = SHELL_PATH;
+  const w = nodeWidth(data, debug);
+  const d = shellPath(w);
   const showDataHandle = DATA_OUT_TYPES.has(data.type);
+  // 副标题：自述优先，缺省用描述性文案（禁止复读类型名）；与标题雷同时隐藏
+  const subtitle =
+    String(data.description ?? "").trim() || t(`nodeDesc.${data.type}`, nodeDescFallback[data.type] ?? "");
+  const showSubtitle = Boolean(subtitle) && subtitle !== data.label;
 
   return (
     <div
@@ -149,7 +206,7 @@ function BaseNodeInner({
         selected && "-translate-y-px",
       )}
       style={{
-        width: NODE_WIDTH,
+        width: w,
         height: NODE_HEIGHT,
         transition: "transform var(--transition-fast)",
       }}
@@ -170,7 +227,7 @@ function BaseNodeInner({
       {/* 超椭圆描边层：hover 描边提亮、选中主强调描边+柔光、调试态 warning 虚线 */}
       <svg
         className="pointer-events-none absolute inset-0"
-        width={NODE_WIDTH}
+        width={w}
         height={NODE_HEIGHT}
         style={{ overflow: "visible" }}
       >
@@ -194,23 +251,23 @@ function BaseNodeInner({
       {/* 内容层：图标 chip + 名称/说明双行 */}
       <div className="relative flex h-full items-center gap-2.5 pl-4 pr-3">
         <div
-          className="flex h-[26px] w-[26px] shrink-0 items-center justify-center"
+          className="flex h-[30px] w-[30px] shrink-0 items-center justify-center"
           style={{
-            clipPath: `path('${genPath(13)}')`,
+            clipPath: `path('${genPath(15)}')`,
             background: `color-mix(in srgb, ${color} 15%, transparent)`,
           }}
         >
-          <Icon size={14} style={{ color }} strokeWidth={2} />
+          <Icon size={17} style={{ color }} strokeWidth={2} />
         </div>
         <div className="flex-1 min-w-0">
           <p className="truncate text-xs font-medium leading-4 text-foreground">{data.label}</p>
-          <p className="mt-px truncate text-[10px] leading-3 text-foreground/70">
-            {data.description || t(`nodePalette.${data.type}`, data.type)}
-          </p>
+          {showSubtitle && (
+            <p className="mt-px truncate text-[10px] leading-3 text-foreground/70">{subtitle}</p>
+          )}
         </div>
         {debug && (
           <span
-            className="flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-medium text-foreground"
+            className="wf-chip flex shrink-0 items-center gap-1 px-1.5 py-0.5 text-[9px] font-medium text-foreground"
             style={{
               background: `color-mix(in srgb, var(--color-warning) 16%, transparent)`,
               boxShadow: "inset 0 0 0 1px color-mix(in srgb, var(--color-warning) 35%, transparent)",
@@ -222,21 +279,13 @@ function BaseNodeInner({
         )}
       </div>
 
-      {/* 连接点：顶部入点 / 底部执行出点 / 右侧菱形数据出点 */}
+      {/* 连接点：顶部入点 / 底部执行出点 / 右侧菱形数据出点（统一 wf-port 语言：同尺寸同描边同视觉重量） */}
       {showTarget && (
-        <Handle
-          type="target"
-          position={Position.Top}
-          className="!h-2.5 !w-2.5 !rounded-full !border-2 !border-[var(--color-card)] !bg-muted-foreground"
-        />
+        <Handle type="target" position={Position.Top} className="wf-port" />
       )}
 
       {sourceHandleCount === 1 && (
-        <Handle
-          type="source"
-          position={Position.Bottom}
-          className="!h-2.5 !w-2.5 !rounded-full !border-2 !border-[var(--color-card)] !bg-muted-foreground"
-        />
+        <Handle type="source" position={Position.Bottom} className="wf-port" />
       )}
       {sourceHandleCount > 1 && (
         <>
@@ -244,15 +293,15 @@ function BaseNodeInner({
             type="source"
             position={Position.Bottom}
             id="true"
-            className="!h-2.5 !w-2.5 !rounded-full !border-2 !border-[var(--color-card)] !bg-[var(--color-success)]"
-            style={{ left: "30%" }}
+            className="wf-port"
+            style={{ left: "30%", "--wf-port-fill": branchVar.then } as CSSProperties}
           />
           <Handle
             type="source"
             position={Position.Bottom}
             id="false"
-            className="!h-2.5 !w-2.5 !rounded-full !border-2 !border-[var(--color-card)] !bg-[var(--color-warning)]"
-            style={{ left: "70%" }}
+            className="wf-port"
+            style={{ left: "70%", "--wf-port-fill": branchVar.else } as CSSProperties}
           />
         </>
       )}
@@ -261,8 +310,8 @@ function BaseNodeInner({
           type="source"
           position={Position.Right}
           id="data"
-          className="!h-2.5 !w-2.5 !rotate-45 !rounded-[2px] !border-2 !border-[var(--color-card)] !bg-[var(--color-info)]"
-          style={{ top: "50%" }}
+          className="wf-port wf-port-data"
+          style={{ top: "50%", "--wf-port-fill": "var(--color-info)" } as CSSProperties}
         />
       )}
     </div>
@@ -303,27 +352,30 @@ export const ToolNode = memo(function ToolNode({ data, selected }: NodeProps) {
 });
 
 // ── 判断分支（decision）：then/else 双分支 ────────────────────────────────
+// then=低饱和沉稳绿 / else=中性淡紫灰：分支语义色 token（globals.css 派生自
+// success/muted-foreground，随全部主题联动），与节点图标色（logic=warning）错开、
+// 标签圆点与出点圆点同色同形
 export const branchVar: Record<"then" | "else", string> = {
-  then: "var(--color-success)",
-  else: "var(--color-warning)",
+  then: "var(--color-branch-then)",
+  else: "var(--color-branch-else)",
 };
 
-/** 分支标签（骑线小徽章：实底 punch 线条 + 彩点 + 前景文字，双主题 WCAG 安全） */
+/** 分支标签（骑线小徽章：实底 punch 线条 + 彩点 + 前景文字，双主题 WCAG 安全；wf-chip 超椭圆统一语言） */
 export function BranchChip({ branch, className }: { branch: "then" | "else"; className?: string }) {
   const color = branchVar[branch];
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-full px-1.5 py-[1px] text-[9px] font-medium text-foreground",
+        "wf-chip inline-flex items-center gap-1 px-1.5 py-[1px] text-[9px] font-medium text-foreground",
         className,
       )}
       style={{
         background: "var(--color-card)",
-        boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${color} 45%, transparent)`,
+        boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${color} 55%, transparent)`,
       }}
     >
       <span
-        className="h-[5px] w-[5px] rounded-full"
+        className="h-[6px] w-[6px] rounded-full"
         style={{ background: color }}
       />
       {branch}
