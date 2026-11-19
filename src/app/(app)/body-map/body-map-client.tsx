@@ -28,7 +28,7 @@ interface OrganStatus {
 const ORGAN_LAYOUT: Array<{
   key: string;
   label: string;
-  tag: string; // 4 字功能说明（名字下方弱化小字；文案定稿，禁改写）
+  tag?: string; // 4 字功能说明（仅悬停提示/详情面板用，不上画布；文案定稿禁改写，定稿集外节点不设）
   emoji: string;
   category: string;
   x: number;
@@ -84,15 +84,15 @@ const ORGAN_LAYOUT: Array<{
 
   // Lower torso
   { key: "nest", label: "巢穴", tag: "租户隔离", emoji: "🏠", category: "organ", x: 67, y: 75, href: "/nest", system: "isolation" },
-  { key: "mirror", label: "镜像", tag: "沙箱测试", emoji: "🪞", category: "service", x: 21, y: 75, href: "/mirror", system: "isolation" },
+  { key: "mirror", label: "镜像", emoji: "🪞", category: "service", x: 21, y: 75, href: "/mirror", system: "isolation" },
 
   // Legs (Foundation)
-  { key: "trajectory", label: "轨迹", tag: "轨迹追踪", emoji: "📊", category: "system", x: 88, y: 89, href: "/trajectory", system: "foundation" },
-  { key: "mcp", label: "MCP", tag: "工具接入", emoji: "🔌", category: "system", x: 155, y: 75, href: "/mcp", system: "foundation" },
+  { key: "trajectory", label: "轨迹", emoji: "📊", category: "system", x: 88, y: 89, href: "/trajectory", system: "foundation" },
+  { key: "mcp", label: "MCP", emoji: "🔌", category: "system", x: 155, y: 75, href: "/mcp", system: "foundation" },
 
   // Feet (Infrastructure)
-  { key: "learn", label: "Learn", tag: "课程学习", emoji: "📚", category: "system", x: 44, y: 89, href: "/learn", system: "foundation" },
-  { key: "diagnostics", label: "Diagnostics", tag: "系统诊断", emoji: "🩺", category: "system", x: 132, y: 89, href: "/monitoring", system: "foundation" },
+  { key: "learn", label: "Learn", emoji: "📚", category: "system", x: 44, y: 89, href: "/learn", system: "foundation" },
+  { key: "diagnostics", label: "Diagnostics", emoji: "🩺", category: "system", x: 132, y: 89, href: "/monitoring", system: "foundation" },
 ];
 
 const SYSTEM_COLORS: Record<string, { fill: string; stroke: string; glow: string }> = {
@@ -346,21 +346,17 @@ function OrganNode({
         {organ.emoji}
       </text>
 
-      {/* Label（名字 + 名字后 4 字功能说明：弱化小字、与名字垂直居中对齐、整体居中于图标） */}
+      {/* Label（画布只放名字，4 字说明在侧栏菜单/悬停提示/详情面板——画布保持干净） */}
       <text
         x={pos.x}
-        y={pos.y + 7.15}
+        y={pos.y + 6.8}
         textAnchor="middle"
+        fontSize="2.8"
         fill="currentColor"
         fontWeight="500"
         className="select-none pointer-events-none"
       >
-        <tspan fontSize="2.4">{label}</tspan>
-        {organ.tag && (
-          <tspan fontSize="2" dx="0.7" dy="-0.15" fontWeight="400" opacity={0.55}>
-            {organ.tag}
-          </tspan>
-        )}
+        {label}
       </text>
     </g>
   );
