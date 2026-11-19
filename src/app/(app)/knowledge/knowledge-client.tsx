@@ -239,7 +239,6 @@ export function KnowledgeClient() {
   const { t } = useTranslation();
   const apiBase = getApiBaseUrl();
   const setPageSidebar = useAppStore((s) => s.setPageSidebar);
-  const setPageWorkspace = useAppStore((s) => s.setPageWorkspace);
 
   // Tab state
   const [activeTab, setActiveTab] = useState<'items' | 'requests' | 'sharing'>('items');
@@ -506,10 +505,13 @@ export function KnowledgeClient() {
 
   // ── Register workspace content: detail panel ───────────────
 
-  useEffect(() => {
-    if (activeTab === 'items' && selectedItem) {
-      setPageWorkspace(
-        <DetailPanel
+    // ── 页内 detail 右列（PageLayout workspace prop）──
+  // 菜单点击劫持全局根修（2026-11-19）：条目/请求详情渲染在页面自身右列，绝不再
+  // 塞进全局 workspace 面板；selectedItem/selectedRequest/reviewNote（纯展示型
+  // detail 状态）原样保留。
+  const requestCfg = selectedRequest ? (requestStatusConfig[selectedRequest.status] || requestStatusConfig.pending) : requestStatusConfig.pending;
+  const pageDetail = activeTab === 'items' && selectedItem ? (
+    <DetailPanel
           title={selectedItem.title}
           subtitle={selectedItem.description || (selectedItem.content ? selectedItem.content.slice(0, 120) + '...' : undefined)}
           icon={<BookOpen className="w-5 h-5 text-violet-400" />}
@@ -577,15 +579,12 @@ export function KnowledgeClient() {
             },
           ]}
         />
-      );
-    } else if (activeTab === 'requests' && selectedRequest) {
-      const cfg = requestStatusConfig[selectedRequest.status] || requestStatusConfig.pending;
-      setPageWorkspace(
-        <DetailPanel
+  ) : activeTab === 'requests' && selectedRequest ? (
+    <DetailPanel
           title={selectedRequest.kb_name}
           subtitle={selectedRequest.kb_description}
           icon={<FileText className="w-5 h-5 text-primary" />}
-          badge={cfg.label}
+          badge={requestCfg.label}
           onClose={() => setSelectedRequest(null)}
           sections={[
             {
@@ -601,7 +600,7 @@ export function KnowledgeClient() {
             {
               title: t('knowledgeRequests.statusInfo', 'Status'),
               items: [
-                { label: t('knowledgeRequests.status', 'Status'), value: cfg.label, icon: <cfg.icon className={cn('w-3.5 h-3.5', cfg.color)} /> },
+                { label: t('knowledgeRequests.status', 'Status'), value: requestCfg.label, icon: <requestCfg.icon className={cn('w-3.5 h-3.5', requestCfg.color)} /> },
                 ...(selectedRequest.review_note ? [{ label: t('knowledgeRequests.reviewNote', 'Review Note'), value: selectedRequest.review_note }] : []),
               ],
             },
@@ -637,12 +636,7 @@ export function KnowledgeClient() {
             }] : []),
           ]}
         />
-      );
-    } else {
-      setPageWorkspace(null);
-    }
-    return () => setPageWorkspace(null);
-  }, [activeTab, selectedItem, selectedRequest, reviewNote, t, setPageWorkspace, handlePin, handleStar, handleDelete, handleReview]);
+  ) : null;
 
   // ── Loading state ──────────────────────────────────────────
 
@@ -659,6 +653,7 @@ export function KnowledgeClient() {
   return (
     <PageLayout
       title={t('knowledge.title') || 'Knowledge Base'}
+      workspace={pageDetail}
       icon={<BookOpen size={16} className="text-violet-400" />}
     >
       <div className="h-full overflow-y-auto">

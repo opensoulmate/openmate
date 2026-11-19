@@ -33,7 +33,6 @@ export function SkillsClient() {
   const [migrating, setMigrating] = useState(false);
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
   const setPageSidebar = useAppStore((s) => s.setPageSidebar);
-  const setPageWorkspace = useAppStore((s) => s.setPageWorkspace);
 
   const fetchSkills = useCallback(async () => {
     setLoading(true);
@@ -215,13 +214,11 @@ export function SkillsClient() {
   }, [skills, selectedSkill, category, categories, filter, t, setPageSidebar]);
 
   // Register workspace content: detail panel for selected skill
-  useEffect(() => {
-    if (!selectedSkill) {
-      setPageWorkspace(null);
-      return;
-    }
-    setPageWorkspace(
-      <DetailPanel
+    // ── 技能详情=页内 detail 右列（PageLayout workspace prop）──
+  // 菜单点击劫持全局根修（2026-11-19）：详情绝不塞进全局 workspace 面板；
+  // 选中态 selectedSkill（纯展示型 detail 状态）原样保留。
+  const pageDetail = selectedSkill ? (
+    <DetailPanel
         title={selectedSkill.name}
         subtitle={selectedSkill.description || undefined}
         icon={<Puzzle className="w-5 h-5 text-primary" />}
@@ -269,14 +266,12 @@ export function SkillsClient() {
           )
         }
       />
-    );
-    return () => setPageWorkspace(null);
-  }, [selectedSkill, t, setPageWorkspace]);
+  ) : null;
 
   if (loading) return <div className="flex items-center justify-center h-full"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
 
   return (
-    <PageLayout title="技能">
+    <PageLayout title="技能" workspace={pageDetail}>
 
       {/* Toast */}
       {toast && (

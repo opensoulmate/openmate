@@ -4,8 +4,8 @@ import { Clock, Play, Pause, Trash2, RefreshCw, Loader2, ChevronRight, ChevronDo
 import { getApiBaseUrl } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
 import { useTranslation } from 'react-i18next';
+import { useRouter } from 'next/navigation';
 import { PageLayout } from '@/components/page-layout';
-import { DetailPanel } from '@/components/detail-panel';
 import { LeftPanel } from '@/components/left-panel';
 import { useAppStore } from '@/stores/app-store';
 import { ClockFace } from './clock-face';
@@ -76,8 +76,8 @@ export function CronClient() {
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [viewMode, setViewMode] = useState<'year' | 'month' | 'week' | 'day'>('week');
   const { t } = useTranslation();
+  const router = useRouter();
   const setPageSidebar = useAppStore((s) => s.setPageSidebar);
-  const setPageWorkspace = useAppStore((s) => s.setPageWorkspace);
 
   const loadJobs = useCallback(async () => {
     setLoading(true);
@@ -152,12 +152,6 @@ export function CronClient() {
   const activeCount = useMemo(() => jobs.filter(j => j.status === 'active').length, [jobs]);
   const pausedCount = useMemo(() => jobs.filter(j => j.status === 'paused').length, [jobs]);
 
-  // Selected job object
-  const selectedJob = useMemo(() => {
-    if (!selectedJobId) return null;
-    return jobs.find(j => (j.job_id || j.id) === selectedJobId) ?? null;
-  }, [jobs, selectedJobId]);
-
   // Group jobs by status for sidebar
   const groupedJobs = useMemo(() => {
     const active = jobs.filter(j => j.status === 'active');
@@ -188,7 +182,7 @@ export function CronClient() {
                   : 'hover:bg-muted/50 border border-transparent',
               )}
             >
-              <div className="flex items-center gap-1.5 min-w-0" onClick={() => setSelectedJobId(jobId)}>
+              <div className="flex items-center gap-1.5 min-w-0" onClick={() => router.push(`/cron/${jobId}`)}>
                 <span className={cn('w-2 h-2 rounded-full shrink-0', isActive ? 'bg-green-500' : 'bg-amber-500')} />
                 <span className="text-xs font-medium truncate flex-1 cursor-pointer">{job.name || jobId}</span>
                 {/* Action buttons */}
@@ -241,69 +235,8 @@ export function CronClient() {
     return () => setPageSidebar(null);
   }, [jobs, selectedJobId, t, setPageSidebar]);
 
-  // Register workspace content
-  useEffect(() => {
-    if (!selectedJob) {
-      setPageWorkspace(null);
-      return;
-    }
-    const jobId = selectedJob.job_id || selectedJob.id;
-    setPageWorkspace(
-      <DetailPanel
-        title={selectedJob.name || jobId}
-        subtitle={selectedJob.schedule}
-        icon={<Clock className="w-5 h-5 text-primary" />}
-        badge={selectedJob.status === 'active' ? '运行中' : '已暂停'}
-        onClose={() => setSelectedJobId(null)}
-        sections={[
-          {
-            title: t('cron.basicInfo', '基本信息'),
-            items: [
-              { label: 'ID', value: jobId },
-              { label: t('cron.taskNameLabel', '名称'), value: selectedJob.name || '-' },
-              ...(selectedJob.agent ? [{ label: t('cron.agent', 'Agent'), value: selectedJob.agent }] : []),
-            ],
-          },
-          {
-            title: t('cron.scheduleInfo', '调度'),
-            items: [
-              { label: t('cron.scheduleRule', 'Cron 表达式'), value: selectedJob.schedule, icon: <Timer className="w-3.5 h-3.5" /> },
-              { label: t('cron.nextRun', '下次执行'), value: formatTime(selectedJob.next_run), icon: <Play className="w-3.5 h-3.5" /> },
-            ],
-          },
-          {
-            title: t('cron.statusInfo', '状态'),
-            items: [
-              {
-                label: t('cron.enabled', '已启用'),
-                value: selectedJob.status === 'active' ? '✓' : '—',
-                icon: selectedJob.status === 'active'
-                  ? <CheckCircle className="w-3.5 h-3.5 text-green-500" />
-                  : <Pause className="w-3.5 h-3.5 text-amber-500" />,
-              },
-              {
-                label: t('cron.lastStatus', '上次状态'),
-                value: selectedJob.status === 'active' ? t('cron.active', 'Active') : t('cron.paused', 'Paused'),
-              },
-              { label: t('cron.lastRun', '上次执行'), value: formatTime(selectedJob.last_run) },
-            ],
-          },
-          ...(selectedJob.prompt ? [{
-            title: t('cron.executePrompt', 'Prompt'),
-            items: [{
-              label: '',
-              value: <div className="text-xs whitespace-pre-wrap break-words max-h-40 overflow-y-auto">{selectedJob.prompt}</div>,
-            }],
-          }] : []),
-          ...(selectedJob.deliver ? [{
-            title: t('cron.deliverTarget', '投递目标'),
-            items: [{ label: '', value: selectedJob.deliver }],
-          }] : []),
-        ]}
-      />
-    );
-    return () => setPageWorkspace(null);
-  }, [selectedJob, t, setPageWorkspace]);
+  // 任务详情=整页 /cron/[id]（入口点击 router.push 路由，2026-11-19 根修）；
+  // 页内纯展示型选中态 selectedJobId 保留给周视图高亮，不进 workspace 面板。
 
   if (loading) {
     return (

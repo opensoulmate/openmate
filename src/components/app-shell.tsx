@@ -174,7 +174,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     }
   }, [setRightPanelOpen]);
   const pageSidebar = useAppStore((s) => s.pageSidebar);
-  const pageWorkspace = useAppStore((s) => s.pageWorkspace);
   const isMobile = useIsMobile();
   // Auto-collapse sidebar on mid-sized screens (lg but not xl)
   // User can override by clicking the toggle button

@@ -1,7 +1,7 @@
 "use client";
 /**
  * 开发记录页面 — 动态读取 docs/devlog/ 目录下的开发记录文件
- * 使用openface标准三栏布局：setPageSidebar(LeftPanel) + MainPanel(MainHeader) + setPageWorkspace(DetailPanel)
+ * 使用openface标准三栏布局：setPageSidebar(LeftPanel) + MainPanel(MainHeader) + 页内 detail 右列（workspace prop）
  *
  * 数据来源：GET /api/devlog/list → { logs: DevlogItem[] }
  * 文件命名规范：{YYYY-MM-DD}-{feature-name}.md
@@ -54,7 +54,6 @@ export function DevlogClient() {
   const [loadingContent, setLoadingContent] = useState(false);   // 内容加载状态
 
   const setPageSidebar = useAppStore((s) => s.setPageSidebar);
-  const setPageWorkspace = useAppStore((s) => s.setPageWorkspace);
 
   /* ── 从 API 加载开发记录列表 ── */
   useEffect(() => {
@@ -147,9 +146,17 @@ export function DevlogClient() {
   }, [filtered, selectedId, logs.length, setPageSidebar]);
 
   /* ── 注册右侧workspace（DetailPanel） ── */
+    /* ── 加载选中记录内容（纯展示型 detail 状态） ── */
   useEffect(() => {
-    if (!selected) { setPageWorkspace(null); return; }
+    if (!selected) return;
     loadLogContent(selected.fileName);
+  }, [selected, loadLogContent]);
+
+  /* ── 页内 detail 右列（PageLayout workspace prop）──
+     菜单点击劫持全局根修（2026-11-19）：记录正文渲染在页面自身右列，绝不再
+     塞进全局 workspace 面板；selected/logContent（纯展示型 detail 状态）原样保留。 */
+  const pageDetail = selected ? (() => {
+    
 
     /* 详情面板的基本信息项 */
     const detailItems = [
@@ -163,9 +170,8 @@ export function DevlogClient() {
     const fileUrl = logContent
       ? `data:application/octet-stream;base64,${btoa(unescape(encodeURIComponent(logContent)))}`
       : "";
-
-    setPageWorkspace(
-      <DetailPanel
+    return (
+    <DetailPanel
         title={selected.name}
         subtitle={selected.desc}
         icon={<FileText className="w-5 h-5 text-primary" />}
@@ -193,8 +199,7 @@ export function DevlogClient() {
         </div>
       </DetailPanel>
     );
-    return () => setPageWorkspace(null);
-  }, [selected, logContent, setPageWorkspace, loadLogContent]);
+  })() : null;
 
   /* ── MainPanel: 中间主内容区 ── */
   return (
@@ -202,6 +207,7 @@ export function DevlogClient() {
       title="开发记录"
       icon={<FileText className="w-5 h-5" />}
       badge={loading ? "加载中..." : `${logs.length} 条`}
+      workspace={pageDetail}
       headerActions={
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground">{loading ? "加载中..." : `共 ${logs.length} 条开发记录`}</span>

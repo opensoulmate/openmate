@@ -31,11 +31,11 @@ interface AppLayoutState {
   toggleRightPanel: () => void;
   setRightPanelOpen: (open: boolean) => void;
 
-  // Page-specific sidebar/workspace content
+  // Page-specific sidebar content
+  // （pageWorkspace→workspace 面板通道已整体拆除：页面 detail 一律页内渲染，
+  //   workspace 面板只属于工作区——结构性杜绝「点击开进 workspace」）
   pageSidebar: React.ReactNode | null;
-  pageWorkspace: React.ReactNode | null;
   setPageSidebar: (content: React.ReactNode | null) => void;
-  setPageWorkspace: (content: React.ReactNode | null) => void;
 
   // Per-session workspace tabs (right panel state)
   workspaceTabsBySession: Record<string, WorkspaceState>;
@@ -63,9 +63,7 @@ export const useAppStore = create<AppLayoutState>((set, get) => ({
     set({ rightPanelOpen: open }),
 
   pageSidebar: null,
-  pageWorkspace: null,
   setPageSidebar: (content) => set({ pageSidebar: content }),
-  setPageWorkspace: (content) => set({ pageWorkspace: content }),
 
   // ── Per-session workspace tabs ──────────────────────────────────
 

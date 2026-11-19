@@ -1,5 +1,5 @@
 
-import { useState, useRef, useCallback, useEffect, type FormEvent, type ReactNode, type ChangeEvent } from 'react';
+import { useState, useRef, useCallback, useEffect, type FormEvent, type ChangeEvent } from 'react';
 import {
   X,
   Globe,
@@ -180,7 +180,6 @@ function TerminalPlaceholder() {
 export interface WorkspacePanelProps {
   sessionId?: string;
   workspaceTitle?: string;
-  pageWorkspace?: ReactNode;
   sessionDetails?: {
     agentIcon?: string;
     agentName?: string;
@@ -205,7 +204,6 @@ export interface WorkspacePanelProps {
 export function WorkspacePanel({
   sessionId = '__default__',
   workspaceTitle = '工作区',
-  pageWorkspace,
   sessionDetails,
   onBrowserAIAction,
   onSelectionAIEdit,
@@ -584,9 +582,10 @@ export function WorkspacePanel({
         )}
       </div>
 
-      {/* Content area */}
+      {/* Content area — 工作区自身内容（文件/浏览器/终端/会话详情）。
+          页面 detail 绝不进此面板（pageWorkspace 通道已拆除）。 */}
       <div className="flex-1 overflow-hidden min-h-0">
-        {pageWorkspace || renderContent()}
+        {renderContent()}
       </div>
     </div>
   );

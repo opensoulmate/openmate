@@ -1,7 +1,7 @@
 "use client";
 /**
  * 开发规范页面 — 动态读取 docs/specs/ 目录下的规范文件
- * 使用openface标准三栏布局：setPageSidebar(LeftPanel) + MainPanel(MainHeader) + setPageWorkspace(DetailPanel)
+ * 使用openface标准三栏布局：setPageSidebar(LeftPanel) + MainPanel(MainHeader) + 页内 detail 右列（workspace prop）
  *
  * 数据来源：GET /api/dev-specs/list → { specs: SpecItem[] }
  */
@@ -49,7 +49,6 @@ export function DevSpecsClient() {
   const [loadingContent, setLoadingContent] = useState(false);   // 内容加载状态
 
   const setPageSidebar = useAppStore((s) => s.setPageSidebar);
-  const setPageWorkspace = useAppStore((s) => s.setPageWorkspace);
 
   /* ── 从 API 加载规范列表 ── */
   useEffect(() => {
@@ -142,11 +141,16 @@ export function DevSpecsClient() {
   }, [filtered, selectedId, specs.length, setPageSidebar]);
 
   /* ── 注册右侧workspace（DetailPanel） ── */
+    /* ── 加载选中内容（纯展示型 detail 状态） ── */
   useEffect(() => {
-    if (!selected) { setPageWorkspace(null); return; }
+    if (!selected) return;
     loadSpecContent(selected.fileName);
+  }, [selected, loadSpecContent]);
 
-    /* 详情面板的基本信息项 */
+  /* ── 页内 detail 右列（PageLayout workspace prop）──
+     菜单点击劫持全局根修（2026-11-19）：规范正文渲染在页面自身右列，绝不再塞进全局 workspace 面板；selected/specContent（纯展示型 detail 状态）原样保留。 */
+  const pageDetail = selected ? (() => {
+/* 详情面板的基本信息项 */
     const detailItems = [
       { label: "编号", value: selected.id },
       { label: "版本", value: selected.version },
@@ -158,9 +162,8 @@ export function DevSpecsClient() {
     const fileUrl = specContent
       ? `data:application/octet-stream;base64,${btoa(unescape(encodeURIComponent(specContent)))}`
       : "";
-
-    setPageWorkspace(
-      <DetailPanel
+    return (
+    <DetailPanel
         title={selected.name}
         subtitle={selected.desc}
         icon={<FileText className="w-5 h-5 text-primary" />}
@@ -188,14 +191,14 @@ export function DevSpecsClient() {
         </div>
       </DetailPanel>
     );
-    return () => setPageWorkspace(null);
-  }, [selected, specContent, setPageWorkspace, loadSpecContent]);
+  })() : null;
 
   /* ── MainPanel: 中间主内容区（对齐UI规范3.2） ── */
   return (
     <PageLayout
       title="开发规范"
       icon={<FileText className="w-5 h-5" />}
+      workspace={pageDetail}
       badge={loading ? "加载中..." : `${specs.length} 项`}
       headerActions={
         <div className="flex items-center gap-2">

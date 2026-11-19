@@ -1,5 +1,5 @@
 
-import { useEffect, type ReactNode } from 'react';
+import { type ReactNode } from 'react';
 import { MainHeader } from './main-header';
 import { useAppStore } from '../store/app-store';
 import { useIsMobile } from '../hooks/use-mobile';
@@ -14,7 +14,8 @@ export interface MainPanelProps {
   icon?: ReactNode;
   /** Badge/label displayed after title */
   badge?: string;
-  /** Right panel content (optional, defaults to global workspace tabs) */
+  /** In-page detail column content (optional). 渲染在页面自身右列（页内 detail），
+   * 绝不进全局 workspace 面板——workspace 面板只属于工作区（文件/浏览器/终端/会话详情）。 */
   workspace?: ReactNode;
   /** Main content */
   children: ReactNode;
@@ -53,16 +54,12 @@ export function MainPanel({
   onToggleSidebar,
   onToggleRightPanel,
 }: MainPanelProps) {
-  // Register page-specific workspace content
-  const setPageWorkspace = useAppStore((s) => s.setPageWorkspace);
+  // 页内 detail 渲染（2026-11-19 菜单点击劫持全局根修）：detail 内容直接渲染在
+  // 页面自身右列，不再经 app-store 的 pageWorkspace 通道塞进全局 workspace 面板。
+  // （旧通道=「点击在 workspace 里打开」病灶；workspace 面板只属于工作区本身。）
   const storeToggleRight = useAppStore((s) => s.toggleRightPanel);
   const setRightPanelOpen = useAppStore((s) => s.setRightPanelOpen);
   const isMobile = useIsMobile();
-
-  useEffect(() => {
-    setPageWorkspace(workspace ?? null);
-    return () => setPageWorkspace(null);
-  }, [workspace, setPageWorkspace]);
 
   const handleToggleLeft = () => {
     onToggleSidebar?.();
@@ -105,6 +102,13 @@ export function MainPanel({
           {children}
         </div>
       </div>
+
+      {/* 页内 detail 右列（页面自己的三栏右格）——不是全局 workspace 面板 */}
+      {workspace && (
+        <aside className="relative z-20 flex shrink-0 flex-col overflow-hidden border-l border-border bg-background max-lg:absolute max-lg:inset-y-0 max-lg:right-0 max-lg:w-full lg:w-[400px]">
+          {workspace}
+        </aside>
+      )}
     </div>
   );
 }

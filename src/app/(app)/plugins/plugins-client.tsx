@@ -322,7 +322,6 @@ export function PluginsClient() {
   const [selectedPlugin, setSelectedPlugin] = useState<Plugin | null>(null);
 
   const setPageSidebar = useAppStore((s) => s.setPageSidebar);
-  const setPageWorkspace = useAppStore((s) => s.setPageWorkspace);
 
   const loadPlugins = useCallback(async () => {
     setLoading(true);
@@ -454,13 +453,11 @@ export function PluginsClient() {
   }, [plugins, sidebarTab, selectedPlugin, t, setPageSidebar, setShowInstall]);
 
   // ── Register workspace content ──────────────────────────────────
-  useEffect(() => {
-    if (!selectedPlugin) {
-      setPageWorkspace(null);
-      return;
-    }
-    setPageWorkspace(
-      <DetailPanel
+    // ── 页内 detail 右列（PageLayout workspace prop）──
+  // 菜单点击劫持全局根修（2026-11-19）：详情绝不塞进全局 workspace 面板；
+  // 选中态（纯展示型 detail 状态）原样保留。
+  const pageDetail = selectedPlugin ? (
+    <DetailPanel
         title={selectedPlugin.name}
         subtitle={selectedPlugin.description || `v${selectedPlugin.version}`}
         icon={<Puzzle className="w-5 h-5 text-primary" />}
@@ -507,12 +504,10 @@ export function PluginsClient() {
           },
         ]}
       />
-    );
-    return () => setPageWorkspace(null);
-  }, [selectedPlugin, t, setPageWorkspace]);
+  ) : null;
 
   return (
-    <PageLayout title="插件">
+    <PageLayout title="插件" workspace={pageDetail}>
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-6xl px-3 lg:px-6 py-4 lg:py-8">
           {/* Header */}

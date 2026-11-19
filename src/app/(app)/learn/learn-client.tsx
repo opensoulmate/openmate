@@ -69,7 +69,6 @@ export function LearnClient() {
   const { t } = useTranslation();
   const apiBase = getApiBaseUrl();
   const setPageSidebar = useAppStore((s) => s.setPageSidebar);
-  const setPageWorkspace = useAppStore((s) => s.setPageWorkspace);
 
   // Data
   const [courses, setCourses] = useState<Course[]>([]);
@@ -386,15 +385,11 @@ export function LearnClient() {
     return () => setPageSidebar(null);
   }, [courses, selectedCourseId, t, setPageSidebar]);
 
-  // ── RightPanel workspace (chapter detail) ──────────────────
+  // ── 章节阅读器=页内 detail 右列（PageLayout workspace prop）──
+  // 菜单点击劫持全局根修（2026-11-19）：章节内容/测验渲染在页面自身右列，绝不再
+  // 塞进全局 workspace 面板；课程/章节选中态（纯展示型 detail 状态）原样保留。
+  const chapterDetail = currentChapter && courseDetail ? (
 
-  useEffect(() => {
-    if (!currentChapter || !courseDetail) {
-      setPageWorkspace(null);
-      return;
-    }
-
-    setPageWorkspace(
       <DetailPanel
         title={currentChapter.title}
         subtitle={`${courseDetail.title} · ${t('learn.chapter') || 'Chapter'} ${(selectedChapterIndex ?? 0) + 1}/${chapters.length}`}
@@ -508,10 +503,8 @@ export function LearnClient() {
             </div>
           )}
         </div>
-      </DetailPanel>,
-    );
-    return () => setPageWorkspace(null);
-  }, [currentChapter, courseDetail, chapters, selectedChapterIndex, showQuiz, quizAnswers, quizSubmitted, quizScore, t, setPageWorkspace]);
+      </DetailPanel>
+  ) : null;
 
   // ── Loading state ──────────────────────────────────────────
 
@@ -526,7 +519,7 @@ export function LearnClient() {
   // ── Main content ───────────────────────────────────────────
 
   return (
-    <PageLayout title="学习" icon={<GraduationCap size={16} className="text-primary" />}>
+    <PageLayout title="学习" icon={<GraduationCap size={16} className="text-primary" />} workspace={chapterDetail}>
       <div className="h-full overflow-y-auto">
         {!selectedCourseId ? (
           /* No course selected — dashboard overview */

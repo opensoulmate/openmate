@@ -144,7 +144,6 @@ export function WorkflowClient() {
 
   // ── App layout ──
   const setPageSidebar = useAppStore((s) => s.setPageSidebar);
-  const setPageWorkspace = useAppStore((s) => s.setPageWorkspace);
   // 主题联动：React Flow colorMode 跟随系统主题（其默认 light 会给容器注入
   // light 类、把 .light 令牌块带进画布——画布必须显式跟随应用主题）
   const theme = useAppStore((s) => s.theme);
@@ -594,23 +593,18 @@ export function WorkflowClient() {
     setDeleteTarget, setPageSidebar, t,
   ]);
 
-  // ── Register workspace ──
-  useEffect(() => {
-    if (selectedNode) {
-      setPageWorkspace(
-        <NodeConfigPanel
-          nodeId={selectedNode.id}
-          data={selectedNode.data as unknown as WorkflowNodeData}
-          onClose={() => selectNode(null)}
-        />,
-      );
-    } else if (showExecutionPanel) {
-      setPageWorkspace(<WorkflowExecutionPanel />);
-    } else {
-      setPageWorkspace(null);
-    }
-    return () => setPageWorkspace(null);
-  }, [selectedNode, showExecutionPanel, selectNode, setPageWorkspace]);
+  // ── 页内 detail 右列（节点配置/执行面板）──
+  // 菜单点击劫持全局根修（2026-11-19）：节点配置是画布自己的 detail，渲染在页面
+  // 自身右列（PageLayout workspace prop），绝不再开进全局 workspace 面板。
+  const pageDetail = selectedNode ? (
+    <NodeConfigPanel
+      nodeId={selectedNode.id}
+      data={selectedNode.data as unknown as WorkflowNodeData}
+      onClose={() => selectNode(null)}
+    />
+  ) : showExecutionPanel ? (
+    <WorkflowExecutionPanel />
+  ) : null;
 
   // ── Render ──
   return (
@@ -618,6 +612,7 @@ export function WorkflowClient() {
       title={t("workflow.title") || "Workflow"}
       icon={<GitBranch size={16} />}
       badge={activeWorkflowId ? `${nodes.length} nodes` : undefined}
+      workspace={pageDetail}
       showSidebarToggle
       showWorkspaceToggle
     >

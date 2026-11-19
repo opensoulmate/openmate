@@ -75,7 +75,6 @@ export function DocsClient() {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set()); // 折叠的分组
 
   const setPageSidebar = useAppStore((s) => s.setPageSidebar);
-  const setPageWorkspace = useAppStore((s) => s.setPageWorkspace);
 
   /* ── 从 API 加载文档列表 ── */
   useEffect(() => {
@@ -235,12 +234,16 @@ export function DocsClient() {
   }, [filteredGroups, selectedPath, groups, totalFiles, setPageSidebar]);
 
   /* ── 注册右侧 workspace（DetailPanel） ── */
+    /* ── 加载选中内容（纯展示型 detail 状态） ── */
   useEffect(() => {
-    if (!selectedFile) {
-      setPageWorkspace(null);
-      return;
-    }
+    if (!selectedFile) return;
     loadDocContent(selectedFile.path);
+  }, [selectedFile, loadDocContent]);
+
+  /* ── 页内 detail 右列（PageLayout workspace prop）──
+     菜单点击劫持全局根修（2026-11-19）：文档正文渲染在页面自身右列，绝不再塞进全局 workspace 面板；selectedFile/docContent（纯展示型 detail 状态）原样保留。 */
+  const pageDetail = selectedFile ? (() => {
+    
 
     /* 面包屑路径 */
     const pathParts = selectedFile.path.split("/");
@@ -253,9 +256,8 @@ export function DocsClient() {
     const fileUrl = docContent
       ? `data:application/octet-stream;base64,${btoa(unescape(encodeURIComponent(docContent)))}`
       : "";
-
-    setPageWorkspace(
-      <DetailPanel
+    return (
+    <DetailPanel
         title={selectedFile.name}
         subtitle={selectedFile.group}
         icon={<FileText className="w-5 h-5 text-primary" />}
@@ -301,14 +303,14 @@ export function DocsClient() {
         </div>
       </DetailPanel>
     );
-    return () => setPageWorkspace(null);
-  }, [selectedFile, docContent, setPageWorkspace, loadDocContent]);
+  })() : null;
 
   /* ── MainPanel: 中间主内容区 ── */
   return (
     <PageLayout
       title="文档中心"
       icon={<FileText className="w-5 h-5" />}
+      workspace={pageDetail}
       badge={loading ? "加载中..." : `${totalFiles} 篇`}
       headerActions={
         <div className="flex items-center gap-2">

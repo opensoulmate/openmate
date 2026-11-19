@@ -74,7 +74,6 @@ export function McpClient() {
   const [selectedTool, setSelectedTool] = useState<ToolTestState | null>(null);
 
   const setPageSidebar = useAppStore((s) => s.setPageSidebar);
-  const setPageWorkspace = useAppStore((s) => s.setPageWorkspace);
 
   // New server form
   const [newName, setNewName] = useState("");
@@ -338,14 +337,12 @@ export function McpClient() {
   }, [servers, filtered, loading, query, stats, selectedServer, t, setPageSidebar, setShowAdd]);
 
   // ── Register workspace content ──────────────────────────────────
-  useEffect(() => {
-    if (!selectedServer) {
-      setPageWorkspace(null);
-      return;
-    }
-    const busy = actionLoading[selectedServer.id];
-    setPageWorkspace(
-      <DetailPanel
+    // ── 页内 detail 右列（PageLayout workspace prop）──
+  // 菜单点击劫持全局根修（2026-11-19）：详情绝不塞进全局 workspace 面板；
+  // 选中态（纯展示型 detail 状态）原样保留。
+  const detailBusy = selectedServer ? actionLoading[selectedServer.id] : undefined;
+  const pageDetail = selectedServer ? (
+    <DetailPanel
         title={selectedServer.name}
         subtitle={selectedServer.description || selectedServer.url}
         icon={<Server className="w-5 h-5 text-primary" />}
@@ -367,16 +364,16 @@ export function McpClient() {
             </button>
             <button
               onClick={() => handleConnect(selectedServer)}
-              disabled={!!busy}
+              disabled={!!detailBusy}
               className={cn(
                 "flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors",
                 selectedServer.connected
                   ? "border border-red-500/30 text-red-400 hover:bg-red-500/10"
                   : "bg-primary text-primary-foreground hover:bg-primary/90",
-                busy ? "opacity-50" : ""
+                detailBusy ? "opacity-50" : ""
               )}
             >
-              {busy ? <Loader2 size={11} className="animate-spin" /> : selectedServer.connected ? <PlugZap size={11} /> : <Plug size={11} />}
+              {detailBusy ? <Loader2 size={11} className="animate-spin" /> : selectedServer.connected ? <PlugZap size={11} /> : <Plug size={11} />}
               {selectedServer.connected ? (t("mcp.disconnect") || "Disconnect") : (t("mcp.connect") || "Connect")}
             </button>
           </div>
@@ -444,14 +441,12 @@ export function McpClient() {
           },
         ]}
       />
-    );
-    return () => setPageWorkspace(null);
-  }, [selectedServer, actionLoading, t, setPageWorkspace]);
+  ) : null;
 
   // ── Render ─────────────────────────────────────────────
 
   return (
-    <PageLayout title="MCP 客户端">
+    <PageLayout title="MCP 客户端" workspace={pageDetail}>
       <div className="flex flex-col h-full overflow-hidden">
         {/* Toast */}
         {toast && (

@@ -1,7 +1,7 @@
 "use client";
 /**
  * 智能投标页面 — AI招投标文档生成系统
- * 使用openface标准三栏布局：setPageSidebar(LeftPanel) + MainPanel + setPageWorkspace(DetailPanel)
+ * 使用openface标准三栏布局：setPageSidebar(LeftPanel) + MainPanel + 页内 detail 右列（workspace prop）
  * 集成bidding后端引擎（12个API端点）
  */
 import { useState, useEffect, useCallback } from "react";
@@ -111,7 +111,7 @@ function getApiBase() {
 /* ── 主组件 ────────────────────────────────────────── */
 
 export default function BiddingClient() {
-  const { setPageSidebar, setPageWorkspace } = useAppStore();
+  const { setPageSidebar } = useAppStore();
 
   /* 状态 */
   const [projects, setProjects] = useState<Project[]>([]);
@@ -331,10 +331,11 @@ export default function BiddingClient() {
   }, [projects, selectedId, showNewProject, newProjectName, setPageSidebar]);
 
   /* ── 右侧栏：详情面板 ──────────────────────────── */
-  useEffect(() => {
-    if (!selected) { setPageWorkspace(null); return; }
-    setPageWorkspace(
-      <DetailPanel
+    /* ── 页内 detail 右列（PageLayout workspace prop）──
+     菜单点击劫持全局根修（2026-11-19）：项目详情渲染在页面自身右列，绝不再
+     塞进全局 workspace 面板；selected/selectedId（纯展示型 detail 状态）原样保留。 */
+  const pageDetail = selected ? (
+    <DetailPanel
         title={selected.name}
         subtitle={STATUS_LABEL[selected.status]}
         icon={<FileText className="w-5 h-5 text-primary" />}
@@ -391,14 +392,12 @@ export default function BiddingClient() {
           )}
         </div>
       </DetailPanel>
-    );
-    return () => setPageWorkspace(null);
-  }, [selected, parseResult, checkResults, setPageWorkspace]);
+  ) : null;
 
   /* ── MainPanel ──────────────────────────────────── */
   if (!selected) {
     return (
-      <PageLayout title="智能投标" icon={<FileText className="w-5 h-5" />} badge="AI">
+      <PageLayout title="智能投标" icon={<FileText className="w-5 h-5" />} workspace={pageDetail} badge="AI">
         <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
           <FileText size={64} className="mb-4 opacity-20" />
           <p className="text-sm">选择或创建一个投标项目</p>

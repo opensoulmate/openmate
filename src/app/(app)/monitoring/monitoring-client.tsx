@@ -708,7 +708,6 @@ export function MonitoringClient() {
   const { t } = useTranslation();
   const apiBase = getApiBaseUrl();
   const setPageSidebar = useAppStore((s) => s.setPageSidebar);
-  const setPageWorkspace = useAppStore((s) => s.setPageWorkspace);
 
   // ── Tab state ──────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<MonitoringTab>('overview');
@@ -1334,10 +1333,12 @@ export function MonitoringClient() {
 
   // ── Register workspace content (DetailPanel) ───────────────
 
-  useEffect(() => {
-    if (activeTab === 'overview' && selectedOrganDetail) {
-      setPageWorkspace(
-        <DetailPanel
+    // ── 页内 detail 右列（PageLayout workspace prop）──
+  // 菜单点击劫持全局根修（2026-11-19）：器官/事件详情渲染在页面自身右列，绝不再
+  // 塞进全局 workspace 面板；selectedOrganDetail/selectedEvent（纯展示型 detail
+  // 状态）原样保留。
+  const pageDetail = activeTab === 'overview' && selectedOrganDetail ? (
+    <DetailPanel
           title={selectedOrganDetail.label}
           subtitle={selectedOrganDetail.key}
           icon={<Server className="w-5 h-5 text-orange-500" />}
@@ -1356,10 +1357,8 @@ export function MonitoringClient() {
             },
           ]}
         />
-      );
-    } else if (activeTab === 'activity' && selectedEvent) {
-      setPageWorkspace(
-        <DetailPanel
+  ) : activeTab === 'activity' && selectedEvent ? (
+    <DetailPanel
           title={selectedEvent.summary}
           subtitle={`${selectedEvent.organ} · ${selectedEvent.type}`}
           icon={<span className="text-lg">{selectedEvent.emoji}</span>}
@@ -1388,18 +1387,14 @@ export function MonitoringClient() {
             }] : []),
           ]}
         />
-      );
-    } else {
-      setPageWorkspace(null);
-    }
-    return () => setPageWorkspace(null);
-  }, [activeTab, selectedOrganDetail, selectedEvent, categoryLabels, t, setPageWorkspace]);
+  ) : null;
 
   // ── Main render ────────────────────────────────────────────
 
   return (
     <PageLayout
       title="监控"
+      workspace={pageDetail}
       icon={<Activity size={16} className="text-orange-500" />}
     >
       <div className="h-full overflow-y-auto">

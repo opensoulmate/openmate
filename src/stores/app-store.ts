@@ -248,11 +248,11 @@ interface AppState {
   setRightPanelOpen: (open: boolean) => void;
   setPendingFilePreview: (file: { url: string; name: string; mimeType?: string } | null) => void;
 
-  // Page-specific sidebar/workspace content (for PageLayout framework)
+  // Page-specific sidebar content (for PageLayout framework)
+  // （pageWorkspace→workspace 面板通道已整体拆除：页面 detail 一律页内渲染——
+  //   PageLayout 的 workspace prop=页面自身右列；workspace 面板只属于工作区）
   pageSidebar: React.ReactNode | null;
-  pageWorkspace: React.ReactNode | null;
   setPageSidebar: (content: React.ReactNode | null) => void;
-  setPageWorkspace: (content: React.ReactNode | null) => void;
 
   // Mobile swipeable panels (synced with bottom nav)
   currentPanel: number;
@@ -429,11 +429,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   setPendingFilePreview: (file) =>
     set({ pendingFilePreview: file }),
 
-  // Page-specific sidebar/workspace content
+  // Page-specific sidebar content
   pageSidebar: null,
-  pageWorkspace: null,
   setPageSidebar: (content) => set({ pageSidebar: content }),
-  setPageWorkspace: (content) => set({ pageWorkspace: content }),
 
   currentPanel: 0,
   setCurrentPanel: (n) => set({ currentPanel: n }),

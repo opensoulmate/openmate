@@ -210,7 +210,6 @@ export function AppShell({
   const toggleSidebar = useAppStore((s) => s.toggleSidebar);
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
   const setRightPanelOpen = useAppStore((s) => s.setRightPanelOpen);
-  const setPageWorkspace = useAppStore((s) => s.setPageWorkspace);
   const isMobile = useIsMobile();
 
   // RightPanel动态宽度: 桌面50vw, 移动端256px (跟OpenMate一致)
@@ -222,12 +221,8 @@ export function AppShell({
     return () => window.removeEventListener('resize', update);
   }, [isMobile]);
 
-  useEffect(() => {
-    if (rightPanel) {
-      setPageWorkspace(rightPanel);
-    }
-    return () => setPageWorkspace(null);
-  }, [rightPanel, setPageWorkspace]);
+  // rightPanel 直接渲染在下方布局（页面自己的右格），不再经 store 的
+  // pageWorkspace 通道转手（该通道=「内容开进 workspace 面板」病灶，已整体拆除）。
 
   // ── TopBar: 左侧logo+名称，右侧设置 ─────────────────────
 
