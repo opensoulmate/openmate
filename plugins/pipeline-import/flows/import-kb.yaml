@@ -1,0 +1,35 @@
+# 导入加工流 — 流水线（OpenPipeline）作为后端工序的流程引擎实证
+#
+# 触发：manual「跑一下」（POST /flows/pipeline-import/run，inputs: file_path 或 file_id）
+# 链路：tool 节点调「导入加工」（pipeline-import__import）
+#      → OpenSoul /api/pipeline/* 全工序（存储→提取→免疫→知识入库）
+#      → pipeline_id/逐段结果回流，收尾通知
+# 归位口径：流水线=后端功能流程（非前端菜单页）；此流证明流程引擎 tool 节点可调。
+id: pipeline-import
+name: 导入加工流
+version: 1
+triggers:
+  - type: manual
+nodes:
+  - id: import
+    type: tool
+    tool: pipeline-import__import
+    args:
+      file_path: "$run.inputs.file_path"
+      file_id: "$run.inputs.file_id"
+      pipeline: "$run.inputs.pipeline"
+      user_id: "$run.inputs.user_id"
+      tags: "$run.inputs.tags"
+    retry:
+      max: 1
+      backoff: fixed
+      base_seconds: 2
+    timeout_seconds: 600
+  - id: finish
+    type: action
+    actions:
+      - type: notify
+        channel: in-app
+        message: "导入加工完成：文件已走流水线（存储→提取→免疫→入库）并进入知识库"
+observability:
+  retain_runs: 30

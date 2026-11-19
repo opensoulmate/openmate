@@ -1,0 +1,32 @@
+id: pipeline-import
+name: 导入加工
+version: 0.1.0
+description: 知识库导入加工（OpenPipeline 后端工序）——文件按 MIME 自动走 ocr/asr/text/video 流水线（存储→提取→免疫→知识入库），流程引擎 tool 节点可调「导入加工」
+author: soulmate
+entry: main.py
+permissions:
+  - tool.register
+  - tool.call
+  - data.read
+tools:
+  - name: import
+    description: 导入加工（后端工序）：文件→流水线自动选 ocr/asr/text/video→存储→提取（OCR/ASR/文本）→免疫扫描→知识入库，返回 pipeline_id+逐段加工结果。file_path（本地文件）与 file_id（Vein 已存文件）二选一
+    handler: handle_import
+    permissions: [tool.call, data.read]
+    approval: never
+    input_schema:
+      type: object
+      properties:
+        file_path:
+          description: 本地文件路径（读文件内容走 /api/pipeline/upload 全工序）
+        file_id:
+          description: Vein 文件 id（已存文件走 /api/pipeline/run，与 file_path 二选一）
+        pipeline:
+          description: 流水线类型 auto|ocr|asr|text|video，默认 auto（按 MIME 自动检测）
+        tags:
+          description: 知识条目标签列表
+        user_id:
+          description: 归档用户名（写键派生），默认 default
+      required: []
+flows:
+  - flows/import-kb.yaml

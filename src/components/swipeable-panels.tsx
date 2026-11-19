@@ -22,7 +22,6 @@ const PANEL_ROUTES = [
   "/cron",
   "/workflow",
   "/workflow",
-  "/pipeline",
   "/will",
   "/skills",
   "/mcp",

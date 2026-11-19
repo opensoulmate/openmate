@@ -50,7 +50,8 @@ const baseNavItems: BottomNavItem[] = [
   { href: "/knowledge-requests", label: "nav.kbSharing", icon: Share2 },
   { href: "/cron", label: "nav.cron", icon: Clock },
   { href: "/workflow", label: "nav.workflow", icon: Workflow },
-  { href: "/pipeline", label: "nav.pipeline", icon: Zap },
+  // /pipeline 归位（2026-11-19）：流水线=后端工序，入口在知识库导入面，
+  // /pipeline 保留为加工详情视图（旧路由直达），不再占一级菜单
   { href: "/skills", label: "nav.skills", icon: Puzzle },
   { href: "/mcp", label: "nav.mcp", icon: Plug },
   { href: "/workspace", label: "nav.workspace", icon: FolderKanban },

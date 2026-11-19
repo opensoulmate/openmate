@@ -246,6 +246,27 @@
     "viewVideos": "Videos"
   },
   "knowledge": {
+    "import": {
+      "title": "Import & Process",
+      "subtitle": "Files go through the backend pipeline (OCR/ASR/text/video) automatically and land in the knowledge base",
+      "dropHint": "Drop files here or click to choose — processed and imported automatically",
+      "processing": "Processing…",
+      "done": "Imported",
+      "failed": "Failed",
+      "detailLink": "Processing detail",
+      "recent": "Recent processing",
+      "noHistory": "No processing runs yet",
+      "stepsUnit": " stages",
+      "detailHint": "Click to open the processing detail view (full stage-by-stage record)",
+      "confidence": "confidence",
+      "stageStore": "Store",
+      "stageExtract": "Text extraction",
+      "stageOcr": "OCR",
+      "stageAsr": "Speech-to-text",
+      "stageVideo": "Video analysis",
+      "stageImmune": "Security scan",
+      "stageKnowledge": "Knowledge ingest"
+    },
     "title": "Knowledge Base",
     "create": "Create Knowledge",
     "empty": "No knowledge entries yet",
@@ -5323,6 +5344,9 @@
   "pipeline": {
     "title": "Pipeline · Smart Pipeline",
     "subtitle": "File upload → Security scan → Content extraction → Knowledge ingestion, one-click automation",
+    "detailBanner": "Processing detail view — stage-by-stage record of this run",
+    "detailBannerHome": "This page is the processing detail view; file import lives in Knowledge (uploads trigger the backend pipeline)",
+    "backToKnowledge": "← Back to knowledge import",
     "history": "History",
     "config": "Config",
     "processingFlow": "Processing Pipeline",

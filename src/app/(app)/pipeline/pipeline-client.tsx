@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback, useRef } from "react";
+import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { getApiBaseUrl } from "@/lib/api-client";
 import { useTranslation } from "react-i18next";
@@ -81,6 +82,8 @@ export function PipelineClient() {
   const [showHistory, setShowHistory] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [selectedHistory, setSelectedHistory] = useState<PipelineResult | null>(null);
+  // 加工详情视图（归位）：?pipeline_id= 自知识库导入进度/历史进来，直达某次运行
+  const [detailId, setDetailId] = useState<string | null>(null);
 
   // Fetch pipeline types
   useEffect(() => {
@@ -109,6 +112,23 @@ export function PipelineClient() {
   }, [apiBase]);
 
   useEffect(() => { fetchHistory(); }, [fetchHistory]);
+
+  // 加工详情视图：?pipeline_id= 直达该次运行（知识库导入进度/历史可达面）
+  useEffect(() => {
+    if (!apiBase || typeof window === "undefined") return;
+    const pid = new URLSearchParams(window.location.search).get("pipeline_id");
+    if (!pid) return;
+    setDetailId(pid);
+    fetch(`${apiBase}/api/pipeline/history/${encodeURIComponent(pid)}`)
+      .then(r => (r.ok ? r.json() : null))
+      .then(data => {
+        if (data && data.pipeline_id) {
+          setSelectedHistory(data);
+          setShowHistory(true);
+        }
+      })
+      .catch(() => {});
+  }, [apiBase]);
 
   // Upload handler
   const handleUpload = async () => {
@@ -187,6 +207,22 @@ export function PipelineClient() {
 
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-4xl mx-auto p-3 lg:p-6 space-y-3 lg:space-y-6">
+
+          {/* 归位提示条：此页=加工详情视图（入口在知识库导入进度/历史） */}
+          <div className="flex items-center gap-2 rounded-lg border border-indigo-500/20 bg-indigo-500/5 px-3 py-2">
+            <Zap size={12} className="text-indigo-500 shrink-0" />
+            <p className="text-[11px] text-muted-foreground flex-1">
+              {detailId
+                ? t('pipeline.detailBanner', '导入加工详情视图——查看该次运行的逐段加工记录')
+                : t('pipeline.detailBannerHome', '本页为导入加工详情视图；文件导入入口在知识库（上传自动触发后端流水线）')}
+            </p>
+            <Link
+              href="/knowledge"
+              className="text-[11px] text-primary hover:underline whitespace-nowrap flex items-center gap-1"
+            >
+              ← {t('pipeline.backToKnowledge', '返回知识库导入')}
+            </Link>
+          </div>
 
           {/* Pipeline Flow Visualization */}
           <div className="rounded-xl border border-border bg-card p-5">

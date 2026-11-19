@@ -246,6 +246,27 @@
     "viewVideos": "视频"
   },
   "knowledge": {
+    "import": {
+      "title": "导入加工",
+      "subtitle": "文件自动走后端流水线（OCR/ASR/文本/视频）加工入库",
+      "dropHint": "拖拽文件到此处，或点击选择——自动加工入库",
+      "processing": "加工中…",
+      "done": "已入库",
+      "failed": "失败",
+      "detailLink": "加工详情",
+      "recent": "最近加工",
+      "noHistory": "暂无加工记录",
+      "stepsUnit": " 段",
+      "detailHint": "点击进入加工详情视图（完整逐段加工记录）",
+      "confidence": "置信度",
+      "stageStore": "存储",
+      "stageExtract": "文本提取",
+      "stageOcr": "OCR 识别",
+      "stageAsr": "语音转写",
+      "stageVideo": "视频分析",
+      "stageImmune": "安全扫描",
+      "stageKnowledge": "知识入库"
+    },
     "title": "知识库",
     "create": "新建知识",
     "empty": "还没有知识条目",
@@ -5332,6 +5353,9 @@
   "pipeline": {
     "title": "智能流水线 · Pipeline",
     "subtitle": "文件上传 → 安全扫描 → 内容提取 → 知识入库，一键自动化",
+    "detailBanner": "导入加工详情视图——查看该次运行的逐段加工记录",
+    "detailBannerHome": "本页为导入加工详情视图；文件导入入口在知识库（上传自动触发后端流水线）",
+    "backToKnowledge": "返回知识库导入",
     "history": "历史",
     "config": "配置",
     "processingFlow": "处理流水线",

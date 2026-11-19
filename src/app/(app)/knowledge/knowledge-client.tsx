@@ -20,6 +20,7 @@ import {
   Share2,
 } from 'lucide-react';
 import { SharingTab } from './tabs/sharing-tab';
+import { KnowledgeImportPanel } from './import-panel';
 
 import { EChart } from '@/components/echart';
 
@@ -719,6 +720,9 @@ export function KnowledgeClient() {
           <div className="p-3 lg:p-6 space-y-4 lg:space-y-6">
             {!selectedItem ? (
               <>
+                {/* 导入加工面（流水线后端工序入口）：上传自动触发流水线→产物入库 */}
+                <KnowledgeImportPanel onImported={fetchAll} />
+
                 {/* Stats Row */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 lg:gap-3">
                   <div className="rounded-lg border border-border bg-card p-3">

@@ -78,7 +78,7 @@ export function CommandMenu() {
     { id: "nav-cron", label: "定时任务", labelEn: "Cron Jobs", labelJa: "定时ジョブ", icon: <Clock size={16} />, action: () => router.push("/cron"), keywords: ["cron", "定时", "schedule"], group: "自动化", groupEn: "Automation", groupJa: "自動化" },
     { id: "nav-workflow", label: "工作流", labelEn: "Workflow", labelJa: "ワークフロー", icon: <Workflow size={16} />, action: () => router.push("/workflow"), keywords: ["workflow", "工作流"], group: "自动化", groupEn: "Automation", groupJa: "自動化" },
     { id: "nav-workflow-builder", label: "工作流编排", labelEn: "Workflow Builder", labelJa: "ワークフロービルダー", icon: <GitBranch size={16} />, action: () => router.push("/workflow"), keywords: ["workflow", "builder", "编排"], group: "自动化", groupEn: "Automation", groupJa: "自動化" },
-    { id: "nav-pipeline", label: "流水线", labelEn: "Pipeline", labelJa: "パイプライン", icon: <Zap size={16} />, action: () => router.push("/pipeline"), keywords: ["pipeline", "流水线"], group: "自动化", groupEn: "Automation", groupJa: "自動化" },
+    { id: "nav-pipeline", label: "导入加工（知识库）", labelEn: "Import Processing (Knowledge)", labelJa: "取込加工（知識ベース）", icon: <Zap size={16} />, action: () => router.push("/knowledge"), keywords: ["pipeline", "流水线", "导入", "加工", "ocr", "asr"], group: "知识库", groupEn: "Knowledge", groupJa: "知識ベース" },
     { id: "nav-will", label: "意志", labelEn: "Will", labelJa: "意志", icon: <Sparkles size={16} />, action: () => router.push("/will"), keywords: ["will", "意志"], group: "自动化", groupEn: "Automation", groupJa: "自動化" },
 
     // Tools

@@ -223,6 +223,27 @@
     "sessionNotAccessible": "この会話は表示できません：存在しないか、アクセス権がありません"
   },
   "knowledge": {
+    "import": {
+      "title": "取込加工",
+      "subtitle": "ファイルはバックエンドパイプライン（OCR/ASR/テキスト/動画）で自動加工され知識ベースへ",
+      "dropHint": "ここにドラッグ＆ドロップ、またはクリックして選択——自動加工で取り込み",
+      "processing": "加工中…",
+      "done": "取り込み完了",
+      "failed": "失敗",
+      "detailLink": "加工詳細",
+      "recent": "最近の加工",
+      "noHistory": "加工記録はまだありません",
+      "stepsUnit": " 段",
+      "detailHint": "クリックで加工詳細ビュー（全工程の記録）を開く",
+      "confidence": "信頼度",
+      "stageStore": "保存",
+      "stageExtract": "テキスト抽出",
+      "stageOcr": "OCR 認識",
+      "stageAsr": "音声書き起こし",
+      "stageVideo": "動画解析",
+      "stageImmune": "安全スキャン",
+      "stageKnowledge": "知識登録"
+    },
     "title": "ナレッジベース",
     "create": "ナレッジを作成",
     "empty": "ナレッジエントリはまだありません",
@@ -5529,6 +5550,9 @@
   "pipeline": {
     "title": "智能流水线 · Pipeline",
     "subtitle": "文件アップロード → 安全扫描 → 内容提取 → 知识入库，一键自动化",
+    "detailBanner": "取込加工詳細ビュー——この実行の工程別記録",
+    "detailBannerHome": "このページは取込加工詳細ビューです。ファイル取込の入口はナレッジベース（アップロードでバックエンドパイプラインが起動）",
+    "backToKnowledge": "← ナレッジ取込へ戻る",
     "history": "履歴",
     "config": "設定",
     "processingFlow": "处理流水线",
