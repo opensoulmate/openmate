@@ -216,6 +216,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [eventCount, setEventCount] = useState(0);
   const [rightPanelWidth, setRightPanelWidth] = useState(0);
   const menuRef = useRef<HTMLDivElement>(null);
+  // 会话恢复只试一次/冷启动（2026-11-20）：登录/启动后落回上次关闭时的会话详情页
+  const sessionRestoreDoneRef = useRef(false);
 
   // ── Conversation list state ──────────────────────────────────────
   const agents = useAppStore((s) => s.sidebarAgents) as AgentInfo[];
@@ -267,7 +269,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
     // 1. Detect agents
-    let detectedAgents: Array<{ id: string; name: string; icon: string; description: string; available: boolean; logo?: string }> = [];
+    let detectedAgents: Array<{ id: string; name: string; icon: string; description: string; available: boolean; logo?: string; acp_id?: string; support_tier?: string }> = [];
     // Check store cache first
     const cachedAgents = useAppStore.getState().cachedAgents;
     if (cachedAgents && cachedAgents.length > 0) {
@@ -306,6 +308,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       useAppStore.getState().syncUnreadFromServer(serverUnread);
     } catch { /* 缓存归正失败不影响列表 */ }
 
+    // 2c. ID 归一（一条真源，2026-11-20）：会话/注册真源 id=ws_acp 路由 id（acp_id），
+    // detect 目录 id 历史上有 3 处不一致（claude/pi-agent/open-interpreter）。映射只认
+    // detect 行服务端下发的 acp_id，客户端禁自造（注册表键=acp_id=建会话 agent_id）。
+    const canon = (k: string): string => {
+      const hit = detectedAgents.find((a) => a.id === k);
+      return (hit?.acp_id || hit?.id || k) as string;
+    };
+
     // 3. Group sessions by agent (check session tags first, then fallback to platform)
     const agentSessionMap: Record<string, Session[]> = {};
     for (const s of sessions) {
@@ -315,7 +325,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       const HERMES_SOURCES = new Set(['cli', 'weixin', 'acp', 'tui']);
       // Check server-side tags first (e.g. "agent:soulmate"), then platform detection
       const agentTag = (s.tags || []).find((t: string) => t.startsWith('agent:'));
-      const agentKey = agentTag ? agentTag.replace('agent:', '') : (HERMES_SOURCES.has(src) ? 'hermes' : (s.platform || src || 'unknown'));
+      const rawKey = agentTag ? agentTag.replace('agent:', '') : (HERMES_SOURCES.has(src) ? 'hermes' : (s.platform || src || 'unknown'));
+      const agentKey = canon(rawKey);
       if (!agentSessionMap[agentKey]) agentSessionMap[agentKey] = [];
       agentSessionMap[agentKey].push(s);
     }
@@ -356,7 +367,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     for (const [key, sessions] of Object.entries(agentSessionMap)) {
       if (SKIP_AGENT_IDS.has(key) || agentMap.has(key)) continue;
       if (!registeredIds.has(key)) continue;
-      const detected = detectedAgents.find(a => a.id === key);
+      const detected = detectedAgents.find(a => (a.acp_id || a.id) === key);
       agentMap.set(key, {
         id: key, name: detected?.name || key,
         icon: detected?.icon || AGENT_ICONS[key] || '🤖',
@@ -368,14 +379,32 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
     // Add registered agents (connected, can open sessions) that have no sessions yet
     for (const detected of detectedAgents) {
-      if (SKIP_AGENT_IDS.has(detected.id) || agentMap.has(detected.id)) continue;
-      if (!registeredIds.has(detected.id)) continue; // 未注册不进列表
-      agentMap.set(detected.id, {
-        id: detected.id, name: detected.name || detected.id,
-        icon: detected.icon || AGENT_ICONS[detected.id] || '🤖',
-        logo: detected.logo, description: detected.description || detected.id,
+      const did = detected.acp_id || detected.id; // 会话真源 id（一条真源）
+      if (SKIP_AGENT_IDS.has(did) || agentMap.has(did)) continue;
+      if (!registeredIds.has(did)) continue; // 未注册不进列表
+      agentMap.set(did, {
+        id: did, name: detected.name || did,
+        icon: detected.icon || AGENT_ICONS[did] || AGENT_ICONS[detected.id] || '🤖',
+        logo: detected.logo, description: detected.description || did,
         installed: detected.available || false, available: detected.available || false,
         sessions: [], expanded: false, sourceGroups: undefined,
+      });
+    }
+
+    // 缺凭据 agent（detect 真源 support_tier=needs-credentials）：标灰+「需凭据」角标
+    // 可见但禁新建会话（不进新建）。44 项 catalog-only 不进（一条真源：能开会话的
+    // 全进列表，接不了的如实标灰，不可装的不出现）。
+    for (const detected of detectedAgents) {
+      const did = detected.acp_id || detected.id;
+      if (SKIP_AGENT_IDS.has(did) || agentMap.has(did)) continue;
+      if (detected.support_tier !== 'needs-credentials') continue;
+      agentMap.set(did, {
+        id: did, name: detected.name || did,
+        icon: detected.icon || AGENT_ICONS[did] || AGENT_ICONS[detected.id] || '🤖',
+        logo: detected.logo, description: detected.description || did,
+        installed: detected.available || false, available: false,
+        sessions: [], expanded: false, sourceGroups: undefined,
+        needsCredentials: true,
       });
     }
 
@@ -416,6 +445,38 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         })),
       }));
     });
+
+    // ── 会话恢复（2026-11-20 用户诉求）：登录/启动后落回上次关闭时的会话详情页，不默认开新页 ──
+    // 优先级：显式 ?session= 深链 > 恢复上次会话 > 默认新会话页。rememberLoginNext
+    // 回跳由登录页整页导航天然优先（落非 /chat 页时本路径不执行——fetchSessions
+    // 只在 /chat 跑）。真源=GET /api/sessions/last-active（session_reads 账号分区，
+    // 登出不清=登出重登仍回上次会话）；会话已删/无解=保持默认新会话页。
+    if (!sessionRestoreDoneRef.current) {
+      sessionRestoreDoneRef.current = true;
+      try {
+        const currentActive = useAppStore.getState().activeSessionId;
+        const deepSession = new URLSearchParams(window.location.search).get('session');
+        if (deepSession || !currentActive) {
+          let restore = null as null | { id: string; agent_id: string; title: string };
+          if (deepSession) {
+            restore = { id: deepSession, agent_id: '', title: '' };
+          } else {
+            const lr = await fetch(`${apiBase}/api/sessions/last-active`, { headers });
+            if (lr.ok) restore = (await lr.json())?.session || null;
+          }
+          if (restore && restore.id && restore.id !== currentActive) {
+            // agent 身份从列表行取（一条真源：行=注册/检测归一后的会话真源 id）
+            const hit = agentList.find(a => a.sessions.some(s => s.id === restore!.id));
+            const agentId = hit?.id || restore.agent_id || '';
+            const agentName = hit?.name || restore.agent_id || '';
+            useAppStore.getState().setActiveSession(restore.id, !agentId || agentId === 'soulmate' ? null : agentId, {
+              agentName: agentName || undefined,
+              sessionName: restore.title || '',
+            });
+          }
+        }
+      } catch { /* 恢复失败=保持默认新会话页（不打断进入） */ }
+    }
   }, [t]);
 
   // ── 旧 chunk 自动换血（2026-10-25）：部署会换 chunk 哈希，用户开着的旧会话引用失效 chunk

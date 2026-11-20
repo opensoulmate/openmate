@@ -38,9 +38,12 @@ async function tagSessionAgent(sessionId: string, agentId: string): Promise<void
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ tag_name: `agent:${agentId}` }),
+    }).then(r => {
+      console.log('[ACP][persist] tag agent →', r.status, sessionId, agentId);
+      if (!r.ok) console.error('[ACP][persist] 打tag失败:', r.status);
     });
   } catch (e) {
-    console.warn('[session-tag] Failed to tag session:', e);
+    console.error('[ACP][persist] 打tag异常:', e);
   }
 }
 
@@ -265,6 +268,12 @@ const isTokenExpired = (t: string): boolean => {
   } catch { return true; }
 };
 
+// 模块级共享 ref：sendAcpPrompt（useAcpWebSocket 作用域）竞态自愈回队到
+// waitForConnection（ChatClient 作用域）——跨作用域解环（2026-11-20）。
+const waitForConnectionRef: {
+  current: ((sid: string, text: string, att?: MessagePart[], opts?: { steer?: boolean; _retried?: boolean }) => void) | null;
+} = { current: null };
+
 function useAcpWebSocket(params: {
   selectedAgent: AgentInfo | null;
   selectedSession: Session | null;
@@ -335,13 +344,19 @@ function useAcpWebSocket(params: {
 
   // 发送用户消息到指定会话的 ACP 连接（支持多模态：文本+图片+文件）
   // opts.steer=true：任务运行中的插话（Khoj interrupt_queue/goose Steer），RPC响应不触发完成
-  const sendAcpPrompt = useCallback(async (sessionId: string, text: string, attachments?: MessagePart[], opts?: { steer?: boolean }) => {
+  const sendAcpPrompt = useCallback(async (sessionId: string, text: string, attachments?: MessagePart[], opts?: { steer?: boolean; _retried?: boolean }) => {
     const state = getSessionState(sessionId);
     // 等待 ACP 握手完成
     if (state.acpReady) await state.acpReady;
     const sid = state.acpSessionId;
     const ws = wsMapRef.current.get(sessionId) || state.ws;
     if (!sid || !ws || ws.readyState !== WebSocket.OPEN) {
+      // 竞态自愈（2026-11-20 会话恢复验收"点记录能续聊"）：重连/建连途中发送不再
+      // 报错丢弃——转 waitForConnection 队列，WS 就绪后自动送出；只重试一次防循环。
+      if (!opts?._retried && waitForConnectionRef.current) {
+        waitForConnectionRef.current(sessionId, text, attachments, { ...opts, _retried: true });
+        return;
+      }
       // 发送失败必须可见——静默丢弃=用户看到永久转圈
       console.error('[ACP] 发送失败：连接不可用', { hasSid: !!sid, wsState: ws?.readyState });
       setLoading(false);
@@ -553,7 +568,9 @@ function useAcpWebSocket(params: {
       const updated = { id: newSessionId, name: displayName, platform: 'hermes' } as Session;
       setSelectedSession(updated);
       selectedSessionRef.current = updated;
-      useAppStore.getState().setActiveSession(newSessionId, null, { sessionName: displayName });
+      // agent 身份保留（禁冒名兜底）：迁移只换 sessionId，绝不清 agent 身份——
+      // 传 null 会让重连走 'soulmate' 兜底，把 A 会话接进 B 的大脑（用户判死）。
+      useAppStore.getState().setActiveSession(newSessionId, currentSelectedAgentId === 'soulmate' ? null : currentSelectedAgentId, { sessionName: displayName });
       // PATCH到后端，完成后再刷新sidebar
       if (autoName) {
         fetch(`${getApiBaseUrl()}/api/sessions/${newSessionId}`, {
@@ -623,6 +640,7 @@ function useAcpWebSocket(params: {
         // 不回带 id（只有 session/new 回带）。此前只认响应里的 id → 老会话 acpSessionId
         // 永远 null → sendAcpPrompt 静默丢消息 → 界面永远转圈。加载的 sid 本来就知道。
         const acpSid = result?.session_id || result?.sessionId || existingAcpSid || undefined;
+        console.log('[ACP][persist] session/new result:', JSON.stringify(result)?.slice(0, 120), '→ acpSid:', acpSid, 'temp:', sessionId.startsWith('temp-'));
         if (acpSid) {
           state.acpSessionId = acpSid;
           // Migrate temp session ID to real session ID
@@ -645,13 +663,17 @@ function useAcpWebSocket(params: {
             selectedSessionRef.current = updated;
             try {
               const apiBase = getApiBaseUrl();
-              await fetch(`${apiBase}/api/sessions`, {
+              const saveResp = await fetch(`${apiBase}/api/sessions`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
                 body: JSON.stringify({ id: acpSid, name: sessionName || `${agentId} 会话`, agent_id: agentId, tags: [`agent:${agentId}`] }),
               });
+              console.log('[ACP][persist] POST /api/sessions →', saveResp.status, 'id:', acpSid);
+              if (!saveResp.ok) {
+                console.error('[ACP][persist] 会话落库HTTP失败:', saveResp.status, (await saveResp.text().catch(() => '')).slice(0, 200));
+              }
             } catch (saveErr) {
-              console.warn('[ACP] 保存session到OpenSoul失败:', saveErr);
+              console.error('[ACP][persist] 保存session到OpenSoul失败:', saveErr);
             }
             // 注册行已落库，此刻再刷新侧边栏（此前 refreshSidebar 发生在注册前，
             // 拉列表时行还不存在 → 新会话不刷新页面永远不显示）
@@ -661,6 +683,12 @@ function useAcpWebSocket(params: {
         state.resolveAcpReady?.();
       } catch (e) {
         console.error('[ACP] 握手失败:', e);
+        // 握手被断（如 4000 顶替/重连竞态）也不丢身份（2026-11-20"点记录能续聊"）：
+        // 非 temp 会话的 id 本来就是 ACP sid（session/load 的已知输入），补记后
+        // 发送只需等 WS 就绪（sendAcpPrompt 竞态自愈回队），不再"连接不可用"误报。
+        if (!state.acpSessionId && !sessionId.startsWith('temp-')) {
+          state.acpSessionId = sessionId;
+        }
         state.resolveAcpReady?.();
       }
     };
@@ -1829,7 +1857,8 @@ export function ChatClient() {
 
   // 公共 WS 等待函数：连接建立后自动发送消息
   // opts.steer=true：任务运行中发送=插话（排队注入，不抢占当前任务）
-  const waitForConnection = useCallback((sessionId: string, messageText: string, attachments?: MessagePart[], opts?: { steer?: boolean }) => {
+  // opts._retried=sendAcpPrompt 竞态自愈回队标记（仅一次）
+  const waitForConnection = useCallback((sessionId: string, messageText: string, attachments?: MessagePart[], opts?: { steer?: boolean; _retried?: boolean }) => {
     let spWaited = 0; // 已等待毫秒数
     const spWaitConnect = setInterval(() => {
       spWaited += 500; // 每500ms检查一次
@@ -1856,6 +1885,7 @@ export function ChatClient() {
       }
     }, 500);
   }, [sendAcpPrompt, updateSessionMessages, t]);
+  waitForConnectionRef.current = waitForConnection; // ref 赋值：sendAcpPrompt 竞态自愈回队
 
   // ── 草稿跨端同步（账号分区单一真源，2026-11-17）────────────────────────
   // 草稿真源=服务端 session_drafts(session_id, user_id)——登录同一账号的任一端
@@ -2350,7 +2380,9 @@ export function ChatClient() {
                       headers: { 'Content-Type': 'application/json', Authorization: 'Be' + 'arer ' + (localStorage.getItem('openmate-token') || '') },
                       body: JSON.stringify({ title: autoTitle }),
                     }).then(() => useAppStore.getState().refreshSidebar()).catch(() => {});
-                    useAppStore.getState().setActiveSession(currentSessionId, null, { sessionName: autoTitle });
+                    // 只更新标题，绝不触碰 agentId（曾在此传 null 清掉 agent 身份，
+                    // 导致点击任何 agent 新建的会话都被顶替成 soulmate——用户判死）
+                    useAppStore.getState().setActiveSession(currentSessionId, useAppStore.getState().activeAgentId, { sessionName: autoTitle });
                   }
                 }
                 // 没有活跃 session 时，自动创建新会话并跳转

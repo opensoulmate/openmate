@@ -47,6 +47,8 @@ export interface AgentInfo {
   sessions: Session[];
   expanded: boolean;
   sourceGroups?: SourceGroup[];
+  /** 缺凭据（detect support_tier=needs-credentials）：标灰+角标展示，禁新建会话 */
+  needsCredentials?: boolean;
 }
 
 // ── Unread badge ─────────────────────────────────────────────────
@@ -146,13 +148,22 @@ export function ConversationTree({
         displayAgents.map(agent => (
           <div key={agent.id}>
             {/* Agent header */}
-            <div className="flex items-center justify-between px-2 py-2 lg:py-1.5 hover:bg-muted/50 active:bg-muted/70 group touch-manipulation">
+            <div className={`flex items-center justify-between px-2 py-2 lg:py-1.5 hover:bg-muted/50 active:bg-muted/70 group touch-manipulation${agent.needsCredentials ? ' opacity-60' : ''}`}>
               <button onClick={() => onToggleAgent(agent.id)} className="flex items-center gap-1.5 flex-1 min-w-0">
                 {agent.expanded
                   ? <ChevronDown className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                   : <ChevronRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" />}
                 <SuperAvatar src={agent.logo || agent.icon} alt={agent.name} size={20} fallback={<span className="text-sm">{agent.icon}</span>} />
                 <span className="text-sm font-medium truncate">{agent.name}</span>
+                {agent.needsCredentials && (
+                  <span
+                    data-testid="needs-credentials-badge"
+                    className="shrink-0 text-[9px] leading-none px-1 py-0.5 rounded border border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                    title={t("sidebar.needsCredentialsHint", "缺 API 凭据，补齐后可对话")}
+                  >
+                    {t("sidebar.needsCredentials", "需凭据")}
+                  </span>
+                )}
               </button>
               {(() => {
                 const agentUnread = agent.sessions.reduce((s, session) => s + getUnread(session), 0);
@@ -162,13 +173,16 @@ export function ConversationTree({
                   <span className="text-[10px] text-muted-foreground shrink-0">{agent.sessions.length}</span>
                 );
               })()}
-              <button
-                onClick={(e) => { e.stopPropagation(); onNewSession?.(agent.id); }}
-                className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all shrink-0"
-                title={t("sidebar.newChat", "新建会话")}
-              >
-                <Plus size={13} />
-              </button>
+              {/* 缺凭据=禁新建会话（不进新建）：不渲染 + 按钮 */}
+              {!agent.needsCredentials && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onNewSession?.(agent.id); }}
+                  className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all shrink-0"
+                  title={t("sidebar.newChat", "新建会话")}
+                >
+                  <Plus size={13} />
+                </button>
+              )}
             </div>
 
             {/* Source groups or flat sessions — mobile: always flat (2-level), desktop: 3-level tree */}

@@ -706,7 +706,8 @@ export const useAIGroupsStore = create<AIGroupsState>((set, get) => ({
       const dRes = await fetch(`${getApiBaseUrl()}/api/agents/detect`, { headers: authHeaders() });
       const dData = await dRes.json();
       (Array.isArray(dData?.agents) ? dData.agents : []).forEach((r: any) => {
-        if (r.id) nameById[r.id] = r.name || r.id;
+        // 名册键=会话真源 id（acp_id）：注册表行的 agent_id 同键（一条真源）
+        if (r.id) nameById[r.acp_id || r.id] = r.name || r.id;
       });
     } catch (e) {
       console.error('Failed to fetch detect names:', e);
