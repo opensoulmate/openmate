@@ -1,0 +1,17 @@
+{
+  "agent_id": "copilot",
+  "prompt": "请只回答数字：26+16等于多少？",
+  "started_at": "2026-11-20 08:36:49",
+  "chunks": [
+    "42"
+  ],
+  "text": "42",
+  "prompt_response": {
+    "stopReason": "endTurn"
+  },
+  "error": null,
+  "session_id": "copilot-2d08bc5d49e8",
+  "result": "PASS",
+  "finished_at": "2026-11-20 08:36:53",
+  "expect": "42"
+}

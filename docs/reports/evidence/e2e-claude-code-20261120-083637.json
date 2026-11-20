@@ -1,0 +1,64 @@
+{
+  "agent_id": "claude-code",
+  "prompt": "请只回答数字：26+16等于多少？",
+  "started_at": "2026-11-20 08:36:30",
+  "chunks": [
+    "[[update:available_commands_update]]",
+    "[[update:available_commands_update]]",
+    "[[update:usage_update]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "42",
+    "[[update:usage_update]]",
+    "[[update:usage_update]]"
+  ],
+  "text": "42",
+  "prompt_response": {
+    "stopReason": "end_turn",
+    "usage": {
+      "inputTokens": 17853,
+      "outputTokens": 60,
+      "cachedReadTokens": 4096,
+      "cachedWriteTokens": 0,
+      "totalTokens": 22009
+    },
+    "_meta": {
+      "quota": {
+        "token_count": {
+          "totalTokens": 22009,
+          "inputTokens": 17853,
+          "cachedInputTokens": 4096,
+          "cachedWriteTokens": 0,
+          "outputTokens": 60,
+          "reasoningOutputTokens": 0
+        },
+        "model_usage": [
+          {
+            "model": "mimo-v2.6-pro",
+            "token_count": {
+              "totalTokens": 22880,
+              "inputTokens": 18617,
+              "cachedInputTokens": 4096,
+              "cachedWriteTokens": 0,
+              "outputTokens": 167,
+              "reasoningOutputTokens": 0
+            }
+          }
+        ]
+      }
+    }
+  },
+  "error": null,
+  "session_id": "1ec52b17-7825-4aa3-b8b1-7950cf29be17",
+  "result": "PASS",
+  "finished_at": "2026-11-20 08:36:37",
+  "expect": "42"
+}

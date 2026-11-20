@@ -1,0 +1,29 @@
+{
+  "agent_id": "codex",
+  "prompt": "请只回答数字：26+16等于多少？",
+  "started_at": "2026-11-20 08:36:37",
+  "chunks": [
+    "Model metadata for `mimo-v2.6-pro` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.",
+    "[[update:available_commands_update]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "42",
+    "[[update:usage_update]]"
+  ],
+  "text": "Model metadata for `mimo-v2.6-pro` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.42",
+  "prompt_response": {
+    "stopReason": "end_turn"
+  },
+  "error": null,
+  "session_id": "01a1f662-5015-76d1-a238-f7eb2cf3c24b",
+  "result": "PASS",
+  "finished_at": "2026-11-20 08:36:42",
+  "expect": "42"
+}

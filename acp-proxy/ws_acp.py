@@ -57,6 +57,34 @@ _EXTRA_BIN_DIRS = [
 ]
 os.environ["PATH"] = ":".join(_EXTRA_BIN_DIRS + [os.environ.get("PATH", "")]).rstrip(":")
 
+
+# 凭据注入（2026-11-20 mimo 当大脑重接）：CLI agent（codex/pi/copilot 等）走
+# 自定义 OpenAI/Anthropic 兼容端点时需要 XIAOMI_API_KEY 等凭据——从 gland 口径
+# ~/.hermes/.env 读取注入子进程 env（只取白名单键，不硬编码、不外显、不落 git）。
+# 已在外层 env 显式设置的值优先（setdefault 语义）。
+def _inject_cred_env(env: dict) -> dict:
+    try:
+        want = ("XIAOMI_API_KEY", "XIAOMI_BASE_URL")
+        found = {}
+        with open(os.path.join(_USER_HOME, ".hermes", ".env")) as f:
+            for line in f:
+                line = line.strip()
+                for k in want:
+                    if line.startswith(k + "="):
+                        found[k] = line.split("=", 1)[1].strip().strip('"').strip("'")
+        if found.get("XIAOMI_API_KEY"):
+            env.setdefault("XIAOMI_API_KEY", found["XIAOMI_API_KEY"])
+            # pi 内置 provider 的 Token Plan(China) 凭据变量名（providers.md 口径）
+            env.setdefault("XIAOMI_TOKEN_PLAN_CN_API_KEY", found["XIAOMI_API_KEY"])
+            # 小米官方文档示例变量名别名
+            env.setdefault("MIMO_API_KEY", found["XIAOMI_API_KEY"])
+        if found.get("XIAOMI_BASE_URL"):
+            env.setdefault("XIAOMI_BASE_URL", found["XIAOMI_BASE_URL"])
+    except Exception as e:  # noqa: BLE001 — 凭据加载失败不阻塞 spawn，子进程如实报错
+        logger.warning(f"[ACP] cred env inject skipped: {e}")
+    return env
+
+
 # JWT配置
 _OPSOUL_ENV = {}
 _env_path = f"{_OPENSOUL_ROOT}/.env"
@@ -92,9 +120,19 @@ AGENT_ROUTES = {
     "gemini":      {"cmd": [sys.executable, "-m", "agent.cli_acp", "gemini"], "cwd": _ACPPROXY_DIR, "probe_timeout": 15},
     "interpreter": {"cmd": [sys.executable, "-m", "agent.cli_acp", "interpreter"], "cwd": _ACPPROXY_DIR, "probe_timeout": 15},
     "copilot":     {"cmd": [sys.executable, "-m", "agent.cli_acp", "copilot"], "cwd": _ACPPROXY_DIR, "probe_timeout": 15},
+    # DeepSeek 无官方 CLI（真装真测证伪过 pip deepseek-cli）；deepseek 条目按
+    # "deepseek-r1 模型经本地 ollama 已可用"归位：路由指向 ollama_acp + 显式指定
+    # deepseek-r1 蒸馏模型（2026-11-20 实拉取真对话）。
+    "deepseek":    {"cmd": [sys.executable, "-m", "agent.ollama_acp"], "cwd": _ACPPROXY_DIR,
+                    "env": {"OLLAMA_MODEL": "deepseek-r1:1.5b"}, "probe_timeout": 15},
     # 生态标准 ACP 桥包（AionUi 同款姿势：不逐一自写，用官方/社区桥）
     "codex":       {"cmd": ["npx", "-y", "@zed-industries/codex-acp@0.16.0"], "cwd": _USER_HOME, "probe_timeout": 30},
-    "pi":          {"cmd": ["npx", "-y", "pi-acp@0.0.34"], "cwd": _USER_HOME, "probe_timeout": 30},
+    # pi-acp 桥：pi 命令必须钉死绝对路径——/home/climbing/node_modules/.bin/pi 是
+    # 旧 @mariozechner 分支（2026-04 遗留），npm 式 PATH 前插会让 pi-acp 优先捡到它，
+    # 其断裂依赖 cli-highlight（chalk_1.default TypeError）令 pi 子进程启动即崩
+    # （session/new → "Cannot call write after a stream was destroyed"，2026-11-20 真测）。
+    "pi":          {"cmd": ["npx", "-y", "pi-acp@0.0.34"], "cwd": _USER_HOME, "probe_timeout": 30,
+                    "env": {"PI_ACP_PI_COMMAND": os.path.join(_USER_HOME, ".npm-global", "bin", "pi")}},
     "claude-code": {"cmd": ["npx", "-y", "@agentclientprotocol/claude-agent-acp@0.89.1"], "cwd": _USER_HOME, "probe_timeout": 30},
     # OpenClaw：自带ACP桥到其Gateway（探测/使用需gateway在线）
     "openclaw":  {"cmd": ["openclaw", "acp"], "cwd": _USER_HOME},
@@ -395,6 +433,12 @@ async def ws_acp_endpoint(client_ws: WebSocket):
             # 每次启动子进程必炸。os已由模块顶部import，删除局部import即可。）
             env = dict(os.environ)
             env["EVOLUTION_API_URL"] = "http://127.0.0.1:8092"
+            _inject_cred_env(env)  # gland 口径凭据（mimo 当大脑，2026-11-20）
+            env.update(route.get("env") or {})  # 路由级 env（如 ollama 模型指定）
+            logger.info(f"[ACP] spawn env check for {agent_id}: "
+                        f"PI_ACP_PI_COMMAND={env.get('PI_ACP_PI_COMMAND')} "
+                        f"OLLAMA_MODEL={env.get('OLLAMA_MODEL')} "
+                        f"XIAOMI_API_KEY={'set' if env.get('XIAOMI_API_KEY') else 'missing'}")
             # 归属盖章（2026-11-17）：把登录账号传给 agent 子进程——懒注册会话行时
             # 盖 user_id，杜绝"无主行"按写入端分裂记录（账号是唯一分区键）。
             env["SOULMATE_USER_ID"] = str(user_id)
@@ -675,12 +719,15 @@ async def ws_acp_endpoint(client_ws: WebSocket):
                 f"[ACP] subprocess exited, respawning route cmd for {agent_id} "
                 f"(attempt {restart_count}, acpSessionId={sid_for_restart})"
             )
+            _restart_env = _inject_cred_env(dict(os.environ))
+            _restart_env.update(route.get("env") or {})
             new_proc = await asyncio.create_subprocess_exec(
                 *route["cmd"],
                 cwd=str(route["cwd"]),  # 所有route都定义了cwd
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=_restart_env,
             )
             if new_proc.returncode is not None:
                 err = await new_proc.stderr.read() if new_proc.stderr else b""

@@ -1,0 +1,26 @@
+{
+  "agent_id": "codex",
+  "prompt": "请只回答数字：26+16等于多少？",
+  "started_at": "2026-11-20 08:47:30",
+  "chunks": [
+    "[[update:available_commands_update]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "42",
+    "[[update:usage_update]]"
+  ],
+  "text": "42",
+  "prompt_response": {
+    "stopReason": "end_turn"
+  },
+  "error": null,
+  "session_id": "01a1f66c-4252-7701-b4f9-6cf67cd3aa0d",
+  "result": "PASS",
+  "finished_at": "2026-11-20 08:47:34",
+  "expect": "42"
+}

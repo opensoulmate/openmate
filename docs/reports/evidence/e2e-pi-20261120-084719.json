@@ -1,0 +1,43 @@
+{
+  "agent_id": "pi",
+  "prompt": "请只回答数字：26+16等于多少？",
+  "started_at": "2026-11-20 08:47:13",
+  "chunks": [
+    "pi v1.5.2\n---\n\n## Context\n- /home/climbing/AGENTS.md\n\n## Skills\n- /home/climbing/.pi/agent/skills/para-memory-files/SKILL.md\n- /home/climbing/.pi/agent/skills/paperclip-create-agent/SKILL.md\n- /home/climbing/.pi/agent/skills/paperclip-converting-plans-to-tasks/SKILL.md\n- /home/climbing/.pi/agent/skills/paperclip-board/SKILL.md\n- /home/climbing/.pi/agent/skills/paperclip/SKILL.md\n- /home/climbing/.pi/agent/skills/browser-skill/SKILL.md\n- /home/climbing/.pi/agent/skills/agently-mail/SKILL.md\n- /home/climbing/.agents/skills/browser-skill/SKILL.md\n- /home/climbing/.agents/skills/agently-mail/SKILL.md\n- /home/climbing/.pi/skills/openspec-sync-specs/SKILL.md\n- /home/climbing/.pi/skills/openspec-propose/SKILL.md\n- /home/climbing/.pi/skills/openspec-explore/SKILL.md\n- /home/climbing/.pi/skills/openspec-archive-change/SKILL.md\n- /home/climbing/.pi/skills/openspec-apply-change/SKILL.md\n",
+    "[[update:session_info_update]]",
+    "[[update:usage_update]]",
+    "[[update:available_commands_update]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "[[update:agent_thought_chunk]]",
+    "4",
+    "2",
+    "[[update:usage_update]]",
+    "[[update:session_info_update]]"
+  ],
+  "text": "pi v1.5.2\n---\n\n## Context\n- /home/climbing/AGENTS.md\n\n## Skills\n- /home/climbing/.pi/agent/skills/para-memory-files/SKILL.md\n- /home/climbing/.pi/agent/skills/paperclip-create-agent/SKILL.md\n- /home/climbing/.pi/agent/skills/paperclip-converting-plans-to-tasks/SKILL.md\n- /home/climbing/.pi/agent/skills/paperclip-board/SKILL.md\n- /home/climbing/.pi/agent/skills/paperclip/SKILL.md\n- /home/climbing/.pi/agent/skills/browser-skill/SKILL.md\n- /home/climbing/.pi/agent/skills/agently-mail/SKILL.md\n- /home/climbing/.agents/skills/browser-skill/SKILL.md\n- /home/climbing/.agents/skills/agently-mail/SKILL.md\n- /home/climbing/.pi/skills/openspec-sync-specs/SKILL.md\n- /home/climbing/.pi/skills/openspec-propose/SKILL.md\n- /home/climbing/.pi/skills/openspec-explore/SKILL.md\n- /home/climbing/.pi/skills/openspec-archive-change/SKILL.md\n- /home/climbing/.pi/skills/openspec-apply-change/SKILL.md\n42",
+  "prompt_response": {
+    "stopReason": "end_turn"
+  },
+  "error": null,
+  "session_id": "01a1f66c-018e-75d0-8be4-cd577a5fd141",
+  "result": "PASS",
+  "finished_at": "2026-11-20 08:47:19",
+  "expect": "42"
+}

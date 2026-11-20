@@ -54,6 +54,23 @@ def _child_env() -> dict:
     return env
 
 
+def _profile_env(profile: str, env: dict) -> dict:
+    """按 profile 注入模型端点配置（mimo 当大脑，2026-11-20）。
+
+    copilot 走官方 BYOK（docs.github.com: COPILOT_PROVIDER_* 环境变量，
+    GitHub 认证可选）；凭据取 gland 口径 XIAOMI_API_KEY，不硬编码。"""
+    if profile == "copilot":
+        key = os.environ.get("XIAOMI_API_KEY", "")
+        if key:
+            env["COPILOT_PROVIDER_BASE_URL"] = os.environ.get(
+                "XIAOMI_BASE_URL", "https://token-plan-cn.xiaomimimo.com/v1")
+            env["COPILOT_PROVIDER_API_KEY"] = key
+            env.setdefault("COPILOT_PROVIDER_TYPE", "openai")
+            env.setdefault("COPILOT_MODEL",
+                           os.environ.get("CLI_ACP_COPILOT_MODEL", "mimo-v2.6-pro"))
+    return env
+
+
 _INTERP_SCRIPT = r"""
 import sys
 from interpreter import interpreter as oi
@@ -121,7 +138,8 @@ def _build_cmd(profile: str, prompt: str) -> list[str]:
 def _run_cli(profile: str, prompt: str, session_id: str) -> str:
     cmd = _build_cmd(profile, prompt)
     _log(f"[cli_acp:{profile}] run: {cmd[0]} ({len(cmd)} args)")
-    proc = subprocess.run(cmd, cwd=_WORKDIR, env=_child_env(),
+    env = _profile_env(profile, _child_env())
+    proc = subprocess.run(cmd, cwd=_WORKDIR, env=env,
                           capture_output=True, text=True, timeout=_TIMEOUT)
     out = _clean(proc.stdout or "")
     err = _clean(proc.stderr or "")
