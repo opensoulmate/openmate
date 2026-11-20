@@ -1,0 +1,102 @@
+{
+  "agent": "hermes",
+  "tests": [
+    {
+      "name": "session/new",
+      "status": "pass",
+      "detail": "sessionId=e6c88f52-7d50-42bb-ad15-cb26b936c4bc",
+      "evidence": {
+        "route": "hermes"
+      }
+    },
+    {
+      "name": "basic 基础对话",
+      "status": "pass",
+      "detail": "reply含42=True, chunks=1, first_token=2.9297757148742676, stop=end_turn, err=None",
+      "evidence": {
+        "reply_head": "42"
+      }
+    },
+    {
+      "name": "stream 流式回复",
+      "status": "pass",
+      "detail": "长回复轮 agent_message_chunk 数=4, 首token延迟=1.74342942237854",
+      "evidence": {
+        "chunks": 4,
+        "reply_head": "1、2、3、4、5、6、7、8、9、10、11、12"
+      }
+    },
+    {
+      "name": "multiturn 多轮上下文",
+      "status": "pass",
+      "detail": "第2轮回复含暗号'榛子77'=True；第1轮='已记'，第2轮='榛子77'",
+      "evidence": {}
+    },
+    {
+      "name": "tool+file 工具调用/文件操作",
+      "status": "pass",
+      "detail": "磁盘文件落盘=True 内容匹配=True 工具事件=['agent_thought_chunk', 'tool_call', 'tool_call_update', 'usage_update'] err=None",
+      "evidence": {
+        "files": [
+          [
+            "/home/climbing/.hermes/cache/scratch/deep-test/hermes-tool.txt",
+            "TOOL-OK-hermes\n"
+          ]
+        ],
+        "reply_head": "\n\n完成"
+      }
+    },
+    {
+      "name": "file-read 文件读取",
+      "status": "pass",
+      "detail": "回复含文件内 nonce=True err=None",
+      "evidence": {
+        "nonce": "READ-hermes-1795168174",
+        "reply_head": "\n\nREAD-hermes-1795168174"
+      }
+    },
+    {
+      "name": "skill 技能加载",
+      "status": "partial",
+      "detail": "技能文件缺失或无 description: /home/climbing/.hermes/skills/hermes-agent/SKILL.md",
+      "evidence": {}
+    },
+    {
+      "name": "interrupt 中断恢复",
+      "status": "pass",
+      "detail": "cancel已发=True 提前停止=True (stop=end_turn, 回复字数=221) 恢复轮='恢复可用'",
+      "evidence": {
+        "cancel": {
+          "sent_after_s": 56.17095923423767,
+          "resp_id": 18,
+          "resp": {
+            "error": {
+              "code": -32601,
+              "message": "Method not found",
+              "data": {
+                "method": "session/cancel"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "concurrency 并发会话不串答",
+      "status": "pass",
+      "detail": "A回复含A-canary=True 含B-canary=False | B回复含B-canary=True 含A-canary=False",
+      "evidence": {
+        "reply_a": "APPLEC-hermes",
+        "reply_b": "BANANAC-hermes"
+      }
+    },
+    {
+      "name": "harness 异常",
+      "status": "fail",
+      "detail": "ConnectionClosedOK: received 1000 (OK) session ended; then sent 1000 (OK) session ended",
+      "evidence": {}
+    }
+  ],
+  "finished": true,
+  "bad": 2
+}

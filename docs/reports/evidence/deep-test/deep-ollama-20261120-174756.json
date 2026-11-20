@@ -1,0 +1,85 @@
+{
+  "agent": "ollama",
+  "tests": [
+    {
+      "name": "session/new",
+      "status": "pass",
+      "detail": "sessionId=ollama-b0c62fcfb776",
+      "evidence": {
+        "route": "ollama"
+      }
+    },
+    {
+      "name": "basic 基础对话",
+      "status": "pass",
+      "detail": "reply含42=True, chunks=20, first_token=9.532849550247192, stop=endTurn, err=None",
+      "evidence": {
+        "reply_head": "\n\n26 加 16 等于：\n\n\\[\n\\boxed{42}\n\\]"
+      }
+    },
+    {
+      "name": "stream 流式回复",
+      "status": "pass",
+      "detail": "长回复轮 agent_message_chunk 数=59, 首token延迟=8.137850046157837",
+      "evidence": {
+        "chunks": 59,
+        "reply_head": "\n\n从1数到12，用、分隔所有数字，输出如下：\n\n\\boxed{1,\\ 2,\\ 3,\\ 4,\\ 5,\\ 6,\\ 7,\\ 8,\\ 9,\\ 10,\\ 11,\\ 12"
+      }
+    },
+    {
+      "name": "multiturn 多轮上下文",
+      "status": "fail",
+      "detail": "第2轮回复含暗号'榛子77'=False；第1轮='\\n\\n隐号“榛子77”可能是某种奖励、反馈或记忆机制的设定。用户希望每次使用隐号7'，第2轮='\\n\\n123'",
+      "evidence": {}
+    },
+    {
+      "name": "tool+file 工具调用/文件操作",
+      "status": "fail",
+      "detail": "磁盘文件落盘=False 内容匹配=False 工具事件=[] err=None",
+      "evidence": {
+        "files": [],
+        "reply_head": "\n\n创建指定文件并回复完成。\n\n```bash\n# 读取当前目录\necho \"\\0\" > /dev/null\n\n# 创建目标文件并写入内容\nmkdir -p /home/climbing/.herme"
+      }
+    },
+    {
+      "name": "file-read 文件读取",
+      "status": "fail",
+      "detail": "回复含文件内 nonce=False err=None",
+      "evidence": {
+        "nonce": "READ-ollama-1795168225",
+        "reply_head": "\n\n```bash\n# 检查文件是否存在\nfind /home/climbing/.hermes/cache/scratch/deep-test/ollama-read.txt -o 2>&1 >> /home/climbing/.herm"
+      }
+    },
+    {
+      "name": "skill 技能加载",
+      "status": "n/a",
+      "detail": "该 agent 无技能系统（CLI 一次性模式/纯模型路由）",
+      "evidence": {}
+    },
+    {
+      "name": "interrupt 中断恢复",
+      "status": "partial",
+      "detail": "cancel已发=True 提前停止=False (stop=endTurn, 回复字数=465) 恢复轮='\\n\\n恢复可用性'",
+      "evidence": {
+        "cancel": {
+          "sent_after_s": 15.387893199920654,
+          "resp_id": 18
+        }
+      }
+    },
+    {
+      "name": "concurrency 并发会话不串答",
+      "status": "fail",
+      "detail": "异常: TimeoutError()",
+      "evidence": {}
+    },
+    {
+      "name": "harness 异常",
+      "status": "fail",
+      "detail": "TimeoutError: ",
+      "evidence": {}
+    }
+  ],
+  "finished": true,
+  "bad": 6
+}

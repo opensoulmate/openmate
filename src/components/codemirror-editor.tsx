@@ -283,8 +283,12 @@ export function CodeMirrorEditor({
           if (update.docChanged) {
             userEditingRef.current = true;
             onChangeRef.current(update.state.doc.toString());
-            // Reset flag after React has time to process the state update
+            // Reset flag after React has time to process the state update.
+            // rAF 在 visibility:hidden（后台标签/内嵌 webview）下不触发，只靠 rAF
+            // 会让标记永久卡 true → value 同步永久跳过（发送后/清空输入框都不清空，
+            // 2026-11-20 深测实测复现）。补 setTimeout 兜底重置。
             requestAnimationFrame(() => { userEditingRef.current = false; });
+            setTimeout(() => { userEditingRef.current = false; }, 50);
           }
         }),
         EditorView.domEventHandlers({ keydown: handleKeyDown }),

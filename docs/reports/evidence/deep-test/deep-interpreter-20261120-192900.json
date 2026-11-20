@@ -1,0 +1,30 @@
+{
+  "tests": [
+    {
+      "name": "session/new",
+      "status": "pass",
+      "detail": "sessionId=interpreter-e5102351a814",
+      "evidence": {
+        "route": "interpreter"
+      }
+    },
+    {
+      "name": "basic 基础对话",
+      "status": "pass",
+      "detail": "reply含42=True, chunks=1, first_token=10.913296937942505, stop=endTurn, err=None",
+      "evidence": {
+        "reply_head": "26 + 16 = 42"
+      }
+    },
+    {
+      "name": "stream 流式回复",
+      "status": "fail",
+      "detail": "长回复轮 agent_message_chunk 数=1, 首token延迟=6.242323160171509",
+      "evidence": {
+        "chunks": 1,
+        "reply_head": "4,5,6,7,8,9,10,11,12"
+      }
+    }
+  ],
+  "finished": false
+}

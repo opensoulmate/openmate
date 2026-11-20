@@ -44,9 +44,16 @@ TERMINAL = ("scored", "failed", "completed", "skipped")
 
 
 def mint_token() -> str:
-    from src.services.auth import create_access_token
+    """真实用户路径拿 token：测试账号登录（F3b 身份绑定后，随机 uuid4 铸的 token
+    会被 _lookup_user 判"账号不存在"401——mint 自铸口径已失效）。"""
+    import urllib.parse
+    import urllib.request
 
-    return create_access_token(uuid.uuid4())
+    body = urllib.parse.urlencode(
+        {"username": "e2e_spot_1120", "password": "SpotVerify2026"}).encode()
+    req = urllib.request.Request(f"{API}/api/user/login", data=body, method="POST")
+    with urllib.request.urlopen(req, timeout=60) as r:
+        return json.loads(r.read())["access_token"]
 
 
 def ws_listener(gid: str, token: str, frames: list, stop: threading.Event):
@@ -82,7 +89,7 @@ def main() -> int:
     marker = f"94multi-{int(time.time())}"
     token = mint_token()
     hdr = {"Authorization": f"Bearer {token}"}
-    client = httpx.Client(headers=hdr, timeout=30)
+    client = httpx.Client(headers=hdr, timeout=120)
 
     frames: list = []
     FRAMES_PATH.write_text("", encoding="utf-8")
@@ -121,7 +128,11 @@ def main() -> int:
     t0 = time.time()
     while time.time() - t0 < POLL_TIMEOUT_S:
         time.sleep(6)
-        g = client.get(f"{API}/api/ai-groups/{gid}").json()
+        try:
+            g = client.get(f"{API}/api/ai-groups/{gid}").json()
+        except Exception as poll_err:  # 高负载下连接被重置：轮询必须扛住，不炸整个探针
+            print(f"[3] poll error (retry): {type(poll_err).__name__}", flush=True)
+            continue
         tasks = g.get("tasks", [])
         parent = next((x for x in tasks if not x.get("parent_task_id")), None)
         subs = [x for x in tasks if x.get("parent_task_id")]
@@ -135,7 +146,11 @@ def main() -> int:
     stop.set()
     t.join(timeout=5)
 
-    tasks = client.get(f"{API}/api/ai-groups/{gid}").json().get("tasks", [])
+    try:
+        tasks = client.get(f"{API}/api/ai-groups/{gid}").json().get("tasks", [])
+    except Exception as final_err:
+        print(f"[3] final fetch error: {final_err!r}", flush=True)
+        tasks = []
     parent = next((x for x in tasks if not x.get("parent_task_id")), None)
     subs = [x for x in tasks if x.get("parent_task_id")]
 

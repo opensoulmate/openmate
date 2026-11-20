@@ -1,0 +1,29 @@
+{
+  "agent": "hermes",
+  "tests": [
+    {
+      "name": "session/new",
+      "status": "pass",
+      "detail": "sessionId=0285ce62-8fc2-440d-adf5-1ebfc3be25b6",
+      "evidence": {
+        "route": "hermes"
+      }
+    },
+    {
+      "name": "skill 技能加载",
+      "status": "pass",
+      "detail": "回复含 description 原文片段 'Use, configure, theme, e'=True err=None",
+      "evidence": {
+        "reply_head": "\n\n\"Use, configure, theme, extend, and orchestrate Hermes Agent.\""
+      }
+    },
+    {
+      "name": "degrade 错误降级",
+      "status": "partial",
+      "detail": "杀掉子进程=[753094] → WS被关闭(1000:session ended)，连接级降级（非挂死非假成功，但客户端须重连）",
+      "evidence": {}
+    }
+  ],
+  "finished": true,
+  "bad": 1
+}

@@ -1,0 +1,21 @@
+{
+  "agent": "codex",
+  "tests": [
+    {
+      "name": "session/new",
+      "status": "pass",
+      "detail": "sessionId=01a1f89d-9274-7471-bf9e-1eaf72c9a919",
+      "evidence": {
+        "route": "codex"
+      }
+    },
+    {
+      "name": "tool+file 工具调用/文件操作",
+      "status": "fail",
+      "detail": "TimeoutError: recv静默超时(150.0s); 已收updates=['agent_thought_chunk', 'agent_thought_chunk', 'agent_thought_chunk', 'agent_thought_chunk',（超时/断连）",
+      "evidence": {}
+    }
+  ],
+  "finished": true,
+  "bad": 1
+}

@@ -1,0 +1,50 @@
+{
+  "agent": "claude-code",
+  "tests": [
+    {
+      "name": "session/new",
+      "status": "pass",
+      "detail": "sessionId=33f5c745-8c92-4ff6-ad42-1f51bc2cc4c1",
+      "evidence": {
+        "route": "claude-code"
+      }
+    },
+    {
+      "name": "interrupt 中断恢复",
+      "status": "partial",
+      "detail": "cancel已发=True 提前停止=False (stop=end_turn, 回复字数=310) 恢复轮='恢复可用'",
+      "evidence": {
+        "cancel": {
+          "sent_after_s": 100.56207871437073,
+          "resp_id": 12,
+          "resp": {
+            "error": {
+              "code": -32601,
+              "message": "\"Method not found\": session/cancel",
+              "data": {
+                "method": "session/cancel"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "concurrency 并发会话不串答",
+      "status": "pass",
+      "detail": "A回复含A-canary=True 含B-canary=False | B回复含B-canary=True 含A-canary=False",
+      "evidence": {
+        "reply_a": "APPLEC-claude-code",
+        "reply_b": "BANANAC-claude-code"
+      }
+    },
+    {
+      "name": "degrade 错误降级",
+      "status": "fail",
+      "detail": "杀掉子进程=[775234, 775477] → TimeoutError: recv静默超时(240s); 已收updates=['tool_call_update', 'agent_thought_chunk', 'agent_message_chunk', 'user_message_chunk', 'agent_thought_chunk', 'agent_message_chunk', '_auth/status_update', 'available_commands_update']",
+      "evidence": {}
+    }
+  ],
+  "finished": true,
+  "bad": 2
+}

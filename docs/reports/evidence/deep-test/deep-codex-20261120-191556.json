@@ -1,0 +1,39 @@
+{
+  "agent": "codex",
+  "tests": [
+    {
+      "name": "session/new",
+      "status": "pass",
+      "detail": "sessionId=01a1f8ab-9c6f-7d43-83e5-204f27f04103",
+      "evidence": {
+        "route": "codex"
+      }
+    },
+    {
+      "name": "interrupt 中断恢复",
+      "status": "partial",
+      "detail": "cancel已发=True 提前停止=False (stop=end_turn, 回复字数=205) 恢复轮='恢复可用'",
+      "evidence": {
+        "cancel": {
+          "sent_after_s": 11.315948009490967,
+          "resp_id": 12,
+          "resp": {
+            "error": {
+              "code": -32601,
+              "message": "Method not found",
+              "data": "session/cancel"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "degrade 错误降级",
+      "status": "fail",
+      "detail": "杀掉子进程=[776399, 776525, 776535] → TimeoutError: recv静默超时(240s); 已收updates=['user_message_chunk', 'agent_message_chunk', 'user_message_chunk', 'agent_message_chunk', 'available_commands_update']",
+      "evidence": {}
+    }
+  ],
+  "finished": true,
+  "bad": 2
+}

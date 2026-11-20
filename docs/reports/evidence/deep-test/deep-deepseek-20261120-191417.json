@@ -1,0 +1,38 @@
+{
+  "agent": "deepseek",
+  "tests": [
+    {
+      "name": "session/new",
+      "status": "pass",
+      "detail": "sessionId=ollama-332636c65e4e",
+      "evidence": {
+        "route": "deepseek"
+      }
+    },
+    {
+      "name": "basic 基础对话",
+      "status": "pass",
+      "detail": "reply含42=True, chunks=119, first_token=5.0736401081085205, stop=endTurn, err=None",
+      "evidence": {
+        "reply_head": "\n\n**解答：**\n\n我们需要计算 **26 + 16**。\n\n步骤如下：\n\n1. 将个位数相加：\n   \\[\n   6 + 6 = 12\n   \\]\n   个位写2，进1到十位。\n\n2. 将十位数相加并加上进位：\n   \\[\n   2 +"
+      }
+    },
+    {
+      "name": "stream 流式回复",
+      "status": "pass",
+      "detail": "长回复轮 agent_message_chunk 数=45, 首token延迟=27.048198461532593",
+      "evidence": {
+        "chunks": 45,
+        "reply_head": "\n\n从1数到12，用逗号连接所有数字，输出为：1,2,3,4,5,6,7,8,9,10,11,12。"
+      }
+    },
+    {
+      "name": "multiturn 多轮上下文",
+      "status": "fail",
+      "detail": "第2轮回复含暗号'榛子77'=False；第1轮='\\n\\n已记'，第2轮='\\n\\n刚才的暗号是[你的暗号]。'",
+      "evidence": {}
+    }
+  ],
+  "finished": true,
+  "bad": 1
+}

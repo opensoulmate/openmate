@@ -1,0 +1,41 @@
+{
+  "agent": "soulmate",
+  "tests": [
+    {
+      "name": "session/new",
+      "status": "pass",
+      "detail": "sessionId=om-dae89abdaa86",
+      "evidence": {
+        "route": "soulmate"
+      }
+    },
+    {
+      "name": "interrupt 中断恢复",
+      "status": "partial",
+      "detail": "cancel已发=True 提前停止=False (stop=end_turn, 回复字数=288) 恢复轮='恢复可用'",
+      "evidence": {
+        "cancel": {
+          "sent_after_s": 92.66787886619568,
+          "resp_id": 12,
+          "resp": {
+            "error": {
+              "code": -32601,
+              "message": "Method not found",
+              "data": {
+                "method": "session/cancel"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "degrade 错误降级",
+      "status": "fail",
+      "detail": "杀掉子进程=[779015] → TimeoutError: recv静默超时(240s); 已收updates=[]",
+      "evidence": {}
+    }
+  ],
+  "finished": true,
+  "bad": 2
+}

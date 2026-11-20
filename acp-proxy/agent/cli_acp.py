@@ -131,7 +131,10 @@ def _build_cmd(profile: str, prompt: str) -> list[str]:
         return [bin_, "-p", prompt]
     if profile == "interpreter":
         py = os.path.expanduser("~/.local/share/uv/tools/open-interpreter/bin/python")
-        return [py, "-c", _INTERP_SCRIPT, prompt, _OLLAMA_MODEL]
+        # -I 隔离模式：工作目录里 agent 生成的杂文件（如 numbers.py）会遮蔽标准库
+        # （python -c 把 cwd 放进 sys.path，numbers.py 遮蔽 stdlib numbers → decimal
+        # import 炸 → pydantic_core 连环崩，2026-11-20 深测实测全回合阵亡）。
+        return [py, "-I", "-c", _INTERP_SCRIPT, prompt, _OLLAMA_MODEL]
     raise ValueError(f"unknown profile: {profile}")
 
 

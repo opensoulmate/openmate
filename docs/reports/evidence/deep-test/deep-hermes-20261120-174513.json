@@ -1,0 +1,37 @@
+{
+  "agent": "hermes",
+  "tests": [
+    {
+      "name": "session/new",
+      "status": "pass",
+      "detail": "sessionId=3a311d54-778f-4fcd-b7c1-0fe646a05116",
+      "evidence": {
+        "route": "hermes"
+      }
+    },
+    {
+      "name": "basic 基础对话",
+      "status": "pass",
+      "detail": "reply含42=True, chunks=1, first_token=1.6349468231201172, stop=end_turn, err=None",
+      "evidence": {
+        "reply_head": "42"
+      }
+    },
+    {
+      "name": "stream 流式回复",
+      "status": "fail",
+      "detail": "agent_message_chunk 数=1, 首token延迟=1.6349468231201172",
+      "evidence": {
+        "chunks": 1
+      }
+    },
+    {
+      "name": "multiturn 多轮上下文",
+      "status": "pass",
+      "detail": "第2轮回复含暗号'榛子77'=True；第1轮='\\n\\n已记'，第2轮='榛子77'",
+      "evidence": {}
+    }
+  ],
+  "finished": true,
+  "bad": 1
+}

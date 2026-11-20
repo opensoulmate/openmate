@@ -1,0 +1,113 @@
+{
+  "agent": "openclaw",
+  "tests": [
+    {
+      "name": "session/new",
+      "status": "pass",
+      "detail": "sessionId=b147717c-71d6-45b7-9d7e-77d9e406b4f8",
+      "evidence": {
+        "route": "openclaw"
+      }
+    },
+    {
+      "name": "basic 基础对话",
+      "status": "pass",
+      "detail": "reply含42=True, chunks=1, first_token=26.028775215148926, stop=end_turn, err=None",
+      "evidence": {
+        "reply_head": "42"
+      }
+    },
+    {
+      "name": "stream 流式回复",
+      "status": "fail",
+      "detail": "长回复轮 agent_message_chunk 数=1, 首token延迟=192.3136169910431",
+      "evidence": {
+        "chunks": 1,
+        "reply_head": "[OpenClaw interruption] Context overflow: prompt too large for the model. Try /r"
+      }
+    },
+    {
+      "name": "multiturn 多轮上下文",
+      "status": "fail",
+      "detail": "TimeoutError: （超时/断连）",
+      "evidence": {}
+    },
+    {
+      "name": "tool+file 工具调用/文件操作",
+      "status": "pass",
+      "detail": "磁盘文件落盘=True 内容匹配=True 工具事件=['session_info_update', 'tool_call', 'tool_call_update'] err=None",
+      "evidence": {
+        "files": [
+          [
+            "/home/climbing/.hermes/cache/scratch/deep-test/openclaw-tool.txt",
+            "TOOL-OK-openclaw\n"
+          ]
+        ],
+        "reply_head": "完成"
+      }
+    },
+    {
+      "name": "file-read 文件读取",
+      "status": "fail",
+      "detail": "TimeoutError: （超时/断连）",
+      "evidence": {}
+    },
+    {
+      "name": "skill 技能加载",
+      "status": "pass",
+      "detail": "回复含技能内 nonce=True err=None",
+      "evidence": {
+        "nonce": "DEEPPROBE-openclaw-1795169808",
+        "reply_head": "READ-openclaw-1795169508\n\nDEEPPROBE-openclaw-1795169808"
+      }
+    },
+    {
+      "name": "interrupt 中断恢复",
+      "status": "partial",
+      "detail": "cancel已发=True 提前停止=False (stop=end_turn, 回复字数=247) 恢复轮='恢复可用'",
+      "evidence": {
+        "cancel": {
+          "sent_after_s": 76.84278702735901,
+          "resp_id": 19,
+          "resp": {
+            "error": {
+              "code": -32601,
+              "message": "\"Method not found\": session/cancel",
+              "data": {
+                "method": "session/cancel"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "concurrency 并发会话不串答",
+      "status": "pass",
+      "detail": "A回复含A-canary=True 含B-canary=False | B回复含B-canary=True 含A-canary=False",
+      "evidence": {
+        "reply_a": "APPLEC-openclaw",
+        "reply_b": "BANANAC-openclaw"
+      }
+    },
+    {
+      "name": "degrade 错误降级",
+      "status": "fail",
+      "detail": "杀掉子进程=[739725] → 无响应/挂死，respawn新进程=[709725, 750801, 751067, 751922]，耗时=1.6s",
+      "evidence": {
+        "killed": [
+          739725
+        ],
+        "respawn": [
+          709725,
+          750801,
+          751067,
+          751922
+        ],
+        "reply_head": ""
+      }
+    }
+  ],
+  "finished": true,
+  "bad": 5
+}

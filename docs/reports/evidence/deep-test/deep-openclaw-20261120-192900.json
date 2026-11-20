@@ -1,0 +1,13 @@
+{
+  "tests": [
+    {
+      "name": "session/new",
+      "status": "pass",
+      "detail": "sessionId=bd7e91bf-69c8-4928-a069-d87651734010",
+      "evidence": {
+        "route": "openclaw"
+      }
+    }
+  ],
+  "finished": false
+}

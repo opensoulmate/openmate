@@ -1,0 +1,61 @@
+{
+  "agent": "pi",
+  "tests": [
+    {
+      "name": "session/new",
+      "status": "pass",
+      "detail": "sessionId=01a1f89e-089e-718b-b22f-4c361a418421",
+      "evidence": {
+        "route": "pi"
+      }
+    },
+    {
+      "name": "basic 基础对话",
+      "status": "pass",
+      "detail": "reply含42=True, chunks=2, first_token=0.0007259845733642578, stop=end_turn, err=None",
+      "evidence": {
+        "reply_head": "pi v1.5.2\n---\n\n## Context\n- /home/climbing/AGENTS.md\n\n## Skills\n- /home/climbing/.pi/agent/skills/para-memory-files/SKIL"
+      }
+    },
+    {
+      "name": "stream 流式回复",
+      "status": "pass",
+      "detail": "长回复轮 agent_message_chunk 数=7, 首token延迟=3.3247756958007812",
+      "evidence": {
+        "chunks": 7,
+        "reply_head": "1、2、3、4、5、6、7、8、9、10、11、12"
+      }
+    },
+    {
+      "name": "skill 技能加载",
+      "status": "pass",
+      "detail": "回复含技能内 nonce=True err=None",
+      "evidence": {
+        "nonce": "DEEPPROBE-pi-1795172489",
+        "reply_head": "DEEPPROBE-pi-1795172489"
+      }
+    },
+    {
+      "name": "interrupt 中断恢复",
+      "status": "partial",
+      "detail": "cancel已发=True 提前停止=False (stop=end_turn, 回复字数=215) 恢复轮='恢复可用'",
+      "evidence": {
+        "cancel": {
+          "sent_after_s": 22.077274560928345,
+          "resp_id": 15,
+          "resp": {
+            "error": {
+              "code": -32601,
+              "message": "\"Method not found\": session/cancel",
+              "data": {
+                "method": "session/cancel"
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "finished": true,
+  "bad": 1
+}

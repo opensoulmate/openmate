@@ -1,0 +1,85 @@
+{
+  "agent": "interpreter",
+  "tests": [
+    {
+      "name": "session/new",
+      "status": "pass",
+      "detail": "sessionId=interpreter-c32860ace6ad",
+      "evidence": {
+        "route": "interpreter"
+      }
+    },
+    {
+      "name": "basic 基础对话",
+      "status": "fail",
+      "detail": "reply含42=False, chunks=0, first_token=None, stop=None, err={'code': -32000, 'message': 'interpreter failed: cli exit 1: nit__.py\", line 31, in <module>\\n    from .core_schema import CoreConfig, CoreSchema, CoreSchemaType, ErrorType\\n  File \"/home/climbing/.local/share/uv/tools/open-interpreter/lib/python3.12/site-packages/pydantic_core/core_schema.py\", line 12, in <module>\\n    from decimal import Decimal\\n  File \"/home/climbing/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12/decimal.py\", line 102, in <module>\\n    from _decimal import *\\nAttributeError: module \\'numbers\\' has no attribute \\'Number\\''}",
+      "evidence": {
+        "reply_head": ""
+      }
+    },
+    {
+      "name": "stream 流式回复",
+      "status": "fail",
+      "detail": "长回复轮 agent_message_chunk 数=0, 首token延迟=None",
+      "evidence": {
+        "chunks": 0,
+        "reply_head": ""
+      }
+    },
+    {
+      "name": "multiturn 多轮上下文",
+      "status": "fail",
+      "detail": "第2轮回复含暗号'榛子77'=False；第1轮=''，第2轮=''",
+      "evidence": {}
+    },
+    {
+      "name": "tool+file 工具调用/文件操作",
+      "status": "fail",
+      "detail": "磁盘文件落盘=False 内容匹配=False 工具事件=[] err={'code': -32000, 'message': 'interpreter failed: cli exit 1: nit__.py\", line 31, in <module>\\n    from .core_schema import CoreConfig, CoreSchema, CoreSchemaType, ErrorType\\n  File \"/home/climbing/.local/share/uv/tools/open-interpreter/lib/python3.12/site-packages/pydantic_core/core_schema.py\", line 12, in <module>\\n    from decimal import Decimal\\n  File \"/home/climbing/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12/decimal.py\", line 102, in <module>\\n    from _decimal import *\\nAttributeError: module \\'numbers\\' has no attribute \\'Number\\''}",
+      "evidence": {
+        "files": [],
+        "reply_head": ""
+      }
+    },
+    {
+      "name": "file-read 文件读取",
+      "status": "fail",
+      "detail": "回复含文件内 nonce=False err={'code': -32000, 'message': 'interpreter failed: cli exit 1: nit__.py\", line 31, in <module>\\n    from .core_schema import CoreConfig, CoreSchema, CoreSchemaType, ErrorType\\n  File \"/home/climbing/.local/share/uv/tools/open-interpreter/lib/python3.12/site-packages/pydantic_core/core_schema.py\", line 12, in <module>\\n    from decimal import Decimal\\n  File \"/home/climbing/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12/decimal.py\", line 102, in <module>\\n    from _decimal import *\\nAttributeError: module \\'numbers\\' has no attribute \\'Number\\''}",
+      "evidence": {
+        "nonce": "READ-interpreter-1795172935",
+        "reply_head": ""
+      }
+    },
+    {
+      "name": "skill 技能加载",
+      "status": "n/a",
+      "detail": "该 agent 无技能系统（CLI 一次性模式/纯模型路由）",
+      "evidence": {}
+    },
+    {
+      "name": "interrupt 中断恢复",
+      "status": "fail",
+      "detail": "cancel已发=False 提前停止=True (stop=None, 回复字数=0) 恢复轮=''",
+      "evidence": {
+        "cancel": null
+      }
+    },
+    {
+      "name": "concurrency 并发会话不串答",
+      "status": "fail",
+      "detail": "A回复含A-canary=False 含B-canary=False | B回复含B-canary=False 含A-canary=False",
+      "evidence": {
+        "reply_a": "",
+        "reply_b": ""
+      }
+    },
+    {
+      "name": "degrade 错误降级",
+      "status": "fail",
+      "detail": "杀掉子进程=[772516] → TimeoutError: recv静默超时(240s); 已收updates=[]",
+      "evidence": {}
+    }
+  ],
+  "finished": true,
+  "bad": 8
+}

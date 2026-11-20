@@ -1,0 +1,102 @@
+{
+  "agent": "pi",
+  "tests": [
+    {
+      "name": "session/new",
+      "status": "pass",
+      "detail": "sessionId=01a1f861-a761-76ba-b858-8e6205f1017d",
+      "evidence": {
+        "route": "pi"
+      }
+    },
+    {
+      "name": "basic 基础对话",
+      "status": "fail",
+      "detail": "reply含42=False, chunks=1, first_token=0.0038709640502929688, stop=end_turn, err=None",
+      "evidence": {
+        "reply_head": "pi v1.5.2\n---\n\n## Context\n- /home/climbing/AGENTS.md\n\n## Skills\n- /home/climbing/.pi/agent/skills/para-memory-files/SKIL"
+      }
+    },
+    {
+      "name": "stream 流式回复",
+      "status": "pass",
+      "detail": "长回复轮 agent_message_chunk 数=9, 首token延迟=3.6223056316375732",
+      "evidence": {
+        "chunks": 9,
+        "reply_head": "42\n\n1、2、3、4、5、6、7、8、9、10、11、12"
+      }
+    },
+    {
+      "name": "multiturn 多轮上下文",
+      "status": "pass",
+      "detail": "第2轮回复含暗号'榛子77'=True；第1轮='已记'，第2轮='榛子77'",
+      "evidence": {}
+    },
+    {
+      "name": "tool+file 工具调用/文件操作",
+      "status": "pass",
+      "detail": "磁盘文件落盘=True 内容匹配=True 工具事件=['agent_thought_chunk', 'session_info_update', 'tool_call', 'tool_call_update', 'usage_update'] err=None",
+      "evidence": {
+        "files": [
+          [
+            "/home/climbing/.hermes/cache/scratch/deep-test/pi-tool.txt",
+            "TOOL-OK-pi\n"
+          ]
+        ],
+        "reply_head": "完成"
+      }
+    },
+    {
+      "name": "file-read 文件读取",
+      "status": "pass",
+      "detail": "回复含文件内 nonce=True err=None",
+      "evidence": {
+        "nonce": "READ-pi-1795168546",
+        "reply_head": "READ-pi-1795168546"
+      }
+    },
+    {
+      "name": "skill 技能加载",
+      "status": "n/a",
+      "detail": "该 agent 无技能系统（CLI 一次性模式/纯模型路由）",
+      "evidence": {}
+    },
+    {
+      "name": "interrupt 中断恢复",
+      "status": "pass",
+      "detail": "cancel已发=True 提前停止=True (stop=end_turn, 回复字数=200) 恢复轮='恢复可用'",
+      "evidence": {
+        "cancel": {
+          "sent_after_s": 71.26305484771729,
+          "resp_id": 18,
+          "resp": {
+            "error": {
+              "code": -32601,
+              "message": "\"Method not found\": session/cancel",
+              "data": {
+                "method": "session/cancel"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "concurrency 并发会话不串答",
+      "status": "pass",
+      "detail": "A回复含A-canary=True 含B-canary=False | B回复含B-canary=True 含A-canary=False",
+      "evidence": {
+        "reply_a": "pi v1.5.2\n---\n\n## Context\n- /home/climbing/AGENTS.md\n\n## Skills\n- /home/climbing/.pi/agent/skills/pa",
+        "reply_b": "pi v1.5.2\n---\n\n## Context\n- /home/climbing/AGENTS.md\n\n## Skills\n- /home/climbing/.pi/agent/skills/pa"
+      }
+    },
+    {
+      "name": "harness 异常",
+      "status": "fail",
+      "detail": "TimeoutError: ",
+      "evidence": {}
+    }
+  ],
+  "finished": true,
+  "bad": 2
+}
