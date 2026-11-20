@@ -15,7 +15,7 @@ import { startBrowserTaskRunner } from "@/lib/browser-task-runner";
 import { installBehaviorSensor } from "@/lib/behavior-sensor";
 import { WorkspacePanel } from '@opensoulmate/openface';
 import { AIGroupsSidebar } from "@/components/ai-groups-sidebar";
-import { Level2NavSidebar } from "@/components/level2-nav-sidebar";
+import { OrganNavSidebar } from "@/components/organ-nav-sidebar";
 import { useAIGroupsStore } from "@/stores/ai-groups-store";
 
 import { useVisibilityPoll } from "@/hooks/use-visibility-poll";
@@ -578,13 +578,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 {isAIGroupsRoute ? (
                   <AIGroupsSidebar />
                 ) : pageSidebar ? (
-                  // 左侧 = 二级菜单（当前一级模块子功能）+ 页内上下文导航（pageSidebar 保留，功能零删减）
-                  <div className="flex flex-col h-full min-h-0">
-                    <div className="shrink-0 max-h-[45%] overflow-y-auto border-b border-border">
-                      <Level2NavSidebar />
-                    </div>
-                    <div className="flex-1 min-h-0">{pageSidebar}</div>
-                  </div>
+                  pageSidebar
                 ) : isChatRoute ? (
                   <>
                     <LeftPanel
@@ -627,7 +621,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     />
                   </>
                 ) : (
-                  <Level2NavSidebar />
+                  <OrganNavSidebar />
                 )}
               </SidebarContent>
               <SidebarFooter />

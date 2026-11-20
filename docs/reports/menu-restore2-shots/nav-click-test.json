@@ -1,0 +1,480 @@
+[
+ {
+  "href": "/metrics",
+  "clicked": "CLICKED",
+  "path": "/metrics",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "📊 Prometheus 指标",
+  "bodyLen": 1764,
+  "ok": true
+ },
+ {
+  "href": "/notifications",
+  "clicked": "CLICKED",
+  "path": "/notifications",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "通知中心",
+  "bodyLen": 528,
+  "ok": true
+ },
+ {
+  "href": "/dashboard",
+  "clicked": "CLICKED",
+  "path": "/dashboard",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "",
+  "bodyLen": 1053,
+  "ok": true
+ },
+ {
+  "href": "/download",
+  "clicked": "CLICKED",
+  "path": "/download",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "",
+  "bodyLen": 312,
+  "ok": true
+ },
+ {
+  "href": "/evolution",
+  "clicked": "CLICKED",
+  "path": "/evolution",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "",
+  "bodyLen": 946,
+  "ok": true
+ },
+ {
+  "href": "/plugins",
+  "clicked": "CLICKED",
+  "path": "/plugins",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "插件管理",
+  "bodyLen": 1156,
+  "ok": true
+ },
+ {
+  "href": "/system",
+  "clicked": "CLICKED",
+  "path": "/system",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "系统概览",
+  "bodyLen": 1606,
+  "ok": true
+ },
+ {
+  "href": "/knowledge",
+  "clicked": "CLICKED",
+  "path": "/knowledge",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "导入加工",
+  "bodyLen": 626,
+  "ok": true
+ },
+ {
+  "href": "/learn",
+  "clicked": "CLICKED",
+  "path": "/learn",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "",
+  "bodyLen": 549,
+  "ok": true
+ },
+ {
+  "href": "/graph",
+  "clicked": "CLICKED",
+  "path": "/graph",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "",
+  "bodyLen": 598,
+  "ok": true
+ },
+ {
+  "href": "/knowledge-requests",
+  "clicked": "CLICKED",
+  "path": "/knowledge-requests",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "知识库申请",
+  "bodyLen": 642,
+  "ok": true
+ },
+ {
+  "href": "/cron",
+  "clicked": "CLICKED",
+  "path": "/cron",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "",
+  "bodyLen": 267,
+  "ok": true
+ },
+ {
+  "href": "/workflow",
+  "clicked": "CLICKED",
+  "path": "/workflow",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "",
+  "bodyLen": 47971,
+  "ok": true
+ },
+ {
+  "href": "/skills",
+  "clicked": "CLICKED",
+  "path": "/skills",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "技能市场",
+  "bodyLen": 13822,
+  "ok": true
+ },
+ {
+  "href": "/mcp",
+  "clicked": "CLICKED",
+  "path": "/mcp",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "MCP 服务器",
+  "bodyLen": 852,
+  "ok": true
+ },
+ {
+  "href": "/workspace",
+  "clicked": "CLICKED",
+  "path": "/workspace",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "工作区",
+  "bodyLen": 41580,
+  "ok": true
+ },
+ {
+  "href": "/capture",
+  "clicked": "CLICKED",
+  "path": "/capture",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "采集管理",
+  "bodyLen": 644,
+  "ok": true
+ },
+ {
+  "href": "/tags",
+  "clicked": "CLICKED",
+  "path": "/tags",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "标签",
+  "bodyLen": 9314,
+  "ok": true
+ },
+ {
+  "href": "/body-map",
+  "clicked": "CLICKED",
+  "path": "/body-map",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "躯体地图",
+  "bodyLen": 820,
+  "ok": true
+ },
+ {
+  "href": "/discovery",
+  "clicked": "CLICKED",
+  "path": "/discovery",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "发现引擎",
+  "bodyLen": 52877,
+  "ok": true
+ },
+ {
+  "href": "/soma-admin",
+  "clicked": "CLICKED",
+  "path": "/soma-admin",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "OpenSoma · 管理面板",
+  "bodyLen": 608,
+  "ok": true
+ },
+ {
+  "href": "/admin",
+  "clicked": "CLICKED",
+  "path": "/admin",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "系统管理",
+  "bodyLen": 3716,
+  "ok": true
+ },
+ {
+  "href": "/permission",
+  "clicked": "CLICKED",
+  "path": "/permission",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "权限管理",
+  "bodyLen": 698,
+  "ok": true
+ },
+ {
+  "href": "/enterprise",
+  "clicked": "CLICKED",
+  "path": "/enterprise",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "企业管理",
+  "bodyLen": 612,
+  "ok": true
+ },
+ {
+  "href": "/sessions",
+  "clicked": "CLICKED",
+  "path": "/sessions",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "会话管理",
+  "bodyLen": 2151,
+  "ok": true
+ },
+ {
+  "href": "/spending",
+  "clicked": "CLICKED",
+  "path": "/spending",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "",
+  "bodyLen": 663,
+  "ok": true
+ },
+ {
+  "href": "/intelligence",
+  "clicked": "CLICKED",
+  "path": "/intelligence",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "智能分析",
+  "bodyLen": 661,
+  "ok": true
+ },
+ {
+  "href": "/ai-engine",
+  "clicked": "CLICKED",
+  "path": "/ai-engine",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "AI 引擎",
+  "bodyLen": 1145,
+  "ok": true
+ },
+ {
+  "href": "/healer",
+  "clicked": "CLICKED",
+  "path": "/healer",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "自愈 · 器官诊断",
+  "bodyLen": 691,
+  "ok": true
+ },
+ {
+  "href": "/monitoring",
+  "clicked": "CLICKED",
+  "path": "/monitoring",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "",
+  "bodyLen": 3145,
+  "ok": true
+ },
+ {
+  "href": "/topology",
+  "clicked": "CLICKED",
+  "path": "/topology",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "系统拓扑 · Topology",
+  "bodyLen": 2000,
+  "ok": true
+ },
+ {
+  "href": "/registry",
+  "clicked": "CLICKED",
+  "path": "/registry",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "组件注册表",
+  "bodyLen": 2721,
+  "ok": true
+ },
+ {
+  "href": "/trajectory",
+  "clicked": "CLICKED",
+  "path": "/trajectory",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "轨迹追踪",
+  "bodyLen": 3721,
+  "ok": true
+ },
+ {
+  "href": "/timeline",
+  "clicked": "CLICKED",
+  "path": "/timeline",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "时间线",
+  "bodyLen": 17624,
+  "ok": true
+ },
+ {
+  "href": "/changelog",
+  "clicked": "CLICKED",
+  "path": "/changelog",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "遗传链 · 版本演化中心",
+  "bodyLen": 2796,
+  "ok": true
+ },
+ {
+  "href": "/docs",
+  "clicked": "CLICKED",
+  "path": "/docs",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "",
+  "bodyLen": 50405,
+  "ok": true
+ },
+ {
+  "href": "/devlog",
+  "clicked": "CLICKED",
+  "path": "/devlog",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "",
+  "bodyLen": 1277,
+  "ok": true
+ },
+ {
+  "href": "/marketplace",
+  "clicked": "CLICKED",
+  "path": "/marketplace",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "应用市场",
+  "bodyLen": 1653,
+  "ok": true
+ },
+ {
+  "href": "/soul",
+  "clicked": "CLICKED",
+  "path": "/soul",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "OpenSoul · 系统管理",
+  "bodyLen": 696,
+  "ok": true
+ },
+ {
+  "href": "/cortex",
+  "clicked": "CLICKED",
+  "path": "/cortex",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "OpenCortex",
+  "bodyLen": 631,
+  "ok": true
+ },
+ {
+  "href": "/hippo",
+  "clicked": "CLICKED",
+  "path": "/hippo",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "海马体 · 记忆生命周期",
+  "bodyLen": 713,
+  "ok": true
+ },
+ {
+  "href": "/pulse",
+  "clicked": "CLICKED",
+  "path": "/pulse",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "Pulse · 心跳层观察面",
+  "bodyLen": 2121,
+  "ok": true
+ },
+ {
+  "href": "/will",
+  "clicked": "CLICKED",
+  "path": "/will",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "意志 · 工作流引擎",
+  "bodyLen": 1441,
+  "ok": true
+ },
+ {
+  "href": "/mate",
+  "clicked": "CLICKED",
+  "path": "/chat",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "你好，今天打算做点什么？",
+  "bodyLen": 474,
+  "ok": true,
+  "note": "301 by design: next.config /mate→/chat（上次恢复令维持清单，点击可达不藏功能）"
+ },
+ {
+  "href": "/vital",
+  "clicked": "CLICKED",
+  "path": "/vital",
+  "title": "OpenMate｜开放协同的AI智能伙伴",
+  "h1": "体征 · 系统监控",
+  "bodyLen": 884,
+  "ok": true
+ },
+ {
+  "href": "/nest",
+  "error": "no close frame received or sent",
+  "ok": false
+ },
+ {
+  "href": "/limb",
+  "error": "no close frame received or sent",
+  "ok": false
+ },
+ {
+  "href": "/mind",
+  "error": "no close frame received or sent",
+  "ok": false
+ },
+ {
+  "href": "/plugins/business-opportunity/home",
+  "error": "no close frame received or sent",
+  "ok": false
+ },
+ {
+  "href": "/plugins/flow-console/home",
+  "error": "no close frame received or sent",
+  "ok": false
+ },
+ {
+  "href": "/plugins/gene-loop",
+  "error": "no close frame received or sent",
+  "ok": false
+ },
+ {
+  "href": "/nest",
+  "path": "/nest",
+  "h1": "细胞巢穴 · 多租户隔离",
+  "bodyLen": 701,
+  "ok": true
+ },
+ {
+  "href": "/limb",
+  "path": "/limb",
+  "h1": "四肢 · RPA执行器",
+  "bodyLen": 605,
+  "ok": true
+ },
+ {
+  "href": "/mind",
+  "path": "/mind",
+  "h1": "心智 · 人格调节层",
+  "bodyLen": 652,
+  "ok": true
+ },
+ {
+  "href": "/plugins/business-opportunity/home",
+  "path": "/plugins/business-opportunity/home",
+  "h1": "商机管理",
+  "bodyLen": 701,
+  "ok": true
+ },
+ {
+  "href": "/plugins/flow-console/home",
+  "path": "/plugins/flow-console/home",
+  "h1": "流程运行台",
+  "bodyLen": 5584,
+  "ok": true
+ },
+ {
+  "href": "/plugins/gene-loop",
+  "path": "/plugins/gene-loop",
+  "h1": "Gene 进化回流",
+  "bodyLen": 2079,
+  "ok": true
+ }
+]

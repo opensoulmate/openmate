@@ -95,20 +95,41 @@ export const BUILTIN_DOMAINS: DomainDef[] = [
   {
     id: "organs", labelKey: "nav.dom.organs", fallback: "器官", icon: User,
     home: "/body-map", bar: "bottom",
+    // 器官域二级 = 全部 25 器官一个不少（核心 8/底座 8/高级 9，与 organ-nav-sidebar
+    // / body-map ORGAN_LAYOUT 同一清单）；其他域散落的器官条目按归属保留不删。
     items: [
       { href: "/body-map", labelKey: "nav.bodyMap", fallback: "躯体地图", icon: User },
-      { href: "/soma", labelKey: "nav.soma", fallback: "躯体", icon: Bot, organKey: "soma" },
-      { href: "/discovery", labelKey: "nav.discovery", fallback: "发现引擎", icon: Search },
-      { href: "/capture", labelKey: "nav.capture", fallback: "采集", icon: Camera },
+      // 核心 8
+      { href: "/soul", labelKey: "nav.soul", fallback: "Soul", icon: Brain, organKey: "soul" },
       { href: "/cortex", labelKey: "nav.cortex", fallback: "皮层", icon: Cpu, organKey: "cortex" },
+      { href: "/nerve", labelKey: "nav.nerve", fallback: "神经", icon: Zap, organKey: "nerve" },
+      { href: "/vein", labelKey: "nav.vein", fallback: "血管", icon: Droplets, organKey: "vein" },
+      { href: "/soma", labelKey: "nav.soma", fallback: "躯体", icon: Bot, organKey: "soma" },
       { href: "/sense", labelKey: "nav.sense", fallback: "感官", icon: Eye, organKey: "sense" },
+      { href: "/will", labelKey: "nav.will", fallback: "意志", icon: Sparkles, organKey: "will" },
+      { href: "/mate", labelKey: "nav.mate", fallback: "伙伴", icon: Users, organKey: "mate" },
+      // 底座 8
+      { href: "/immune", labelKey: "nav.immune", fallback: "免疫", icon: Shield, organKey: "immune" },
+      { href: "/vital", labelKey: "nav.vital", fallback: "体征", icon: Activity, organKey: "vital" },
+      { href: "/marrow", labelKey: "nav.marrow", fallback: "骨髓", icon: Bone, organKey: "marrow" },
+      { href: "/gland", labelKey: "nav.gland", fallback: "腺体", icon: Stethoscope, organKey: "gland" },
+      { href: "/gene", labelKey: "nav.gene", fallback: "基因", icon: Dna, organKey: "gene" },
+      { href: "/echo", labelKey: "nav.echo", fallback: "回声", icon: Volume2, organKey: "echo" },
       { href: "/mirror", labelKey: "nav.mirror", fallback: "镜像", icon: Layers, organKey: "mirror" },
       { href: "/link", labelKey: "nav.link", fallback: "突触", icon: Link2, organKey: "link" },
+      // 高级 9
+      { href: "/hippo", labelKey: "nav.hippo", fallback: "海马体", icon: Brain, organKey: "hippo" },
       { href: "/reflex", labelKey: "nav.reflex", fallback: "反射", icon: Bolt, organKey: "reflex" },
+      { href: "/heredity", labelKey: "nav.heredity", fallback: "遗传链", icon: GitBranch, organKey: "heredity" },
+      { href: "/nest", labelKey: "nav.nest", fallback: "巢穴", icon: Home, organKey: "nest" },
+      { href: "/pulse", labelKey: "nav.pulse", fallback: "脉搏", icon: Heart, organKey: "pulse" },
       { href: "/limb", labelKey: "nav.limb", fallback: "四肢", icon: MousePointer, organKey: "limb" },
       { href: "/voice", labelKey: "nav.voice", fallback: "声带", icon: Mic, organKey: "voice" },
       { href: "/vision", labelKey: "nav.vision", fallback: "视觉", icon: ImageIcon, organKey: "vision" },
       { href: "/mind", labelKey: "nav.mind", fallback: "心智", icon: Smile, organKey: "mind" },
+      // 非器官（原域内条目保留，零删减）
+      { href: "/discovery", labelKey: "nav.discovery", fallback: "发现引擎", icon: Search },
+      { href: "/capture", labelKey: "nav.capture", fallback: "采集", icon: Camera },
     ],
   },
   {
