@@ -1,3 +1,5 @@
+import { clearLoginNext } from '@/lib/auth-errors';
+
 const DEFAULT_API_URL = typeof window !== 'undefined'
   ? `http://${window.location.hostname}:8090`
   : 'http://127.0.0.1:8090';
@@ -139,9 +141,12 @@ export function setUserName(name: string) {
 }
 
 export function clearUser() {
-  localStorage.removeItem('openmate-user-id');
-  localStorage.removeItem('openmate-username');
-  localStorage.removeItem('openmate-token');
+  localStorage.removeItem("openmate-user-id");
+  localStorage.removeItem("openmate-username");
+  localStorage.removeItem("openmate-token");
+  // 登出=会话终止：回跳路径随会话清空（重新登录落首页）；
+  // 401 过期接管在本函数之后立即 rememberLoginNext() 重新存（回原路径）——顺序即语义。
+  clearLoginNext();
 }
 
 export function setToken(token: string) {

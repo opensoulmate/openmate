@@ -1,11 +1,9 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { LoginPage } from "@/components/login-page";
-import { consumeLoginNext } from "@/lib/auth-errors";
 
+// 登录页挂载点（(app) 之外=整页渲染）。登录成功后由 LoginPage 自身
+// window.location.href = consumeLoginNext() 整页回跳（强制刷新重建全部 WebSocket）。
 export default function Login() {
-  const router = useRouter();
-  // 登录成功回跳原路径（401 接管时已存；无则落 /chat，与既有语义一致）
-  return <LoginPage onLogin={() => router.push(consumeLoginNext())} />;
+  return <LoginPage />;
 }

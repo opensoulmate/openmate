@@ -3,6 +3,7 @@ import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Loader2, CheckCircle2, XCircle } from 'lucide-react';
 import { setToken, setUserId, setUserName } from '@/lib/api-client';
+import { ensureAuthFullPage } from '@/lib/auth-errors';
 import { useTranslation } from 'react-i18next';
 
 // 微信/QQ OAuth 授权回跳落点：登录成功带 token 入库后进 /chat；绑定结果显示后回设置页
@@ -13,6 +14,8 @@ function OAuthCallback() {
   const { t } = useTranslation();
 
   useEffect(() => {
+    // 认证 UI 整页铁律：授权回跳页同样只允许整页渲染
+    ensureAuthFullPage();
     const token = params.get('token');
     const userId = params.get('user_id');
     const username = params.get('username');

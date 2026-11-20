@@ -238,10 +238,16 @@ function createWindow() {
     return { action: 'deny' };
   });
   // 主窗口防漂移：普通外链不许把应用本身导航走
+  // origin 比对必须认「配置地址」和「实际加载地址」两个（地址回退链可能把窗口
+  // 落到 127.0.0.1/NetBird/配置域名任意一个）——只认配置 origin 时，站内
+  // window.location.href 硬跳（登录/登出/过期接管全是这种）会被误判外链拦下、
+  // 转进右侧 workspace 标签 =「点退出后登录界面渲染进右侧 workspace」病灶。
   const APP_ORIGIN = new URL(OPENMATE_URL).origin;
   win.webContents.on('will-navigate', (e, url) => {
     try {
-      if (new URL(url).origin === APP_ORIGIN) return;
+      const target = new URL(url);
+      const cur = new URL(win.webContents.getURL() || OPENMATE_URL);
+      if (target.origin === APP_ORIGIN || target.origin === cur.origin) return;
     } catch (err) { /* 非法 URL=拦 */ }
     e.preventDefault();
     toWorkspaceTab(url);

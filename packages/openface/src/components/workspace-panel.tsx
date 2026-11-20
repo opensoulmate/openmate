@@ -12,6 +12,7 @@ import {
 import { SkirtTabs, type SkirtTab } from './skirt-tabs';
 import { BrowserAIControl } from './file-viewer/renderers/browser-ai-control';
 import { FileViewer } from './file-viewer';
+import { isAppSelfWebUrl, appSelfPath } from '../lib/url-policy';
 import { cn } from '../lib/utils';
 import { useIsMobile } from '../hooks/use-mobile';
 
@@ -326,6 +327,11 @@ export function WorkspacePanel({
     if (!pendingWebUrl) return;
     if (lastHandledWebUrlRef.current === pendingWebUrl) return;
     lastHandledWebUrlRef.current = pendingWebUrl;
+    // 铁律：应用自身页面（含登录/注册/过期接管等认证 UI）绝不进 workspace 标签——整页跳转
+    if (isAppSelfWebUrl(pendingWebUrl)) {
+      window.location.href = appSelfPath(pendingWebUrl);
+      return;
+    }
     if (/\/api\/file(\?|$)/.test(pendingWebUrl)) {
       let name = 'file';
       try {
@@ -434,6 +440,11 @@ export function WorkspacePanel({
           <NewTabView
             title={workspaceTitle}
             onOpenBrowser={(url) => {
+              // 铁律：手输/自动打开的应用自身页面整页跳转，绝不进面板
+              if (isAppSelfWebUrl(url)) {
+                window.location.href = appSelfPath(url);
+                return;
+              }
               updateTab(activeTab.id, {
                 type: 'web-browser',
                 url: ensureProtocol(url),

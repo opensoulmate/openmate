@@ -111,3 +111,31 @@ export function consumeLoginNext(): string {
   if (next && next.startsWith('/') && !next.startsWith('//')) return next;
   return '/chat';
 }
+
+/**
+ * 清除保存的回跳路径。挂在 clearUser() 内（api-client）：
+ * - 显式登出 = 会话终止 → 回跳路径随会话清空，重新登录落首页（/chat）；
+ * - 401 过期接管在 clearUser() 之后立即 rememberLoginNext() 重新存 → 回原路径。
+ * 两个语义天然不冲突（顺序即语义），各登出点无需各自记得清理。
+ */
+export function clearLoginNext(): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.removeItem(LOGIN_NEXT_KEY);
+}
+
+/**
+ * 认证 UI 整页铁律：登录/注册/OAuth 回跳只允许整页渲染。
+ * 若被塞进 iframe（workspace web-browser 标签、右列、详情面板——用户报障
+ * 「点退出后登录界面渲染进右侧 workspace」），立即把顶层窗口导航到本页，
+ * 在任何构建/壳层/旧 bundle 上都不可能再出现「面板里的登录界面」。
+ */
+export function ensureAuthFullPage(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (window.top && window.top !== window.self) {
+      window.top.location.replace(window.location.href);
+    }
+  } catch {
+    /* 跨域壳层拒绝导航时不阻塞渲染 */
+  }
+}

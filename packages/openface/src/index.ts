@@ -29,6 +29,9 @@ export type { BottomBarProps } from './components/bottom-bar';
 export { useIsMobile, useMediaQuery } from './hooks/use-mobile';
 export { useResizeObserver } from './hooks/use-resize-observer';
 
+// URL 准入策略（workspace 面板 vs 整页路由的单一判定）
+export { isAppSelfWebUrl, appSelfPath } from './lib/url-policy';
+
 // Design Tokens
 export * from './design-tokens';
 

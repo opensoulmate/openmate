@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { LogIn, UserPlus, Loader2, Settings, ChevronDown, Check, Wifi, Eye, EyeOff } from 'lucide-react';
 import { setApiBaseUrl, getApiBaseUrl, setUserId, setToken, setUserName } from '@/lib/api-client';
-import { consumeLoginNext } from '@/lib/auth-errors';
+import { consumeLoginNext, ensureAuthFullPage } from '@/lib/auth-errors';
 import { useTranslation } from 'react-i18next';
 import { SuperEllipse } from '@/components/ui/super-ellipse';
 
@@ -22,7 +22,7 @@ function api() {
   };
 }
 
-export function LoginPage({ onLogin }: { onLogin: () => void }) {
+export function LoginPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [email, setEmail] = useState('');
@@ -37,6 +37,9 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
   const [oauthProviders, setOauthProviders] = useState<string[]>([]);
   const [connStatus, setConnStatus] = useState<'idle' | 'ok' | 'fail'>('idle');
   const { t } = useTranslation();
+
+  // 认证 UI 整页铁律：登录界面绝不允许渲染在 iframe/右列/workspace 面板里
+  useEffect(() => { ensureAuthFullPage(); }, []);
 
   useEffect(() => {
     const saved = getApiBaseUrl();
