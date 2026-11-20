@@ -101,4 +101,10 @@ PYTHONPATH= ~/opensoul/.venv/bin/python -m pytest
 cd ~/openmate/acp-proxy && python3 -m pytest tests/test_memory_semantic_hybrid.py tests/test_memory_write_audit.py tests/test_memory_three_factor.py tests/test_persistent_memory.py tests/test_memory_echo_wiring.py tests/test_memory_marker.py -q
 ```
 
+全量结果（2026-11-20 实测，34:30）：**7994 passed / 126 failed / 2 errors**。126 个失败
+全部为**既有失败**（test_sessions_*/advisory/branch_summary/message_tree/ws_chat/
+marketplace 等非记忆子系统；test_advisory_review×10 经 git stash 对照复证、其余经
+pre-change worktree（37aa5852，PYTHONPATH 强制旧码）整批复跑 **同为 126 failed**
+逐数吻合）——本改动 **零新增失败**；记忆族全绿（59+68+79+17+44+17+9+27+21+35）。
+
 *本文数字均来自 2026-11-20 本机实测（证据文件见 §头）；机制出处 file: 级来源见 `aml-memory-study.md` §3/§5 与本表「出处」列。*
