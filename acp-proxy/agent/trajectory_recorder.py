@@ -349,6 +349,25 @@ class TrajectoryRecorder:
         )
         return (data or {}).get("id", "")
 
+    async def persist_chat_messages(
+        self, session_id: str, agent_id: str, messages: list[dict]
+    ) -> bool:
+        """聊天消息落库（agent_messages 真源，2026-11-20 根修"消息不落库"）。
+
+        relay 观察者在 prompt/回合收口时经此记账到 opensoul
+        POST /api/sessions/{id}/messages——修前 relay 消息只进 trajectory span
+        （content 还截断 500），agent_messages 恒空=刷新即失、扫 messages 零命中。
+        失败走 _post 熔断/重试/可见丢弃，绝不阻塞会话流。
+        """
+        if not session_id or not messages:
+            return False
+        data = await self._post(
+            f"/api/sessions/{session_id}/messages",
+            {"agent_id": agent_id, "messages": messages},
+            allow_404=True,
+        )
+        return bool((data or {}).get("ok"))
+
     @_fail_safe("")
     async def start_turn(
         self, session_id: str, user_text: str = "", agent_id: str = "soulmate"

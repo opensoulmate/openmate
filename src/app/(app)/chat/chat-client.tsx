@@ -632,10 +632,26 @@ function useAcpWebSocket(params: {
         // 身份链（2026-10-22 补全）：load 也显式带 agent_id——proxy 对首条会话消息
         // 统一要求显式身份（session/new 强制 agent_id 的同一铁律），load 不带会被
         // "禁止默认顶替"门拒 → 续用会话死在"连接已断开"。身份仍来自点开的入口，零默认。
-        const result = (existingAcpSid
-          ? await sendRpcRequest(ws, 'session/load', { session_id: existingAcpSid, agent_id: agentId })
-          : await sendRpcRequest(ws, 'session/new', { cwd: '/', mcpServers: [], agent_id: agentId, _meta: { session_id: sessionId } })
-        ) as { session_id?: string; sessionId?: string };
+        let result: { session_id?: string; sessionId?: string } | undefined;
+        try {
+          result = (existingAcpSid
+            ? await sendRpcRequest(ws, 'session/load', { session_id: existingAcpSid, agent_id: agentId })
+            : await sendRpcRequest(ws, 'session/new', { cwd: '/', mcpServers: [], agent_id: agentId, _meta: { session_id: sessionId } })
+          ) as { session_id?: string; sessionId?: string };
+        } catch (rpcErr) {
+          // 会话创建失败必须可见（2026-11-20 静默丢消息=最严重级）：修前 RPC error
+          // 只进 console，用户看到"已发送"气泡但消息哪都没去。当场弹错误气泡。
+          const emsg = (rpcErr as Error)?.message || String(rpcErr);
+          console.error('[ACP][persist] session/new|load 失败:', emsg);
+          updateSessionMessages(sessionId, prev => [...prev, {
+            id: `err-${Date.now()}`,
+            role: 'agent',
+            parts: [{ type: 'text', text: `⚠️ 会话创建失败：${emsg}。消息未发出，请重试。` }],
+            timestamp: new Date(),
+          }]);
+          setLoading(false);
+          throw rpcErr;
+        }
         // 根因修复（2026-11-03）：ACP v1.0 的 session/load 响应=空 LoadSessionResponse，
         // 不回带 id（只有 session/new 回带）。此前只认响应里的 id → 老会话 acpSessionId
         // 永远 null → sendAcpPrompt 静默丢消息 → 界面永远转圈。加载的 sid 本来就知道。
@@ -2430,8 +2446,20 @@ export function ChatClient() {
                 // 始终走 connectSession + waitForConnection，避免僵尸WebSocket（readyState=OPEN但对端已死）
                 // agent 身份来源：会话自带 > store > 空白入口默认 soulmate（默认只许在这一处）
                 const spAgentId2 = useAppStore.getState().activeAgentId || (selectedSessionRef.current as { agentId?: string } | null)?.agentId || 'soulmate';
-                connectSession(currentSessionId, spAgentId2, text.slice(0, 30));
-                waitForConnection(currentSessionId, messageText, attachments, { steer: isSteer });
+                try {
+                  connectSession(currentSessionId, spAgentId2, text.slice(0, 30));
+                  waitForConnection(currentSessionId, messageText, attachments, { steer: isSteer });
+                } catch (sendErr) {
+                  // 发送链同步异常必须可见（静默丢消息=最严重级）
+                  console.error('[ACP][persist] 发送链异常:', sendErr);
+                  setLoading(false);
+                  updateSessionMessages(currentSessionId, prev => [...prev, {
+                    id: `err-${Date.now()}`,
+                    role: 'agent',
+                    parts: [{ type: 'text', text: `⚠️ 消息发送失败：${(sendErr as Error)?.message || sendErr}。请重试。` }],
+                    timestamp: new Date(),
+                  }]);
+                }
               }}
               isLoading={loading}
               placeholder={t("chat.inputPlaceholder", "输入任务，点 ✨ 展开字段（Enter 发送，Shift+Enter 换行）")}

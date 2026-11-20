@@ -177,6 +177,14 @@ class RelayTrajectory:
                 t.root_id = await self.recorder.start_turn(
                     s, tx, agent_id=self.agent_id
                 )
+                # 消息落库（2026-11-20 根修"消息不落库"）：user 消息随回合起点
+                # 记账 agent_messages（修前只进 trajectory span，扫 messages 零命中）
+                if tx:
+                    await self.recorder.persist_chat_messages(
+                        s,
+                        self.agent_id,
+                        [{"role": "user", "content": tx, "timestamp": t.t0}],
+                    )
 
             self._enqueue(_start)
         except Exception as e:
@@ -278,6 +286,14 @@ class RelayTrajectory:
                     # token_budget 族，其余空=正常完成）
                     termination=termination.from_acp_stop_reason(stop),
                 )
+                # 消息落库（2026-11-20）：CLI 兜底回合同样记账 agent_messages
+                msgs = []
+                if tx:
+                    msgs.append({"role": "user", "content": tx, "timestamp": time.time() - max(dur, 0) / 1000.0})
+                if ax:
+                    msgs.append({"role": "assistant", "content": ax, "timestamp": time.time()})
+                if msgs:
+                    await self.recorder.persist_chat_messages(s, self.agent_id, msgs)
                 logger.debug(
                     f"[relay-traj] cli turn closed: agent={self.agent_id} sid={s} "
                     f"status={status} stop={stop or '-'} chars={len(ax)}"
@@ -321,6 +337,14 @@ class RelayTrajectory:
                 # P1-15：ACP stop_reason→终止条件词汇落 trace
                 termination=termination.from_acp_stop_reason(stop),
             )
+            # 消息落库（2026-11-20）：assistant 回答记账 agent_messages（完整文本，
+            # 不走 trajectory 的 500 截断）——刷新/重登后详情页历史有真源
+            if text:
+                await self.recorder.persist_chat_messages(
+                    t.session_id,
+                    self.agent_id,
+                    [{"role": "assistant", "content": text, "timestamp": time.time()}],
+                )
             logger.debug(
                 f"[relay-traj] turn closed: agent={self.agent_id} sid={t.session_id} "
                 f"status={status} stop={meta_stop or '-'} chars={len(text)} "

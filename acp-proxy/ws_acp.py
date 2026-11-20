@@ -344,6 +344,18 @@ async def ws_acp_endpoint(client_ws: WebSocket):
         return
     logger.info(f"[ACP] user {user_id} → agent {agent_id} → {route['cmd']}")
 
+    # session/new cwd 归一（2026-11-20 根修"UI新会话静默丢消息"）：mimo 等原生
+    # agent 对 cwd:"/"直接 -32603 Internal error（2x2 矩阵实测：cwd 才是触发因，
+    # _meta 无害），UI 硬编码 '/' 必炸 → acpSid 空 → 迁移/落库/发送全断且零报错。
+    # 代理层统一归一（一条真源适配，所有客户端受益）：cwd 缺失/根/不存在 → route
+    # cwd（能力是数据：route.cwd=该 agent 真实工作目录）；显式合法目录原样透传。
+    _sparams = session_msg.get("params") if isinstance(session_msg, dict) else None
+    if isinstance(_sparams, dict):
+        _cwd = str(_sparams.get("cwd") or "")
+        if not _cwd or _cwd == "/" or not os.path.isdir(_cwd):
+            _sparams["cwd"] = route.get("cwd", _USER_HOME)
+            logger.info(f"[ACP] cwd 归一 → {_sparams['cwd']!r}（原值={_cwd!r} 缺失/根/不存在）")
+
     # ACP sessionId捕获 + 重启重放过滤（子进程重启session/load恢复用）
     session_new_id = session_msg.get("id")
     acp_state: dict = {"acp_sid": None}
