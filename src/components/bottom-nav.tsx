@@ -13,6 +13,7 @@ import { useTranslation } from "react-i18next";
 import { useRef, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { getUserName, getUserId, clearUser, getUserRole } from "@/lib/api-client";
+import { clearAutoLogin } from "@/lib/login-accounts";
 import {
   MessageSquare, Users, BookOpen, Workflow, Settings, Brain, Activity,
   LayoutDashboard, Bell, Server, GraduationCap, Network, Share2, Search,
@@ -156,6 +157,7 @@ export function BottomNav({ totalUnread = 0, onOpenConversations }: BottomNavPro
 
   function handleLogout() {
     clearUser();
+    clearAutoLogin(); // 显式登出=关自动登录（401 过期接管不走这里，自动登录仍可救过期）
     localStorage.removeItem("openmate-api-url");
     window.location.href = "/login";
   }

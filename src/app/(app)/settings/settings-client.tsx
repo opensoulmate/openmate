@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 import { type ThemeId, getThemes, getStoredTheme, persistTheme } from "@/lib/theme";
 import { useAppStore } from "@/stores/app-store";
 import { getApiBaseUrl, getToken, getUserId, getUserName, clearUser } from "@/lib/api-client";
+import { clearAutoLogin } from "@/lib/login-accounts";
 import { useToast } from "@/components/toast-provider";
 import i18n, { detectLanguage } from "@/lib/i18n";
 import { useTranslation } from "react-i18next";
@@ -647,6 +648,7 @@ export function SettingsClient() {
 
   function handleLogout() {
     clearUser();
+    clearAutoLogin(); // 显式登出=关自动登录（401 过期接管不走这里，自动登录仍可救过期）
     localStorage.removeItem("openmate-api-url");
     window.location.href = "/login";
   }

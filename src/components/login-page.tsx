@@ -1,16 +1,31 @@
 'use client';
-import { useState, useEffect } from 'react';
-import { LogIn, UserPlus, Loader2, Settings, ChevronDown, Check, Wifi, Eye, EyeOff } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { LogIn, UserPlus, Loader2, Settings, Check, Wifi, Eye, EyeOff, QrCode, Keyboard } from 'lucide-react';
 import { setApiBaseUrl, getApiBaseUrl, setUserId, setToken, setUserName } from '@/lib/api-client';
 import { consumeLoginNext, ensureAuthFullPage } from '@/lib/auth-errors';
+import {
+  listAccounts,
+  saveLoginAccount,
+  removeLoginAccount,
+  getSavedPassword,
+  getLastAccount,
+  getAutoLoginUser,
+  setAutoLogin,
+  getAutoToken,
+  clearAutoLogin,
+  type SavedAccount,
+} from '@/lib/login-accounts';
+import { LoginAccountField } from '@/components/login-account-field';
+import { LoginQrPanel } from '@/components/login-qr-panel';
 import { useTranslation } from 'react-i18next';
 import { SuperEllipse } from '@/components/ui/super-ellipse';
 
 function api() {
   const base = getApiBaseUrl();
   return {
-    login: (username: string, password: string) => {
+    login: (username: string, password: string, rememberMe = false) => {
       const body = new URLSearchParams({ username, password });
+      if (rememberMe) body.set('remember_me', 'true');
       return fetch(`${base}/api/user/login`, { method: 'POST', body: body.toString(), headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }).then(r => { if (!r.ok) throw new Error(`${r.status}`); return r.json(); });
     },
     register: (username: string, password: string, email: string) =>
@@ -36,6 +51,12 @@ export function LoginPage() {
   const [resendIn, setResendIn] = useState(0);
   const [oauthProviders, setOauthProviders] = useState<string[]>([]);
   const [connStatus, setConnStatus] = useState<'idle' | 'ok' | 'fail'>('idle');
+  // QQ 登录框三件套 + 扫码
+  const [accounts, setAccounts] = useState<SavedAccount[]>([]);
+  const [rememberPwd, setRememberPwd] = useState(false);
+  const [autoLogin, setAutoLoginOn] = useState(false);
+  const [qrMode, setQrMode] = useState(false);
+  const [autoChecking, setAutoChecking] = useState(true); // 初始同步 true：SSR/水合一致，effect 判定后即放行表单
   const { t } = useTranslation();
 
   // 认证 UI 整页铁律：登录界面绝不允许渲染在 iframe/右列/workspace 面板里
@@ -47,6 +68,64 @@ export function LoginPage() {
     // Test connection
     testConnection(saved);
     fetch(`${saved}/api/user/oauth/providers`).then(r => r.json()).then(d => setOauthProviders(d.providers || [])).catch(() => {});
+  }, []);
+
+  // 账号历史 + 自动登录：预填上次账号（记住密码自动填充），勾了自动登录就静默进站
+  useEffect(() => {
+    setAccounts(listAccounts());
+    const autoUser = getAutoLoginUser();
+    setAutoLoginOn(!!autoUser);
+    const last = autoUser || getLastAccount();
+
+    let cancelled = false;
+    (async () => {
+      // 自动登录：长效 token 优先，无效回落加密密码静默登录，全失败回落表单（不锁人）
+      if (autoUser) {
+        try {
+          const tok = await getAutoToken(autoUser);
+          if (tok) {
+            const base = getApiBaseUrl();
+            const r = await fetch(`${base}/api/user/me`, { headers: { Authorization: ['Bearer', tok].join(' ') } });
+            if (r.ok) {
+              const u = await r.json();
+              if (!cancelled) {
+                setUserId(u.id);
+                setToken(tok);
+                setUserName(u.username || autoUser);
+                window.location.href = consumeLoginNext();
+                return;
+              }
+            }
+          }
+          const pw = await getSavedPassword(autoUser);
+          if (pw) {
+            const res = await api().login(autoUser, pw, true);
+            if (!cancelled && res.user_id) {
+              setUserId(res.user_id);
+              setToken(res.access_token);
+              setUserName(res.username || autoUser);
+              if (res.remember_token) await setAutoLogin(autoUser, res.remember_token);
+              window.location.href = consumeLoginNext();
+              return;
+            }
+          }
+        } catch {
+          /* 自动登录失败 → 回落登录页，不锁人 */
+        }
+      }
+      if (cancelled) return;
+      // 回落/预填：上次账号 + 已记密码自动填充
+      if (last) {
+        setUsername(last);
+        const pw = await getSavedPassword(last);
+        if (pw && !cancelled) {
+          setPassword(pw);
+          setRememberPwd(true);
+        }
+      }
+      setAutoChecking(false);
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -72,6 +151,14 @@ export function LoginPage() {
     setShowSettings(false);
   };
 
+  // 登录成功落盘：账号照记，密码只在勾了「记住密码」才加密存；自动登录收长效 token
+  const persistLoginPrefs = async (user: string, pw: string | null, rememberToken?: string | null) => {
+    await saveLoginAccount(user, rememberPwd ? pw : null);
+    if (autoLogin) await setAutoLogin(user, rememberToken ?? null);
+    else if (getAutoLoginUser() === user) clearAutoLogin();
+    setAccounts(listAccounts());
+  };
+
   const handleSubmit = async () => {
     if (!username.trim() || !password.trim()) { setError(t('login.usernamePasswordRequired')); return; }
     setLoading(true); setError('');
@@ -84,9 +171,10 @@ export function LoginPage() {
         setLoading(false);
         return;
       } else {
-        const res = await a.login(username, password);
+        const res = await a.login(username, password, autoLogin);
         if (res.user_id) { setUserId(res.user_id); setToken(res.access_token); setUserName(res.username || username); }
         else throw new Error(t('login.loginFailed'));
+        await persistLoginPrefs(username, password, res.remember_token);
       }
       // 强制页面刷新，确保所有 WebSocket 连接用新 token 重建
       // 登录成功回跳原路径（401 过期接管时已存；无则落 /chat，与既有语义一致）
@@ -108,8 +196,9 @@ export function LoginPage() {
     try {
       const a = api();
       await a.verifyEmail(username, verifyCode.trim());
-      const res = await a.login(username, password);
+      const res = await a.login(username, password, autoLogin);
       if (res.user_id) { setUserId(res.user_id); setToken(res.access_token); setUserName(res.username || username); }
+      await persistLoginPrefs(username, password, res.remember_token);
       window.location.href = consumeLoginNext();
     } catch {
       setError(t('login.codeInvalid', '验证码错误或已过期'));
@@ -135,18 +224,48 @@ export function LoginPage() {
     }
   };
 
+  // 下拉点选账号：账号+已记密码回填（QQ 式点击即填）
+  const handleSelectAccount = useCallback(async (acc: SavedAccount) => {
+    setUsername(acc.username);
+    const pw = await getSavedPassword(acc.username);
+    setPassword(pw ?? '');
+    setRememberPwd(!!pw);
+    setError('');
+  }, []);
+
+  const handleDeleteAccount = useCallback((name: string) => {
+    removeLoginAccount(name);
+    setAccounts(listAccounts());
+    if (!getAutoLoginUser()) setAutoLoginOn(false);
+  }, []);
+
   return (
     <div className="flex items-center justify-center min-h-dvh bg-background px-4 py-8">
-      <div className="p-8 rounded-xl border bg-card w-full max-w-96 shadow-lg">
+      <div className="relative p-8 rounded-xl border bg-card w-full max-w-96 shadow-lg">
+        {/* QQ 登录框右上角：扫码/账号密码 切换 */}
+        <button
+          type="button"
+          onClick={() => { setQrMode(!qrMode); setError(''); }}
+          title={qrMode ? t('login.switchToAccount', '切换到账号密码登录') : t('login.switchToQr', '切换到扫码登录')}
+          aria-label={qrMode ? t('login.switchToAccount', '切换到账号密码登录') : t('login.switchToQr', '切换到扫码登录')}
+          className="absolute right-3 top-3 w-11 h-11 flex items-center justify-center rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+        >
+          {qrMode ? <Keyboard className="w-5 h-5" /> : <QrCode className="w-5 h-5" />}
+        </button>
+
         <div className="text-center mb-6">
           <div className="w-16 h-16 shrink-0 overflow-hidden rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
             {mode === 'register' ? <UserPlus size={32} className="text-primary shrink-0" /> : <LogIn size={32} className="text-primary shrink-0" />}
           </div>
           <h1 className="text-2xl font-bold">OpenMate</h1>
-          <p className="text-sm text-muted-foreground mt-1">{mode === 'register' ? t('login.createAccount') : t('login.loginToContinue')}</p>
+          <p className="text-sm text-muted-foreground mt-1">
+            {qrMode ? t('login.qrLoginTitle', '扫码登录') : mode === 'register' ? t('login.createAccount') : t('login.loginToContinue')}
+          </p>
         </div>
 
-        {mode === 'verify' ? (
+        {qrMode ? (
+          <LoginQrPanel />
+        ) : mode === 'verify' ? (
           <div>
             <div className="text-sm text-muted-foreground mb-1">{t('login.verifyTip', '验证码已发送至你的邮箱（10 分钟内有效）')}</div>
             <div className="text-xs text-muted-foreground mb-3">
@@ -166,16 +285,61 @@ export function LoginPage() {
               {t('login.backToLogin', '返回登录')}
             </button>
           </div>
+        ) : autoChecking ? (
+          <div className="flex flex-col items-center gap-3 py-8">
+            <Loader2 className="w-6 h-6 animate-spin text-primary" />
+            <p className="text-sm text-muted-foreground">{t('login.autoLoggingIn', '自动登录中...')}</p>
+          </div>
         ) : (
           <>
-        <input value={username} onChange={e => setUsername(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSubmit()} placeholder={t('login.username')} className="w-full mb-3 px-4 py-3 rounded-lg border bg-background text-sm" autoFocus />
+        <LoginAccountField
+          value={username}
+          onChange={setUsername}
+          accounts={accounts}
+          onSelect={handleSelectAccount}
+          onDelete={handleDeleteAccount}
+          onSubmit={handleSubmit}
+          placeholder={t('login.username')}
+          disabled={loading}
+          autoFocus
+          passwordSavedMark={t('login.passwordSaved', '密码已记住')}
+          deleteAccountLabel={t('login.deleteAccount', '删除该账号')}
+        />
         <div className="relative w-full mb-3">
-          <input type={showPassword ? "text" : "password"} value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSubmit()} placeholder={t('login.password')} className="w-full px-4 py-3 pr-12 rounded-lg border bg-background text-sm" />
+          <input type={showPassword ? "text" : "password"} value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSubmit()} placeholder={t('login.password')} className="w-full px-4 py-3 pr-12 rounded-lg border bg-background text-sm" autoComplete="current-password" />
           <button type="button" onClick={() => setShowPassword(!showPassword)} aria-label={t('login.password')} className="absolute right-1 top-1/2 -translate-y-1/2 w-11 h-11 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground transition-colors">
             {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
           </button>
         </div>
         {mode === 'register' && <input value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSubmit()} placeholder={t('login.emailOptional')} className="w-full mb-3 px-4 py-3 rounded-lg border bg-background text-sm" />}
+
+        {/* 记住密码 / 自动登录（QQ 式勾选组）：勾自动登录必勾记住密码，取消记住密码连带取消自动登录 */}
+        <div className="flex items-center justify-between mb-3 text-sm">
+          <label className="flex items-center gap-2 min-h-[44px] cursor-pointer select-none text-muted-foreground hover:text-foreground transition-colors">
+            <input
+              type="checkbox"
+              checked={rememberPwd}
+              onChange={(e) => {
+                setRememberPwd(e.target.checked);
+                if (!e.target.checked) setAutoLoginOn(false);
+              }}
+              className="w-4 h-4 rounded accent-[var(--color-primary)]"
+            />
+            {t('login.rememberPassword', '记住密码')}
+          </label>
+          <label className="flex items-center gap-2 min-h-[44px] cursor-pointer select-none text-muted-foreground hover:text-foreground transition-colors">
+            <input
+              type="checkbox"
+              checked={autoLogin}
+              onChange={(e) => {
+                setAutoLoginOn(e.target.checked);
+                if (e.target.checked) setRememberPwd(true);
+              }}
+              className="w-4 h-4 rounded accent-[var(--color-primary)]"
+            />
+            {t('login.autoLogin', '自动登录')}
+          </label>
+        </div>
 
         {error && <p className="text-xs text-destructive mb-3 text-center">{error}</p>}
 
