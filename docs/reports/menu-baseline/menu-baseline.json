@@ -1,10 +1,10 @@
 {
  "meta": {
-  "generated_at": "2026-11-20T12:35:22+08:00",
+  "generated_at": "2026-11-20T14:46:28+08:00",
   "base_url": "http://localhost:3000",
   "role": "user",
   "language": "zh",
-  "build_id": "2csnSLehf7ijpm4GAPYpa"
+  "build_id": "uZxZRNrImrn3vC6hVvZJJ"
  },
  "desktop": {
   "topbar": [
@@ -3112,6 +3112,248 @@
    }
   }
  },
+ "sidebar_policy": {
+  "rules": [
+   {
+    "route": "/body-map",
+    "expect": "organ25"
+   },
+   {
+    "route": "/soul",
+    "expect": "organ25"
+   },
+   {
+    "route": "/hippo",
+    "expect": "organ25"
+   },
+   {
+    "route": "/pulse",
+    "expect": "organ25"
+   },
+   {
+    "route": "/will",
+    "expect": "organ25"
+   },
+   {
+    "route": "/download",
+    "expect": "own-nav",
+    "must_show": [
+     "全部任务"
+    ]
+   },
+   {
+    "route": "/monitoring",
+    "expect": "own-nav",
+    "must_show": [
+     "概览"
+    ]
+   },
+   {
+    "route": "/learn",
+    "expect": "own-nav",
+    "must_show": [
+     "生成新课程"
+    ]
+   },
+   {
+    "route": "/knowledge",
+    "expect": "own-nav",
+    "must_show": [
+     "共享请求"
+    ]
+   },
+   {
+    "route": "/workflow",
+    "expect": "own-nav+join",
+    "must_show": [
+     "流程运行台"
+    ]
+   },
+   {
+    "route": "/evolution",
+    "expect": "own-nav+join",
+    "must_show": [
+     "进化回流"
+    ]
+   },
+   {
+    "route": "/plugins/business-opportunity/home",
+    "expect": "plugin-l2",
+    "must_show": [
+     "商机发现"
+    ]
+   },
+   {
+    "route": "/sessions",
+    "expect": "leaf"
+   },
+   {
+    "route": "/spending",
+    "expect": "leaf"
+   },
+   {
+    "route": "/topology",
+    "expect": "leaf"
+   },
+   {
+    "route": "/timeline",
+    "expect": "domain+join",
+    "must_show": [
+     "进化回流"
+    ]
+   },
+   {
+    "route": "/changelog",
+    "expect": "domain+join",
+    "must_show": [
+     "进化回流"
+    ]
+   },
+   {
+    "route": "/admin",
+    "expect": "leaf"
+   },
+   {
+    "route": "/marketplace",
+    "expect": "leaf"
+   }
+  ],
+  "results": [
+   {
+    "route": "/body-map",
+    "expect": "organ25",
+    "shell": true,
+    "links": 39,
+    "organ": 25
+   },
+   {
+    "route": "/soul",
+    "expect": "organ25",
+    "shell": true,
+    "links": 39,
+    "organ": 25
+   },
+   {
+    "route": "/hippo",
+    "expect": "organ25",
+    "shell": true,
+    "links": 39,
+    "organ": 25
+   },
+   {
+    "route": "/pulse",
+    "expect": "organ25",
+    "shell": true,
+    "links": 39,
+    "organ": 25
+   },
+   {
+    "route": "/will",
+    "expect": "organ25",
+    "shell": true,
+    "links": 39,
+    "organ": 25
+   },
+   {
+    "route": "/download",
+    "expect": "own-nav",
+    "shell": true,
+    "links": 0,
+    "organ": 0
+   },
+   {
+    "route": "/monitoring",
+    "expect": "own-nav",
+    "shell": true,
+    "links": 0,
+    "organ": 0
+   },
+   {
+    "route": "/learn",
+    "expect": "own-nav",
+    "shell": true,
+    "links": 0,
+    "organ": 0
+   },
+   {
+    "route": "/knowledge",
+    "expect": "own-nav",
+    "shell": true,
+    "links": 0,
+    "organ": 0
+   },
+   {
+    "route": "/workflow",
+    "expect": "own-nav+join",
+    "shell": true,
+    "links": 1,
+    "organ": 0
+   },
+   {
+    "route": "/evolution",
+    "expect": "own-nav+join",
+    "shell": true,
+    "links": 1,
+    "organ": 0
+   },
+   {
+    "route": "/plugins/business-opportunity/home",
+    "expect": "plugin-l2",
+    "shell": true,
+    "links": 1,
+    "organ": 0
+   },
+   {
+    "route": "/sessions",
+    "expect": "leaf",
+    "shell": false,
+    "links": 0,
+    "organ": 0
+   },
+   {
+    "route": "/spending",
+    "expect": "leaf",
+    "shell": false,
+    "links": 0,
+    "organ": 0
+   },
+   {
+    "route": "/topology",
+    "expect": "leaf",
+    "shell": false,
+    "links": 0,
+    "organ": 0
+   },
+   {
+    "route": "/timeline",
+    "expect": "domain+join",
+    "shell": true,
+    "links": 1,
+    "organ": 0
+   },
+   {
+    "route": "/changelog",
+    "expect": "domain+join",
+    "shell": true,
+    "links": 1,
+    "organ": 0
+   },
+   {
+    "route": "/admin",
+    "expect": "leaf",
+    "shell": false,
+    "links": 0,
+    "organ": 0
+   },
+   {
+    "route": "/marketplace",
+    "expect": "leaf",
+    "shell": false,
+    "links": 0,
+    "organ": 0
+   }
+  ]
+ },
  "coverage": {
   "audit55": [
    {
@@ -3391,6 +3633,111 @@
     "href": "/soul",
     "label": "Soul",
     "home": "sidebar"
+   }
+  ],
+  "sidebar_policy": [
+   {
+    "route": "/body-map",
+    "expect": "organ25"
+   },
+   {
+    "route": "/soul",
+    "expect": "organ25"
+   },
+   {
+    "route": "/hippo",
+    "expect": "organ25"
+   },
+   {
+    "route": "/pulse",
+    "expect": "organ25"
+   },
+   {
+    "route": "/will",
+    "expect": "organ25"
+   },
+   {
+    "route": "/download",
+    "expect": "own-nav",
+    "must_show": [
+     "全部任务"
+    ]
+   },
+   {
+    "route": "/monitoring",
+    "expect": "own-nav",
+    "must_show": [
+     "概览"
+    ]
+   },
+   {
+    "route": "/learn",
+    "expect": "own-nav",
+    "must_show": [
+     "生成新课程"
+    ]
+   },
+   {
+    "route": "/knowledge",
+    "expect": "own-nav",
+    "must_show": [
+     "共享请求"
+    ]
+   },
+   {
+    "route": "/workflow",
+    "expect": "own-nav+join",
+    "must_show": [
+     "流程运行台"
+    ]
+   },
+   {
+    "route": "/evolution",
+    "expect": "own-nav+join",
+    "must_show": [
+     "进化回流"
+    ]
+   },
+   {
+    "route": "/plugins/business-opportunity/home",
+    "expect": "plugin-l2",
+    "must_show": [
+     "商机发现"
+    ]
+   },
+   {
+    "route": "/sessions",
+    "expect": "leaf"
+   },
+   {
+    "route": "/spending",
+    "expect": "leaf"
+   },
+   {
+    "route": "/topology",
+    "expect": "leaf"
+   },
+   {
+    "route": "/timeline",
+    "expect": "domain+join",
+    "must_show": [
+     "进化回流"
+    ]
+   },
+   {
+    "route": "/changelog",
+    "expect": "domain+join",
+    "must_show": [
+     "进化回流"
+    ]
+   },
+   {
+    "route": "/admin",
+    "expect": "leaf"
+   },
+   {
+    "route": "/marketplace",
+    "expect": "leaf"
    }
   ]
  }

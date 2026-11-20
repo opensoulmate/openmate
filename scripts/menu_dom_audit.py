@@ -13,8 +13,16 @@
 基线 = 恢复后的正确状态（docs/reports/menu-baseline/menu-baseline.json）：
   顶栏 9 直挂（指标/通知/仪表盘/下载/进化/插件/系统/⌘K/设置）
   底栏直挂全量（含监控、器官为单一 L1 入口、插件一级位）
-  左栏 organ-nav 25 器官 + 11 工具 + 插件分节
+  左栏 organ-nav 25 器官 + 11 工具 + 插件分节（**仅器官上下文**，见下）
   另附 AUDIT_55 覆盖清单（menu-audit 55 条底栏基线逐条落位核对，一条不少）
+
+左栏策略口径（2026-11-20 用户令："顶部菜单和底部菜单为一级菜单，左侧为二级菜单"
+——左侧=**当前一级的**二级清单，不是全局常驻器官表）：
+  ① organ25：器官二级菜单（25 器官全集）只在「器官」一级入口（/body-map）及器官详情页；
+  ② own-nav / plugin-l2：其他页面左侧=各自的二级子菜单（页面自注册 nav、插件二级、
+     域 join 条目如 流程运行台→工作流、进化回流→进化）；
+  ③ leaf：叶子页（如 会话管理/开销）不显示侧栏/紧凑态；
+  ④ 铁律：非器官上下文的侧栏里出现 25 器官 = FAIL（"绝不能见谁都弹 25 器官"）。
 
 用法：
   python3 scripts/menu_dom_audit.py                  # 比对基线（绿=0 / 红=1）
@@ -110,6 +118,54 @@ AUDIT_55 = [
     {"href": "/mind", "label": "心智", "home": "sidebar"},
     {"href": "/soul", "label": "Soul", "home": "sidebar"},
 ]
+
+# ── 左栏策略（SIDEBAR_POLICY）────────────────────────────────────────────
+# expect: organ25=器官二级（25 全集）/ own-nav=页面自注册二级或紧凑导航 /
+#         plugin-l2=插件二级 / domain+join=域内页+插件 join 二级条目 / leaf=无侧栏。
+#         must_show=侧栏或页面必须出现的文案。
+ORGAN_25 = [
+    "/soul", "/cortex", "/nerve", "/vein", "/soma", "/sense", "/will", "/mate",
+    "/immune", "/vital", "/marrow", "/gland", "/gene", "/echo", "/mirror", "/link",
+    "/hippo", "/reflex", "/heredity", "/nest", "/pulse", "/limb", "/voice", "/vision", "/mind",
+]
+
+SIDEBAR_POLICY = [
+    {"route": "/body-map", "expect": "organ25"},
+    {"route": "/soul", "expect": "organ25"},
+    {"route": "/hippo", "expect": "organ25"},
+    {"route": "/pulse", "expect": "organ25"},
+    {"route": "/will", "expect": "organ25"},
+    {"route": "/download", "expect": "own-nav", "must_show": ["全部任务"]},
+    {"route": "/monitoring", "expect": "own-nav", "must_show": ["概览"]},
+    {"route": "/learn", "expect": "own-nav", "must_show": ["生成新课程"]},
+    {"route": "/knowledge", "expect": "own-nav", "must_show": ["共享请求"]},
+    {"route": "/workflow", "expect": "own-nav+join", "must_show": ["流程运行台"]},
+    {"route": "/evolution", "expect": "own-nav+join", "must_show": ["进化回流"]},
+    {"route": "/plugins/business-opportunity/home", "expect": "plugin-l2", "must_show": ["商机发现"]},
+    {"route": "/sessions", "expect": "leaf"},
+    {"route": "/spending", "expect": "leaf"},
+    {"route": "/topology", "expect": "leaf"},
+    {"route": "/timeline", "expect": "domain+join", "must_show": ["进化回流"]},
+    {"route": "/changelog", "expect": "domain+join", "must_show": ["进化回流"]},
+    {"route": "/admin", "expect": "leaf"},
+    {"route": "/marketplace", "expect": "leaf"},
+]
+
+# 侧栏 shell 内清点（shadcn Sidebar 根；hrefs=侧栏全部链接；text=侧栏文案）
+POLICY_EXTRACT_JS = r"""
+() => {
+  const sb = document.querySelector('[data-slot="sidebar"], [data-sidebar="sidebar"]');
+  const hrefs = [];
+  if (sb) for (const a of sb.querySelectorAll('a[href]')) hrefs.push(a.getAttribute('href'));
+  return {
+    shell: !!sb,
+    hrefs,
+    shellText: sb ? (sb.innerText || '') : '',
+    bodyText: (document.body.innerText || '').slice(0, 4000),
+    path: location.pathname,
+  };
+}
+"""
 
 # ── 浏览器内提取（单次执行，库存 + 结构坐标一网打尽）────────────────────────
 
@@ -488,6 +544,43 @@ def check_coverage(live, role):
     return fails, notes, len(AUDIT_55) - skipped
 
 
+def check_sidebar_policy(pg, base_url):
+    """左栏策略清点（SIDEBAR_POLICY 口径）：逐路由真打开、等稳定、逐项判定。"""
+    fails, rows = [], []
+    for rule in SIDEBAR_POLICY:
+        route, expect = rule["route"], rule["expect"]
+        pg.goto(base_url + route, wait_until="domcontentloaded")
+        state = pg.evaluate(POLICY_EXTRACT_JS)
+        for _ in range(8):  # 等水合稳定：连续两次读数一致即停
+            pg.wait_for_timeout(1500)
+            cur = pg.evaluate(POLICY_EXTRACT_JS)
+            stable = cur == state
+            state = cur
+            if stable:
+                break
+        hrefs = state.get("hrefs", [])
+        organ_here = [h for h in hrefs if h in ORGAN_25]
+        missing = [h for h in ORGAN_25 if h not in hrefs]
+        row = {"route": route, "expect": expect, "shell": state["shell"],
+               "links": len(hrefs), "organ": len(organ_here)}
+        # 铁律：非器官上下文绝不弹 25 器官
+        if expect == "organ25":
+            if not state["shell"]:
+                fails.append(f"[左栏策略] {route}: 应为器官二级（organ25）但侧栏 shell 未渲染")
+            elif missing:
+                row["missing"] = missing
+                fails.append(f"[左栏策略] {route}: 器官二级缺 {len(missing)} 个（一个不少要求）: {missing}")
+        else:
+            if organ_here:
+                fails.append(f"[左栏策略] {route}: 非器官上下文弹出器官表（{len(organ_here)} 个器官链接）—— 违反'绝不能见谁都弹 25 器官'")
+        for txt in rule.get("must_show", []):
+            if txt not in state["shellText"] and txt not in state["bodyText"]:
+                fails.append(f"[左栏策略] {route}: 期望的二级条目「{txt}」未出现")
+        rows.append(row)
+        log(f"  左栏策略 {route:38s} expect={expect:14s} shell={'Y' if state['shell'] else 'N'} links={len(hrefs):3d} organ={len(organ_here)}")
+    return fails, rows
+
+
 # ── 主流程 ────────────────────────────────────────────────────────────────
 
 
@@ -528,6 +621,8 @@ def main():
         log(f"登录成功 role={role}")
         log("清点桌面渲染 DOM（/body-map 展开态）…")
         desktop = capture_state(pg, args.base_url, shots_dir, "desktop")
+        log("左栏策略逐页清点（器官二级仅器官上下文 / 绝不见谁都弹 25 器官）…")
+        policy_fails, policy_rows = check_sidebar_policy(pg, args.base_url)
         ctx.close()
 
         # ── 移动 390×844 ──
@@ -571,10 +666,11 @@ def main():
             "bottombar": layout_zone(mobile["bottombar"]),
         },
     }
+    live["sidebar_policy"] = {"rules": SIDEBAR_POLICY, "results": policy_rows}
 
     if args.update_baseline:
         out = dict(live)
-        out["coverage"] = {"audit55": AUDIT_55}
+        out["coverage"] = {"audit55": AUDIT_55, "sidebar_policy": SIDEBAR_POLICY}
         os.makedirs(base_dir, exist_ok=True)
         with open(args.baseline, "w", encoding="utf-8") as f:
             json.dump(out, f, ensure_ascii=False, indent=1)
@@ -637,6 +733,9 @@ def main():
     fails += f2
     notes += notes2
 
+    # 左栏策略（器官二级仅器官上下文 / 绝不见谁都弹 25 器官）
+    fails += policy_fails
+
     # ── 输出 ──
     print("=" * 72)
     print("菜单回归比对 · " + datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
@@ -656,7 +755,7 @@ def main():
         "弹出菜单": len(live["desktop"]["usermenu"]),
     }
     print(f"渲染清点: 顶栏 {counts['顶栏']} / 底栏 {counts['底栏']} / 左栏 {counts['左栏']} "
-          f"/ 弹出菜单 {counts['弹出菜单']} · 覆盖55: 核对 {checked} 条")
+          f"/ 弹出菜单 {counts['弹出菜单']} · 覆盖55: 核对 {checked} 条 · 左栏策略: {len(policy_rows)} 路由")
     if fails:
         print(f"结果: RED ✗ 共 {len(fails)} 项差异（缺失/降级/多余/顺序/位置）—— 不许上")
         sys.exit(1)

@@ -15,7 +15,9 @@ import { startBrowserTaskRunner } from "@/lib/browser-task-runner";
 import { installBehaviorSensor } from "@/lib/behavior-sensor";
 import { WorkspacePanel } from '@opensoulmate/openface';
 import { AIGroupsSidebar } from "@/components/ai-groups-sidebar";
-import { OrganNavSidebar } from "@/components/organ-nav-sidebar";
+import { OrganNavSidebar, isOrganRoute } from "@/components/organ-nav-sidebar";
+import { l2RowsFor, L2RowsBlock } from "@/components/context-l2-sidebar";
+import { fetchPluginMenus, getCachedPluginMenus, type PluginMenu } from "@/lib/plugin-nav";
 import { useAIGroupsStore } from "@/stores/ai-groups-store";
 
 import { useVisibilityPoll } from "@/hooks/use-visibility-poll";
@@ -210,7 +212,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [effectiveCollapsed, isMobile, isMidScreen, mobileSidebarOpen, midScreenExpanded, collapsed, toggle, fsWasCollapsed]);
   const currentPanel = useAppStore((s) => s.currentPanel);
   const setCurrentPanel = useAppStore((s) => s.setCurrentPanel);
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [eventCount, setEventCount] = useState(0);
   const [rightPanelWidth, setRightPanelWidth] = useState(0);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -531,6 +533,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   // Detect AI Groups route for conditional sidebar/workspace rendering
   const isAIGroupsRoute = pathname.startsWith('/ai-groups');
+
+  // ── 左侧二级清单（用户三层架构：顶部/底部=一级，左侧=当前一级的二级）──
+  // 器官二级仅「器官」上下文（/body-map+器官详情页）；插件二级随插件上下文/域 join；
+  // 叶子页不显示侧栏——绝不见谁都弹 25 器官（2026-11-20 用户令）。
+  const [pluginMenus, setPluginMenus] = useState<PluginMenu[]>([]);
+  useEffect(() => {
+    const refetch = () => {
+      fetchPluginMenus(i18n.language).then(setPluginMenus).catch(() => {
+        setPluginMenus(getCachedPluginMenus());
+      });
+    };
+    refetch();
+    window.addEventListener("openmate-plugins-changed", refetch);
+    return () => window.removeEventListener("openmate-plugins-changed", refetch);
+  }, [i18n.language]);
+  const organCtx = isOrganRoute(pathname);
+  const l2Rows = l2RowsFor(pathname, pluginMenus);
+  const hasSidebar = isAIGroupsRoute || isChatRoute || organCtx || l2Rows.length > 0 || !!pageSidebar;
   const fetchAIGroups = useAIGroupsStore((s) => s.fetchGroups);
 
   // Fetch AI groups when on the ai-groups route
@@ -571,14 +591,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             }
           }
         }} className="flex-1 min-h-0 overflow-hidden h-full">
-          {/* Sidebar — unified mobile/desktop */}
+          {/* Sidebar — unified mobile/desktop；叶子页无二级清单=不显示侧栏（整栏不渲染，内容全宽） */}
+          {hasSidebar && (
           <Sidebar collapsible="offcanvas">
 
               <SidebarContent>
                 {isAIGroupsRoute ? (
                   <AIGroupsSidebar />
-                ) : pageSidebar ? (
-                  pageSidebar
                 ) : isChatRoute ? (
                   <>
                     <LeftPanel
@@ -620,13 +639,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                       )}
                     />
                   </>
-                ) : (
+                ) : organCtx ? (
+                  // 器官二级菜单（25 器官全集）——仅「器官」一级入口及器官详情页
                   <OrganNavSidebar />
-                )}
+                ) : l2Rows.length > 0 ? (
+                  // 当前一级的二级清单（插件上下文/域 join 条目）+ 页内上下文导航
+                  <div className="flex flex-col h-full min-h-0">
+                    <div className="shrink-0 max-h-[45%] overflow-y-auto border-b border-border">
+                      <L2RowsBlock rows={l2Rows} />
+                    </div>
+                    {pageSidebar ? <div className="flex-1 min-h-0">{pageSidebar}</div> : null}
+                  </div>
+                ) : pageSidebar ? (
+                  // 页面自注册的二级/紧凑导航（该域有子功能时）
+                  pageSidebar
+                ) : null}
               </SidebarContent>
               <SidebarFooter />
               <SidebarRail />
             </Sidebar>
+            )}
 
       {/* Main content area */}
       <SidebarInset className="min-h-0 overflow-hidden" onClick={() => {

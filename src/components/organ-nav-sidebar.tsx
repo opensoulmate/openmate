@@ -111,6 +111,16 @@ const SECTIONS: NavSection[] = [
   },
 ];
 
+// ── 器官上下文判定（app-shell 用）────────────────────────────────────
+// 器官二级菜单只在「器官」一级入口（/body-map）及器官详情页显示——
+// 其他页面左侧=各自的二级子菜单或不显示，绝不见谁都弹 25 器官（用户令）。
+const ORGAN_HREFS: string[] = SECTIONS.slice(0, 3).flatMap((s) => s.items.map((i) => i.href));
+
+export function isOrganRoute(pathname: string): boolean {
+  if (pathname === "/body-map" || pathname.startsWith("/body-map/")) return true;
+  return ORGAN_HREFS.some((h) => pathname === h || pathname.startsWith(`${h}/`));
+}
+
 export function OrganNavSidebar() {
   const pathname = usePathname();
   const { t, i18n } = useTranslation();
