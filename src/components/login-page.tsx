@@ -265,7 +265,8 @@ export function LoginPage() {
   }, []);
 
   return (
-    <div className="flex items-center justify-center min-h-dvh bg-background px-4 py-8">
+    // min-h-[var(--app-height,...)]：键盘弹出时登录表单整卡在可视区内重新居中（iOS 不认 resizes-content meta 的兜底）
+    <div className="flex items-center justify-center min-h-[var(--app-height,100dvh)] bg-background px-4 py-8">
       <div className="relative p-8 rounded-xl border bg-card w-full max-w-96 shadow-lg">
         {/* QQ 登录框右上角：扫码/账号密码 切换 */}
         <button

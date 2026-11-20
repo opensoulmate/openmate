@@ -3,12 +3,16 @@ import "./globals.css";
 import "@/styles/sidebar.css";
 import I18nProvider from "@/components/i18n-provider";
 import SplashGate from "@/components/splash-gate";
+import VisualViewportSync from "@/components/visual-viewport-sync";
 
 export const viewport: Viewport = {
   themeColor: "#7c3aed",
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
+  // 移动端键盘遮挡根修①：Chrome 108+ 键盘弹出时缩布局视口（而非悬浮遮挡），
+  // flow 布局的聊天输入栏自动顶到键盘上方；iOS 不认此 meta，由 VisualViewportSync 兜底
+  interactiveWidget: "resizes-content",
 };
 
 export const metadata: Metadata = {
@@ -72,8 +76,12 @@ export default function RootLayout({
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
-      <body className="h-screen overflow-hidden bg-background text-foreground antialiased">
+      {/* h-[var(--app-height,...)]：移动端键盘弹出时 VisualViewportSync 把 --app-height 钉到
+          可视高度，body 跟着缩，全站 in-flow 输入面（消息输入/表单）统一顶到键盘上方；
+          无键盘时 var 缺省=100vh 与原 h-screen 完全一致（桌面零回归） */}
+      <body className="h-[var(--app-height,100vh)] overflow-hidden bg-background text-foreground antialiased">
         <I18nProvider><SplashGate />{children}</I18nProvider>
+        <VisualViewportSync />
       <script dangerouslySetInnerHTML={{ __html: "if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js')}" }} />
       </body>
     </html>

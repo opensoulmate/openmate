@@ -87,7 +87,11 @@ export function TerminalPanel({ apiBase, token }: TerminalPanelProps) {
     <>
       {/* Terminal panel */}
       {open && (
-        <div className={`fixed z-40 bg-[var(--color-background)] border border-border rounded-t-xl shadow-2xl transition-all ${maximized ? 'inset-0' : 'bottom-0 right-2 lg:right-14 w-[calc(100%-1rem)] lg:w-[700px] h-[50vh] lg:h-[400px]'}`}>
+        <div
+          className={`fixed z-40 bg-[var(--color-background)] border border-border rounded-t-xl shadow-2xl transition-all ${maximized ? 'inset-0' : 'bottom-0 right-2 lg:right-14 w-[calc(100%-1rem)] lg:w-[700px] h-[50vh] lg:h-[400px]'}`}
+          // --keyboard-inset：键盘弹出时终端面板让出键盘高度（xterm 输入面不被遮挡）；桌面 var 缺省 0px=原 bottom-0
+          style={{ bottom: 'var(--keyboard-inset, 0px)' }}
+        >
           <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-[var(--color-card)] rounded-t-xl">
             <div className="flex items-center gap-2">
               <TerminalIcon className="w-4 h-4 text-muted-foreground" />

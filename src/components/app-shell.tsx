@@ -561,7 +561,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [isAIGroupsRoute, fetchAIGroups]);
 
   return (
-    <div className="flex flex-col h-svh overflow-hidden">
+    // h-[var(--app-height,...)]：键盘弹出时 VisualViewportSync 钉 --app-height=可视高度，
+    // 底部 shrink-0 输入栏（对话页/群组页共用）整体顶到键盘上方；无 var=100svh 与原 h-svh 一致
+    <div className="flex flex-col h-[var(--app-height,100svh)] overflow-hidden">
       <GlobalWebSocket />
       <EChartsThemeProvider>
       {/* Top utility bar — full screen width */}

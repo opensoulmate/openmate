@@ -142,7 +142,8 @@ function QrConfirmView() {
 
 function ConfirmShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-center min-h-dvh bg-background px-4 py-8">
+    // min-h-[var(--app-height,...)]：键盘弹出时表单可视区内居中（与登录页同款键盘兜底）
+    <div className="flex items-center justify-center min-h-[var(--app-height,100dvh)] bg-background px-4 py-8">
       <div className="p-8 rounded-xl border bg-card w-full max-w-96 shadow-lg">{children}</div>
     </div>
   );
