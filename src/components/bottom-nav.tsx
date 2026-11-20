@@ -2,9 +2,9 @@
 
 // bottom-nav — 底栏一级直挂形态（恢复令：宁可乱但全，功能零删减）。
 // 2026-11-20 范围纠偏（用户正解）：只有器官收进二级菜单（「器官」一级入口→左侧
-// organ-nav-sidebar 列全 25 器官），其他一切菜单恢复 520d2bca 之前的直挂形态。
-// 插件菜单贡献机制保留（docs/plugin-spec.md §菜单契约）：L1 动态生成，
-// 安装长出/卸载收走；join 二级并入侧栏（organ-nav-sidebar 插件分节）。
+// organ-nav-sidebar 列全 25 器官），其他一切菜单保持 520d2bca 之前的直挂形态。
+// 插件菜单贡献（docs/plugin-spec.md）：L1 动态生成，安装长出/卸载收走；
+// 二级面（左栏 join 拼接块）已按用户令废除 → 全部回退独立一级位（底栏动态项）。
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -22,9 +22,10 @@ import {
   Volume2, Layers, Link2, Home, MousePointer, Mic, ImageIcon, Smile,
   Stethoscope, Cpu, Bolt, Heart, Gauge, BarChart3, Package, ScrollText,
   History, Store, Pill, LogOut, DollarSign, Terminal, Briefcase, GitMerge,
+  Inbox,
 } from "lucide-react";
 import {
-  fetchPluginMenus, getCachedPluginMenus, resolvePluginMenus,
+  fetchPluginMenus, getCachedPluginMenus,
   type PluginMenu,
 } from "@/lib/plugin-nav";
 import { BottomBar as OpenFaceBottomBar } from "@opensoulmate/openface";
@@ -45,7 +46,7 @@ const ICON_MAP: Record<string, React.ElementType> = {
   Camera, Download, Tag, User, Bot, Droplets, Dna, Eye, Shield, Bone,
   Volume2, Layers, Link2, Home, MousePointer, Mic, ImageIcon, Smile,
   Stethoscope, Cpu, Bolt, Heart, Gauge, BarChart3, Package, ScrollText,
-  History, Store, Pill, LogOut, DollarSign, Briefcase, GitMerge,
+  History, Store, Pill, LogOut, DollarSign, Briefcase, GitMerge, Inbox,
 };
 
 const DEFAULT_ICON = FileText;
@@ -61,9 +62,11 @@ export const baseNavItems: BottomNavItem[] = [
   { href: "/knowledge", label: "nav.knowledge", icon: BookOpen },
   { href: "/learn", label: "nav.learn", icon: GraduationCap },
   { href: "/graph", label: "nav.graph", icon: Network },
+  { href: "/search", label: "nav.search", icon: Search }, // 统一搜索（工具移出器官区→一级直挂落位）
   { href: "/knowledge-requests", label: "nav.kbSharing", icon: Share2 },
   { href: "/cron", label: "nav.cron", icon: Clock },
   { href: "/workflow", label: "nav.workflow", icon: Workflow },
+  { href: "/tasks", label: "nav.tasks", icon: Inbox }, // 任务收发台（工具移出器官区→一级直挂落位）
   // /pipeline 归位（2026-11-19）：流水线=后端工序，入口在知识库导入面，
   // /pipeline 保留为加工详情视图（旧路由直达），不再占一级菜单
   { href: "/skills", label: "nav.skills", icon: Puzzle },
@@ -124,13 +127,15 @@ export function BottomNav({ totalUnread = 0, onOpenConversations }: BottomNavPro
     return () => window.removeEventListener("openmate-plugins-changed", refetch);
   }, [i18n.language]);
 
-  // 合并基础导航项和插件一级位（join 并入既有域的插件不出一级位——同一功能只在一个层级出现）
+  // 合并基础导航项和插件一级位。插件二级面（左栏 join/拼接块）已按用户令废除，
+  // 按 plugin-spec「目标缺席回退独立一级位」：全部插件菜单落底栏动态一级项
+  // （= 520d2bca 前底栏"插件动态项"原样，功能零删减）。单条目插件直接落其
+  // 条目页 href（条目即页面，零删减钉在一级直挂）；多条目落插件首页。
   const role = getUserRole();
-  const { own } = resolvePluginMenus(pluginMenus);
   const navItems: BottomNavItem[] = [
     ...baseNavItems.filter(item => !item.adminOnly || role === 'admin'),
-    ...own.map(menu => ({
-      href: menu.home,
+    ...pluginMenus.map(menu => ({
+      href: menu.entries.length === 1 ? menu.entries[0].href : menu.home,
       label: menu.label,
       icon: ICON_MAP[menu.icon] || DEFAULT_ICON,
     })),

@@ -16,8 +16,7 @@ import { installBehaviorSensor } from "@/lib/behavior-sensor";
 import { WorkspacePanel } from '@opensoulmate/openface';
 import { AIGroupsSidebar } from "@/components/ai-groups-sidebar";
 import { OrganNavSidebar, isOrganRoute } from "@/components/organ-nav-sidebar";
-import { l2RowsFor, L2RowsBlock } from "@/components/context-l2-sidebar";
-import { fetchPluginMenus, getCachedPluginMenus, type PluginMenu } from "@/lib/plugin-nav";
+import { L2_SHELL_CLASS } from "@/components/l2-layout";
 import { useAIGroupsStore } from "@/stores/ai-groups-store";
 
 import { useVisibilityPoll } from "@/hooks/use-visibility-poll";
@@ -212,7 +211,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [effectiveCollapsed, isMobile, isMidScreen, mobileSidebarOpen, midScreenExpanded, collapsed, toggle, fsWasCollapsed]);
   const currentPanel = useAppStore((s) => s.currentPanel);
   const setCurrentPanel = useAppStore((s) => s.setCurrentPanel);
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const [eventCount, setEventCount] = useState(0);
   const [rightPanelWidth, setRightPanelWidth] = useState(0);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -595,23 +594,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // Detect AI Groups route for conditional sidebar/workspace rendering
   const isAIGroupsRoute = pathname.startsWith('/ai-groups');
 
-  // ── 左侧二级清单（用户三层架构：顶部/底部=一级，左侧=当前一级的二级）──
-  // 器官二级仅「器官」上下文（/body-map+器官详情页）；插件二级随插件上下文/域 join；
-  // 叶子页不显示侧栏——绝不见谁都弹 25 器官（2026-11-20 用户令）。
-  const [pluginMenus, setPluginMenus] = useState<PluginMenu[]>([]);
-  useEffect(() => {
-    const refetch = () => {
-      fetchPluginMenus(i18n.language).then(setPluginMenus).catch(() => {
-        setPluginMenus(getCachedPluginMenus());
-      });
-    };
-    refetch();
-    window.addEventListener("openmate-plugins-changed", refetch);
-    return () => window.removeEventListener("openmate-plugins-changed", refetch);
-  }, [i18n.language]);
+  // ── 左侧二级菜单只许三种形态（用户铁律 2026-11-20）────────────────────
+  // ①器官页=25 器官（一个不多一个不少）②各域页=该域原生子功能（pageSidebar 原样）
+  // ③叶子页=无侧栏。禁止发明拼接块/二级菜单块；绝不见谁都弹 25 器官。
   const organCtx = isOrganRoute(pathname);
-  const l2Rows = l2RowsFor(pathname, pluginMenus);
-  const hasSidebar = isAIGroupsRoute || isChatRoute || organCtx || l2Rows.length > 0 || !!pageSidebar;
+  const hasSidebar = isAIGroupsRoute || isChatRoute || organCtx || !!pageSidebar;
   const fetchAIGroups = useAIGroupsStore((s) => s.fetchGroups);
 
   // Fetch AI groups when on the ai-groups route
@@ -703,19 +690,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     />
                   </>
                 ) : organCtx ? (
-                  // 器官二级菜单（25 器官全集）——仅「器官」一级入口及器官详情页
+                  // 形态①：器官二级菜单（25 器官一个不多一个不少）——仅器官上下文
                   <OrganNavSidebar />
-                ) : l2Rows.length > 0 ? (
-                  // 当前一级的二级清单（插件上下文/域 join 条目）+ 页内上下文导航
-                  <div className="flex flex-col h-full min-h-0">
-                    <div className="shrink-0 max-h-[45%] overflow-y-auto border-b border-border">
-                      <L2RowsBlock rows={l2Rows} />
-                    </div>
-                    {pageSidebar ? <div className="flex-1 min-h-0">{pageSidebar}</div> : null}
-                  </div>
                 ) : pageSidebar ? (
-                  // 页面自注册的二级/紧凑导航（该域有子功能时）
-                  pageSidebar
+                  // 形态②：该域原生子功能（页面自注册二级/紧凑导航，原样）+ 统一布局容器
+                  <div className={L2_SHELL_CLASS}>{pageSidebar}</div>
                 ) : null}
               </SidebarContent>
               <SidebarFooter />

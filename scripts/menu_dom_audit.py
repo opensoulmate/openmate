@@ -12,17 +12,18 @@
 
 基线 = 恢复后的正确状态（docs/reports/menu-baseline/menu-baseline.json）：
   顶栏 9 直挂（指标/通知/仪表盘/下载/进化/插件/系统/⌘K/设置）
-  底栏直挂全量（含监控、器官为单一 L1 入口、插件一级位）
-  左栏 organ-nav 25 器官 + 11 工具 + 插件分节（**仅器官上下文**，见下）
+  底栏直挂全量（含监控、器官为单一 L1 入口、插件一级位、11 工具落位）
+  左栏 organ-nav = 恰 25 器官（零工具零其他内容，仅器官上下文）
   另附 AUDIT_55 覆盖清单（menu-audit 55 条底栏基线逐条落位核对，一条不少）
+  + TOOLS_11 归属落位（11 工具移出器官区后顶/底栏一级直挂钉住，一个不丢）
 
-左栏策略口径（2026-11-20 用户令："顶部菜单和底部菜单为一级菜单，左侧为二级菜单"
-——左侧=**当前一级的**二级清单，不是全局常驻器官表）：
-  ① organ25：器官二级菜单（25 器官全集）只在「器官」一级入口（/body-map）及器官详情页；
-  ② own-nav / plugin-l2：其他页面左侧=各自的二级子菜单（页面自注册 nav、插件二级、
-     域 join 条目如 流程运行台→工作流、进化回流→进化）；
-  ③ leaf：叶子页（如 会话管理/开销）不显示侧栏/紧凑态；
-  ④ 铁律：非器官上下文的侧栏里出现 25 器官 = FAIL（"绝不能见谁都弹 25 器官"）。
+左栏策略口径（2026-11-20 用户铁律："左侧为二级菜单"=当前一级自己的二级清单，
+"不许发明任何拼接块/二级菜单块结构"，仅此三种形态）：
+  ① organ25：器官页左栏=25 器官一个不多一个不少（零工具零其他内容）；
+  ② own-nav：各域页=该域原生子功能（下载/学习等原有 sidebar，pageSidebar 原样）；
+  ③ leaf：叶子页无侧栏。
+  ④ 铁律：join/拼接条目（流程运行台/进化回流/商机发现/拼接块）任何左栏禁出 = FAIL；
+     非器官上下文弹 25 器官 = FAIL；各侧栏同宽（统一布局）。
 
 用法：
   python3 scripts/menu_dom_audit.py                  # 比对基线（绿=0 / 红=1）
@@ -120,13 +121,35 @@ AUDIT_55 = [
 ]
 
 # ── 左栏策略（SIDEBAR_POLICY）────────────────────────────────────────────
-# expect: organ25=器官二级（25 全集）/ own-nav=页面自注册二级或紧凑导航 /
-#         plugin-l2=插件二级 / domain+join=域内页+插件 join 二级条目 / leaf=无侧栏。
-#         must_show=侧栏或页面必须出现的文案。
+# 左栏只许三种形态（用户铁律，2026-11-20）："左侧为二级菜单"=当前一级自己的二级清单：
+#   organ25 = 器官页左栏 25 器官一个不多一个不少（零工具零其他内容）
+#   own-nav = 各域页=该域原生子功能（下载/学习等原有 sidebar，pageSidebar 原样）
+#   leaf    = 叶子页无侧栏
+# 铁律：不许发明任何"拼接块/二级菜单块"（流程运行台/进化回流等 join 条目）——
+#       任何左栏出现 join/拼接条目即 FAIL。
 ORGAN_25 = [
     "/soul", "/cortex", "/nerve", "/vein", "/soma", "/sense", "/will", "/mate",
     "/immune", "/vital", "/marrow", "/gland", "/gene", "/echo", "/mirror", "/link",
     "/hippo", "/reflex", "/heredity", "/nest", "/pulse", "/limb", "/voice", "/vision", "/mind",
+]
+
+# 左栏禁止出现的 join/拼接条目（我方发明物，用户令"一个不留"）
+L2_BANNED_STRINGS = ["流程运行台", "进化回流", "商机发现", "二级菜单"]
+
+# 11 工具移出器官区后的归属落位（用户令："归属落位要钉住不丢"）——
+# 9 个本就是一级直挂（顶/底栏），/search /tasks 补一级直挂（工具=一级菜单的东西）。
+TOOLS_11 = [
+    {"href": "/dashboard", "label": "仪表盘", "home": "topbar"},
+    {"href": "/knowledge", "label": "知识库", "home": "bottombar"},
+    {"href": "/search", "label": "搜索", "home": "bottombar"},
+    {"href": "/graph", "label": "知识图谱", "home": "bottombar"},
+    {"href": "/workflow", "label": "工作流", "home": "bottombar"},
+    {"href": "/tasks", "label": "任务收发台", "home": "bottombar"},
+    {"href": "/cron", "label": "定时任务", "home": "bottombar"},
+    {"href": "/skills", "label": "技能市场", "home": "bottombar"},
+    {"href": "/mcp", "label": "MCP客户端", "home": "bottombar"},
+    {"href": "/workspace", "label": "工作区", "home": "bottombar"},
+    {"href": "/learn", "label": "学习", "home": "bottombar"},
 ]
 
 SIDEBAR_POLICY = [
@@ -139,14 +162,14 @@ SIDEBAR_POLICY = [
     {"route": "/monitoring", "expect": "own-nav", "must_show": ["概览"]},
     {"route": "/learn", "expect": "own-nav", "must_show": ["生成新课程"]},
     {"route": "/knowledge", "expect": "own-nav", "must_show": ["共享请求"]},
-    {"route": "/workflow", "expect": "own-nav+join", "must_show": ["流程运行台"]},
-    {"route": "/evolution", "expect": "own-nav+join", "must_show": ["进化回流"]},
-    {"route": "/plugins/business-opportunity/home", "expect": "plugin-l2", "must_show": ["商机发现"]},
+    {"route": "/workflow", "expect": "own-nav"},
+    {"route": "/evolution", "expect": "own-nav"},
+    {"route": "/plugins/business-opportunity/home", "expect": "leaf"},
     {"route": "/sessions", "expect": "leaf"},
     {"route": "/spending", "expect": "leaf"},
     {"route": "/topology", "expect": "leaf"},
-    {"route": "/timeline", "expect": "domain+join", "must_show": ["进化回流"]},
-    {"route": "/changelog", "expect": "domain+join", "must_show": ["进化回流"]},
+    {"route": "/timeline", "expect": "leaf"},
+    {"route": "/changelog", "expect": "leaf"},
     {"route": "/admin", "expect": "leaf"},
     {"route": "/marketplace", "expect": "leaf"},
 ]
@@ -244,7 +267,7 @@ EXTRACT_JS = r"""
     let root = soul.parentElement;
     for (let i = 0; i < 10 && root; i++) {
       const as = root.querySelectorAll('a[href]');
-      if (as.length >= 30 && root.querySelector('a[href="/mind"]') && root.querySelector('a[href="/learn"]')) break;
+      if (as.length >= 25 && root.querySelector('a[href="/mind"]')) break;
       root = root.parentElement;
     }
     if (root) {
@@ -545,8 +568,11 @@ def check_coverage(live, role):
 
 
 def check_sidebar_policy(pg, base_url):
-    """左栏策略清点（SIDEBAR_POLICY 口径）：逐路由真打开、等稳定、逐项判定。"""
+    """左栏策略清点（三形态口径）：逐路由真打开、等稳定、逐项判定。
+    organ25=恰 25 行一个不多一个不少（零工具零其他内容）；join/拼接条目全局禁出；
+    各侧栏同宽（统一布局）。"""
     fails, rows = [], []
+    shell_widths = {}
     for rule in SIDEBAR_POLICY:
         route, expect = rule["route"], rule["expect"]
         pg.goto(base_url + route, wait_until="domcontentloaded")
@@ -560,25 +586,57 @@ def check_sidebar_policy(pg, base_url):
                 break
         hrefs = state.get("hrefs", [])
         organ_here = [h for h in hrefs if h in ORGAN_25]
-        missing = [h for h in ORGAN_25 if h not in hrefs]
-        row = {"route": route, "expect": expect, "shell": state["shell"],
-               "links": len(hrefs), "organ": len(organ_here)}
-        # 铁律：非器官上下文绝不弹 25 器官
+        row = {"route": route, "expect": expect, "shell": state["shell"], "links": len(hrefs)}
         if expect == "organ25":
+            # 恰好 25 器官，一个不多一个不少：集合全等 + 行数全等
+            extra = [h for h in hrefs if h not in ORGAN_25]
+            missing = [h for h in ORGAN_25 if h not in hrefs]
             if not state["shell"]:
-                fails.append(f"[左栏策略] {route}: 应为器官二级（organ25）但侧栏 shell 未渲染")
-            elif missing:
-                row["missing"] = missing
-                fails.append(f"[左栏策略] {route}: 器官二级缺 {len(missing)} 个（一个不少要求）: {missing}")
+                fails.append(f"[左栏策略] {route}: 应为器官 25 行但侧栏未渲染")
+            elif missing or extra or len(hrefs) != 25:
+                row.update({"missing": missing, "extra": extra})
+                fails.append(
+                    f"[左栏策略] {route}: 器官栏不是 25 行（缺{len(missing)} 多{len(extra)} 总{len(hrefs)}）——"
+                    f"缺={missing} 多={extra}")
         else:
             if organ_here:
-                fails.append(f"[左栏策略] {route}: 非器官上下文弹出器官表（{len(organ_here)} 个器官链接）—— 违反'绝不能见谁都弹 25 器官'")
+                fails.append(f"[左栏策略] {route}: 非器官上下文弹出器官表（{len(organ_here)} 个器官链接）")
+        # 铁律：join/拼接条目（流程运行台/进化回流/商机发现/拼接块）任何左栏禁出
+        for banned in L2_BANNED_STRINGS:
+            if banned in state.get("shellText", ""):
+                fails.append(f"[左栏策略] {route}: 左栏出现禁出的 join/拼接内容「{banned}」—— 用户令一个不留")
         for txt in rule.get("must_show", []):
-            if txt not in state["shellText"] and txt not in state["bodyText"]:
+            if txt not in state["shellText"] and txt not in state.get("bodyText", ""):
                 fails.append(f"[左栏策略] {route}: 期望的二级条目「{txt}」未出现")
+        if state["shell"]:
+            w = pg.evaluate("""() => {
+              const sb = document.querySelector('[data-slot="sidebar"], [data-sidebar="sidebar"]');
+              return sb ? Math.round(sb.getBoundingClientRect().width) : 0;
+            }""")
+            shell_widths[route] = w
+            row["width"] = w
         rows.append(row)
-        log(f"  左栏策略 {route:38s} expect={expect:14s} shell={'Y' if state['shell'] else 'N'} links={len(hrefs):3d} organ={len(organ_here)}")
+        log(f"  左栏策略 {route:38s} expect={expect:8s} shell={'Y' if state['shell'] else 'N'} links={len(hrefs):3d} organ={len(organ_here)}")
+    # 统一布局·同宽：所有侧栏 shell 宽度一致（容差 4px）
+    if shell_widths:
+        ws = sorted(set(shell_widths.values()))
+        if len(ws) > 1 and ws[-1] - ws[0] > 4:
+            fails.append(f"[左栏策略] 侧栏宽度不一致（违反统一布局'同宽'）: {shell_widths}")
     return fails, rows
+
+
+def check_tools_placement(live):
+    """11 工具移出器官区后的归属落位：逐个钉在顶/底栏一级直挂，一个不丢。"""
+    fails, notes = [], []
+    zone = {
+        "topbar": set(it["href"] for it in live["desktop"]["topbar"] if it.get("href")),
+        "bottombar": set(it["href"] for it in live["desktop"]["bottombar"] if it.get("href")),
+    }
+    for e in TOOLS_11:
+        if e["href"] not in zone[e["home"]]:
+            fails.append(f"[工具落位] 丢失: {e['href']} ({e['label']}) 应在 {e['home']} 一级直挂")
+    notes.append(f"[工具落位] 11 工具逐一核对（9 原有一级直挂 + /search /tasks 补挂）: {len(TOOLS_11)} 条")
+    return fails, notes
 
 
 # ── 主流程 ────────────────────────────────────────────────────────────────
@@ -670,7 +728,7 @@ def main():
 
     if args.update_baseline:
         out = dict(live)
-        out["coverage"] = {"audit55": AUDIT_55, "sidebar_policy": SIDEBAR_POLICY}
+        out["coverage"] = {"audit55": AUDIT_55, "sidebar_policy": SIDEBAR_POLICY, "tools_11": TOOLS_11}
         os.makedirs(base_dir, exist_ok=True)
         with open(args.baseline, "w", encoding="utf-8") as f:
             json.dump(out, f, ensure_ascii=False, indent=1)
@@ -733,8 +791,13 @@ def main():
     fails += f2
     notes += notes2
 
-    # 左栏策略（器官二级仅器官上下文 / 绝不见谁都弹 25 器官）
+    # 左栏策略（三形态 + join/拼接禁出 + 统一布局同宽）
     fails += policy_fails
+
+    # 11 工具归属落位（移出器官区后顶/底栏一级直挂，一个不丢）
+    f2, notes2 = check_tools_placement(live)
+    fails += f2
+    notes += notes2
 
     # ── 输出 ──
     print("=" * 72)
