@@ -2375,11 +2375,15 @@ export function ChatClient() {
                   const firstUserText = messages.find(m => m.role === 'user')?.parts?.find((p: { type: string; text?: string }) => p.type === 'text')?.text || text;
                   const autoTitle = firstUserText.slice(0, 20);
                   if (isDefaultName && autoTitle && curName !== autoTitle) {
-                    fetch(`${getApiBaseUrl()}/api/sessions/${currentSessionId}`, {
-                      method: 'PATCH',
-                      headers: { 'Content-Type': 'application/json', Authorization: 'Be' + 'arer ' + (localStorage.getItem('openmate-token') || '') },
+                    // temp 会话此刻还没落库（迁移竞态），PATCH 必 404 且留脏标题——
+                    // 命名交给迁移后的 handleTempSessionMigration（按首条用户消息重命名）。
+                    if (!currentSessionId.startsWith('temp-')) {
+                      fetch(`${getApiBaseUrl()}/api/sessions/${currentSessionId}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('openmate-token') || ''}` },
                       body: JSON.stringify({ title: autoTitle }),
-                    }).then(() => useAppStore.getState().refreshSidebar()).catch(() => {});
+                      }).then(() => useAppStore.getState().refreshSidebar()).catch(() => {});
+                    }
                     // 只更新标题，绝不触碰 agentId（曾在此传 null 清掉 agent 身份，
                     // 导致点击任何 agent 新建的会话都被顶替成 soulmate——用户判死）
                     useAppStore.getState().setActiveSession(currentSessionId, useAppStore.getState().activeAgentId, { sessionName: autoTitle });
