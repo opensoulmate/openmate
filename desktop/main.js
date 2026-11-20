@@ -318,12 +318,38 @@ ipcMain.handle('webview-capture', async (_e, { tabId }) => {
   return { ok: true, dataUrl: img.toDataURL() };
 });
 
+/** 托盘图标加载：平台基准尺寸（Linux 22 / Windows 16 / macOS 16）+ @2x/@3x 高清表示 */
+function loadTrayImage() {
+  const trayDir = path.join(__dirname, 'tray');
+  // Windows 直接用全尺寸 .ico（16/24/32/48/64/256 内嵌，由 shell 选最优尺寸）
+  if (process.platform === 'win32') {
+    const ico = nativeImage.createFromPath(path.join(trayDir, 'tray.ico'));
+    if (!ico.isEmpty()) return ico;
+  }
+  const base = process.platform === 'darwin' ? 16 : process.platform === 'win32' ? 16 : 22;
+  const png = (px) => path.join(trayDir, `tray-${px}.png`);
+  const img = nativeImage.createFromPath(png(base));
+  if (img.isEmpty()) {
+    // 兜底：旧单图（无多分辨率资产时）——仅作不崩保险，不作为正常路径
+    return nativeImage.createFromPath(path.join(__dirname, 'icon.png'));
+  }
+  // HiDPI：把 2x/3x 尺寸挂为高分表示，托盘按显示器 scaleFactor 自动选清晰版
+  for (const sf of [2, 3]) {
+    const hi = png(Math.min(256, base * sf));
+    if (fs.existsSync(hi)) {
+      img.addRepresentation({ scaleFactor: sf, dataURL: 'data:image/png;base64,' + fs.readFileSync(hi).toString('base64') });
+    }
+  }
+  return img;
+}
+
 function createTray() {
   try {
-    const iconPath = path.join(__dirname, 'icon.png');
-    const img = nativeImage.createFromPath(iconPath);
+    // 高清托盘：多分辨率图标集（tray/tray-*.png + tray.ico），按平台基准尺寸取图，
+    // HiDPI 挂 2x/3x 表示让托盘按 scaleFactor 选清晰版——禁再单尺寸缩放（缩放=模糊根因）
+    const img = loadTrayImage();
     if (img.isEmpty()) return; // 无图标则不建托盘，不报错
-    tray = new Tray(img.resize({ width: 22, height: 22 }));
+    tray = new Tray(img);
     tray.setToolTip('OpenMate');
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: '显示主窗口', click: () => { if (win) { win.show(); win.focus(); } else createWindow(); } },
