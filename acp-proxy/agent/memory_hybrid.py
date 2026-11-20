@@ -1,22 +1,42 @@
-"""SoulMate 混合检索召回包（MEM-Semantic ③）：语义 top-k + 关键词兜底。
+"""SoulMate 记忆检索薄客户端（收敛版）——检索能力唯一正主=OpenSoul。
 
-opensoul src/hippo/memory_hybrid.py 的跨仓镜像（同 RRF 常数、同召回包形——
-memory_recall_pack/1；两仓不能互相 import，代码镜像+测试双钉）。OMH 可抄件：
-included/excluded 每条带 reason、超预算记录 reason=over_budget 留痕不静默丢、
-truncated 标志、limit+max_chars 双预算。
+收敛决定（2026-11-20 用户纠偏「记忆系统应该是opensoul，别搞错了」，迁移优先于
+删除）：
+- 原 acp-proxy 本地混合检索实现（RRF/语义/关键词融合=opensoul memory_hybrid 的
+  跨仓镜像）已**迁移归一**：检索能力只在 opensoul/src/hippo/memory_hybrid.py
+  一家（AML 抄作业机制层同居：邻居轮/意图加权/字面守卫·实体·日期通道/时间注解/
+  rerank/打包 trace/查询侧过滤）；
+- SoulMate 记忆检索统一调 OpenSoul API：POST {base}/api/hippo/ltm/search
+  （mode=hybrid，响应含 memory_recall_pack/1 召回包）；写入 write-through 见
+  agent/memory_retrieval.py（POST /api/hippo/ltm/add）；
+- 本地只留：keyword_relevance 纯词法工具（consolidator 去重打分用，无排序能力）
+  + TTL 薄缓存（会话暂存，禁本地排名冒充检索能力）；
+- OpenSoul 不可达=如实降级空包（degraded=True + reason 可见），**禁本地平行
+  排名兜底**——检索能力归 opensoul 一家。
 
-诚实边界：语义通道失败/未配置=channels.semantic 如实标缺席 + pack.degraded，
-keyword 通道兜底排名（禁静默降级冒充语义全量）；行向量缺失=unranked 如实。
+兼容面：hybrid_retrieve() 保留旧函数名/近似签名（旧 rows/vectors/embed_* 参数
+弃用忽略——排名由 OpenSoul 做，参数留位仅为调用方零改动过渡）；新代码直接用
+search_opensoul()。
 """
 
+import json
+import logging
+import os
 import re
+import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 
-RRF_K = 60
-W_SEMANTIC = 2.0
-W_KEYWORD = 1.0
+logger = logging.getLogger("acp-proxy.memory-hybrid")
+
+DEFAULT_OPENSOUL_URL = "http://127.0.0.1:8090"
+SEARCH_PATH = "/api/hippo/ltm/search"
+HTTP_TIMEOUT = 8.0
+CACHE_TTL = 30.0  # 薄缓存（会话暂存）：同查询 30s 内不重打 OpenSoul
 
 _TOKEN_RE = re.compile(r"[a-zA-Z0-9_]+|[\u4e00-\u9fff]+")
+_CACHE: dict[str, tuple[float, dict]] = {}
 
 
 def _tokens(text: str) -> set[str]:
@@ -34,7 +54,7 @@ def _tokens(text: str) -> set[str]:
 
 
 def keyword_relevance(query: str, content: str) -> float:
-    """keyword 通道相关度 ∈ [0,1]：query token 覆盖比例（CJK bigram）。"""
+    """keyword 覆盖度 ∈ [0,1]（纯词法工具：consolidator 去重打分用；无排序能力）。"""
     q = _tokens(query)
     if not q:
         return 0.0
@@ -46,7 +66,7 @@ def keyword_relevance(query: str, content: str) -> float:
 
 @dataclass
 class RecallPack:
-    """召回包（OMH project_memory_recall_pack/v1 可抄件形，逐字纪律）。"""
+    """召回包（memory_recall_pack/1 合同形；真源=OpenSoul pack 响应适配）。"""
 
     query: str = ""
     included: list[dict] = field(default_factory=list)
@@ -58,6 +78,8 @@ class RecallPack:
     reason: str | None = None
     candidates: int = 0
     unranked: int = 0
+    intent: str = "default"
+    trace: dict = field(default_factory=dict)
 
     @property
     def record_count(self) -> int:
@@ -77,148 +99,102 @@ class RecallPack:
             "record_count": self.record_count,
             "candidates": self.candidates,
             "unranked": self.unranked,
+            "intent": self.intent,
+            "trace": self.trace,
         }
 
 
-def hybrid_retrieve(
+def _base_url() -> str:
+    return (os.environ.get("SOULMATE_OPENSOUL_URL") or DEFAULT_OPENSOUL_URL).rstrip("/")
+
+
+def _degraded_pack(query: str, reason: str) -> RecallPack:
+    pack = RecallPack(query=query)
+    pack.degraded = True
+    pack.reason = reason
+    pack.channels = {"opensoul": "unavailable"}
+    return pack
+
+
+def search_opensoul(
     query: str,
-    rows: list[dict],
     *,
-    vectors: dict[str, list[float]] | None = None,
-    embed_query_fn=None,
-    embed_batch_fn=None,
     limit: int = 6,
     max_chars: int = 1200,
+    memory_type: str = "",
+    base_url: str = "",
+    timeout: float = HTTP_TIMEOUT,
+    use_cache: bool = True,
 ) -> RecallPack:
-    """语义 top-k + 关键词兜底混合检索 → 召回包（RRF 融合，确定性排序）。"""
-    from agent.memory_vector_index import cosine
+    """检索统一走 OpenSoul（mode=hybrid 召回包）。失败=如实降级空包。
 
-    pack = RecallPack(query=query)
-    vectors = dict(vectors or {})
+    薄缓存：同 (query, limit, max_chars, memory_type, base) 30s 内直接回缓存
+    （会话暂存语义，非排名）。任何异常都不冒充本地排名结果。
+    """
     q = (query or "").strip()
-
-    # ── 语义通道 ──────────────────────────────────────────────
-    sem_scores: dict[str, float] = {}
     if not q:
-        pack.channels["semantic"] = "skipped_empty_query"
-    elif embed_query_fn is None and embed_batch_fn is None and not vectors:
-        pack.channels["semantic"] = "unavailable"
-        pack.degraded = True
-        pack.reason = "semantic channel unavailable: no embedding fn/vectors provided"
-    else:
-        try:
-            q_vec = (embed_query_fn([q]) or [[]])[0] if embed_query_fn else None
-        except Exception as exc:
-            q_vec = None
-            pack.channels["semantic"] = "degraded"
-            pack.degraded = True
-            pack.reason = f"query embedding failed: {type(exc).__name__}: {exc}"
-        if q_vec:
-            missing = [
-                (r["memory_id"], r["content"])
-                for r in rows
-                if r["memory_id"] not in vectors
-            ]
-            if missing and embed_batch_fn is not None:
-                try:
-                    vecs = embed_batch_fn([c for _, c in missing])
-                    for (mid, _c), vec in zip(missing, vecs):
-                        if vec:
-                            vectors[mid] = vec
-                except Exception as exc:
-                    pack.reason = pack.reason or (
-                        f"row embedding failed: {type(exc).__name__}: {exc}"
-                    )
-            for r in rows:
-                vec = vectors.get(r["memory_id"])
-                if vec:
-                    sem_scores[r["memory_id"]] = cosine(q_vec, vec)
-                else:
-                    pack.unranked += 1
-            pack.channels.setdefault("semantic", "ok")
-        elif "semantic" not in pack.channels:
-            pack.channels["semantic"] = "degraded"
-            pack.degraded = True
-            pack.reason = pack.reason or "query embedding returned empty vector"
-
-    # ── keyword 通道（兜底）────────────────────────────────────
-    kw_scores: dict[str, float] = {}
-    if q:
-        for r in rows:
-            kw = keyword_relevance(q, r.get("content", ""))
-            if kw > 0:
-                kw_scores[r["memory_id"]] = kw
-        pack.channels["keyword"] = "ok"
-    else:
-        pack.channels["keyword"] = "skipped_empty_query"
-
-    # ── RRF 融合 ──────────────────────────────────────────────
-    sem_ranked = sorted(sem_scores.items(), key=lambda t: (-t[1], t[0]))
-    kw_ranked = sorted(kw_scores.items(), key=lambda t: (-t[1], t[0]))
-    fused: dict[str, float] = {}
-    for rank, (mid, _s) in enumerate(sem_ranked, start=1):
-        fused[mid] = fused.get(mid, 0.0) + W_SEMANTIC / (RRF_K + rank)
-    for rank, (mid, _s) in enumerate(kw_ranked, start=1):
-        fused[mid] = fused.get(mid, 0.0) + W_KEYWORD / (RRF_K + rank)
-
-    by_id = {r["memory_id"]: r for r in rows}
-    ranked_ids = sorted(fused.keys(), key=lambda mid: (-fused[mid], mid))
-    pack.candidates = len(ranked_ids)
-    considered_unranked = [
-        mid
-        for mid in (r["memory_id"] for r in rows)
-        if mid not in fused and mid not in vectors and q
-    ]
-
-    # ── 预算裁剪（OMH：over_budget 留痕不静默丢）──────────────────
-    used_chars = 0
-    budget_open = True
-    for mid in ranked_ids:
-        r = by_id[mid]
-        score = fused[mid]
-        content = r.get("content", "")
-        if not budget_open or len(pack.included) >= limit:
-            pack.excluded.append(
-                {"memory_id": mid, "reason": "over_budget", "detail": f"score={score:.4f}"}
-            )
-            pack.truncated = True
-            continue
-        if used_chars + len(content) > max_chars and pack.included:
-            pack.excluded.append(
-                {
-                    "memory_id": mid,
-                    "reason": "over_budget",
-                    "detail": f"score={score:.4f}, chars={len(content)}",
-                }
-            )
-            pack.truncated = True
-            budget_open = False
-            continue
-        channels_hit = []
-        if mid in sem_scores:
-            channels_hit.append("semantic")
-        if mid in kw_scores:
-            channels_hit.append("keyword")
-        pack.included.append(
-            {
-                "memory_id": mid,
-                "content": content,
-                "score": round(score, 6),
-                "semantic": round(sem_scores[mid], 6) if mid in sem_scores else None,
-                "keyword": round(kw_scores[mid], 6) if mid in kw_scores else None,
-                "reason": f"rrf_fused({'+'.join(channels_hit)})",
-            }
+        return _degraded_pack(query, "empty query")
+    base = (base_url or _base_url()).rstrip("/")
+    key = "|".join((base, q, str(limit), str(max_chars), memory_type))
+    if use_cache:
+        hit = _CACHE.get(key)
+        if hit and time.time() - hit[0] < CACHE_TTL:
+            return _pack_from_dict(hit[1], query)
+    payload = {
+        "query": q,
+        "mode": "hybrid",
+        "limit": limit,
+        "max_chars": max_chars,
+        "memory_types": [memory_type] if memory_type else [],
+    }
+    try:
+        req = urllib.request.Request(
+            base + SEARCH_PATH,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
         )
-        used_chars += len(content)
-
-    for mid in considered_unranked:
-        pack.excluded.append(
-            {
-                "memory_id": mid,
-                "reason": "unranked_no_embedding",
-                "detail": "row vector missing/failed; keyword channel had no hit",
-            }
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        logger.warning("opensoul memory search degraded: %s", exc)
+        return _degraded_pack(
+            query, f"opensoul unavailable: {type(exc).__name__}: {exc}"
         )
+    pack_dict = body.get("pack")
+    if not isinstance(pack_dict, dict):
+        # pack 缺席（keyword 模式响应）=如实降级，禁本地补排名
+        return _degraded_pack(query, "opensoul response missing hybrid pack")
+    if use_cache:
+        _CACHE[key] = (time.time(), pack_dict)
+    return _pack_from_dict(pack_dict, query)
 
-    pack.budget = {"max_records": limit, "max_chars": max_chars, "used_chars": used_chars}
+
+def _pack_from_dict(d: dict, query: str) -> RecallPack:
+    pack = RecallPack(query=d.get("query", query))
+    pack.included = list(d.get("included", []))
+    pack.excluded = list(d.get("excluded", []))
+    pack.truncated = bool(d.get("truncated", False))
+    pack.budget = dict(d.get("budget", {}))
+    pack.channels = dict(d.get("channels", {}))
+    pack.degraded = bool(d.get("degraded", False))
+    pack.reason = d.get("reason")
+    pack.candidates = int(d.get("candidates", 0))
+    pack.unranked = int(d.get("unranked", 0))
+    pack.intent = d.get("intent", "default")
+    pack.trace = dict(d.get("trace", {}))
     return pack
+
+
+def hybrid_retrieve(query: str, rows=None, **kwargs) -> RecallPack:
+    """兼容面（弃用注记）：旧混合检索签名 → 统一走 search_opensoul。
+
+    rows/vectors/embed_query_fn/embed_batch_fn 全部**忽略**——排名能力已迁移
+    opensoul（本仓禁养平行记忆系统）；limit/max_chars/memory_type 透传。
+    """
+    return search_opensoul(
+        query,
+        limit=kwargs.get("limit", 6),
+        max_chars=kwargs.get("max_chars", 1200),
+        memory_type=kwargs.get("memory_type", ""),
+    )

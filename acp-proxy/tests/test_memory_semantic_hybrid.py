@@ -11,6 +11,7 @@
 6. 写入时自动向量化 + 召回期自愈回填
 """
 import inspect
+import json
 import sys
 from pathlib import Path
 
@@ -113,28 +114,146 @@ def test_wiring_semantic_boost_in_retrieve_sort_key():
     assert "min_importance.value" in src
 
 
-# ── 5. 召回包预算裁剪（OMH 可抄件）────────────────────────────────
+# ── 5. 召回包=OpenSoul 薄客户端契约（收敛版 2026-11-20：检索能力唯一正主=
+# opensoul；本地混合排名实现已迁移 opensoul tests/test_memory_hybrid.py，
+# 本节只钉客户端契约：委托形参/适配/降级诚实/禁本地排名兜底）──────────
 
-def test_retrieve_pack_budget_trim_trace(tmp_path):
+class _FakeResp:
+    def __init__(self, body: dict):
+        self._data = json.dumps(body).encode("utf-8")
+
+    def read(self):
+        return self._data
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+@pytest.fixture()
+def _clear_hybrid_cache():
+    import agent.memory_hybrid as mh
+
+    mh._CACHE.clear()
+    yield
+    mh._CACHE.clear()
+
+
+def test_retrieve_pack_delegates_and_adapts(tmp_path, monkeypatch, _clear_hybrid_cache):
+    import urllib.request
+
+    import agent.memory_hybrid as mh
+
+    captured = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["payload"] = json.loads(req.data.decode("utf-8"))
+        captured["url"] = req.full_url
+        return _FakeResp(
+            {
+                "pack": {
+                    "pack_version": "memory_recall_pack/1",
+                    "query": captured["payload"]["query"],
+                    "included": [
+                        {
+                            "memory_id": "ltm_x",
+                            "content": "决定采用蓝绿部署策略",
+                            "score": 0.05,
+                            "semantic": 0.9,
+                            "keyword": 0.0,
+                            "reason": "rrf_fused(semantic+literal)",
+                        }
+                    ],
+                    "excluded": [],
+                    "truncated": False,
+                    "budget": {"max_records": 6, "max_chars": 1200, "used_chars": 10},
+                    "channels": {"semantic": "ok"},
+                    "degraded": False,
+                    "reason": None,
+                    "record_count": 1,
+                    "candidates": 1,
+                    "unranked": 0,
+                    "intent": "default",
+                    "trace": {"rerank": "off"},
+                },
+                "results": [],
+                "count": 1,
+            }
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
     eng = MemoryRetrievalEngine(db_path=str(tmp_path / "m.db"), embed_fn=fake_embed)
-    for i in range(3):
-        eng.store(f"部署流程说明第{i}部分 " + "细节" * 40, importance=MemoryImportance.HIGH)
-    pack = eng.retrieve_pack("部署流程", limit=6, max_chars=120)
-    assert pack["truncated"] is True
-    assert len(pack["included"]) == 1
-    over = [e for e in pack["excluded"] if e["reason"] == "over_budget"]
-    assert len(over) == 2
-    assert pack["budget"]["used_chars"] <= 120
-    assert pack["pack_version"] == "memory_recall_pack/1"
-
-
-def test_retrieve_pack_semantic_reason_visible(tmp_path):
-    eng = MemoryRetrievalEngine(db_path=str(tmp_path / "m.db"), embed_fn=fake_embed)
-    eng.store("决定采用蓝绿部署策略", importance=MemoryImportance.HIGH)
     pack = eng.retrieve_pack("上次说的上线发布方式是什么", limit=3)
+    assert captured["url"].endswith("/api/hippo/ltm/search")
+    assert captured["payload"]["mode"] == "hybrid"  # 召回包=OpenSoul hybrid 真源
+    assert pack["pack_version"] == "memory_recall_pack/1"
     assert pack["included"][0]["content"] == "决定采用蓝绿部署策略"
-    assert "semantic" in pack["included"][0]["reason"]
     assert pack["degraded"] is False
+    assert pack["trace"]["rerank"] == "off"  # OpenSoul pack 原样透传
+
+
+def test_retrieve_pack_degraded_honest_when_opensoul_down(
+    tmp_path, monkeypatch, _clear_hybrid_cache
+):
+    """OpenSoul 不可达=如实降级空包；禁本地平行排名兜底（收敛铁律）。"""
+    import urllib.error
+    import urllib.request
+
+    def boom(req, timeout=None):
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    eng = MemoryRetrievalEngine(db_path=str(tmp_path / "m.db"), embed_fn=fake_embed)
+    eng.store("决定采用蓝绿部署策略", importance=MemoryImportance.HIGH)  # 本地暂存在
+    pack = eng.retrieve_pack("上次说的上线发布方式是什么", limit=3)
+    assert pack["degraded"] is True
+    assert "opensoul unavailable" in (pack["reason"] or "")
+    assert pack["included"] == []  # 不冒充本地排名结果
+    assert pack["channels"] == {"opensoul": "unavailable"}
+
+
+def test_hybrid_retrieve_compat_delegates_ignoring_rows(monkeypatch, _clear_hybrid_cache):
+    import urllib.request
+
+    from agent.memory_hybrid import hybrid_retrieve
+
+    seen = {}
+
+    def fake_urlopen(req, timeout=None):
+        seen["payload"] = json.loads(req.data.decode("utf-8"))
+        return _FakeResp({"pack": {"pack_version": "memory_recall_pack/1", "included": []}})
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    pack = hybrid_retrieve(
+        "部署流程",
+        [{"memory_id": "local1", "content": "本地行被忽略"}],  # rows 弃用忽略
+        vectors={"local1": [1.0]},
+        embed_query_fn=fake_embed,
+        limit=4,
+        max_chars=100,
+    )
+    assert seen["payload"]["limit"] == 4
+    assert seen["payload"]["max_chars"] == 100
+    assert pack.degraded is False
+
+
+def test_opensoul_cache_short_circuits_repeat(monkeypatch, _clear_hybrid_cache):
+    import urllib.request
+
+    import agent.memory_hybrid as mh
+
+    calls = {"n": 0}
+
+    def fake_urlopen(req, timeout=None):
+        calls["n"] += 1
+        return _FakeResp({"pack": {"pack_version": "memory_recall_pack/1", "included": []}})
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    mh.search_opensoul("缓存测试查询甲", limit=3)
+    mh.search_opensoul("缓存测试查询甲", limit=3)
+    assert calls["n"] == 1  # 薄缓存（会话暂存）：30s 内同查询不重打
 
 
 # ── 6. 写入时自动向量化 + 自愈 ─────────────────────────────────────

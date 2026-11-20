@@ -7696,7 +7696,9 @@ You can send files to the user natively: to deliver a file, write a brief confir
                     messages = compressed
 
             # 3. 本地记忆检索引擎（与OpenSoul LTM互补）
-            local_memories = self._memory_engine.retrieve(user_text, limit=3)
+            # 收敛版（2026-11-20）：召回统一走 OpenSoul（检索能力唯一正主），
+            # 不可达=空表如实（禁本地平行排名兜底）
+            local_memories = self._memory_engine.retrieve_opensoul(user_text, limit=3)
             recalled_ids.extend(memory_echo.collect_recalled_ids(local_memories=local_memories))
             recalled_texts.extend(getattr(m, "content", "") for m in local_memories[:3])
             if local_memories:

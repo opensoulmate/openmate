@@ -282,8 +282,52 @@ class MemoryRetrievalEngine:
         # MEM-Semantic ②：写入时自动向量化（失败不打断写入，检索期自愈回填）
         self._auto_vectorize(entry.memory_id, content)
 
+        # 收敛版（2026-11-20 用户纠偏）：记忆写入 write-through 统一调 OpenSoul
+        # （/api/hippo/ltm/add），本地行=会话暂存/薄缓存。失败不打断主流程（本地
+        # 暂存仍可用），warning 可见——该条在 OpenSoul 侧补同步前不可被统一检索召回。
+        self._write_through_opensoul(entry)
+
         logger.debug(f"Stored memory: {memory_id} ({memory_type.value}, importance={importance.value})")
         return entry
+
+    def _write_through_opensoul(self, entry: MemoryEntry) -> bool:
+        """记忆写入统一面（SoulMate 记忆读写/检索统一调 OpenSoul API）。"""
+        import urllib.error
+        import urllib.request
+
+        from agent.memory_hybrid import _base_url
+
+        payload = {
+            "content": entry.content,
+            "memory_type": entry.memory_type.value,
+            "tags": list(entry.tags),
+            "metadata": dict(entry.metadata),
+            "write_mode": "explicit",  # 引擎写入=显式路径（非自动抽取）
+            "dup_policy": "reject",
+            "echo_guard": False,  # 引擎写入非回合 digest，不过回声闸
+        }
+        try:
+            req = urllib.request.Request(
+                _base_url() + "/api/hippo/ltm/add",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=8.0) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            logger.warning(
+                "write-through to opensoul failed (staged locally only, "
+                "not recallable via unified search until synced): %s", exc
+            )
+            return False
+        if not body.get("added", False):
+            logger.info(
+                "opensoul admission declined write-through (%s): %s",
+                body.get("outcome", "?"),
+                entry.content[:80],
+            )
+        return bool(body.get("added", False))
 
     # ── MEM-Semantic：写入审计 + 自动向量化 ──────────────────────────
     def _write_admission_audit(
@@ -508,60 +552,46 @@ class MemoryRetrievalEngine:
         max_chars: int = 1200,
         min_importance: MemoryImportance = MemoryImportance.TRIVIAL,
     ) -> dict:
-        """混合检索召回包（MEM-Semantic 加码①：OMH 可抄件形）——语义 top-k +
-        关键词兜底；included/excluded 每条带 reason；超预算记录 reason=
-        over_budget 留痕不静默丢；truncated 标志 + 双预算如实。"""
-        from agent.memory_hybrid import hybrid_retrieve
+        """混合检索召回包（收敛版）——检索能力唯一正主=OpenSoul。
 
-        sql = "SELECT * FROM memories WHERE 1=1"
-        params: list = []
-        if memory_type:
-            sql += " AND memory_type = ?"
-            params.append(memory_type.value)
-        if session_id:
-            sql += " AND session_id = ?"
-            params.append(session_id)
-        sql += " AND importance >= ?"
-        params.append(min_importance.value)
-        sql += " ORDER BY created_at DESC LIMIT 500"
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
-        rows = [
-            r for r in rows
-            if json.loads(r.get("metadata") or "{}").get("admission", "auto_approved")
-            != "deferred_review"
-        ]
-        contents = {r["memory_id"]: r["content"] for r in rows}
-        vectors = self._vector_index.load(contents=contents)
-        fn = self._resolve_embed_fn()
-        missing = [(mid, c) for mid, c in contents.items() if mid not in vectors]
-        if missing and fn is not None:
-            try:
-                stats = self._vector_index.backfill(missing, fn)
-                if stats["embedded"]:
-                    vectors = self._vector_index.load(contents=contents)
-            except Exception as exc:
-                logger.warning(f"retrieve_pack vector backfill failed: {exc}")
+        2026-11-20 用户纠偏（「记忆系统应该是opensoul」）：本地 rows/向量/RRF
+        排名实现已迁移 opensoul src/hippo/memory_hybrid.py（AML 抄作业机制层
+        同居），本口只做 API 透传（agent.memory_hybrid.search_opensoul 薄客户端
+        +TTL 缓存）。OpenSoul 不可达=如实降级空包（degraded+reason），禁本地
+        平行排名兜底。session_id/min_importance 为兼容留位（OpenSoul 侧过滤
+        口径待接），不参与本轮排名。
+        """
+        from agent.memory_hybrid import search_opensoul
 
-        def embed_batch(texts):
-            return fn(texts) if fn is not None else [[] for _ in texts]
-
-        def embed_query(texts):
-            if fn is None:
-                return [[] for _ in texts]
-            return fn(texts)
-
-        pack = hybrid_retrieve(
+        pack = search_opensoul(
             query,
-            rows,
-            vectors=vectors,
-            embed_query_fn=embed_query if fn is not None else None,
-            embed_batch_fn=embed_batch if fn is not None else None,
             limit=limit,
             max_chars=max_chars,
+            memory_type=memory_type.value if memory_type else "",
         )
         return pack.to_dict()
+
+    def retrieve_opensoul(self, query: str, limit: int = 3) -> list[MemoryEntry]:
+        """SoulMate 回调口（soulmate_agent 召回统一走 OpenSoul）；不可达=空表。"""
+        from agent.memory_hybrid import search_opensoul
+
+        pack = search_opensoul(query, limit=limit)
+        out: list[MemoryEntry] = []
+        for item in pack.included[:limit]:
+            out.append(
+                MemoryEntry(
+                    memory_id=item.get("memory_id", ""),
+                    memory_type=MemoryType.EPISODIC,
+                    content=item.get("content", ""),
+                    importance=MemoryImportance.NORMAL,
+                    metadata={
+                        "source": "opensoul_ltm",
+                        "hybrid_reason": item.get("reason", ""),
+                        "recall_pack_degraded": pack.degraded,
+                    },
+                )
+            )
+        return out
 
     def review_memory(self, memory_id: str, verdict: str, reason: str = "") -> tuple[bool, str]:
         """延后记忆复核（OMH 三岔动词全带 reason）：verdict=approve 放行进召回 /

@@ -161,6 +161,11 @@ def test_wiring_three_factor_in_retrieve_sort_key():
 
 
 def test_wiring_real_message_path_calls_retrieve():
-    """soulmate_agent 真实消息路径（prompt记忆注入）调用 retrieve(user_text)。"""
+    """soulmate_agent 真实消息路径（prompt记忆注入）召回统一走 OpenSoul。
+
+    收敛版（2026-11-20 用户纠偏「记忆系统应该是opensoul」）：钉
+    retrieve_opensoul(user_text, limit=3)——检索能力唯一正主=OpenSoul，
+    本地不做平行排名（禁回退旧 retrieve() 字符串）。
+    """
     agent_src = (Path(__file__).resolve().parents[1] / "agent" / "soulmate_agent.py").read_text()
-    assert "self._memory_engine.retrieve(user_text, limit=3)" in agent_src
+    assert "self._memory_engine.retrieve_opensoul(user_text, limit=3)" in agent_src

@@ -92,3 +92,19 @@ cd ~/opensoul && PYTHONPATH= .venv/bin/python -m pytest
 cd ~/openmate/acp-proxy && python3 -m pytest tests/test_memory_three_factor.py \
   tests/test_memory_semantic_hybrid.py tests/test_memory_write_audit.py -q
 ```
+
+## 七、更新（2026-11-20）：AML 抄作业落地 + 记忆系统归属收敛
+
+对比表升级为 **「抄前 vs 抄后 vs 榜单头部」**，见 **`aml-memory-adoption.md`**（P0×5 + P1×6
+逐项出处落地、扩集 22 条基准抄前抄后留证、不抄清单 4 项理由）。要点：
+
+- 落点归属（用户纠偏原话「记忆系统应该是opensoul」）：机制全部落 `opensoul/src/hippo`
+  族；acp-proxy `memory_hybrid.py` 镜像**收敛为薄客户端**（检索统一走
+  `/api/hippo/ltm/search`，本地只留 TTL 薄缓存+纯词法工具，禁本地平行排名）；
+  SoulMate 记忆读写 write-through `/api/hippo/ltm/add`。
+- 基准真身=`opensoul/scripts/e2e_memory_semantic_recall.py`（两轮：回归钉 8×8
+  100% 保持 + 扩集 22 条 20/22→21/22，别名类 MRR@3 0.875→1.000、时间类 4/5→5/5）。
+  上文 §六 的 `acp-proxy demo_memory_semantic_recall.py` 命令已改为薄客户端冒烟
+  （`--smoke`），基准主张以 opensoul 面为准。
+- 本页 §三/§四 的「vs OMH」表为 2026-10-15 口径，保留作历史；当前口径以
+  `aml-memory-adoption.md` §三为准。

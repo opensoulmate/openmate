@@ -96,3 +96,14 @@ def _isolate_long_task_autonomy_db(tmp_path, monkeypatch):
     monkeypatch.setattr(lta, "DB_PATH", tmp_path / "long_task_autonomy.db")
     monkeypatch.setenv("ACP_LONG_TASK_DB", str(tmp_path / "long_task_autonomy.db"))
     yield
+
+
+@pytest.fixture(autouse=True)
+def _isolate_opensoul_memory_api(monkeypatch):
+    """SoulMate 记忆 write-through/search 统一调 OpenSoul API（收敛版 2026-11-20）
+    ——测试一律指向不可路由的本地端口，禁写真实 :8090 OpenSoul 生产 LTM/召回
+    账本（repo 铁律：测试禁写真实运行库）。需要行为断言的用例自行 monkeypatch
+    urllib.request.urlopen（以测试为准）。
+    """
+    monkeypatch.setenv("SOULMATE_OPENSOUL_URL", "http://127.0.0.1:1")
+    yield
