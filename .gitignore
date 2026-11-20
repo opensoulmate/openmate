@@ -41,3 +41,6 @@ core/dist/
 core/.freeze-venv/
 data/collab-tasks/
 data/flow-runs/
+
+# === 菜单回归防线 · 每次运行的瞬态产物（基线 shots/ 才入库） ===
+docs/reports/menu-baseline/last-run/

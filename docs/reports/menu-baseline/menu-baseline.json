@@ -1,0 +1,3397 @@
+{
+ "meta": {
+  "generated_at": "2026-11-20T12:35:22+08:00",
+  "base_url": "http://localhost:3000",
+  "role": "user",
+  "language": "zh",
+  "build_id": "2csnSLehf7ijpm4GAPYpa"
+ },
+ "desktop": {
+  "topbar": [
+   {
+    "key": "top:/chat",
+    "href": "/chat",
+    "label": "OpenMate",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 0,
+     "y": 9.5,
+     "w": 125.296875,
+     "h": 28
+    },
+    "visible": true,
+    "menu": false
+   },
+   {
+    "key": "top:btn:系统健康",
+    "href": null,
+    "label": "系统健康",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 125.296875,
+     "y": 7.5,
+     "w": 32,
+     "h": 32
+    },
+    "visible": true,
+    "menu": false
+   },
+   {
+    "key": "top:/metrics",
+    "href": "/metrics",
+    "label": "Prometheus指标",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 161.296875,
+     "y": 10,
+     "w": 106.96875,
+     "h": 27
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "top:/notifications",
+    "href": "/notifications",
+    "label": "通知中心",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 285.265625,
+     "y": 10,
+     "w": 74,
+     "h": 27
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "top:/dashboard",
+    "href": "/dashboard",
+    "label": "仪表盘",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 363.265625,
+     "y": 10,
+     "w": 64,
+     "h": 27
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "top:/download",
+    "href": "/download",
+    "label": "下载管理",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 431.265625,
+     "y": 10,
+     "w": 74,
+     "h": 27
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "top:/evolution",
+    "href": "/evolution",
+    "label": "进化",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 509.265625,
+     "y": 10,
+     "w": 54,
+     "h": 27
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "top:/plugins",
+    "href": "/plugins",
+    "label": "插件",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 567.265625,
+     "y": 10,
+     "w": 54,
+     "h": 27
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "top:/system",
+    "href": "/system",
+    "label": "系统总览",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 625.265625,
+     "y": 10,
+     "w": 74,
+     "h": 27
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "top:btn:搜索",
+    "href": null,
+    "label": "搜索",
+    "tag": "",
+    "kbd": true,
+    "rect": {
+     "x": 703.265625,
+     "y": 9.75,
+     "w": 82.40625,
+     "h": 27.5
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "top:/settings",
+    "href": "/settings",
+    "label": "设置",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 1380,
+     "y": 5.5,
+     "w": 60,
+     "h": 36
+    },
+    "visible": true,
+    "menu": true
+   }
+  ],
+  "bottombar": [
+   {
+    "key": "bot:btn:E",
+    "href": null,
+    "label": "E",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 7.200000762939453,
+     "y": 859.7000122070312,
+     "w": 33.599998474121094,
+     "h": 33.5999755859375
+    },
+    "visible": true,
+    "menu": false
+   },
+   {
+    "key": "bot:/chat",
+    "href": "/chat",
+    "label": "对话",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 0,
+     "y": 2.875,
+     "w": 48,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/ai-groups",
+    "href": "/ai-groups",
+    "label": "AI群",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 50,
+     "y": 2.875,
+     "w": 48,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/knowledge",
+    "href": "/knowledge",
+    "label": "知识库",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 100,
+     "y": 2.875,
+     "w": 48,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/learn",
+    "href": "/learn",
+    "label": "学习",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 150,
+     "y": 2.875,
+     "w": 48,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/graph",
+    "href": "/graph",
+    "label": "知识图谱",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 200,
+     "y": 2.875,
+     "w": 56.015625,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/knowledge-requests",
+    "href": "/knowledge-requests",
+    "label": "知识库共享",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 258.015625,
+     "y": 2.875,
+     "w": 65.015625,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/cron",
+    "href": "/cron",
+    "label": "定时任务",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 325.03125,
+     "y": 2.875,
+     "w": 56.015625,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/workflow",
+    "href": "/workflow",
+    "label": "工作流",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 383.046875,
+     "y": 2.875,
+     "w": 48,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/skills",
+    "href": "/skills",
+    "label": "技能市场",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 433.046875,
+     "y": 2.875,
+     "w": 56.015625,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/mcp",
+    "href": "/mcp",
+    "label": "MCP客户端",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 491.0625,
+     "y": 2.875,
+     "w": 65.703125,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/workspace",
+    "href": "/workspace",
+    "label": "工作区",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 558.765625,
+     "y": 2.875,
+     "w": 48,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/capture",
+    "href": "/capture",
+    "label": "采集",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 608.765625,
+     "y": 2.875,
+     "w": 48,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/tags",
+    "href": "/tags",
+    "label": "标签管理",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 658.765625,
+     "y": 2.875,
+     "w": 56.015625,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/body-map",
+    "href": "/body-map",
+    "label": "器官",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 716.78125,
+     "y": 2.875,
+     "w": 48,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/discovery",
+    "href": "/discovery",
+    "label": "发现引擎",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 766.78125,
+     "y": 2.875,
+     "w": 56.015625,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/enterprise",
+    "href": "/enterprise",
+    "label": "企业管理",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 824.796875,
+     "y": 2.875,
+     "w": 56.015625,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/sessions",
+    "href": "/sessions",
+    "label": "会话管理",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 882.8125,
+     "y": 2.875,
+     "w": 56.015625,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/spending",
+    "href": "/spending",
+    "label": "开销",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 940.828125,
+     "y": 2.875,
+     "w": 48,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/intelligence",
+    "href": "/intelligence",
+    "label": "智能分析",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 990.828125,
+     "y": 2.875,
+     "w": 56.015625,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/ai-engine",
+    "href": "/ai-engine",
+    "label": "AI 引擎",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 1048.84375,
+     "y": 2.875,
+     "w": 48.671875,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/healer",
+    "href": "/healer",
+    "label": "自愈系统",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 1099.515625,
+     "y": 2.875,
+     "w": 56.015625,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/monitoring",
+    "href": "/monitoring",
+    "label": "监控",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 1157.53125,
+     "y": 2.875,
+     "w": 48,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/topology",
+    "href": "/topology",
+    "label": "系统拓扑",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 1207.53125,
+     "y": 2.875,
+     "w": 56.015625,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/registry",
+    "href": "/registry",
+    "label": "组件注册表",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 1265.546875,
+     "y": 2.875,
+     "w": 65.015625,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/trajectory",
+    "href": "/trajectory",
+    "label": "轨迹",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 1332.5625,
+     "y": 2.875,
+     "w": 48,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/timeline",
+    "href": "/timeline",
+    "label": "时间线",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 1382.5625,
+     "y": 2.875,
+     "w": 48,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/changelog",
+    "href": "/changelog",
+    "label": "版本日志",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 1432.5625,
+     "y": 2.875,
+     "w": 56.015625,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/docs",
+    "href": "/docs",
+    "label": "文档中心",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 1490.578125,
+     "y": 2.875,
+     "w": 56.015625,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/devlog",
+    "href": "/devlog",
+    "label": "开发记录",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 1548.59375,
+     "y": 2.875,
+     "w": 56.015625,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/marketplace",
+    "href": "/marketplace",
+    "label": "市场",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 1606.609375,
+     "y": 2.875,
+     "w": 48,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/plugins/business-opportunity",
+    "href": "/plugins/business-opportunity",
+    "label": "商机管理",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 1656.609375,
+     "y": 2.875,
+     "w": 56.015625,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:btn:终端",
+    "href": null,
+    "label": "终端",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 1400,
+     "y": 860.5,
+     "w": 32,
+     "h": 32
+    },
+    "visible": true,
+    "menu": false
+   }
+  ],
+  "sidebar": {
+   "sections": [
+    {
+     "title": "核心",
+     "items": [
+      {
+       "key": "side:/soul",
+       "href": "/soul",
+       "label": "Soul管理",
+       "tag": "记忆中枢",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 94,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      },
+      {
+       "key": "side:/cortex",
+       "href": "/cortex",
+       "label": "皮层",
+       "tag": "认知规划",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 126,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      },
+      {
+       "key": "side:/nerve",
+       "href": "/nerve",
+       "label": "神经",
+       "tag": "事件总线",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 158,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      },
+      {
+       "key": "side:/vein",
+       "href": "/vein",
+       "label": "血管",
+       "tag": "文件管理",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 190,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      },
+      {
+       "key": "side:/soma",
+       "href": "/soma",
+       "label": "躯体",
+       "tag": "外部连接",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 222,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      },
+      {
+       "key": "side:/sense",
+       "href": "/sense",
+       "label": "感官",
+       "tag": "感知解析",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 254,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      },
+      {
+       "key": "side:/will",
+       "href": "/will",
+       "label": "意志",
+       "tag": "流程编排",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 286,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      },
+      {
+       "key": "side:/mate",
+       "href": "/mate",
+       "label": "伙伴",
+       "tag": "客户端本体",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 318,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      }
+     ]
+    },
+    {
+     "title": "底座",
+     "items": [
+      {
+       "key": "side:/immune",
+       "href": "/immune",
+       "label": "免疫",
+       "tag": "安全防护",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 381,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      },
+      {
+       "key": "side:/vital",
+       "href": "/vital",
+       "label": "体征",
+       "tag": "系统监控",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 413,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      },
+      {
+       "key": "side:/marrow",
+       "href": "/marrow",
+       "label": "骨髓",
+       "tag": "备份恢复",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 445,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      },
+      {
+       "key": "side:/gland",
+       "href": "/gland",
+       "label": "腺体",
+       "tag": "模型网关",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 477,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      },
+      {
+       "key": "side:/gene",
+       "href": "/gene",
+       "label": "基因",
+       "tag": "预制模板",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 509,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      },
+      {
+       "key": "side:/echo",
+       "href": "/echo",
+       "label": "回声",
+       "tag": "消息推送",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 541,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      },
+      {
+       "key": "side:/mirror",
+       "href": "/mirror",
+       "label": "镜像",
+       "tag": "沙箱测试",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 573,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      },
+      {
+       "key": "side:/link",
+       "href": "/link",
+       "label": "突触",
+       "tag": "双向集成",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 605,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      }
+     ]
+    },
+    {
+     "title": "高级",
+     "items": [
+      {
+       "key": "side:/hippo",
+       "href": "/hippo",
+       "label": "海马体",
+       "tag": "记忆管理",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 668,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      },
+      {
+       "key": "side:/reflex",
+       "href": "/reflex",
+       "label": "反射",
+       "tag": "高速应答",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 700,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      },
+      {
+       "key": "side:/heredity",
+       "href": "/heredity",
+       "label": "遗传链",
+       "tag": "版本演化",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 732,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      },
+      {
+       "key": "side:/nest",
+       "href": "/nest",
+       "label": "巢穴",
+       "tag": "租户隔离",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 764,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      },
+      {
+       "key": "side:/pulse",
+       "href": "/pulse",
+       "label": "脉搏",
+       "tag": "时序节拍",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 796,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      },
+      {
+       "key": "side:/limb",
+       "href": "/limb",
+       "label": "四肢",
+       "tag": "RPA执行",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 828,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      },
+      {
+       "key": "side:/voice",
+       "href": "/voice",
+       "label": "声带",
+       "tag": "语音合成",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 860,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      },
+      {
+       "key": "side:/vision",
+       "href": "/vision",
+       "label": "视觉",
+       "tag": "图表绘制",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 892,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      },
+      {
+       "key": "side:/mind",
+       "href": "/mind",
+       "label": "心智",
+       "tag": "人格调节",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 924,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      }
+     ]
+    },
+    {
+     "title": "工具",
+     "items": [
+      {
+       "key": "side:/dashboard",
+       "href": "/dashboard",
+       "label": "仪表盘",
+       "tag": "",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 987,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      },
+      {
+       "key": "side:/knowledge",
+       "href": "/knowledge",
+       "label": "知识库",
+       "tag": "",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 1019,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      },
+      {
+       "key": "side:/search",
+       "href": "/search",
+       "label": "搜索",
+       "tag": "",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 1051,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      },
+      {
+       "key": "side:/graph",
+       "href": "/graph",
+       "label": "知识图谱",
+       "tag": "",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 1083,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      },
+      {
+       "key": "side:/workflow",
+       "href": "/workflow",
+       "label": "工作流",
+       "tag": "",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 1115,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      },
+      {
+       "key": "side:/tasks",
+       "href": "/tasks",
+       "label": "任务收发台",
+       "tag": "",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 1147,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      },
+      {
+       "key": "side:/cron",
+       "href": "/cron",
+       "label": "定时任务",
+       "tag": "",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 1179,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      },
+      {
+       "key": "side:/skills",
+       "href": "/skills",
+       "label": "技能市场",
+       "tag": "",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 1211,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      },
+      {
+       "key": "side:/mcp",
+       "href": "/mcp",
+       "label": "MCP客户端",
+       "tag": "",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 1243,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      },
+      {
+       "key": "side:/workspace",
+       "href": "/workspace",
+       "label": "工作区",
+       "tag": "",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 1275,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      },
+      {
+       "key": "side:/learn",
+       "href": "/learn",
+       "label": "学习",
+       "tag": "",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 1307,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      }
+     ]
+    },
+    {
+     "title": "商机管理",
+     "items": [
+      {
+       "key": "side:/plugins/business-opportunity/home",
+       "href": "/plugins/business-opportunity/home",
+       "label": "商机发现",
+       "tag": "",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 1370,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      }
+     ]
+    },
+    {
+     "title": "流程运行台",
+     "items": [
+      {
+       "key": "side:/plugins/flow-console/home",
+       "href": "/plugins/flow-console/home",
+       "label": "流程运行台",
+       "tag": "",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 1433,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      }
+     ]
+    },
+    {
+     "title": "进化回流",
+     "items": [
+      {
+       "key": "side:/plugins/gene-loop",
+       "href": "/plugins/gene-loop",
+       "label": "进化回流",
+       "tag": "",
+       "kbd": false,
+       "rect": {
+        "x": 0,
+        "y": 1496,
+        "w": 255,
+        "h": 32
+       },
+       "visible": true,
+       "menu": true
+      }
+     ]
+    }
+   ],
+   "rootRect": {
+    "x": 0,
+    "y": 119,
+    "w": 255,
+    "h": 1461
+   }
+  },
+  "usermenu": [
+   {
+    "key": "popup:查看资料",
+    "href": null,
+    "label": "查看资料",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 9,
+     "y": 730.5,
+     "w": 222,
+     "h": 36
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "popup:设置",
+    "href": null,
+    "label": "设置",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 9,
+     "y": 766.5,
+     "w": 222,
+     "h": 36
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "popup:退出登录",
+    "href": null,
+    "label": "退出登录",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 9,
+     "y": 811.5,
+     "w": 222,
+     "h": 36
+    },
+    "visible": true,
+    "menu": true
+   }
+  ]
+ },
+ "mobile": {
+  "topbar": [
+   {
+    "key": "top:/chat",
+    "href": "/chat",
+    "label": "OpenMate",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 0,
+     "y": 11.5,
+     "w": 48,
+     "h": 24
+    },
+    "visible": true,
+    "menu": false
+   },
+   {
+    "key": "top:btn:系统健康",
+    "href": null,
+    "label": "系统健康",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 32,
+     "h": 32
+    },
+    "visible": true,
+    "menu": false
+   },
+   {
+    "key": "top:/metrics",
+    "href": "/metrics",
+    "label": "Prometheus指标",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 36,
+     "y": 3,
+     "w": 30,
+     "h": 26
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "top:/notifications",
+    "href": "/notifications",
+    "label": "通知中心",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 83,
+     "y": 3,
+     "w": 30,
+     "h": 26
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "top:/dashboard",
+    "href": "/dashboard",
+    "label": "仪表盘",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 117,
+     "y": 3,
+     "w": 30,
+     "h": 26
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "top:/download",
+    "href": "/download",
+    "label": "下载管理",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 151,
+     "y": 3,
+     "w": 30,
+     "h": 26
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "top:/evolution",
+    "href": "/evolution",
+    "label": "进化",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 185,
+     "y": 3,
+     "w": 30,
+     "h": 26
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "top:/plugins",
+    "href": "/plugins",
+    "label": "插件",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 219,
+     "y": 3,
+     "w": 30,
+     "h": 26
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "top:/system",
+    "href": "/system",
+    "label": "系统总览",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 253,
+     "y": 3,
+     "w": 30,
+     "h": 26
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "top:btn:搜索",
+    "href": null,
+    "label": "搜索",
+    "tag": "",
+    "kbd": true,
+    "rect": {
+     "x": 287,
+     "y": 3,
+     "w": 30,
+     "h": 26
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "top:/settings",
+    "href": "/settings",
+    "label": "设置",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 330,
+     "y": 5.5,
+     "w": 60,
+     "h": 36
+    },
+    "visible": true,
+    "menu": true
+   }
+  ],
+  "bottombar": [
+   {
+    "key": "bot:btn:E",
+    "href": null,
+    "label": "E",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 8,
+     "y": 804.5,
+     "w": 32,
+     "h": 32
+    },
+    "visible": true,
+    "menu": false
+   },
+   {
+    "key": "bot:/chat",
+    "href": "/chat",
+    "label": "对话",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 0,
+     "y": 2.875,
+     "w": 48,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/ai-groups",
+    "href": "/ai-groups",
+    "label": "AI群",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 50,
+     "y": 2.875,
+     "w": 48,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/knowledge",
+    "href": "/knowledge",
+    "label": "知识库",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 100,
+     "y": 2.875,
+     "w": 48,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/learn",
+    "href": "/learn",
+    "label": "学习",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 150,
+     "y": 2.875,
+     "w": 48,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/graph",
+    "href": "/graph",
+    "label": "知识图谱",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 200,
+     "y": 2.875,
+     "w": 56.015625,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/knowledge-requests",
+    "href": "/knowledge-requests",
+    "label": "知识库共享",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 258.015625,
+     "y": 2.875,
+     "w": 65.015625,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/cron",
+    "href": "/cron",
+    "label": "定时任务",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 325.03125,
+     "y": 2.875,
+     "w": 56.015625,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/workflow",
+    "href": "/workflow",
+    "label": "工作流",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 383.046875,
+     "y": 2.875,
+     "w": 48,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/skills",
+    "href": "/skills",
+    "label": "技能市场",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 433.046875,
+     "y": 2.875,
+     "w": 56.015625,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/mcp",
+    "href": "/mcp",
+    "label": "MCP客户端",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 491.0625,
+     "y": 2.875,
+     "w": 65.703125,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/workspace",
+    "href": "/workspace",
+    "label": "工作区",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 558.765625,
+     "y": 2.875,
+     "w": 48,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/capture",
+    "href": "/capture",
+    "label": "采集",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 608.765625,
+     "y": 2.875,
+     "w": 48,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/tags",
+    "href": "/tags",
+    "label": "标签管理",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 658.765625,
+     "y": 2.875,
+     "w": 56.015625,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/body-map",
+    "href": "/body-map",
+    "label": "器官",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 716.78125,
+     "y": 2.875,
+     "w": 48,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/discovery",
+    "href": "/discovery",
+    "label": "发现引擎",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 766.78125,
+     "y": 2.875,
+     "w": 56.015625,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/enterprise",
+    "href": "/enterprise",
+    "label": "企业管理",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 824.796875,
+     "y": 2.875,
+     "w": 56.015625,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/sessions",
+    "href": "/sessions",
+    "label": "会话管理",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 882.8125,
+     "y": 2.875,
+     "w": 56.015625,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/spending",
+    "href": "/spending",
+    "label": "开销",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 940.828125,
+     "y": 2.875,
+     "w": 48,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/intelligence",
+    "href": "/intelligence",
+    "label": "智能分析",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 990.828125,
+     "y": 2.875,
+     "w": 56.015625,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/ai-engine",
+    "href": "/ai-engine",
+    "label": "AI 引擎",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 1048.84375,
+     "y": 2.875,
+     "w": 48.671875,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/healer",
+    "href": "/healer",
+    "label": "自愈系统",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 1099.515625,
+     "y": 2.875,
+     "w": 56.015625,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/monitoring",
+    "href": "/monitoring",
+    "label": "监控",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 1157.53125,
+     "y": 2.875,
+     "w": 48,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/topology",
+    "href": "/topology",
+    "label": "系统拓扑",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 1207.53125,
+     "y": 2.875,
+     "w": 56.015625,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/registry",
+    "href": "/registry",
+    "label": "组件注册表",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 1265.546875,
+     "y": 2.875,
+     "w": 65.015625,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/trajectory",
+    "href": "/trajectory",
+    "label": "轨迹",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 1332.5625,
+     "y": 2.875,
+     "w": 48,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/timeline",
+    "href": "/timeline",
+    "label": "时间线",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 1382.5625,
+     "y": 2.875,
+     "w": 48,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/changelog",
+    "href": "/changelog",
+    "label": "版本日志",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 1432.5625,
+     "y": 2.875,
+     "w": 56.015625,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/docs",
+    "href": "/docs",
+    "label": "文档中心",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 1490.578125,
+     "y": 2.875,
+     "w": 56.015625,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/devlog",
+    "href": "/devlog",
+    "label": "开发记录",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 1548.59375,
+     "y": 2.875,
+     "w": 56.015625,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/marketplace",
+    "href": "/marketplace",
+    "label": "市场",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 1606.609375,
+     "y": 2.875,
+     "w": 48,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:/plugins/business-opportunity",
+    "href": "/plugins/business-opportunity",
+    "label": "商机管理",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 1656.609375,
+     "y": 2.875,
+     "w": 56.015625,
+     "h": 41.25
+    },
+    "visible": true,
+    "menu": true
+   },
+   {
+    "key": "bot:btn:终端",
+    "href": null,
+    "label": "终端",
+    "tag": "",
+    "kbd": false,
+    "rect": {
+     "x": 350,
+     "y": 804.5,
+     "w": 32,
+     "h": 32
+    },
+    "visible": true,
+    "menu": false
+   }
+  ]
+ },
+ "layout": {
+  "desktop": {
+   "topbar": {
+    "items": [
+     {
+      "key": "top:/metrics",
+      "rect": {
+       "x": 161.296875,
+       "y": 10,
+       "w": 106.96875,
+       "h": 27
+      }
+     },
+     {
+      "key": "top:/notifications",
+      "rect": {
+       "x": 285.265625,
+       "y": 10,
+       "w": 74,
+       "h": 27
+      }
+     },
+     {
+      "key": "top:/dashboard",
+      "rect": {
+       "x": 363.265625,
+       "y": 10,
+       "w": 64,
+       "h": 27
+      }
+     },
+     {
+      "key": "top:/download",
+      "rect": {
+       "x": 431.265625,
+       "y": 10,
+       "w": 74,
+       "h": 27
+      }
+     },
+     {
+      "key": "top:/evolution",
+      "rect": {
+       "x": 509.265625,
+       "y": 10,
+       "w": 54,
+       "h": 27
+      }
+     },
+     {
+      "key": "top:/plugins",
+      "rect": {
+       "x": 567.265625,
+       "y": 10,
+       "w": 54,
+       "h": 27
+      }
+     },
+     {
+      "key": "top:/system",
+      "rect": {
+       "x": 625.265625,
+       "y": 10,
+       "w": 74,
+       "h": 27
+      }
+     },
+     {
+      "key": "top:btn:搜索",
+      "rect": {
+       "x": 703.265625,
+       "y": 9.75,
+       "w": 82.40625,
+       "h": 27.5
+      }
+     },
+     {
+      "key": "top:/settings",
+      "rect": {
+       "x": 1380,
+       "y": 5.5,
+       "w": 60,
+       "h": 36
+      }
+     }
+    ]
+   },
+   "bottombar": {
+    "items": [
+     {
+      "key": "bot:/chat",
+      "rect": {
+       "x": 0,
+       "y": 2.875,
+       "w": 48,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/ai-groups",
+      "rect": {
+       "x": 50,
+       "y": 2.875,
+       "w": 48,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/knowledge",
+      "rect": {
+       "x": 100,
+       "y": 2.875,
+       "w": 48,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/learn",
+      "rect": {
+       "x": 150,
+       "y": 2.875,
+       "w": 48,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/graph",
+      "rect": {
+       "x": 200,
+       "y": 2.875,
+       "w": 56.015625,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/knowledge-requests",
+      "rect": {
+       "x": 258.015625,
+       "y": 2.875,
+       "w": 65.015625,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/cron",
+      "rect": {
+       "x": 325.03125,
+       "y": 2.875,
+       "w": 56.015625,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/workflow",
+      "rect": {
+       "x": 383.046875,
+       "y": 2.875,
+       "w": 48,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/skills",
+      "rect": {
+       "x": 433.046875,
+       "y": 2.875,
+       "w": 56.015625,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/mcp",
+      "rect": {
+       "x": 491.0625,
+       "y": 2.875,
+       "w": 65.703125,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/workspace",
+      "rect": {
+       "x": 558.765625,
+       "y": 2.875,
+       "w": 48,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/capture",
+      "rect": {
+       "x": 608.765625,
+       "y": 2.875,
+       "w": 48,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/tags",
+      "rect": {
+       "x": 658.765625,
+       "y": 2.875,
+       "w": 56.015625,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/body-map",
+      "rect": {
+       "x": 716.78125,
+       "y": 2.875,
+       "w": 48,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/discovery",
+      "rect": {
+       "x": 766.78125,
+       "y": 2.875,
+       "w": 56.015625,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/enterprise",
+      "rect": {
+       "x": 824.796875,
+       "y": 2.875,
+       "w": 56.015625,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/sessions",
+      "rect": {
+       "x": 882.8125,
+       "y": 2.875,
+       "w": 56.015625,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/spending",
+      "rect": {
+       "x": 940.828125,
+       "y": 2.875,
+       "w": 48,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/intelligence",
+      "rect": {
+       "x": 990.828125,
+       "y": 2.875,
+       "w": 56.015625,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/ai-engine",
+      "rect": {
+       "x": 1048.84375,
+       "y": 2.875,
+       "w": 48.671875,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/healer",
+      "rect": {
+       "x": 1099.515625,
+       "y": 2.875,
+       "w": 56.015625,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/monitoring",
+      "rect": {
+       "x": 1157.53125,
+       "y": 2.875,
+       "w": 48,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/topology",
+      "rect": {
+       "x": 1207.53125,
+       "y": 2.875,
+       "w": 56.015625,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/registry",
+      "rect": {
+       "x": 1265.546875,
+       "y": 2.875,
+       "w": 65.015625,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/trajectory",
+      "rect": {
+       "x": 1332.5625,
+       "y": 2.875,
+       "w": 48,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/timeline",
+      "rect": {
+       "x": 1382.5625,
+       "y": 2.875,
+       "w": 48,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/changelog",
+      "rect": {
+       "x": 1432.5625,
+       "y": 2.875,
+       "w": 56.015625,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/docs",
+      "rect": {
+       "x": 1490.578125,
+       "y": 2.875,
+       "w": 56.015625,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/devlog",
+      "rect": {
+       "x": 1548.59375,
+       "y": 2.875,
+       "w": 56.015625,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/marketplace",
+      "rect": {
+       "x": 1606.609375,
+       "y": 2.875,
+       "w": 48,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/plugins/business-opportunity",
+      "rect": {
+       "x": 1656.609375,
+       "y": 2.875,
+       "w": 56.015625,
+       "h": 41.25
+      }
+     }
+    ]
+   },
+   "sidebar": {
+    "items": [
+     {
+      "key": "side:/soul",
+      "rect": {
+       "x": 0,
+       "y": 94,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/cortex",
+      "rect": {
+       "x": 0,
+       "y": 126,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/nerve",
+      "rect": {
+       "x": 0,
+       "y": 158,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/vein",
+      "rect": {
+       "x": 0,
+       "y": 190,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/soma",
+      "rect": {
+       "x": 0,
+       "y": 222,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/sense",
+      "rect": {
+       "x": 0,
+       "y": 254,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/will",
+      "rect": {
+       "x": 0,
+       "y": 286,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/mate",
+      "rect": {
+       "x": 0,
+       "y": 318,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/immune",
+      "rect": {
+       "x": 0,
+       "y": 381,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/vital",
+      "rect": {
+       "x": 0,
+       "y": 413,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/marrow",
+      "rect": {
+       "x": 0,
+       "y": 445,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/gland",
+      "rect": {
+       "x": 0,
+       "y": 477,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/gene",
+      "rect": {
+       "x": 0,
+       "y": 509,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/echo",
+      "rect": {
+       "x": 0,
+       "y": 541,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/mirror",
+      "rect": {
+       "x": 0,
+       "y": 573,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/link",
+      "rect": {
+       "x": 0,
+       "y": 605,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/hippo",
+      "rect": {
+       "x": 0,
+       "y": 668,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/reflex",
+      "rect": {
+       "x": 0,
+       "y": 700,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/heredity",
+      "rect": {
+       "x": 0,
+       "y": 732,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/nest",
+      "rect": {
+       "x": 0,
+       "y": 764,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/pulse",
+      "rect": {
+       "x": 0,
+       "y": 796,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/limb",
+      "rect": {
+       "x": 0,
+       "y": 828,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/voice",
+      "rect": {
+       "x": 0,
+       "y": 860,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/vision",
+      "rect": {
+       "x": 0,
+       "y": 892,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/mind",
+      "rect": {
+       "x": 0,
+       "y": 924,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/dashboard",
+      "rect": {
+       "x": 0,
+       "y": 987,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/knowledge",
+      "rect": {
+       "x": 0,
+       "y": 1019,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/search",
+      "rect": {
+       "x": 0,
+       "y": 1051,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/graph",
+      "rect": {
+       "x": 0,
+       "y": 1083,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/workflow",
+      "rect": {
+       "x": 0,
+       "y": 1115,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/tasks",
+      "rect": {
+       "x": 0,
+       "y": 1147,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/cron",
+      "rect": {
+       "x": 0,
+       "y": 1179,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/skills",
+      "rect": {
+       "x": 0,
+       "y": 1211,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/mcp",
+      "rect": {
+       "x": 0,
+       "y": 1243,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/workspace",
+      "rect": {
+       "x": 0,
+       "y": 1275,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/learn",
+      "rect": {
+       "x": 0,
+       "y": 1307,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/plugins/business-opportunity/home",
+      "rect": {
+       "x": 0,
+       "y": 1370,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/plugins/flow-console/home",
+      "rect": {
+       "x": 0,
+       "y": 1433,
+       "w": 255,
+       "h": 32
+      }
+     },
+     {
+      "key": "side:/plugins/gene-loop",
+      "rect": {
+       "x": 0,
+       "y": 1496,
+       "w": 255,
+       "h": 32
+      }
+     }
+    ]
+   }
+  },
+  "mobile": {
+   "topbar": {
+    "items": [
+     {
+      "key": "top:/metrics",
+      "rect": {
+       "x": 36,
+       "y": 3,
+       "w": 30,
+       "h": 26
+      }
+     },
+     {
+      "key": "top:/notifications",
+      "rect": {
+       "x": 83,
+       "y": 3,
+       "w": 30,
+       "h": 26
+      }
+     },
+     {
+      "key": "top:/dashboard",
+      "rect": {
+       "x": 117,
+       "y": 3,
+       "w": 30,
+       "h": 26
+      }
+     },
+     {
+      "key": "top:/download",
+      "rect": {
+       "x": 151,
+       "y": 3,
+       "w": 30,
+       "h": 26
+      }
+     },
+     {
+      "key": "top:/evolution",
+      "rect": {
+       "x": 185,
+       "y": 3,
+       "w": 30,
+       "h": 26
+      }
+     },
+     {
+      "key": "top:/plugins",
+      "rect": {
+       "x": 219,
+       "y": 3,
+       "w": 30,
+       "h": 26
+      }
+     },
+     {
+      "key": "top:/system",
+      "rect": {
+       "x": 253,
+       "y": 3,
+       "w": 30,
+       "h": 26
+      }
+     },
+     {
+      "key": "top:btn:搜索",
+      "rect": {
+       "x": 287,
+       "y": 3,
+       "w": 30,
+       "h": 26
+      }
+     },
+     {
+      "key": "top:/settings",
+      "rect": {
+       "x": 330,
+       "y": 5.5,
+       "w": 60,
+       "h": 36
+      }
+     }
+    ]
+   },
+   "bottombar": {
+    "items": [
+     {
+      "key": "bot:/chat",
+      "rect": {
+       "x": 0,
+       "y": 2.875,
+       "w": 48,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/ai-groups",
+      "rect": {
+       "x": 50,
+       "y": 2.875,
+       "w": 48,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/knowledge",
+      "rect": {
+       "x": 100,
+       "y": 2.875,
+       "w": 48,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/learn",
+      "rect": {
+       "x": 150,
+       "y": 2.875,
+       "w": 48,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/graph",
+      "rect": {
+       "x": 200,
+       "y": 2.875,
+       "w": 56.015625,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/knowledge-requests",
+      "rect": {
+       "x": 258.015625,
+       "y": 2.875,
+       "w": 65.015625,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/cron",
+      "rect": {
+       "x": 325.03125,
+       "y": 2.875,
+       "w": 56.015625,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/workflow",
+      "rect": {
+       "x": 383.046875,
+       "y": 2.875,
+       "w": 48,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/skills",
+      "rect": {
+       "x": 433.046875,
+       "y": 2.875,
+       "w": 56.015625,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/mcp",
+      "rect": {
+       "x": 491.0625,
+       "y": 2.875,
+       "w": 65.703125,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/workspace",
+      "rect": {
+       "x": 558.765625,
+       "y": 2.875,
+       "w": 48,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/capture",
+      "rect": {
+       "x": 608.765625,
+       "y": 2.875,
+       "w": 48,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/tags",
+      "rect": {
+       "x": 658.765625,
+       "y": 2.875,
+       "w": 56.015625,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/body-map",
+      "rect": {
+       "x": 716.78125,
+       "y": 2.875,
+       "w": 48,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/discovery",
+      "rect": {
+       "x": 766.78125,
+       "y": 2.875,
+       "w": 56.015625,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/enterprise",
+      "rect": {
+       "x": 824.796875,
+       "y": 2.875,
+       "w": 56.015625,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/sessions",
+      "rect": {
+       "x": 882.8125,
+       "y": 2.875,
+       "w": 56.015625,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/spending",
+      "rect": {
+       "x": 940.828125,
+       "y": 2.875,
+       "w": 48,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/intelligence",
+      "rect": {
+       "x": 990.828125,
+       "y": 2.875,
+       "w": 56.015625,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/ai-engine",
+      "rect": {
+       "x": 1048.84375,
+       "y": 2.875,
+       "w": 48.671875,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/healer",
+      "rect": {
+       "x": 1099.515625,
+       "y": 2.875,
+       "w": 56.015625,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/monitoring",
+      "rect": {
+       "x": 1157.53125,
+       "y": 2.875,
+       "w": 48,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/topology",
+      "rect": {
+       "x": 1207.53125,
+       "y": 2.875,
+       "w": 56.015625,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/registry",
+      "rect": {
+       "x": 1265.546875,
+       "y": 2.875,
+       "w": 65.015625,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/trajectory",
+      "rect": {
+       "x": 1332.5625,
+       "y": 2.875,
+       "w": 48,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/timeline",
+      "rect": {
+       "x": 1382.5625,
+       "y": 2.875,
+       "w": 48,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/changelog",
+      "rect": {
+       "x": 1432.5625,
+       "y": 2.875,
+       "w": 56.015625,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/docs",
+      "rect": {
+       "x": 1490.578125,
+       "y": 2.875,
+       "w": 56.015625,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/devlog",
+      "rect": {
+       "x": 1548.59375,
+       "y": 2.875,
+       "w": 56.015625,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/marketplace",
+      "rect": {
+       "x": 1606.609375,
+       "y": 2.875,
+       "w": 48,
+       "h": 41.25
+      }
+     },
+     {
+      "key": "bot:/plugins/business-opportunity",
+      "rect": {
+       "x": 1656.609375,
+       "y": 2.875,
+       "w": 56.015625,
+       "h": 41.25
+      }
+     }
+    ]
+   }
+  }
+ },
+ "coverage": {
+  "audit55": [
+   {
+    "href": "/chat",
+    "label": "会话",
+    "home": "bottombar"
+   },
+   {
+    "href": "/ai-groups",
+    "label": "AI 群组",
+    "home": "bottombar"
+   },
+   {
+    "href": "/knowledge",
+    "label": "知识库",
+    "home": "bottombar"
+   },
+   {
+    "href": "/learn",
+    "label": "学习",
+    "home": "bottombar"
+   },
+   {
+    "href": "/graph",
+    "label": "知识图谱",
+    "home": "bottombar"
+   },
+   {
+    "href": "/knowledge-requests",
+    "label": "知识库共享",
+    "home": "bottombar"
+   },
+   {
+    "href": "/cron",
+    "label": "定时任务",
+    "home": "bottombar"
+   },
+   {
+    "href": "/workflow",
+    "label": "工作流",
+    "home": "bottombar"
+   },
+   {
+    "href": "/skills",
+    "label": "技能市场",
+    "home": "bottombar"
+   },
+   {
+    "href": "/mcp",
+    "label": "MCP客户端",
+    "home": "bottombar"
+   },
+   {
+    "href": "/workspace",
+    "label": "工作区",
+    "home": "bottombar"
+   },
+   {
+    "href": "/capture",
+    "label": "采集",
+    "home": "bottombar"
+   },
+   {
+    "href": "/tags",
+    "label": "标签管理",
+    "home": "bottombar"
+   },
+   {
+    "href": "/body-map",
+    "label": "器官",
+    "home": "bottombar"
+   },
+   {
+    "href": "/discovery",
+    "label": "发现引擎",
+    "home": "bottombar"
+   },
+   {
+    "href": "/soma-admin",
+    "label": "Soma管理",
+    "home": "bottombar",
+    "admin": true
+   },
+   {
+    "href": "/admin",
+    "label": "系统管理",
+    "home": "bottombar",
+    "admin": true
+   },
+   {
+    "href": "/permission",
+    "label": "权限管理",
+    "home": "bottombar",
+    "admin": true
+   },
+   {
+    "href": "/enterprise",
+    "label": "企业管理",
+    "home": "bottombar"
+   },
+   {
+    "href": "/sessions",
+    "label": "会话管理",
+    "home": "bottombar"
+   },
+   {
+    "href": "/spending",
+    "label": "开销",
+    "home": "bottombar"
+   },
+   {
+    "href": "/intelligence",
+    "label": "智能分析",
+    "home": "bottombar"
+   },
+   {
+    "href": "/ai-engine",
+    "label": "AI 引擎",
+    "home": "bottombar"
+   },
+   {
+    "href": "/healer",
+    "label": "自愈系统",
+    "home": "bottombar"
+   },
+   {
+    "href": "/topology",
+    "label": "系统拓扑",
+    "home": "bottombar"
+   },
+   {
+    "href": "/registry",
+    "label": "组件注册表",
+    "home": "bottombar"
+   },
+   {
+    "href": "/trajectory",
+    "label": "轨迹",
+    "home": "bottombar"
+   },
+   {
+    "href": "/timeline",
+    "label": "时间线",
+    "home": "bottombar"
+   },
+   {
+    "href": "/changelog",
+    "label": "版本日志",
+    "home": "bottombar"
+   },
+   {
+    "href": "/docs",
+    "label": "文档中心",
+    "home": "bottombar"
+   },
+   {
+    "href": "/devlog",
+    "label": "开发记录",
+    "home": "bottombar"
+   },
+   {
+    "href": "/marketplace",
+    "label": "市场",
+    "home": "bottombar"
+   },
+   {
+    "href": "/soma",
+    "label": "躯体",
+    "home": "sidebar"
+   },
+   {
+    "href": "/cortex",
+    "label": "皮层",
+    "home": "sidebar"
+   },
+   {
+    "href": "/vein",
+    "label": "血管",
+    "home": "sidebar"
+   },
+   {
+    "href": "/gene",
+    "label": "基因",
+    "home": "sidebar"
+   },
+   {
+    "href": "/vital",
+    "label": "体征",
+    "home": "sidebar"
+   },
+   {
+    "href": "/gland",
+    "label": "腺体",
+    "home": "sidebar"
+   },
+   {
+    "href": "/hippo",
+    "label": "海马体",
+    "home": "sidebar"
+   },
+   {
+    "href": "/reflex",
+    "label": "反射",
+    "home": "sidebar"
+   },
+   {
+    "href": "/heredity",
+    "label": "遗传链",
+    "home": "sidebar"
+   },
+   {
+    "href": "/pulse",
+    "label": "脉搏",
+    "home": "sidebar"
+   },
+   {
+    "href": "/nerve",
+    "label": "神经",
+    "home": "sidebar"
+   },
+   {
+    "href": "/sense",
+    "label": "感官",
+    "home": "sidebar"
+   },
+   {
+    "href": "/immune",
+    "label": "免疫",
+    "home": "sidebar"
+   },
+   {
+    "href": "/marrow",
+    "label": "骨髓",
+    "home": "sidebar"
+   },
+   {
+    "href": "/echo",
+    "label": "回声",
+    "home": "sidebar"
+   },
+   {
+    "href": "/mirror",
+    "label": "镜像",
+    "home": "sidebar"
+   },
+   {
+    "href": "/link",
+    "label": "突触",
+    "home": "sidebar"
+   },
+   {
+    "href": "/nest",
+    "label": "巢穴",
+    "home": "sidebar"
+   },
+   {
+    "href": "/limb",
+    "label": "四肢",
+    "home": "sidebar"
+   },
+   {
+    "href": "/voice",
+    "label": "声带",
+    "home": "sidebar"
+   },
+   {
+    "href": "/vision",
+    "label": "视觉",
+    "home": "sidebar"
+   },
+   {
+    "href": "/mind",
+    "label": "心智",
+    "home": "sidebar"
+   },
+   {
+    "href": "/soul",
+    "label": "Soul",
+    "home": "sidebar"
+   }
+  ]
+ }
+}
