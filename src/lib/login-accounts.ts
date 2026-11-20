@@ -9,7 +9,7 @@
 // - 显式登出必须 clearAutoLogin()（否则登出即被自动登回来）；401 过期接管不清
 //   自动登录（过期≠登出，自动登录就是要救这个场景）。
 
-import { encryptSecret, decryptSecret } from './login-vault';
+import { encryptSecret, decryptSecret, decryptSecretDetailed, type DecryptFailReason } from './login-vault';
 
 export interface SavedAccount {
   username: string;
@@ -65,6 +65,22 @@ export function removeLoginAccount(username: string): void {
   writeAccounts(listAccounts().filter((a) => a.username !== username));
   if (getAutoLoginUser() === username) clearAutoLogin();
   if (getLastAccount() === username) localStorage.removeItem(LAST_ACCOUNT_KEY);
+}
+
+export type SavedPasswordResult =
+  | { status: 'none' }                                        // 该账号没记密码
+  | { status: 'ok'; password: string }                        // 解密成功
+  | { status: 'failed'; reason: DecryptFailReason };          // 记了但解不开（存量密钥丢失/跨模式）
+
+/**
+ * 取已存密码（带失败区分）：'none' vs 'failed' 必须分清——
+ * 'failed' 时 UI 要显性降级（重输密码框+勾选态保留），绝不静默空值。
+ */
+export async function getSavedPasswordDetailed(username: string): Promise<SavedPasswordResult> {
+  const acc = listAccounts().find((a) => a.username === username);
+  if (!acc?.encPassword) return { status: 'none' };
+  const r = await decryptSecretDetailed(acc.encPassword);
+  return r.ok ? { status: 'ok', password: r.plain } : { status: 'failed', reason: r.reason };
 }
 
 /** 取解密后的已存密码（未记/解密失败=null，调用方回落手输）。 */

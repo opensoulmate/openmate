@@ -8,6 +8,7 @@ import {
   saveLoginAccount,
   removeLoginAccount,
   getSavedPassword,
+  getSavedPasswordDetailed,
   getLastAccount,
   getAutoLoginUser,
   setAutoLogin,
@@ -55,6 +56,8 @@ export function LoginPage() {
   const [accounts, setAccounts] = useState<SavedAccount[]>([]);
   const [rememberPwd, setRememberPwd] = useState(false);
   const [autoLogin, setAutoLoginOn] = useState(false);
+  // 已存密码解密失败的显性降级态：绝不静默空值——提示重输、勾选态保留
+  const [savedPwFailed, setSavedPwFailed] = useState(false);
   const [qrMode, setQrMode] = useState(false);
   const [autoChecking, setAutoChecking] = useState(true); // 初始同步 true：SSR/水合一致，effect 判定后即放行表单
   const { t } = useTranslation();
@@ -114,13 +117,20 @@ export function LoginPage() {
         }
       }
       if (cancelled) return;
-      // 回落/预填：上次账号 + 已记密码自动填充
+      // 回落/预填：上次账号 + 已记密码自动填充（解密失败=显性降级，绝不静默空值）
       if (last) {
         setUsername(last);
-        const pw = await getSavedPassword(last);
-        if (pw && !cancelled) {
-          setPassword(pw);
-          setRememberPwd(true);
+        const r = await getSavedPasswordDetailed(last);
+        if (!cancelled) {
+          if (r.status === 'ok') {
+            setPassword(r.password);
+            setRememberPwd(true);
+            setSavedPwFailed(false);
+          } else if (r.status === 'failed') {
+            // 密码存了解不开（存量密钥丢失/跨模式）：提示重输，勾选态保留
+            setSavedPwFailed(true);
+            setRememberPwd(true);
+          }
         }
       }
       setAutoChecking(false);
@@ -160,7 +170,14 @@ export function LoginPage() {
   };
 
   const handleSubmit = async () => {
-    if (!username.trim() || !password.trim()) { setError(t('login.usernamePasswordRequired')); return; }
+    // 错误提示语义精确：用户名空≠密码空≠「密码存了解不开」——绝不拿「不能为空」误导
+    if (!username.trim()) { setError(t('login.usernameRequired', '请输入用户名')); return; }
+    if (!password.trim()) {
+      setError(savedPwFailed
+        ? t('login.savedPasswordDecryptFailed', '已保存的密码无法解密，请重新输入密码')
+        : t('login.passwordRequired', '密码未填入，请输入密码'));
+      return;
+    }
     setLoading(true); setError('');
     try {
       const a = api();
@@ -224,12 +241,20 @@ export function LoginPage() {
     }
   };
 
-  // 下拉点选账号：账号+已记密码回填（QQ 式点击即填）
+  // 下拉点选账号：账号+已记密码回填（QQ 式点击即填；解密失败同样显性降级）
   const handleSelectAccount = useCallback(async (acc: SavedAccount) => {
     setUsername(acc.username);
-    const pw = await getSavedPassword(acc.username);
-    setPassword(pw ?? '');
-    setRememberPwd(!!pw);
+    const r = await getSavedPasswordDetailed(acc.username);
+    if (r.status === 'ok') {
+      setPassword(r.password);
+      setRememberPwd(true);
+      setSavedPwFailed(false);
+    } else {
+      setPassword('');
+      // 没记密码=不勾；记了解不开=勾选态保留+提示重输
+      setRememberPwd(r.status === 'failed');
+      setSavedPwFailed(r.status === 'failed');
+    }
     setError('');
   }, []);
 
@@ -306,11 +331,17 @@ export function LoginPage() {
           deleteAccountLabel={t('login.deleteAccount', '删除该账号')}
         />
         <div className="relative w-full mb-3">
-          <input type={showPassword ? "text" : "password"} value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSubmit()} placeholder={t('login.password')} className="w-full px-4 py-3 pr-12 rounded-lg border bg-background text-sm" autoComplete="current-password" />
+          <input type={showPassword ? "text" : "password"} value={password} onChange={e => { setPassword(e.target.value); if (savedPwFailed) setSavedPwFailed(false); if (error) setError(''); }} onKeyDown={e => e.key === 'Enter' && handleSubmit()} placeholder={t('login.password')} className="w-full px-4 py-3 pr-12 rounded-lg border bg-background text-sm" autoComplete="current-password" />
           <button type="button" onClick={() => setShowPassword(!showPassword)} aria-label={t('login.password')} className="absolute right-1 top-1/2 -translate-y-1/2 w-11 h-11 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground transition-colors">
             {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
           </button>
         </div>
+        {/* 已存密码解不开的显性降级提示（绝不静默空值）：重输即可，勾选态保留 */}
+        {savedPwFailed && !password && (
+          <p className="text-xs text-amber-500 dark:text-amber-400 mb-3 text-center">
+            ⚠ {t('login.savedPasswordDecryptFailed', '已保存的密码无法解密，请重新输入密码')}
+          </p>
+        )}
         {mode === 'register' && <input value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSubmit()} placeholder={t('login.emailOptional')} className="w-full mb-3 px-4 py-3 rounded-lg border bg-background text-sm" />}
 
         {/* 记住密码 / 自动登录（QQ 式勾选组）：勾自动登录必勾记住密码，取消记住密码连带取消自动登录 */}
